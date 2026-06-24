@@ -1,0 +1,28 @@
+packages:
+  - "packages/*"
+  - "packages/adapters/*"
+  - "apps/*"
+  - "services/*"
+
+# Supply chain. A compromised release of our widget would harm every wallet that
+# embedded it, which is why these are tighter than the defaults rather than left alone.
+
+# pnpm 11's default, kept deliberately rather than raised. pnpm's own rationale is that
+# malicious releases are almost always pulled within an hour, so a day is a 24x margin.
+# A week was tried first and rejected: it blocks any tool released in the last 7 days,
+# which means permanently running week-old tooling and churning pins to chase the window.
+# Measured cost against near-zero marginal safety.
+minimumReleaseAge: 1440
+
+# Fail if a package's trust evidence has weakened since an earlier release.
+trustPolicy: no-downgrade
+
+# Already the default in pnpm 11; set explicitly so an audit can see it was a decision.
+blockExoticSubdeps: true
+
+# Install scripts run only where we have said so, by name. Anything not listed fails
+# the install rather than executing quietly.
+allowBuilds:
+  esbuild: true
+  "@biomejs/biome": true
+  oxlint: true

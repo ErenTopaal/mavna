@@ -1,0 +1,13 @@
+dist/
+.turbo/
+node_modules/
+pnpm-lock.yaml
+
+# Source documents provided to the project. Inputs, not our code: reformatting them
+# would create noise in every diff and lose the author's line breaks.
+resources/design_rules.md
+resources/implementation_prompt.md
+resources/integration_research.md
+resources/mavna_project_spesification.md
+resources/rules.md
+resources/security.md
