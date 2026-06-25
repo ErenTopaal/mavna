@@ -4,16 +4,21 @@ export default defineConfig({
   test: {
     projects: [
       {
-        test: { name: "unit", include: ["packages/**/*.test.ts"], environment: "node" },
+        test: {
+          name: "unit",
+          include: ["packages/**/*.test.ts"],
+          // Live tests must never run here. They hit the network, and a testnet
+          // outage is not evidence that someone's change is wrong.
+          exclude: ["**/*.live.test.ts", "**/node_modules/**", "**/dist/**"],
+          environment: "node",
+        },
       },
       {
-        // Hits real endpoints. Never a required check on a pull request: a testnet
-        // outage is not evidence that someone's change is wrong.
         test: {
           name: "live",
           include: ["packages/**/*.live.test.ts"],
           testTimeout: 120_000,
-          hookTimeout: 120_000,
+          hookTimeout: 300_000,
           maxWorkers: 2,
         },
       },
