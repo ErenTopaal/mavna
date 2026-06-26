@@ -19,7 +19,6 @@ const usdc = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH
 const A_LIVE_CONTRACT = "CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ";
 
 const client = new RpcClient({ url: network.rpcUrl });
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 async function fundedAccount(): Promise<Keypair> {
   const kp = Keypair.random();
