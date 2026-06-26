@@ -39,19 +39,19 @@ beforeAll(async () => {
   noTrustline = await fundedAccount();
   withTrustline = await fundedAccount();
 
-  const source = await client.loadAccount(withTrustline.publicKey());
-  const tx = new TransactionBuilder(source, {
-    fee: "100000",
-    networkPassphrase: network.passphrase,
-  })
-    .addOperation(Operation.changeTrust({ asset: usdc }))
-    .setTimeout(180)
-    .build();
-  tx.sign(withTrustline);
-
-  const sent = await client.server.sendTransaction(tx);
-  const result = await client.waitForTransaction(sent.hash);
-  if (result.status !== "SUCCESS") throw new Error("could not open trustline for fixture");
+  // Rebuilt on each attempt: a stale sequence number must be rebuilt, not resent.
+  await client.submit("fixture trustline", async () => {
+    const source = await client.loadAccount(withTrustline.publicKey());
+    const tx = new TransactionBuilder(source, {
+      fee: "1000000",
+      networkPassphrase: network.passphrase,
+    })
+      .addOperation(Operation.changeTrust({ asset: usdc }))
+      .setTimeout(300)
+      .build();
+    tx.sign(withTrustline);
+    return tx;
+  });
 }, 300_000);
 
 describe("inspectDestination against live testnet", () => {

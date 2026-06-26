@@ -1,5 +1,5 @@
 import { MavnaError } from "@mavna/core";
-import type { Account } from "@stellar/stellar-sdk";
+import type { Account, FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
 
 /**
@@ -139,7 +139,7 @@ export class RpcClient {
    * indistinguishable from a transaction that was never seen, so absence is only
    * conclusive once the transaction could no longer be included.
    */
-  async waitForTransaction(hash: string, attempts = 40): Promise<rpc.Api.GetTransactionResponse> {
+  async waitForTransaction(hash: string, attempts = 60): Promise<rpc.Api.GetTransactionResponse> {
     for (let attempt = 0; attempt < attempts; attempt++) {
       const result = await this.server.getTransaction(hash);
       if (result.status !== "NOT_FOUND") {
@@ -150,4 +150,67 @@ export class RpcClient {
     }
     throw new MavnaError(`Transaction ${hash} was never included.`, { retryable: true });
   }
+
+  /**
+   * Submit a transaction and wait for it, retrying the transient failures and
+   * only the transient failures.
+   *
+   * Takes a builder rather than a built transaction because the common transient
+   * failures invalidate the transaction itself: a stale sequence number has to be
+   * rebuilt, not resent. Waiting on the hash of a submission the network never
+   * accepted is the specific mistake this exists to prevent.
+   *
+   * A genuine rejection is returned rather than retried, because retrying a wrong
+   * transaction just produces the same wrong answer more slowly.
+   */
+  async submit(
+    label: string,
+    build: () => Promise<Transaction | FeeBumpTransaction>,
+    attempts = 8,
+  ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
+    let lastReason = "unknown";
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const tx = await build();
+      const sent = await this.server.sendTransaction(tx);
+
+      if (sent.status === "ERROR") {
+        const reason = sent.errorResult?.result().switch().name ?? "unknown";
+        if (!TRANSIENT_SUBMIT_ERRORS.has(reason)) {
+          throw new MavnaError(`${label} was rejected: ${reason}`, { retryable: false });
+        }
+        lastReason = reason;
+        await this.sleep(this.baseDelayMs * 2 ** Math.min(attempt, 4));
+        continue;
+      }
+
+      if (sent.status === "TRY_AGAIN_LATER") {
+        lastReason = "TRY_AGAIN_LATER";
+        await this.sleep(this.baseDelayMs * 2 ** Math.min(attempt, 4));
+        continue;
+      }
+
+      const result = await this.waitForTransaction(sent.hash);
+      if (result.status === "SUCCESS") return result;
+
+      throw new MavnaError(`${label} failed on-chain.`, { retryable: false });
+    }
+
+    throw new MavnaError(
+      `${label} could not be submitted after ${attempts} attempts; ` +
+        `the last reason was ${lastReason}.`,
+      { retryable: true },
+    );
+  }
 }
+
+/**
+ * Failures that mean "the network was busy or our view was stale", as opposed to
+ * "this transaction is wrong". Only these are retried.
+ */
+const TRANSIENT_SUBMIT_ERRORS: ReadonlySet<string> = new Set([
+  "txBadSeq",
+  "txTryAgainLater",
+  "txNoAccount",
+  "txInsufficientFee",
+]);
