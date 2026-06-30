@@ -8,3 +8,9 @@ export {
 } from "./caps.js";
 export type { Channel, ChannelPoolOptions } from "./channels.js";
 export { ChannelPool } from "./channels.js";
+export type {
+  ChainSponsorshipView,
+  ReconciliationReport,
+  SponsoredRecord,
+} from "./reconcile.js";
+export { HorizonSponsorshipView, reconcile } from "./reconcile.js";
