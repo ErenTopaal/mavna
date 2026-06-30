@@ -75,12 +75,16 @@ const emptyUsage = (day: string): CapUsage => ({
 });
 
 export class CapLedger {
-  constructor(
-    private readonly store: CapStore,
-    private readonly config: CapConfig = DEFAULT_CAPS,
-    /** Injected so the day boundary is testable rather than tied to the clock. */
-    private readonly today: () => string = utcDay,
-  ) {}
+  private readonly store: CapStore;
+  private readonly config: CapConfig;
+  /** Injected so the day boundary is testable rather than tied to the clock. */
+  private readonly today: () => string;
+
+  constructor(store: CapStore, config: CapConfig = DEFAULT_CAPS, today: () => string = utcDay) {
+    this.store = store;
+    this.config = config;
+    this.today = today;
+  }
 
   /**
    * Ask before committing capital. Both caps are checked, and the answer carries
