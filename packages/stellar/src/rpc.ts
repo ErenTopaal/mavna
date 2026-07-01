@@ -139,16 +139,28 @@ export class RpcClient {
    * indistinguishable from a transaction that was never seen, so absence is only
    * conclusive once the transaction could no longer be included.
    */
-  async waitForTransaction(hash: string, attempts = 60): Promise<rpc.Api.GetTransactionResponse> {
-    for (let attempt = 0; attempt < attempts; attempt++) {
+  async waitForTransaction(
+    hash: string,
+    /**
+     * Unix seconds after which the transaction can no longer be included. Absence
+     * is only conclusive past this point: before it, "not found" means the network
+     * has not got to it yet, and giving up early turns congestion into a false
+     * failure. Defaults to five minutes, matching the timeout we build with.
+     */
+    deadlineUnix: number = Math.floor(Date.now() / 1000) + 300,
+  ): Promise<rpc.Api.GetTransactionResponse> {
+    for (;;) {
       const result = await this.server.getTransaction(hash);
       if (result.status !== "NOT_FOUND") {
         if (result.status === "SUCCESS") this.observeWrite(result.ledger);
         return result;
       }
+      if (Math.floor(Date.now() / 1000) > deadlineUnix) break;
       await this.sleep(this.baseDelayMs * 2);
     }
-    throw new MavnaError(`Transaction ${hash} was never included.`, { retryable: true });
+    throw new MavnaError(`Transaction ${hash} was not included before it expired.`, {
+      retryable: true,
+    });
   }
 
   /**
@@ -190,7 +202,12 @@ export class RpcClient {
         continue;
       }
 
-      const result = await this.waitForTransaction(sent.hash);
+      // The transaction's own time bound is the only correct deadline: past it
+      // the network cannot include it, and before it silence means nothing.
+      // A fee-bump carries its bounds on the inner transaction, not the envelope.
+      const bounds = "timeBounds" in tx ? tx.timeBounds : tx.innerTransaction.timeBounds;
+      const maxTime = Number(bounds?.maxTime ?? 0);
+      const result = await this.waitForTransaction(sent.hash, maxTime > 0 ? maxTime : undefined);
       if (result.status === "SUCCESS") return result;
 
       throw new MavnaError(`${label} failed on-chain.`, { retryable: false });
