@@ -19,7 +19,10 @@ export default defineConfig({
           include: ["packages/**/*.live.test.ts", "services/**/*.live.test.ts"],
           testTimeout: 120_000,
           hookTimeout: 300_000,
-          maxWorkers: 2,
+          // One at a time. These share a public network, and running them in
+          // parallel is self-inflicted congestion that shows up as false failures.
+          maxWorkers: 1,
+          fileParallelism: false,
         },
       },
     ],
