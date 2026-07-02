@@ -21,7 +21,7 @@ const channel = Keypair.random();
 async function friendbot(kp: Keypair): Promise<void> {
   const response = await fetch(`https://friendbot.stellar.org?addr=${kp.publicKey()}`);
   if (!response.ok && response.status !== 400) throw new Error(`friendbot ${response.status}`);
-  await client.loadAccount(kp.publicKey());
+  await client.waitForAccount(kp.publicKey());
 }
 
 async function horizon(address: string): Promise<Record<string, unknown>> {

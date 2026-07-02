@@ -1,6 +1,6 @@
 import { MavnaError } from "@mavna/core";
-import type { Account, FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
-import { rpc } from "@stellar/stellar-sdk";
+import type { FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
+import { Account, Address, rpc, xdr } from "@stellar/stellar-sdk";
 
 /**
  * The public Stellar RPC endpoint is load balanced across nodes that are NOT at
@@ -114,21 +114,46 @@ export class RpcClient {
    * Every caller wants the retrying version, so this is the one to use.
    */
   async loadAccount(address: string): Promise<Account> {
-    for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+    // The SDK's getAccount does not expose which ledger answered, so a lagging
+    // node returns a SUCCESSFUL response carrying a STALE SEQUENCE NUMBER. That is
+    // worse than an error: the transaction builds fine, is rejected for a bad
+    // sequence, gets rebuilt from the same stale node, and the whole thing
+    // cascades into an apparent network failure. Reading the ledger entry directly
+    // is the only way to see the ledger and apply the freshness guard.
+    const accountId = Address.fromString(address).toScAddress().accountId();
+    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }));
+
+    const entry = await this.read(`account ${address}`, async () => {
+      const response = await this.server.getLedgerEntries(key);
+      return { value: response.entries[0], ledger: response.latestLedger };
+    });
+
+    if (entry === undefined) {
+      throw new MavnaError(`Account ${address} does not exist.`, { retryable: false });
+    }
+
+    const parsed = entry.val.account();
+    return new Account(address, parsed.seqNum().toString());
+  }
+
+  /**
+   * Wait for an account to appear.
+   *
+   * Distinct from loadAccount on purpose. Loading asks "what is this account's
+   * state now", and a definitive absence is an error. Waiting asks "has it shown
+   * up yet", where absence is the expected starting condition. Conflating them
+   * means either a newly created account looks like a failure, or a genuinely
+   * missing one is retried forever.
+   */
+  async waitForAccount(address: string, attempts = 40): Promise<Account> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        return await this.server.getAccount(address);
-      } catch (cause) {
-        if (attempt === this.maxAttempts - 1) {
-          throw new MavnaError(`Account ${address} is not readable.`, {
-            retryable: true,
-            cause,
-          });
-        }
-        await this.sleep(this.baseDelayMs * 2 ** attempt);
+        return await this.loadAccount(address);
+      } catch {
+        await this.sleep(this.baseDelayMs * 2);
       }
     }
-    // Unreachable: the loop either returns or throws on its final attempt.
-    throw new MavnaError(`Account ${address} is not readable.`, { retryable: true });
+    throw new MavnaError(`Account ${address} never appeared.`, { retryable: true });
   }
 
   /**

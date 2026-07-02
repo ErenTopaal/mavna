@@ -28,7 +28,7 @@ async function fundedAccount(): Promise<Keypair> {
   }
   // The endpoint lags, so go through the guarded loader rather than the raw SDK
   // call, which throws the moment one node has not caught up.
-  await client.loadAccount(kp.publicKey());
+  await client.waitForAccount(kp.publicKey());
   return kp;
 }
 
