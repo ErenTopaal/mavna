@@ -55,7 +55,26 @@ export const futureUnixSeconds: z.ZodType<number> = z
 export const displayText: z.ZodType<string, string> = z
   .string()
   .max(200)
-  .transform((v) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim());
+  .transform(stripControlCharacters);
+
+/**
+ * Remove control characters from text that will be rendered.
+ *
+ * Written as a filter rather than a regular expression on purpose: a character
+ * class of control codes is exactly what linters flag as a probable mistake, and
+ * here it is deliberate, so saying it in code is clearer than suppressing a
+ * warning that is usually right.
+ */
+function stripControlCharacters(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    const isC0 = code <= 0x1f;
+    const isC1 = code >= 0x7f && code <= 0x9f;
+    if (!isC0 && !isC1) out += ch;
+  }
+  return out.trim();
+}
 
 /**
  * Parse or throw with the source named, so a bad response is attributable to the
