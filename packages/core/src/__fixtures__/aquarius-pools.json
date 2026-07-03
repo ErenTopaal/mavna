@@ -1,0 +1,156 @@
+{
+  "count": 145,
+  "next": "https://amm-api-testnet.aqua.network/api/external/v1/pools/?page=2&size=2",
+  "previous": null,
+  "results": [
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CBFM4PTSMWDVEQNUPP6GQ76UE3GR4QQMLTZY5ICEHS5JMTR6C66MUHG2",
+      "tokens_addresses": [
+        "CALZZIZI7LH645Q2OHCKUYBS542O4YUA5YV6UODTK6PA3DEIUFPEXZAG",
+        "CC537L4WTJXYQTRIACNSWHFQ2GLXQFT7CQD3SYWJ7WQLCCULXO3T7VGK"
+      ],
+      "tokens_str": ["Arka Test Token", "Arka Test Token"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": 2,
+      "total_volume": 0
+    },
+    {
+      "index": "24f9c991c44acf33fff5f44031c40385d235dc212d7379e824ba3db1c35371f3",
+      "address": "CDV4RVVWCBK4MLSO6YJUSO47YE6JKMSX257LH5CG5XUY3TH4KKV5MWNK",
+      "tokens_addresses": [
+        "CC52SIPHNMTBMHSBYTUI3R53PPMBGTEOJ566GFMSREBFA3KVJ4MY7OBT",
+        "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE"
+      ],
+      "tokens_str": [
+        "Time Rebased Token",
+        "AQUA:GAHPYWLK6YRN7CVYZOO4H3VDRZ7PVF5UJGLZCSPAEIKJE2XSWF5LAGER"
+      ],
+      "pool_type": "concentrated",
+      "fee": "0.0010",
+      "a": null,
+      "tx_count": 145,
+      "total_volume": 20613415776505
+    },
+    {
+      "index": "b2e02fcfca6c96f8ad5cbd84e7784a777b36d9c96a2459402c4f458462aab7f0",
+      "address": "CB3FZZYV4YHTEVFTSLXKH2KOX3OOB43FH3WPN44YBCEZLLBFQ4W5SYYM",
+      "tokens_addresses": [
+        "CBQJN654JB3DILLHSBBZBSH4JPZZM2PCL5VYCE3YJXUN5JLBIIML2DP7",
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+      ],
+      "tokens_str": ["Gravity HITZ", "native"],
+      "pool_type": "constant_product",
+      "fee": "0.0010",
+      "a": null,
+      "tx_count": 10,
+      "total_volume": 16745327
+    },
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CCBSN5QX44THFHHBV7TMWIC2FUOA44PEG3D7L7WYFSF2YZGDGOIJWV6L",
+      "tokens_addresses": [
+        "CBH3PUEAHAXP6M22JR42JM46Q5EYZNSIEC3JGRP3AS7JGWE4MR6JLS5A",
+        "CCT7VI7NFSSRGVW4YHTOPIMURXQO5NBLOOKJQCYOKYY6ZIKC4KB356RK"
+      ],
+      "tokens_str": ["Arka Test Token", "Arka Test Token"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": null,
+      "total_volume": 0
+    },
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CDRHBH3ZMVXHZPSF5YZWYF4XDC6KDA4K532LAA3KEK26KFTD6RHWDB6O",
+      "tokens_addresses": [
+        "CBEKIJPOF6ECGPJANWGQ33QDYBJLOAPG6X2BKOVGXG3PFP46JY3UAT3M",
+        "CDXEQPC7L4SALLYIQU6WWHTZSZH56JJ3XCQKWI36S5NYCOTLNCDSI2CJ"
+      ],
+      "tokens_str": ["Arka Test Token", "Arka Test Token"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": 3,
+      "total_volume": 0
+    },
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CCQSATUNMY6SCUHA5QWVVWM7A3SJTOAXSHID5XWRNGERQ6A6TJ4AN63J",
+      "tokens_addresses": [
+        "CAPMF64VUGKVZVNBA7VLNDJEURTP6KQLZXK3NCBBLSYVLPVPZ4AOLYGL",
+        "CCEGXFI3G7UTJEDLOHNSSZRKITFIET3APXWTKBHGKLB6OJZ34OTCS74C"
+      ],
+      "tokens_str": ["Arka Test Token", "Arka Test Token"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": 4,
+      "total_volume": 0
+    },
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CDELIRAFDR3FP5Z5MLYMH66IFIYLTAZ6HVJKVEUOTJQ4BJJCZSLOYQ6Y",
+      "tokens_addresses": [
+        "CBLWUZLMGV2VZC4WGRWCAICESTBBB7FQDYZLSZPV2DGQYOBEWVZFBAX4",
+        "CD67YGVUEEL2GWXCNB7EONYQ2ZBVOL4YSPUYW2KLN7ARQU4OXCPUDOF7"
+      ],
+      "tokens_str": ["Arka Test Token", "Arka Test Token"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": 4,
+      "total_volume": 0
+    },
+    {
+      "index": "9ac7a9cde23ac2ada11105eeaa42e43c2ea8332ca0aa8f41f58d7160274d718e",
+      "address": "CDII6SNC6VEZDNG33DUULSA6TYIYDIY3E5TS5OU6G74BAIM7XNIAGT2E",
+      "tokens_addresses": [
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "CDSTBS2AFLPTY3R4HGFZ65ZUBK3D75TJJXPEBCR4OSOL4RZ764HWBHEC"
+      ],
+      "tokens_str": ["native", "SBOT:GDI4K24MJSU7JWGZQDI7D6HZ64YY56FZVUAWW4O7NNHT3IRHGGHJ3LRJ"],
+      "pool_type": "constant_product",
+      "fee": "0.0030",
+      "a": null,
+      "tx_count": null,
+      "total_volume": 0
+    },
+    {
+      "index": "24f9c991c44acf33fff5f44031c40385d235dc212d7379e824ba3db1c35371f3",
+      "address": "CBCY4NS3XAP3NEIMV2XEI36B3CT6LR34G4XSLBTCUHFTRNUY3OW3O3TV",
+      "tokens_addresses": [
+        "CCQFYVAELDKNVVEVUIZSWIA2NFKHLIOHJIAQ55BGD2MURI4USXPOEC5E",
+        "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE"
+      ],
+      "tokens_str": [
+        "SMALLFROG00:GAHPYWLK6YRN7CVYZOO4H3VDRZ7PVF5UJGLZCSPAEIKJE2XSWF5LAGER",
+        "AQUA:GAHPYWLK6YRN7CVYZOO4H3VDRZ7PVF5UJGLZCSPAEIKJE2XSWF5LAGER"
+      ],
+      "pool_type": "concentrated",
+      "fee": "0.0010",
+      "a": null,
+      "tx_count": 229,
+      "total_volume": 13062204233864
+    },
+    {
+      "index": "24f9c991c44acf33fff5f44031c40385d235dc212d7379e824ba3db1c35371f3",
+      "address": "CADQVFFI5LZAJSVISAW6EGFUCZDY6BFLTZFSDMGHH46HCCATM6PJBOJ7",
+      "tokens_addresses": [
+        "CCQFYVAELDKNVVEVUIZSWIA2NFKHLIOHJIAQ55BGD2MURI4USXPOEC5E",
+        "CCYPRFTJIIOLQUSQUPQKQJ36PELTK662G5NYAMUOFM6JM7HFOGL2WYQX"
+      ],
+      "tokens_str": [
+        "SMALLFROG00:GAHPYWLK6YRN7CVYZOO4H3VDRZ7PVF5UJGLZCSPAEIKJE2XSWF5LAGER",
+        "Soroban Custom Token 18 Expensive"
+      ],
+      "pool_type": "concentrated",
+      "fee": "0.0010",
+      "a": null,
+      "tx_count": 2,
+      "total_volume": 2151342
+    }
+  ]
+}

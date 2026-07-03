@@ -17,5 +17,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --root ../..",
     "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
+  },
+  "dependencies": {
+    "zod": "4.4.3",
+    "dnum": "2.17.0"
   }
 }
