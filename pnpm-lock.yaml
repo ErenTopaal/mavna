@@ -244,6 +244,18 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0))
 
+  packages/adapters/cctp:
+    dependencies:
+      '@mavna/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@mavna/stellar':
+        specifier: workspace:*
+        version: link:../../stellar
+      '@stellar/stellar-sdk':
+        specifier: 16.2.0
+        version: 16.2.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+
   packages/core:
     dependencies:
       dnum:
