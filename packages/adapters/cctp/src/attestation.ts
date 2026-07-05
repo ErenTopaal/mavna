@@ -114,7 +114,7 @@ export class AttestationService {
     if (response.status === 400) {
       const detail = await response
         .json()
-        .then((b: { error?: string }) => b.error)
+        .then((b: unknown) => (b as { error?: string }).error)
         .catch(() => undefined);
       throw new MavnaError(
         `Circle does not route from domain ${sourceDomain} to ${destinationDomain}` +
