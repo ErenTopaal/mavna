@@ -189,6 +189,26 @@ export class RpcClient {
   }
 
   /**
+   * Prepare a Soroban transaction, but only against a node that has caught up.
+   *
+   * The SDK's own prepareTransaction simulates through the raw server, which
+   * bypasses the freshness guard entirely. That is not theoretical: it produced a
+   * real false failure during the first end-to-end transfer, simulating against a
+   * node that had not yet seen a trustline created moments earlier and reporting
+   * "trustline entry is missing" for an account that demonstrably had one.
+   *
+   * Simulation reads current ledger state, so it needs the same discipline as any
+   * other read.
+   */
+  async prepare(tx: Transaction): Promise<Transaction> {
+    await this.read("ledger head before simulating", async () => {
+      const latest = await this.server.getLatestLedger();
+      return { value: latest.sequence, ledger: latest.sequence };
+    });
+    return this.server.prepareTransaction(tx);
+  }
+
+  /**
    * Submit a transaction and wait for it, retrying the transient failures and
    * only the transient failures.
    *
