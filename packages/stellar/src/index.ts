@@ -8,7 +8,11 @@ export {
 export type { DestinationLane, DestinationState } from "./destination.js";
 export { inspectDestination } from "./destination.js";
 export type { NetworkConfig } from "./network.js";
-export { createNetworkConfig, PUBLIC_TESTNET_RPC_URL } from "./network.js";
+export {
+  createNetworkConfig,
+  PUBLIC_MAINNET_RPC_URLS,
+  PUBLIC_TESTNET_RPC_URL,
+} from "./network.js";
 export type { ReserveInputs, ReserveQuote } from "./reserve.js";
 export {
   belowFloorGuidance,
