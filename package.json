@@ -19,10 +19,11 @@
     "test": "turbo run test",
     "test:live": "turbo run test:live",
     "typecheck": "turbo run typecheck",
-    "lint": "biome check . && oxlint --type-aware",
+    "lint": "biome check . && oxlint --type-aware && node scripts/check-exports.mjs",
     "lint:fix": "biome check --write . && prettier --write \"**/*.{md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{md,yml,yaml}\"",
-    "publish:check": "turbo run publish:check"
+    "publish:check": "turbo run publish:check",
+    "check:exports": "node scripts/check-exports.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
