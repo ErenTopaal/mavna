@@ -274,6 +274,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/status:
+    dependencies:
+      '@mavna/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/stellar:
     dependencies:
       '@mavna/core':
