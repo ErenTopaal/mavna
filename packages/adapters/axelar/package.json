@@ -1,0 +1,26 @@
+{
+  "name": "@mavna/adapter-axelar",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --project unit --root ../../..",
+    "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
+  },
+  "dependencies": {
+    "@mavna/core": "workspace:*",
+    "@mavna/stellar": "workspace:*",
+    "@stellar/stellar-sdk": "16.2.0"
+  }
+}
