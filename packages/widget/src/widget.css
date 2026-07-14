@@ -1,0 +1,465 @@
+/*
+ * One stylesheet, everything scoped under .mv-root.
+ *
+ * No CSS-in-JS and no build-tool adoption on the integrator's side: they install
+ * the package and get working styles. Every selector is prefixed so nothing here
+ * can reach into a host page, and every value is a token so a host can retheme
+ * without overriding rules.
+ *
+ * Type is inherited on purpose. The widget sits inside somebody else's product
+ * and should read as part of it, not as a pasted-in card in a different face.
+ */
+
+.mv-root {
+  /* Pale, slightly green-shifted greys. Not white: white is the default nobody
+     chose, and a signal colour has to sit on something to be a signal. */
+  --mv-ground: #eaefec;
+  --mv-surface: #f6f9f7;
+  --mv-ink: #141b18;
+  --mv-muted: #5c6a64;
+  --mv-rule: #c5cfca;
+  --mv-rule-strong: #9aa8a2;
+  /* The only chromatic colour in the entire widget. It means "you are needed"
+     and nothing else, so it can never be confused with decoration. */
+  --mv-signal: #c3410f;
+
+  --mv-1: 4px;
+  --mv-2: 8px;
+  --mv-3: 12px;
+  --mv-4: 16px;
+  --mv-5: 24px;
+  --mv-6: 32px;
+  --mv-7: 48px;
+
+  --mv-radius: 3px;
+  --mv-radius-lg: 6px;
+
+  --mv-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Symmetric, for anything that breathes rather than arrives. */
+  --mv-swell: cubic-bezier(0.4, 0, 0.6, 1);
+  --mv-fast: 140ms;
+  --mv-slow: 420ms;
+
+  /* Hull width. Referenced by the ticks so the graduation marks stay attached
+     to the hull sides if this ever changes. */
+  --mv-hull: 14px;
+
+  box-sizing: border-box;
+  /* Lets the panel respond to the space an integrator gives it rather than to
+     the viewport, which is the only thing it can actually know about. */
+  container-type: inline-size;
+  color: var(--mv-ink);
+  background: var(--mv-ground);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  /* Amounts sit in columns and must not shimmer as digits change. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mv-root *,
+.mv-root *::before,
+.mv-root *::after {
+  box-sizing: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mv-root:not([data-mv-theme="light"]) {
+    --mv-ground: #0e1412;
+    --mv-surface: #151d1a;
+    --mv-ink: #e4ebe7;
+    --mv-muted: #8d9c95;
+    --mv-rule: #2a3531;
+    --mv-rule-strong: #465450;
+    --mv-signal: #ff7043;
+  }
+}
+
+.mv-root[data-mv-theme="dark"] {
+  --mv-ground: #0e1412;
+  --mv-surface: #151d1a;
+  --mv-ink: #e4ebe7;
+  --mv-muted: #8d9c95;
+  --mv-rule: #2a3531;
+  --mv-rule-strong: #465450;
+  --mv-signal: #ff7043;
+}
+
+/* ---------------------------------------------------------------- panel --- */
+
+.mv-panel {
+  background: var(--mv-surface);
+  border: 1px solid var(--mv-rule);
+  border-radius: var(--mv-radius-lg);
+  padding: var(--mv-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mv-5);
+}
+
+.mv-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mv-muted);
+}
+
+/*
+ * What lands, at the size of the thing that matters.
+ *
+ * The amount SENT is never the primary number here. A user is deciding whether
+ * to accept an outcome, and the outcome is what arrives.
+ */
+.mv-receives {
+  margin: var(--mv-1) 0 0;
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.mv-receives-symbol {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--mv-muted);
+  margin-left: var(--mv-2);
+  letter-spacing: 0;
+}
+
+.mv-floor {
+  margin: var(--mv-2) 0 0;
+  font-size: 12px;
+  color: var(--mv-muted);
+}
+
+/* ----------------------------------------------------------------- fees --- */
+
+.mv-fees {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--mv-2) var(--mv-4);
+  font-size: 13px;
+  border-top: 1px solid var(--mv-rule);
+  padding-top: var(--mv-4);
+}
+
+.mv-fee-name {
+  margin: 0;
+  color: var(--mv-muted);
+}
+
+.mv-fee-amount {
+  margin: 0;
+  text-align: right;
+}
+
+/* The reserve is not a fee. It becomes the user's own locked XLM and comes back
+   if they ever close the account, so it is set apart rather than summed in. */
+.mv-fee-name[data-mv-fee="account-reserve"],
+.mv-fee-amount[data-mv-fee="account-reserve"] {
+  color: var(--mv-ink);
+}
+
+.mv-fee-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--mv-muted);
+}
+
+/* ------------------------------------------------------------ signatures --- */
+
+.mv-signatures {
+  margin: 0;
+  font-size: 13px;
+  color: var(--mv-muted);
+}
+
+.mv-signatures strong {
+  color: var(--mv-ink);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------ the scale --- */
+
+/*
+ * A draft scale, not a stepper.
+ *
+ * Draft marks are painted on a hull so anyone standing on the quay can read how
+ * deep a vessel sits, and therefore how much it carries, without being told. The
+ * same job here: how far a transfer has got, readable at a glance and without
+ * reading a word.
+ *
+ * The hull is the two vertical rules. The part already traversed is submerged
+ * and solid. The waterline is where the transfer is now, and it moves while
+ * things are proceeding normally. It stops moving and turns signal-coloured the
+ * moment the user is what the transfer is waiting for. Motion is therefore
+ * information, not atmosphere, and the still frame still carries it via colour
+ * and weight for anyone who has motion turned off.
+ */
+
+.mv-scale {
+  list-style: none;
+  margin: 0;
+  /* Room for the graduation marks, which sit outside the hull. */
+  padding: 0 0 0 var(--mv-2);
+  border-top: 1px solid var(--mv-rule);
+  padding-top: var(--mv-5);
+}
+
+.mv-step {
+  display: grid;
+  grid-template-columns: var(--mv-hull) minmax(0, 1fr);
+  column-gap: var(--mv-5);
+}
+
+.mv-gauge {
+  position: relative;
+  /* The hull. Drawn per row so consecutive rows form one continuous column. */
+  border-left: 1px solid var(--mv-rule);
+  border-right: 1px solid var(--mv-rule);
+}
+
+/* Submerged: this step is behind us. */
+.mv-step[data-mv-phase="done"] .mv-gauge {
+  background: var(--mv-ink);
+}
+
+/*
+ * Drained.
+ *
+ * A refunded step was laden and then emptied, which is a different fact from
+ * "never started" and must not render as the same empty hull. Hatching reads as
+ * a compartment that held something and no longer does.
+ */
+.mv-step[data-mv-phase="refunded"] .mv-gauge {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--mv-rule-strong) 0 1px,
+    transparent 1px 5px
+  );
+}
+
+/* Graduation mark: where this step's reading is taken. */
+.mv-tick {
+  position: absolute;
+  top: 9px;
+  left: -1px;
+  right: -1px;
+  height: 0;
+}
+
+.mv-tick::before,
+.mv-tick::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  height: 1px;
+  width: 6px;
+  background: var(--mv-rule-strong);
+}
+
+.mv-tick::before {
+  right: 100%;
+  margin-right: 1px;
+}
+
+.mv-tick::after {
+  left: 100%;
+  margin-left: 1px;
+}
+
+/*
+ * The one step that needs the user gets a leader line running from the hull to
+ * its label, in the signal colour. It is the only thing on the scale that points
+ * at anything, so the eye lands on the actionable row first.
+ */
+.mv-step[data-mv-needs-user="true"] .mv-tick::after {
+  width: var(--mv-5);
+  background: var(--mv-signal);
+}
+
+/* The waterline. */
+.mv-water {
+  position: absolute;
+  top: 0;
+  left: -7px;
+  right: -7px;
+  height: 2px;
+  background: var(--mv-ink);
+}
+
+.mv-step[data-mv-phase="pending"] .mv-water {
+  animation: mv-waterline 4200ms var(--mv-swell) infinite alternate;
+}
+
+/* Stopped settling, and waiting on a person. Heavier, and it does not move. */
+.mv-step[data-mv-phase="stalled"] .mv-water,
+.mv-step[data-mv-phase="blocked"] .mv-water,
+.mv-step[data-mv-phase="failed"] .mv-water,
+.mv-step[data-mv-phase="partial"] .mv-water {
+  height: 3px;
+  background: var(--mv-signal);
+}
+
+@keyframes mv-waterline {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-step .mv-water {
+    animation: none;
+  }
+}
+
+/*
+ * The keel: a closing bar under the last step, drawn only when the transfer has
+ * actually finished.
+ *
+ * Without it a finished transfer and one still in flight look nearly the same in
+ * a still frame, because both are mostly-filled columns. This is the difference,
+ * and it is visible before any label is read.
+ */
+.mv-scale[data-mv-outcome="succeeded"] .mv-step:last-child .mv-gauge::after,
+.mv-scale[data-mv-outcome="refunded"] .mv-step:last-child .mv-gauge::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  bottom: 0;
+  height: 3px;
+  background: var(--mv-ink);
+}
+
+.mv-scale[data-mv-outcome="refunded"] .mv-step:last-child .mv-gauge::after {
+  background: var(--mv-rule-strong);
+}
+
+/* ------------------------------------------------------------ step body --- */
+
+.mv-body {
+  padding-bottom: var(--mv-5);
+  min-width: 0;
+}
+
+.mv-step:last-child .mv-body {
+  padding-bottom: 0;
+}
+
+.mv-label {
+  margin: 0;
+  font-weight: 500;
+  color: var(--mv-ink);
+}
+
+.mv-step[data-mv-phase="idle"] .mv-label {
+  color: var(--mv-muted);
+  font-weight: 400;
+}
+
+.mv-note {
+  margin: var(--mv-1) 0 0;
+  font-size: 13px;
+  color: var(--mv-muted);
+}
+
+.mv-step[data-mv-needs-user="true"] .mv-note {
+  color: var(--mv-ink);
+}
+
+.mv-ref {
+  display: inline-block;
+  margin-top: var(--mv-2);
+  font-size: 12px;
+  color: var(--mv-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--mv-rule-strong);
+}
+
+.mv-ref:hover {
+  color: var(--mv-ink);
+}
+
+/* --------------------------------------------------------------- action --- */
+
+.mv-action {
+  margin-top: var(--mv-3);
+  font: inherit;
+  font-size: 13px;
+  color: var(--mv-ink);
+  background: transparent;
+  border: 1px solid var(--mv-signal);
+  border-radius: var(--mv-radius);
+  padding: var(--mv-2) var(--mv-3);
+  cursor: pointer;
+  transition:
+    background var(--mv-fast) var(--mv-ease),
+    color var(--mv-fast) var(--mv-ease);
+}
+
+.mv-action:hover {
+  background: var(--mv-signal);
+  color: var(--mv-surface);
+}
+
+.mv-confirm {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--mv-surface);
+  background: var(--mv-ink);
+  border: 1px solid var(--mv-ink);
+  border-radius: var(--mv-radius);
+  padding: var(--mv-3) var(--mv-4);
+  cursor: pointer;
+  width: 100%;
+  transition: opacity var(--mv-fast) var(--mv-ease);
+}
+
+.mv-confirm:hover {
+  opacity: 0.88;
+}
+
+.mv-root :focus-visible {
+  outline: 2px solid var(--mv-signal);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only, for the phase word that colour and position convey
+   visually. Sighted users should not have to read it. */
+.mv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------ narrow --- */
+
+@container (max-width: 360px) {
+  .mv-panel {
+    padding: var(--mv-4);
+  }
+
+  .mv-receives {
+    font-size: 26px;
+  }
+
+  .mv-step {
+    column-gap: var(--mv-4);
+  }
+}

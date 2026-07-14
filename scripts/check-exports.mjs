@@ -22,6 +22,9 @@ for (const root of roots) {
         f.endsWith(".ts") &&
         !f.endsWith(".test.ts") &&
         !f.endsWith(".test-d.ts") &&
+        // Declaration files declare, they do not export anything an index could
+        // re-export. Requiring one here would be a rule with no failure behind it.
+        !f.endsWith(".d.ts") &&
         f !== "index.ts",
     );
     const index = readFileSync(`${src}/index.ts`, "utf8");
