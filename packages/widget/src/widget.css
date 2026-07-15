@@ -6,22 +6,39 @@
  * can reach into a host page, and every value is a token so a host can retheme
  * without overriding rules.
  *
- * Type is inherited on purpose. The widget sits inside somebody else's product
- * and should read as part of it, not as a pasted-in card in a different face.
+ * The palette is the app's, transcribed from the same shadcn preset, so the two
+ * surfaces look related without the widget importing anything the app uses.
  */
 
 .mv-root {
-  /* Pale, slightly green-shifted greys. Not white: white is the default nobody
-     chose, and a signal colour has to sit on something to be a signal. */
-  --mv-ground: #eaefec;
-  --mv-surface: #f6f9f7;
-  --mv-ink: #141b18;
-  --mv-muted: #5c6a64;
-  --mv-rule: #c5cfca;
-  --mv-rule-strong: #9aa8a2;
-  /* The only chromatic colour in the entire widget. It means "you are needed"
-     and nothing else, so it can never be confused with decoration. */
-  --mv-signal: #c3410f;
+  /*
+   * The app's palette, reached without the app's dependencies.
+   *
+   * Spec §5.2 asks the widget to look like it belongs to the same family as the
+   * app, and says the resemblance comes from matching the preset's TOKENS rather
+   * than sharing its stack. So every value below is the shadcn `neutral` scale
+   * that `--preset bHse` resolves to, transcribed. Nothing here is eyeballed to
+   * look close: they are the same numbers, which is the only way the two
+   * surfaces stay in step when the preset changes.
+   *
+   * The widget is a guest and does not paint a ground by default. It sits on
+   * whatever surface the host gives it.
+   */
+  --mv-ground: transparent;
+  --mv-surface: oklch(1 0 0);
+  --mv-ink: oklch(0.145 0 0);
+  --mv-muted: oklch(0.556 0 0);
+  --mv-rule: oklch(0.922 0 0);
+  --mv-rule-strong: oklch(0.708 0 0);
+  /*
+   * The only chromatic value in the widget, and the preset's `destructive`.
+   *
+   * It means something has gone wrong, and nothing else. It is deliberately NOT
+   * used for "approve this in your wallet", which is a normal thing to be asked
+   * and would be misrepresented by an alarm colour. That state is carried by the
+   * leader line and the copy instead.
+   */
+  --mv-signal: oklch(0.577 0.245 27.325);
 
   --mv-1: 4px;
   --mv-2: 8px;
@@ -31,8 +48,25 @@
   --mv-6: 32px;
   --mv-7: 48px;
 
-  --mv-radius: 3px;
-  --mv-radius-lg: 6px;
+  /*
+   * A system stack by default, and the host's typeface when they ask for it.
+   *
+   * Plain `font-family: inherit` looked right and was not: a host page that sets
+   * no face at all leaves the widget in the browser default serif. And we cannot
+   * ship a webfont, because a guest that drags a typeface into someone else's
+   * product is exactly the imposition this package exists to avoid. So the face
+   * is a variable like every other token: set `--mv-font: inherit` to adopt the
+   * host's, or name one.
+   */
+  --mv-font:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+
+  /* The preset's radius is "small", which the shadcn CLI's own radius map
+     defines as 0.45rem. The smaller step mirrors how shadcn derives --radius-md
+     from --radius, so a control here and a control in the app match. */
+  --mv-radius: calc(0.45rem - 2px);
+  --mv-radius-lg: 0.45rem;
 
   --mv-ease: cubic-bezier(0.2, 0, 0, 1);
   /* Symmetric, for anything that breathes rather than arrives. */
@@ -50,7 +84,8 @@
   container-type: inline-size;
   color: var(--mv-ink);
   background: var(--mv-ground);
-  font-family: inherit;
+  accent-color: var(--mv-ink);
+  font-family: var(--mv-font);
   font-size: 14px;
   line-height: 1.45;
   /* Amounts sit in columns and must not shimmer as digits change. */
@@ -64,26 +99,32 @@
   box-sizing: inherit;
 }
 
+/*
+ * Dark without being told which.
+ *
+ * The system preference is followed unless the host has said otherwise, because
+ * a widget that ignores it looks broken, and a widget that follows it against an
+ * explicit instruction is worse. `data-mv-theme` wins in both directions: a
+ * light host running a dark OS is a real and common case.
+ */
 @media (prefers-color-scheme: dark) {
   .mv-root:not([data-mv-theme="light"]) {
-    --mv-ground: #0e1412;
-    --mv-surface: #151d1a;
-    --mv-ink: #e4ebe7;
-    --mv-muted: #8d9c95;
-    --mv-rule: #2a3531;
-    --mv-rule-strong: #465450;
-    --mv-signal: #ff7043;
+    --mv-surface: oklch(0.205 0 0);
+    --mv-ink: oklch(0.985 0 0);
+    --mv-muted: oklch(0.708 0 0);
+    --mv-rule: oklch(1 0 0 / 10%);
+    --mv-rule-strong: oklch(0.556 0 0);
+    --mv-signal: oklch(0.704 0.191 22.216);
   }
 }
 
 .mv-root[data-mv-theme="dark"] {
-  --mv-ground: #0e1412;
-  --mv-surface: #151d1a;
-  --mv-ink: #e4ebe7;
-  --mv-muted: #8d9c95;
-  --mv-rule: #2a3531;
-  --mv-rule-strong: #465450;
-  --mv-signal: #ff7043;
+  --mv-surface: oklch(0.205 0 0);
+  --mv-ink: oklch(0.985 0 0);
+  --mv-muted: oklch(0.708 0 0);
+  --mv-rule: oklch(1 0 0 / 10%);
+  --mv-rule-strong: oklch(0.556 0 0);
+  --mv-signal: oklch(0.704 0.191 22.216);
 }
 
 /* ---------------------------------------------------------------- panel --- */
@@ -194,11 +235,13 @@
  * reading a word.
  *
  * The hull is the two vertical rules. The part already traversed is submerged
- * and solid. The waterline is where the transfer is now, and it moves while
- * things are proceeding normally. It stops moving and turns signal-coloured the
- * moment the user is what the transfer is waiting for. Motion is therefore
- * information, not atmosphere, and the still frame still carries it via colour
- * and weight for anyone who has motion turned off.
+ * and solid. The waterline is where the transfer is now, and it moves only while
+ * the network is working. The moment progress depends on a person it thickens and
+ * goes still, and if something has actually gone wrong it turns red as well.
+ *
+ * Motion is therefore information rather than atmosphere, which also means it
+ * cannot be the ONLY carrier: weight, colour and the leader line say the same
+ * thing in a still frame, for anyone who has motion turned off.
  */
 
 .mv-scale {
@@ -279,6 +322,14 @@
  */
 .mv-step[data-mv-needs-user="true"] .mv-tick::after {
   width: var(--mv-5);
+  background: var(--mv-ink);
+}
+
+/* Only when something has actually gone wrong does the leader turn red. Being
+   asked to approve a transaction is not a fault. */
+.mv-step[data-mv-phase="stalled"] .mv-tick::after,
+.mv-step[data-mv-phase="failed"] .mv-tick::after,
+.mv-step[data-mv-phase="partial"] .mv-tick::after {
   background: var(--mv-signal);
 }
 
@@ -296,9 +347,18 @@
   animation: mv-waterline 4200ms var(--mv-swell) infinite alternate;
 }
 
-/* Stopped settling, and waiting on a person. Heavier, and it does not move. */
+/*
+ * Stopped settling.
+ *
+ * Every one of these is heavier and static, which is what separates "waiting on
+ * the network" from "waiting on you" at a glance and without motion. Only the
+ * faults are red; being asked to sign is a normal step, so it stays in ink.
+ */
+.mv-step[data-mv-phase="blocked"] .mv-water {
+  height: 3px;
+}
+
 .mv-step[data-mv-phase="stalled"] .mv-water,
-.mv-step[data-mv-phase="blocked"] .mv-water,
 .mv-step[data-mv-phase="failed"] .mv-water,
 .mv-step[data-mv-phase="partial"] .mv-water {
   height: 3px;
