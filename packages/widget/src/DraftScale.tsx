@@ -141,7 +141,12 @@ export function noteFor(step: ScaleStep): string | undefined {
     case "stalled":
       return `Still waiting after ${humanDuration(phase.overdueSeconds)} longer than expected. ${phase.remedy.because}`;
     case "done":
-      return `${formatAmount(phase.received)} ${phase.received.asset.symbol} arrived.`;
+      // Preparing an account and settling it are real steps that receive
+      // nothing, and "0 XLM arrived" is worse than saying nothing at all. The
+      // filled hull already reports that the step is behind us.
+      return BigInt(phase.received.baseUnits) === 0n
+        ? undefined
+        : `${formatAmount(phase.received)} ${phase.received.asset.symbol} arrived.`;
     case "refunded":
       return `Returned to ${shortenAddress(phase.to)}. ${formatAmount(phase.returned)} ${phase.returned.asset.symbol} came back.`;
     case "partial":

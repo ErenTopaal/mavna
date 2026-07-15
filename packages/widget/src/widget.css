@@ -24,6 +24,11 @@
    * The widget is a guest and does not paint a ground by default. It sits on
    * whatever surface the host gives it.
    */
+  /* Read back at runtime in development to detect a missing stylesheet. Its
+     absence is the only observable difference between "styles loaded" and
+     "styles silently absent". */
+  --mv-loaded: 1;
+
   --mv-ground: transparent;
   --mv-surface: oklch(1 0 0);
   --mv-ink: oklch(0.145 0 0);
@@ -175,6 +180,15 @@
   color: var(--mv-muted);
 }
 
+/* A failed transfer has no figure to report, and a large "0" would be read as a
+   balance. The slot keeps its position so the card does not reflow. */
+.mv-receives-none {
+  font-size: 22px;
+  color: var(--mv-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
 /* ----------------------------------------------------------------- fees --- */
 
 .mv-fees {
@@ -287,12 +301,25 @@
 }
 
 /* Graduation mark: where this step's reading is taken. */
+/*
+ * A graduation mark, crossing the hull rather than flanking it.
+ *
+ * Flanking alone left the laden section a solid black mass that read as a
+ * progress bar. What makes a draft scale legible is that the marks stay visible
+ * as the hull goes under, so the crossing line inverts to the surface colour on
+ * a submerged step and the depth stays readable at every fill level.
+ */
 .mv-tick {
   position: absolute;
   top: 9px;
   left: -1px;
   right: -1px;
   height: 0;
+  border-top: 1px solid var(--mv-rule-strong);
+}
+
+.mv-step[data-mv-phase="done"] .mv-tick {
+  border-top-color: var(--mv-surface);
 }
 
 .mv-tick::before,
@@ -321,7 +348,10 @@
  * at anything, so the eye lands on the actionable row first.
  */
 .mv-step[data-mv-needs-user="true"] .mv-tick::after {
-  width: var(--mv-5);
+  /* Deliberately shorter than the column gap. At the full gap it ran into the
+     label and rendered as a strikethrough, which reads as "cancelled" on the one
+     row that most needs to read as "act here". */
+  width: 13px;
   background: var(--mv-ink);
 }
 
@@ -392,8 +422,11 @@
 .mv-scale[data-mv-outcome="refunded"] .mv-step:last-child .mv-gauge::after {
   content: "";
   position: absolute;
-  left: -5px;
-  right: -5px;
+  /* Wider than the hull on both sides. Flush, it disappeared into a fully laden
+     column; the overhang is the whole point, since that is what reads as a base
+     the vessel is resting on rather than more of the same bar. */
+  left: -9px;
+  right: -9px;
   bottom: 0;
   height: 3px;
   background: var(--mv-ink);
@@ -452,6 +485,11 @@
 /* --------------------------------------------------------------- action --- */
 
 .mv-action {
+  /* Its own line. Inline, it butted straight against the explorer link with no
+     separation, so the one control attached to a problem read as part of a
+     sentence rather than as something to press. */
+  display: block;
+  width: fit-content;
   margin-top: var(--mv-3);
   font: inherit;
   font-size: 13px;

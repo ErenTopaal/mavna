@@ -1,7 +1,11 @@
-// Importing the stylesheet from the entry is what makes the package work on
-// install. tsdown emits it as a single `widget.css` beside the bundle, so an
-// integrator who imports the component gets the styles with it and never has to
-// adopt a build tool to use this.
+// This import is what puts the stylesheet in the build graph, and removing it
+// emits no CSS at all. It does NOT reach the consumer: tsdown extracts the CSS
+// into `dist/widget.css` and strips the import from the emitted JS, so importing
+// only the component renders it completely unstyled with no error anywhere.
+//
+// Integrators therefore need one line, `import "@mavna/widget/widget.css"`, and
+// TransferPanel warns in development if it is missing, because the failure is
+// otherwise silent. Found the hard way, by shipping the unstyled version.
 import "./widget.css";
 
 export { DraftScale } from "./DraftScale.js";

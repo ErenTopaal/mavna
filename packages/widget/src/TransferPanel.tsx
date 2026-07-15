@@ -1,5 +1,5 @@
-import type { Fee, FeeKind, Remedy, Route } from "@mavna/core";
-import type { ReactElement } from "react";
+import type { Amount, Fee, FeeKind, Remedy, Route } from "@mavna/core";
+import { type ReactElement, type RefObject, useEffect, useRef } from "react";
 import { DraftScale, type ScaleStep } from "./DraftScale.js";
 import { formatAmount } from "./format.js";
 
@@ -26,26 +26,42 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
   const { route, steps, outcome, onConfirm, onRemedy, theme } = props;
   const started = steps !== undefined;
   const finished = outcome !== "in-flight";
+  const root = useRef<HTMLDivElement>(null);
+
+  useStylesheetWarning(root);
+
+  const landed = settlement(outcome, route, steps);
 
   return (
-    <div className="mv-root" data-mv-theme={theme}>
+    <div className="mv-root" data-mv-theme={theme} ref={root}>
       <section className="mv-panel">
         <div>
           <p className="mv-eyebrow">{headline(outcome, route)}</p>
-          <p className="mv-receives">
-            {formatAmount(route.receives)}
-            <span className="mv-receives-symbol">{route.receives.asset.symbol}</span>
-          </p>
-          <p className="mv-floor">
-            {`At least ${formatAmount(route.receivesAtLeast)} ${route.receivesAtLeast.asset.symbol}, or the transfer does not go through.`}
-          </p>
+          {landed === undefined ? (
+            <p className="mv-receives mv-receives-none">Nothing arrived</p>
+          ) : (
+            <p className="mv-receives">
+              {formatAmount(landed)}
+              <span className="mv-receives-symbol">{landed.asset.symbol}</span>
+            </p>
+          )}
+          {/* A floor is a promise about a transfer that has not happened yet.
+              Repeating it over a finished one describes nothing. */}
+          {finished ? null : (
+            <p className="mv-floor">
+              {`At least ${formatAmount(route.receivesAtLeast)} ${route.receivesAtLeast.asset.symbol}, or the transfer does not go through.`}
+            </p>
+          )}
         </div>
 
-        <dl className="mv-fees">
-          {route.fees.map((fee) => (
-            <FeeLine key={fee.kind} fee={fee} />
-          ))}
-        </dl>
+        {/* Nothing was charged, so listing charges would invent them. */}
+        {outcome === "failed" ? null : (
+          <dl className="mv-fees">
+            {route.fees.map((fee) => (
+              <FeeLine key={fee.kind} fee={fee} explain={!started} />
+            ))}
+          </dl>
+        )}
 
         {/*
           Told once, upfront, and only while it is still true. A finished or
@@ -78,7 +94,58 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
   );
 }
 
-function FeeLine({ fee }: { readonly fee: Fee }): ReactElement {
+/**
+ * Say so, in development, when the stylesheet was never imported.
+ *
+ * The widget ships its CSS as a separate file, which means forgetting to import
+ * it renders every state unstyled and throws nothing: no error, no warning, no
+ * console entry. It looks like a broken component rather than a missing import,
+ * and it cost an afternoon here before this existed.
+ *
+ * `process.env.NODE_ENV` is compared explicitly so a consumer's bundler folds the
+ * whole check away in production rather than shipping it to their users.
+ */
+function useStylesheetWarning(root: RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    const node = root.current;
+    if (node === null) return;
+    const loaded = getComputedStyle(node).getPropertyValue("--mv-loaded").trim();
+    if (loaded !== "") return;
+    console.warn(
+      '[mavna] The widget is rendering without its stylesheet. Add `import "@mavna/widget/widget.css"` ' +
+        "once, anywhere in your app. Styles are shipped as a separate file so they can be replaced.",
+    );
+  }, [root]);
+}
+
+/**
+ * What the user actually ended up with.
+ *
+ * While a transfer is in flight this is the quote, because that is the claim
+ * being made. Once it settles it MUST become what really happened: a returned
+ * transfer that headlines the quoted amount reads as money received, and a
+ * partial delivery that headlines the full amount is simply wrong. This is the
+ * single most consequential number in the widget and it is the easiest one to
+ * leave stale.
+ */
+function settlement(
+  outcome: TransferPanelProps["outcome"],
+  route: Route,
+  steps: readonly ScaleStep[] | undefined,
+): Amount | undefined {
+  if (outcome === "in-flight" || steps === undefined) return route.receives;
+  if (outcome === "succeeded") return route.receives;
+  if (outcome === "failed") return undefined;
+
+  for (const step of steps) {
+    if (outcome === "partial" && step.phase.phase === "partial") return step.phase.received;
+    if (outcome === "refunded" && step.phase.phase === "refunded") return step.phase.returned;
+  }
+  return undefined;
+}
+
+function FeeLine({ fee, explain }: { readonly fee: Fee; readonly explain: boolean }): ReactElement {
   return (
     <>
       <dt className="mv-fee-name" data-mv-fee={fee.kind}>
@@ -88,8 +155,12 @@ function FeeLine({ fee }: { readonly fee: Fee }): ReactElement {
         {`${formatAmount(fee.total)} ${fee.total.asset.symbol}`}
       </dd>
       {/* A second <dd> against the same <dt>, which is valid and keeps the note
-          a grid item so it can span both columns. */}
-      {fee.kind === "account-reserve" ? (
+          a grid item so it can span both columns.
+
+          Shown while the user is deciding, which is when it changes anything.
+          The line item itself never disappears, so the deduction is never
+          silent; only the explanation of it stands down once it is moot. */}
+      {fee.kind === "account-reserve" && explain ? (
         <dd className="mv-fee-note">
           Stellar locks this in your own account so it can hold assets. It is
           yours, and it comes back if you ever close the account.
