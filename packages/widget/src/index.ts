@@ -8,9 +8,16 @@
 // otherwise silent. Found the hard way, by shipping the unstyled version.
 import "./widget.css";
 
-export { DraftScale } from "./DraftScale.js";
 export type { DraftScaleProps, ScaleStep } from "./DraftScale.js";
-export { actionLabel, blockedNote, humanDuration, needsUser, noteFor, remedyFor } from "./DraftScale.js";
+export {
+  actionLabel,
+  blockedNote,
+  DraftScale,
+  humanDuration,
+  needsUser,
+  noteFor,
+  remedyFor,
+} from "./DraftScale.js";
 export { formatAmount, shortenAddress } from "./format.js";
-export { TransferPanel } from "./TransferPanel.js";
 export type { TransferPanelProps } from "./TransferPanel.js";
+export { TransferPanel } from "./TransferPanel.js";

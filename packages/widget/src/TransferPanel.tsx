@@ -162,8 +162,8 @@ function FeeLine({ fee, explain }: { readonly fee: Fee; readonly explain: boolea
           silent; only the explanation of it stands down once it is moot. */}
       {fee.kind === "account-reserve" && explain ? (
         <dd className="mv-fee-note">
-          Stellar locks this in your own account so it can hold assets. It is
-          yours, and it comes back if you ever close the account.
+          Stellar locks this in your own account so it can hold assets. It is yours, and it comes
+          back if you ever close the account.
         </dd>
       ) : null}
     </>

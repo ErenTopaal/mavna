@@ -293,11 +293,7 @@
  * a compartment that held something and no longer does.
  */
 .mv-step[data-mv-phase="refunded"] .mv-gauge {
-  background: repeating-linear-gradient(
-    -45deg,
-    var(--mv-rule-strong) 0 1px,
-    transparent 1px 5px
-  );
+  background: repeating-linear-gradient(-45deg, var(--mv-rule-strong) 0 1px, transparent 1px 5px);
 }
 
 /* Graduation mark: where this step's reading is taken. */

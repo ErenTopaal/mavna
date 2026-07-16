@@ -76,7 +76,12 @@ export const ROUTE: Route = {
   receives: amount(USDC_STELLAR, "247500000"),
   receivesAtLeast: amount(USDC_STELLAR, "246000000"),
   fees: [
-    { kind: "bridge", total: amount(USDC_SEPOLIA, "100000"), recipients: [], includedInQuote: true },
+    {
+      kind: "bridge",
+      total: amount(USDC_SEPOLIA, "100000"),
+      recipients: [],
+      includedInQuote: true,
+    },
     { kind: "gas", total: amount(USDC_SEPOLIA, "150000"), recipients: [], includedInQuote: true },
     {
       kind: "account-reserve",
@@ -107,7 +112,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Waiting on you",
     outcome: "in-flight",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -120,7 +129,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Proceeding",
     outcome: "in-flight",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -133,7 +146,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Overdue",
     outcome: "in-flight",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -155,7 +172,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Arrived",
     outcome: "succeeded",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -175,7 +196,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Returned",
     outcome: "refunded",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -193,7 +218,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Needs gas to land",
     outcome: "partial",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -216,7 +245,11 @@ export const SCENARIOS: ReadonlyArray<{
     name: "Did not go through",
     outcome: "failed",
     steps: [
-      { id: "prepare", label: LABELS.prepare, phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") } },
+      {
+        id: "prepare",
+        label: LABELS.prepare,
+        phase: { phase: "done", ref: deliveryRef, received: amount(XLM, "0") },
+      },
       {
         id: "bridge",
         label: LABELS.bridge,
@@ -224,7 +257,10 @@ export const SCENARIOS: ReadonlyArray<{
           phase: "failed",
           cause: "The burn was rejected by Sepolia.",
           ref: burnRef,
-          remedy: { kind: "retry", because: "Nothing left your wallet, so this can be sent again." },
+          remedy: {
+            kind: "retry",
+            because: "Nothing left your wallet, so this can be sent again.",
+          },
         },
       },
       { id: "settle", label: LABELS.settle, phase: { phase: "idle" } },
