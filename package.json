@@ -23,7 +23,8 @@
     "lint:fix": "biome check --write . && prettier --write \"**/*.{md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{md,yml,yaml}\"",
     "publish:check": "turbo run publish:check",
-    "check:exports": "node scripts/check-exports.mjs"
+    "check:exports": "node scripts/check-exports.mjs",
+    "test:browser": "playwright test"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

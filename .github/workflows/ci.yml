@@ -23,4 +23,10 @@ jobs:
       - run: pnpm format:check
       - run: pnpm build
       - run: pnpm test
+      # Chromium only. The widget's guarantees here are about the cascade and the
+      # box model, which do not differ across engines in ways this suite asserts;
+      # installing three browsers to re-check the same computed styles would cost
+      # minutes per run and catch nothing.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
       - run: pnpm publish:check

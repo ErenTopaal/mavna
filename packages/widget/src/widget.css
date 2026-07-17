@@ -67,11 +67,18 @@
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 
-  /* The preset's radius is "small", which the shadcn CLI's own radius map
-     defines as 0.45rem. The smaller step mirrors how shadcn derives --radius-md
-     from --radius, so a control here and a control in the app match. */
-  --mv-radius: calc(0.45rem - 2px);
-  --mv-radius-lg: 0.45rem;
+  /*
+   * The preset's radius is "small", which the shadcn CLI's own radius map defines
+   * as 0.45rem. Stated here in px at the 16px default, which is the same 7.2px,
+   * because `rem` resolves against the HOST page's root font size and not ours.
+   *
+   * A host that scales `html` would otherwise rescale the widget's geometry while
+   * the box it was given stays exactly the same size, which overflows rather than
+   * adapts. Every other dimension in this file is px for the same reason; a guest
+   * component has to be predictable inside a page it did not write.
+   */
+  --mv-radius: 5.2px;
+  --mv-radius-lg: 7.2px;
 
   --mv-ease: cubic-bezier(0.2, 0, 0, 1);
   /* Symmetric, for anything that breathes rather than arrives. */
@@ -98,10 +105,24 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * Typography is pinned to the widget root, not left to whatever the host says.
+ *
+ * A host page with a global `* { font-size: ... }` outranks any element here we
+ * have not explicitly sized, because a universal selector still beats an
+ * unstyled element. Inheriting deliberately costs one rule and makes the widget
+ * survive a page it did not choose to live in.
+ *
+ * This block sits ABOVE the component rules on purpose: it has the same
+ * specificity as they do, so it must lose to them and win against the host.
+ */
 .mv-root *,
 .mv-root *::before,
 .mv-root *::after {
   box-sizing: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 /*
@@ -401,7 +422,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mv-step .mv-water {
+  /* Matching the selector it overrides, exactly, and placed after it.
+     `.mv-step .mv-water` was tried first and did nothing at all: one class lighter
+     than the rule it was cancelling, so the animation kept running for every user
+     who had asked for it to stop. Caught by a browser test, not by reading. */
+  .mv-step[data-mv-phase="pending"] .mv-water {
     animation: none;
   }
 }
