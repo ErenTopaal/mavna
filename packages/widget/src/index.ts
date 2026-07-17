@@ -20,4 +20,4 @@ export {
 } from "./DraftScale.js";
 export { formatAmount, shortenAddress } from "./format.js";
 export type { TransferPanelProps } from "./TransferPanel.js";
-export { TransferPanel } from "./TransferPanel.js";
+export { settledAmount, TransferPanel } from "./TransferPanel.js";

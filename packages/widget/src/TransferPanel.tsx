@@ -30,7 +30,7 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
 
   useStylesheetWarning(root);
 
-  const landed = settlement(outcome, route, steps);
+  const landed = settledAmount(outcome, route, steps);
 
   return (
     <div className="mv-root" data-mv-theme={theme} ref={root}>
@@ -129,7 +129,7 @@ function useStylesheetWarning(root: RefObject<HTMLDivElement | null>): void {
  * single most consequential number in the widget and it is the easiest one to
  * leave stale.
  */
-function settlement(
+export function settledAmount(
   outcome: TransferPanelProps["outcome"],
   route: Route,
   steps: readonly ScaleStep[] | undefined,

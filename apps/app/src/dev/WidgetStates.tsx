@@ -13,7 +13,7 @@ import { ROUTE, SCENARIOS } from "./fixtures.js";
  */
 export function WidgetStates(): ReactElement {
   return (
-    <main className="min-h-dvh bg-background px-8 py-10">
+    <main className="min-h-dvh bg-background px-4 py-10 sm:px-8">
       <header className="mb-10">
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Widget states</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -30,8 +30,8 @@ export function WidgetStates(): ReactElement {
           <div
             className={
               theme === "dark"
-                ? "dark grid gap-6 rounded-lg bg-background p-6 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]"
-                : "grid gap-6 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]"
+                ? "dark grid gap-6 rounded-lg bg-background p-4 sm:p-6 [grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))]"
+                : "grid gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))]"
             }
           >
             {SCENARIOS.map((scenario) => (

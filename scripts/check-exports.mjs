@@ -19,8 +19,12 @@ for (const root of roots) {
     if (!existsSync(src) || !existsSync(`${src}/index.ts`)) continue;
     const modules = readdirSync(src).filter(
       (f) =>
-        f.endsWith(".ts") &&
+        // .tsx counts. It was omitted at first, which meant the widget's two
+        // components -- the entire public surface of that package -- were exempt
+        // from the one check that exists to catch an incomplete index.
+        (f.endsWith(".ts") || f.endsWith(".tsx")) &&
         !f.endsWith(".test.ts") &&
+        !f.endsWith(".test.tsx") &&
         !f.endsWith(".test-d.ts") &&
         // Declaration files declare, they do not export anything an index could
         // re-export. Requiring one here would be a rule with no failure behind it.
@@ -28,7 +32,7 @@ for (const root of roots) {
         f !== "index.ts",
     );
     const index = readFileSync(`${src}/index.ts`, "utf8");
-    const missing = modules.filter((m) => !index.includes(`./${m.replace(".ts", ".js")}`));
+    const missing = modules.filter((m) => !index.includes(`./${m.replace(/\.tsx?$/, ".js")}`));
     if (missing.length) {
       console.log(`  ${root}/${pkg}: index omits ${missing.join(", ")}`);
       bad++;

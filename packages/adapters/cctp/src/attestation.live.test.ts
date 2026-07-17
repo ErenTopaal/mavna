@@ -23,7 +23,10 @@ describe("Circle's fee service, live", () => {
 
   it("offers exactly two thresholds and no more", async () => {
     const fees = await service.fees(0, STELLAR_DOMAIN);
-    expect(fees.map((f) => f.finalityThreshold).sort()).toEqual([1000, 2000]);
+    // An explicit comparator, because the default sorts numbers as strings and
+    // would happily pass on [1000, 2000] while silently mis-ordering any other
+    // pair of thresholds Circle might introduce.
+    expect(fees.map((f) => f.finalityThreshold).sort((a, b) => a - b)).toEqual([1000, 2000]);
   });
 
   it("refuses a pair it does not route rather than returning a misleading zero", async () => {
