@@ -346,6 +346,9 @@ importers:
       '@mavna/core':
         specifier: workspace:*
         version: link:../../core
+      '@mavna/routing':
+        specifier: workspace:*
+        version: link:../../routing
       '@mavna/stellar':
         specifier: workspace:*
         version: link:../../stellar

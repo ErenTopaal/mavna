@@ -43,6 +43,16 @@ export interface Route {
   readonly trustModel: TrustModel;
   readonly fromChain: ChainRef;
   readonly toChain: ChainRef;
+  /**
+   * Where the value ends up.
+   *
+   * On the route rather than passed alongside it, because a route without a
+   * destination is not a route: an adapter cannot build its transaction without
+   * one. Carrying it here also means a quote can never be signed against an
+   * address other than the one it was quoted for, which on CCTP is the exact
+   * mistake Circle warns about twice, in red, as unrecoverable.
+   */
+  readonly destination: string;
   readonly sends: Amount;
   /**
    * What actually lands after every fee. This is the primary number in the

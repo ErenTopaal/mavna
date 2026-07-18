@@ -72,6 +72,7 @@ export const ROUTE: Route = {
   trustModel: "native-mint",
   fromChain: SEPOLIA,
   toChain: STELLAR,
+  destination: RECIPIENT,
   sends: amount(USDC_SEPOLIA, "25000000"),
   receives: amount(USDC_STELLAR, "247500000"),
   receivesAtLeast: amount(USDC_STELLAR, "246000000"),

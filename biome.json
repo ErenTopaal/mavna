@@ -27,7 +27,10 @@
         "noConsole": {
           "level": "error",
           "options": {
-            "allow": ["warn", "error"]
+            "allow": [
+              "warn",
+              "error"
+            ]
           }
         }
       },
@@ -45,11 +48,25 @@
   },
   "overrides": [
     {
-      "includes": ["scripts/**"],
+      "includes": [
+        "scripts/**"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
             "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/app/src/components/ui/**"
+      ],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noLabelWithoutControl": "off"
           }
         }
       }

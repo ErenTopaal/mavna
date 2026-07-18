@@ -39,12 +39,16 @@ const ref: OnChainRef = {
   explorerUrl: "https://sepolia.etherscan.io/tx/0xa4a4",
 };
 
+/** The account the real testnet transfer actually landed in. */
+const STELLAR_RECIPIENT = "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU";
+
 const ROUTE: Route = {
   id: "r",
   source: "cctp",
   trustModel: "native-mint",
   fromChain: SEPOLIA,
   toChain: STELLAR,
+  destination: STELLAR_RECIPIENT,
   sends: amount(USDC_SEPOLIA, "25000000"),
   receives: amount(USDC_STELLAR, "247500000"),
   receivesAtLeast: amount(USDC_STELLAR, "246000000"),
