@@ -24,7 +24,8 @@
     "format:check": "prettier --check \"**/*.{md,yml,yaml}\"",
     "publish:check": "turbo run publish:check",
     "check:exports": "node scripts/check-exports.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "size": "turbo run size"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

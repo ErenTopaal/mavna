@@ -1,6 +1,6 @@
-import { TransferPanel } from "@mavna/widget";
-import type { ReactElement } from "react";
-import { ROUTE, SCENARIOS } from "./fixtures.js";
+import { RouteList, TransferPanel } from "@mavna/widget";
+import { type ReactElement, useState } from "react";
+import { ROUTE, ROUTE_SET, SCENARIOS } from "./fixtures.js";
 
 /**
  * Every widget state, side by side, in both themes.
@@ -22,6 +22,18 @@ export function WidgetStates(): ReactElement {
         </p>
       </header>
 
+      <section className="mb-12">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">
+          Choosing a route
+        </h2>
+        <div className="grid gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr))]">
+          <RouteChoice theme="light" />
+          <div className="dark rounded-lg bg-background p-4">
+            <RouteChoice theme="dark" />
+          </div>
+        </div>
+      </section>
+
       {(["light", "dark"] as const).map((theme) => (
         <section key={theme} className="mb-12">
           <h2 className="mb-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">
@@ -35,7 +47,7 @@ export function WidgetStates(): ReactElement {
             }
           >
             {SCENARIOS.map((scenario) => (
-              <div key={scenario.name}>
+              <div key={scenario.name} data-scenario={scenario.name}>
                 <p className="mb-2 text-xs text-muted-foreground">{scenario.name}</p>
                 <TransferPanel
                   route={ROUTE}
@@ -47,7 +59,7 @@ export function WidgetStates(): ReactElement {
                 />
               </div>
             ))}
-            <div>
+            <div data-scenario="Before it starts">
               <p className="mb-2 text-xs text-muted-foreground">Before it starts</p>
               <TransferPanel
                 route={ROUTE}
@@ -62,5 +74,17 @@ export function WidgetStates(): ReactElement {
         </section>
       ))}
     </main>
+  );
+}
+
+/** Selection is real state here, because a card that cannot be picked proves nothing. */
+function RouteChoice({ theme }: { readonly theme: "light" | "dark" }): ReactElement {
+  const [selected, setSelected] = useState(ROUTE_SET.routes[0]?.id);
+  return (
+    <div className="mv-root" data-mv-theme={theme}>
+      <div className="mv-panel">
+        <RouteList routes={ROUTE_SET} selectedId={selected} onSelect={setSelected} />
+      </div>
+    </div>
   );
 }

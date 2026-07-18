@@ -19,5 +19,7 @@ export {
   remedyFor,
 } from "./DraftScale.js";
 export { formatAmount, shortenAddress } from "./format.js";
+export type { RouteListProps } from "./RouteList.js";
+export { describeRejection, explainTrust, RouteList } from "./RouteList.js";
 export type { TransferPanelProps } from "./TransferPanel.js";
 export { settledAmount, TransferPanel } from "./TransferPanel.js";

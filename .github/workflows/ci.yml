@@ -23,6 +23,9 @@ jobs:
       - run: pnpm format:check
       - run: pnpm build
       - run: pnpm test
+      # A wallet team evaluating this widget checks its size before they read a
+      # line of the docs, so the budget is a build gate rather than a note.
+      - run: pnpm size
       # Chromium only. The widget's guarantees here are about the cascade and the
       # box model, which do not differ across engines in ways this suite asserts;
       # installing three browsers to re-check the same computed styles would cost

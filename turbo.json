@@ -17,6 +17,10 @@
     },
     "publish:check": {
       "dependsOn": ["build"]
+    },
+    "size": {
+      "dependsOn": ["build"],
+      "inputs": ["dist/**", "package.json"]
     }
   }
 }

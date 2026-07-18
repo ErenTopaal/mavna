@@ -1,4 +1,4 @@
-import type { Amount, Asset, ChainRef, Route } from "@mavna/core";
+import type { Amount, Asset, ChainRef, Route, RouteSet } from "@mavna/core";
 import type { ScaleStep } from "@mavna/widget";
 
 /**
@@ -267,3 +267,50 @@ export const SCENARIOS: ReadonlyArray<{
     ],
   },
 ];
+
+/**
+ * A route set as it actually arrives: some sources answered, some declined, and
+ * one has not replied yet.
+ *
+ * Partial results are the normal case rather than a degraded one, so the gallery
+ * shows the normal case. A set where everything succeeded would never exercise
+ * the rejection list, which is the part with a requirement attached to it.
+ */
+export const ROUTE_SET: RouteSet = {
+  routes: [
+    ROUTE,
+    {
+      ...ROUTE,
+      id: "axelar-sepolia-stellar",
+      source: "axelar",
+      trustModel: "validator-set",
+      receives: amount(USDC_STELLAR, "246100000"),
+      receivesAtLeast: amount(USDC_STELLAR, "244000000"),
+      estimatedSeconds: 900,
+      signaturesRequired: 2,
+    },
+    {
+      ...ROUTE,
+      id: "lz-sepolia-stellar",
+      source: "layerzero",
+      trustModel: "solver-network",
+      receives: amount(USDC_STELLAR, "248200000"),
+      receivesAtLeast: amount(USDC_STELLAR, "245000000"),
+      estimatedSeconds: 120,
+      signaturesRequired: 3,
+    },
+  ],
+  rejected: [
+    {
+      source: "allbridge",
+      reason: "amount-too-small",
+      explanation: "Send at least 50 USDC to use this route.",
+    },
+    {
+      source: "soroswap",
+      reason: "no-liquidity",
+      explanation: "Not enough liquidity for this pair right now. Try a smaller amount.",
+    },
+  ],
+  complete: false,
+};

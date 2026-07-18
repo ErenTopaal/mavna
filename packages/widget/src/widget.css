@@ -259,6 +259,96 @@
   font-weight: 500;
 }
 
+/* --------------------------------------------------------------- routes --- */
+
+.mv-routes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mv-3);
+}
+
+.mv-route-options,
+.mv-route-rejections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mv-2);
+}
+
+.mv-route {
+  font: inherit;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--mv-rule);
+  border-radius: var(--mv-radius);
+  padding: var(--mv-3);
+  cursor: pointer;
+  display: grid;
+  /* The amount and the timing share a row; the trust sentence spans beneath so it
+     has room to be a sentence rather than an abbreviation. */
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--mv-3);
+  row-gap: var(--mv-1);
+  transition: border-color var(--mv-fast) var(--mv-ease);
+}
+
+.mv-route:hover {
+  border-color: var(--mv-rule-strong);
+}
+
+/* The chosen route is marked by weight, not by colour: the one chromatic value
+   in this widget means something went wrong and cannot also mean "selected". */
+.mv-route[aria-pressed="true"] {
+  border-color: var(--mv-ink);
+  box-shadow: inset 0 0 0 1px var(--mv-ink);
+}
+
+.mv-route-amount {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.mv-route-symbol {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--mv-muted);
+  margin-left: var(--mv-1);
+}
+
+.mv-route-meta {
+  font-size: 13px;
+  color: var(--mv-muted);
+  text-align: right;
+}
+
+.mv-route-trust {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--mv-muted);
+}
+
+.mv-route-rejection {
+  font-size: 13px;
+  color: var(--mv-muted);
+  padding-left: var(--mv-3);
+  border-left: 1px solid var(--mv-rule);
+}
+
+.mv-route-rejection-source {
+  color: var(--mv-ink);
+  margin-right: var(--mv-2);
+}
+
+.mv-route-pending {
+  margin: 0;
+  font-size: 13px;
+  color: var(--mv-muted);
+}
+
 /* ------------------------------------------------------------ the scale --- */
 
 /*
@@ -572,6 +662,14 @@
 @container (max-width: 360px) {
   .mv-panel {
     padding: var(--mv-4);
+  }
+
+  .mv-route {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mv-route-meta {
+    text-align: left;
   }
 
   .mv-receives {
