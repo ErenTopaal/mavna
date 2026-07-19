@@ -27,10 +27,7 @@
         "noConsole": {
           "level": "error",
           "options": {
-            "allow": [
-              "warn",
-              "error"
-            ]
+            "allow": ["warn", "error"]
           }
         }
       },
@@ -48,9 +45,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "scripts/**"
-      ],
+      "includes": ["scripts/**"],
       "linter": {
         "rules": {
           "suspicious": {
@@ -60,9 +55,7 @@
       }
     },
     {
-      "includes": [
-        "apps/app/src/components/ui/**"
-      ],
+      "includes": ["apps/app/src/components/ui/**"],
       "linter": {
         "rules": {
           "a11y": {
