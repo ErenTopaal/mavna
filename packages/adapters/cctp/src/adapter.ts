@@ -11,6 +11,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
+import { MavnaError } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   belowFloorGuidance,
@@ -104,7 +105,24 @@ export class CctpAdapter implements BridgeAdapter {
       return this.decline("asset-unsupported", "Circle moves USDC only.");
     }
 
-    const destination = await inspectDestination(this.rpc, request.destination, this.stellarUsdc);
+    // A destination that cannot receive is ordinary user input, not an exceptional
+    // condition, and the interface is explicit that a rejection carrying a reason
+    // beats a throw: the reason is shown to somebody. `classifyAddress` throws on
+    // the dangerous forms -- a secret key most of all -- so that is caught here and
+    // turned back into an answer.
+    let destination: Awaited<ReturnType<typeof inspectDestination>>;
+    try {
+      destination = await inspectDestination(this.rpc, request.destination, this.stellarUsdc);
+    } catch (cause) {
+      return this.decline(
+        "destination-unsupported",
+        // Our own wording, never the raw error, so nothing about the address the
+        // user pasted can end up echoed back into the interface.
+        cause instanceof MavnaError
+          ? cause.message
+          : "That is not an address that can receive a payment on Stellar.",
+      );
+    }
     if (destination.lane.kind === "unusable") {
       return this.decline("destination-unsupported", destination.lane.reason);
     }
