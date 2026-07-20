@@ -4,6 +4,14 @@ export type { Attestation, AttestationStatus } from "./attestation.js";
 export { AttestationService, HASH_FORMAT } from "./attestation.js";
 export type { BurnCall, BurnParams } from "./burn.js";
 export { buildBurn, EVM_TESTNET, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
+export type { EvmDeployment } from "./chains.js";
+export {
+  chainIdForDomain,
+  deploymentFor,
+  EVM_DEPLOYMENTS,
+  explorerTxUrl,
+  sourceChainsFor,
+} from "./chains.js";
 export type { CctpDomain, CctpNetworkConfig } from "./config.js";
 export {
   CCTP_CONTRACTS,

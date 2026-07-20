@@ -50,11 +50,15 @@ export function parseLookupKey(input: string): LookupKey {
   );
 }
 
-export function toHandle(key: LookupKey): TransferHandle {
+export function toHandle(key: LookupKey, sourceChainId?: string): TransferHandle {
   return {
     sourceTxHash: key.kind === "source-tx" ? key.value : undefined,
     depositAddress: key.kind === "deposit-address" ? key.value : undefined,
     destinationAddress: key.kind === "destination-address" ? key.value : undefined,
+    // Usually absent, and that is the point. Someone recovering a transfer has
+    // whatever they still have; an adapter that spans many chains searches them
+    // all rather than making the user remember which one they sent from.
+    sourceChainId,
   };
 }
 

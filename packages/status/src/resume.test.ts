@@ -54,6 +54,20 @@ describe("local memory is a convenience, never the source of truth", () => {
         sourceTxHash: undefined,
         depositAddress: undefined,
         destinationAddress: undefined,
+        sourceChainId: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("knowing the chain is not itself something to search on", () => {
+    // A chain narrows a search; it cannot be one. Counting it would make a handle
+    // with no transaction and no address look recoverable when nothing about it is.
+    expect(
+      isSearchable({
+        sourceTxHash: undefined,
+        depositAddress: undefined,
+        destinationAddress: undefined,
+        sourceChainId: "base-sepolia",
       }),
     ).toBe(false);
   });

@@ -1,4 +1,5 @@
 import { MavnaError } from "@mavna/core";
+import { deploymentFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { buildForwarderHookData, contractAddressToBytes32, toHex } from "./hook.js";
 
@@ -14,7 +15,14 @@ import { buildForwarderHookData, contractAddressToBytes32, toHex } from "./hook.
  * transaction, because nothing in this codebase signs on a user's behalf.
  */
 
-/** CCTP V2 on Ethereum Sepolia, from Circle's own contract reference. */
+/**
+ * CCTP V2 on Ethereum Sepolia.
+ *
+ * Kept as a named constant because it is the deployment every live test in this
+ * repository runs against, but it is no longer the ONLY one: the full verified
+ * set is in `chains.ts` and `buildBurn` reads from there. Treating Sepolia as
+ * the whole world was a real limitation and is gone.
+ */
 export const EVM_TESTNET = {
   tokenMessengerV2: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
   messageTransmitterV2: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
@@ -41,6 +49,13 @@ export interface BurnParams {
   /** The real recipient on Stellar. May be an account, contract or muxed address. */
   readonly stellarRecipient: string;
   readonly network: "testnet" | "mainnet";
+  /**
+   * Which chain the burn happens on, as this codebase names it.
+   *
+   * Required rather than defaulted. A default would mean a caller who forgot it
+   * silently burns on the wrong chain, and there is no recovering from that.
+   */
+  readonly sourceChainId: string;
   readonly finality?: number;
   /**
    * Ceiling on the fee, in the SOURCE chain's units for an EVM burn.
@@ -90,6 +105,16 @@ export function buildBurn(params: BurnParams): BurnCall {
     });
   }
 
+  const deployment = deploymentFor(params.network, params.sourceChainId);
+  if (deployment === undefined) {
+    throw new MavnaError(
+      `No verified CCTP deployment for ${params.sourceChainId} on ${params.network}. ` +
+        "Run scripts/verify-cctp-chains.mjs to add one; guessing an address here is how " +
+        "funds become permanently unrecoverable.",
+      { retryable: false },
+    );
+  }
+
   const forwarder = CCTP_CONTRACTS[params.network].cctpForwarder;
 
   // Refuses anything that is not a contract address, which is what stops a user
@@ -109,13 +134,13 @@ export function buildBurn(params: BurnParams): BurnCall {
   }
 
   return {
-    contract: EVM_TESTNET.tokenMessengerV2,
+    contract: deployment.tokenMessengerV2,
     functionName: "depositForBurnWithHook",
     args: [
       params.amount,
       STELLAR_DOMAIN,
       forwarderBytes32,
-      EVM_TESTNET.usdc as `0x${string}`,
+      deployment.usdc as `0x${string}`,
       // Set deliberately. Leaving it zero would let anyone call receive_message
       // directly, minting to the forwarder WITHOUT forwarding, which strands the
       // funds in the forwarder contract.

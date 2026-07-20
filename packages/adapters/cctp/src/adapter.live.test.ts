@@ -101,12 +101,12 @@ describe("CctpAdapter", () => {
     expect(ready.fees.some((f) => f.kind === "account-reserve")).toBe(false);
   });
 
-  it("declines a chain it cannot actually build a burn for, and says so", async () => {
-    const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId: "base-sepolia" } }));
+  it("declines a chain it has no verified deployment for, and says so", async () => {
+    const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId: "fantom" } }));
     expect(isRoute(result)).toBe(false);
     if (isRoute(result)) return;
     expect(result.reason).toBe("chain-unsupported");
-    expect(result.explanation).toContain("base-sepolia");
+    expect(result.explanation).toContain("fantom");
   });
 
   it("declines an address that cannot receive rather than quoting into a hole", async () => {
@@ -141,6 +141,7 @@ describe("CctpAdapter", () => {
       sourceTxHash: undefined,
       depositAddress: undefined,
       destinationAddress: FUNDED,
+      sourceChainId: undefined,
     });
     expect(phase.phase).toBe("idle");
   });
@@ -150,7 +151,47 @@ describe("CctpAdapter", () => {
       sourceTxHash: "0xa4a4308d0b7692da6f377d9c8f8a131cee8110a32dd218f6c55b1c5a7f046660",
       depositAddress: undefined,
       destinationAddress: FUNDED,
+      sourceChainId: "ethereum-sepolia",
     });
     expect(phase.phase).toBe("done");
+  });
+
+  /**
+   * The recovery path, and the product's stated advantage over the prior art.
+   *
+   * Someone who closed the tab may have a transaction hash and nothing else.
+   * Circle's lookup needs a source domain, so finding the burn means asking every
+   * chain we route from at once rather than telling that person it is lost.
+   */
+  it("finds a burn from the hash alone, with no idea which chain it came from", async () => {
+    const phase = await adapter.status({
+      sourceTxHash: "0xa4a4308d0b7692da6f377d9c8f8a131cee8110a32dd218f6c55b1c5a7f046660",
+      depositAddress: undefined,
+      destinationAddress: FUNDED,
+      sourceChainId: undefined,
+    });
+    expect(phase.phase).toBe("done");
+  });
+
+  it("offers every chain it has a verified deployment for", async () => {
+    const chains = await adapter.supportedChains();
+    // Twenty-one, not one. Sepolia was the only one exercised end to end, but
+    // every other address here was derived from its own chain and checked.
+    expect(chains.length).toBeGreaterThanOrEqual(20);
+    expect(chains).toContain("ethereum-sepolia");
+    expect(chains).toContain("base-sepolia");
+    expect(chains).toContain("arbitrum-sepolia");
+  });
+
+  it("quotes from a chain other than the one it was built against", async () => {
+    const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId: "base-sepolia" } }));
+    if (!isRoute(result)) throw new Error(result.explanation);
+    expect(result.fromChain.id).toBe("base-sepolia");
+    expect(result.fromChain.name).toContain("Base");
+
+    const [tx] = await adapter.buildTransactions(result);
+    const payload = JSON.parse(tx?.payload ?? "{}") as { args: string[] };
+    // Base Sepolia's own USDC, not Sepolia's.
+    expect(payload.args[3]?.toLowerCase()).toBe("0x036cbd53842c5426634e7929541ec2318f3dcf7e");
   });
 });

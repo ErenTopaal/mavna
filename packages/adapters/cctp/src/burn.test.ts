@@ -15,6 +15,7 @@ const base = {
   amount: 1_000_000n,
   stellarRecipient: recipient,
   network: "testnet" as const,
+  sourceChainId: "ethereum-sepolia",
   maxFee: 0n,
 };
 
@@ -46,6 +47,24 @@ describe("the two fields that strand funds if wrong", () => {
 
   it("sends to Stellar's domain, which is not a chain id", () => {
     expect(buildBurn(base).args[1]).toBe(27);
+  });
+
+  it("burns on the chain it was told to, using that chain's own USDC", () => {
+    const sepolia = buildBurn(base);
+    const base_ = buildBurn({ ...base, sourceChainId: "base-sepolia" });
+    // Same messenger address across EVM chains, different token. Reusing one
+    // chain's USDC address on another burns a token that is not USDC there.
+    expect(base_.contract).toBe(sepolia.contract);
+    expect(base_.args[3]).not.toBe(sepolia.args[3]);
+  });
+
+  it("refuses a chain with no verified deployment rather than guessing one", () => {
+    // Every address in the registry was derived from the chain itself. Inventing
+    // one for a chain that was never verified is precisely how funds become
+    // permanently unrecoverable, so this is a hard stop.
+    expect(() => buildBurn({ ...base, sourceChainId: "solana-devnet" })).toThrow(
+      /No verified CCTP deployment/,
+    );
   });
 });
 

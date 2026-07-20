@@ -2,6 +2,7 @@ import type {
   Amount,
   Asset,
   BridgeAdapter,
+  ChainRef,
   NetworkId,
   QuoteRequest,
   Route,
@@ -22,8 +23,9 @@ import {
   type RpcClient,
 } from "@mavna/stellar";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
-import { AttestationService } from "./attestation.js";
-import { buildBurn, EVM_TESTNET, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
+import { type Attestation, AttestationService } from "./attestation.js";
+import { buildBurn, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
+import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
 
@@ -35,21 +37,6 @@ import { canonicalToLocal } from "./delivery.js";
  * what makes adding LayerZero later a matter of writing one more file rather
  * than editing the router.
  */
-
-/**
- * The chains this adapter can actually build a burn for, which is NOT the same
- * as the chains Circle routes from.
- *
- * Circle routes into Stellar from twenty-six domains. `buildBurn` targets one
- * deployment, Ethereum Sepolia, which is the one that has been exercised end to
- * end. Claiming the other twenty-five and failing at signing time would be worse
- * than declining them here with a reason, so this map is the honest set and it
- * grows only as each chain is actually tested.
- */
-const SOURCE_CHAINS: Readonly<Record<NetworkId, Readonly<Record<string, number>>>> = {
-  testnet: { "ethereum-sepolia": EVM_TESTNET.domain },
-  mainnet: {},
-};
 
 /** Circle quotes `minimumFee` in basis points of the amount burned. */
 const BPS = 10_000n;
@@ -87,12 +74,12 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   supportedChains(): Promise<readonly string[]> {
-    return Promise.resolve(Object.keys(SOURCE_CHAINS[this.network]));
+    return Promise.resolve(sourceChainsFor(this.network));
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
-    const domain = SOURCE_CHAINS[this.network][request.from.chainId];
-    if (domain === undefined) {
+    const deployment = deploymentFor(this.network, request.from.chainId);
+    if (deployment === undefined) {
       return this.decline(
         "chain-unsupported",
         `Mavna does not move funds from ${request.from.chainId} yet.`,
@@ -127,7 +114,7 @@ export class CctpAdapter implements BridgeAdapter {
       return this.decline("destination-unsupported", destination.lane.reason);
     }
 
-    const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
+    const fee = await this.bridgeFee(deployment.domain, BigInt(request.sends.baseUnits));
     if (fee === undefined) {
       return this.decline(
         "temporarily-unavailable",
@@ -175,8 +162,8 @@ export class CctpAdapter implements BridgeAdapter {
       id: `cctp-${request.from.chainId}-stellar`,
       source: this.id,
       trustModel: this.trustModel,
-      fromChain: chainRefFor(request.from.chainId),
-      toChain: chainRefFor(request.to.chainId),
+      fromChain: chainRefFor(this.network, request.from.chainId),
+      toChain: chainRefFor(this.network, request.to.chainId),
       destination: request.destination,
       sends: request.sends,
       receives,
@@ -234,6 +221,7 @@ export class CctpAdapter implements BridgeAdapter {
       amount: sends,
       stellarRecipient: route.destination,
       network: this.network === "mainnet" ? "mainnet" : "testnet",
+      sourceChainId: route.fromChain.id,
       finality: FINALITY.standard,
       maxFee,
     });
@@ -267,13 +255,27 @@ export class CctpAdapter implements BridgeAdapter {
   async status(handle: TransferHandle): Promise<StepPhase> {
     if (handle.sourceTxHash === undefined) return { phase: "idle" };
 
-    const rows = await this.attestations.byTransaction(EVM_TESTNET.domain, handle.sourceTxHash);
-    const attestation = rows.find((row) => row.destinationDomain === STELLAR_DOMAIN) ?? rows[0];
+    const found = await this.findBurn(handle.sourceTxHash, handle.sourceChainId);
+    if (found === undefined) {
+      // Not indexed yet, or on a chain we do not route from. Either way there is
+      // no evidence it failed, and reporting failure without evidence is how a
+      // user is talked into sending a second payment.
+      return {
+        phase: "pending",
+        ref: {
+          chainId: handle.sourceChainId ?? "unknown",
+          txHash: handle.sourceTxHash,
+          explorerUrl: "",
+        },
+        expectedByUnix: 0,
+      };
+    }
 
+    const { attestation, chainId } = found;
     const ref = {
-      chainId: "ethereum-sepolia",
+      chainId,
       txHash: handle.sourceTxHash,
-      explorerUrl: `https://sepolia.etherscan.io/tx/${handle.sourceTxHash}`,
+      explorerUrl: explorerTxUrl(this.network, chainId, handle.sourceTxHash),
     };
 
     if (attestation === undefined || attestation.status !== "complete") {
@@ -308,6 +310,39 @@ export class CctpAdapter implements BridgeAdapter {
         baseUnits: balance,
       },
     };
+  }
+
+  /**
+   * Find a burn, searching every chain we route from when told none.
+   *
+   * Circle's lookup is keyed by source domain, so a hash alone is not enough to
+   * ask the question. A user who closed the tab may have nothing but that hash,
+   * and this product's stated advantage over the prior art is that it recovers
+   * from whatever they still have. Twenty-one parallel requests is a small price
+   * for not telling that person their transfer cannot be found.
+   */
+  private async findBurn(
+    txHash: string,
+    sourceChainId: string | undefined,
+  ): Promise<{ attestation: Attestation; chainId: string } | undefined> {
+    const candidates =
+      sourceChainId === undefined
+        ? sourceChainsFor(this.network)
+        : [sourceChainId].filter((id) => deploymentFor(this.network, id) !== undefined);
+
+    const lookups = candidates.map(async (chainId) => {
+      const domain = deploymentFor(this.network, chainId)?.domain;
+      if (domain === undefined) return undefined;
+      const rows = await this.attestations.byTransaction(domain, txHash);
+      const attestation = rows.find((row) => row.destinationDomain === STELLAR_DOMAIN) ?? rows[0];
+      return attestation === undefined ? undefined : { attestation, chainId };
+    });
+
+    const settled = await Promise.allSettled(lookups);
+    for (const outcome of settled) {
+      if (outcome.status === "fulfilled" && outcome.value !== undefined) return outcome.value;
+    }
+    return undefined;
   }
 
   /**
@@ -360,20 +395,20 @@ function xlmAsset(network: NetworkId): Asset {
   };
 }
 
-function chainRefFor(chainId: string) {
-  const explorers: Readonly<Record<string, (hash: string) => string>> = {
-    "ethereum-sepolia": (h) => `https://sepolia.etherscan.io/tx/${h}`,
-    "stellar-testnet": (h) => `https://stellar.expert/explorer/testnet/tx/${h}`,
-    stellar: (h) => `https://stellar.expert/explorer/public/tx/${h}`,
-  };
-  const names: Readonly<Record<string, string>> = {
-    "ethereum-sepolia": "Sepolia",
-    "stellar-testnet": "Stellar",
-    stellar: "Stellar",
-  };
+function chainRefFor(network: NetworkId, chainId: string): ChainRef {
+  if (chainId === stellarChainId(network)) {
+    const path = network === "mainnet" ? "public" : "testnet";
+    return {
+      id: chainId,
+      name: "Stellar",
+      explorerTxUrl: (hash) => `https://stellar.expert/explorer/${path}/tx/${hash}`,
+    };
+  }
+
+  const deployment = EVM_DEPLOYMENTS[network][chainId];
   return {
     id: chainId,
-    name: names[chainId] ?? chainId,
-    explorerTxUrl: explorers[chainId] ?? ((h: string) => h),
+    name: deployment?.name ?? chainId,
+    explorerTxUrl: (hash) => explorerTxUrl(network, chainId, hash),
   };
 }

@@ -46,6 +46,15 @@ export interface TransferHandle {
   readonly sourceTxHash: string | undefined;
   readonly depositAddress: string | undefined;
   readonly destinationAddress: string | undefined;
+  /**
+   * Which chain the source transaction is on.
+   *
+   * Optional, because a user who closed the tab may have nothing but a hash, and
+   * refusing to help them is the failure this whole type exists to avoid. An
+   * adapter that spans many chains should search when this is absent rather than
+   * decline: slower is a fine price for recovering someone's transfer.
+   */
+  readonly sourceChainId: string | undefined;
 }
 
 export interface BridgeAdapter {
