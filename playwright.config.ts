@@ -10,6 +10,8 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "tests",
+  // Live specs reach the network and are run on demand, not on every push.
+  testIgnore: process.env.MAVNA_LIVE === "1" ? [] : ["**/*.live.spec.ts"],
   fullyParallel: true,
   // A test that only passes sometimes is worse than one that fails, so a retry
   // never turns a red run green. CI is where flake gets discovered, not hidden.

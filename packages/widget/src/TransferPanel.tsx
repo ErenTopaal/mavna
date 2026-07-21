@@ -2,6 +2,7 @@ import type { Amount, Fee, FeeKind, Remedy, Route } from "@mavna/core";
 import { type ReactElement, type RefObject, useEffect, useRef } from "react";
 import { DraftScale, type ScaleStep } from "./DraftScale.js";
 import { formatAmount } from "./format.js";
+import { explainTrust } from "./RouteList.js";
 
 /**
  * The whole widget: what you get, what it costs, and where it is.
@@ -47,11 +48,7 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
           )}
           {/* A floor is a promise about a transfer that has not happened yet.
               Repeating it over a finished one describes nothing. */}
-          {finished ? null : (
-            <p className="mv-floor">
-              {`At least ${formatAmount(route.receivesAtLeast)} ${route.receivesAtLeast.asset.symbol}, or the transfer does not go through.`}
-            </p>
-          )}
+          {finished ? null : <p className="mv-floor">{floorLine(route)}</p>}
         </div>
 
         {/* Nothing was charged, so listing charges would invent them. */}
@@ -81,6 +78,11 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
             )}
           </p>
         )}
+
+        {/* Shown here because the panel is often the only thing on screen: with a
+            single route there is no list beside it, and "who could hold my money"
+            is not a question to answer only when there is a choice. */}
+        {started ? null : <p className="mv-trust">{explainTrust(route.trustModel)}</p>}
 
         {started ? <DraftScale steps={steps} outcome={outcome} onRemedy={onRemedy} /> : null}
 
@@ -184,6 +186,21 @@ const FEE_NAMES: Readonly<Record<FeeKind, string>> = {
   integrator: "Service",
   "account-reserve": "Kept in your account",
 };
+
+/**
+ * What the quoted amount is worth as a promise.
+ *
+ * "At least 25 USDC" above a figure of 25 reads as a hedge, and on a rail that
+ * mints exactly what it burns there is nothing to hedge against. Saying so is
+ * worth more than a floor: no slippage is a real difference between routes, and
+ * a user comparing them cannot see it if every route says the same cautious
+ * sentence.
+ */
+function floorLine(route: Route): string {
+  const exact = route.receivesAtLeast.baseUnits === route.receives.baseUnits;
+  if (exact) return "Exactly this much. This route cannot deliver less.";
+  return `At least ${formatAmount(route.receivesAtLeast)} ${route.receivesAtLeast.asset.symbol}, or the transfer does not go through.`;
+}
 
 function headline(outcome: TransferPanelProps["outcome"], route: Route): string {
   switch (outcome) {

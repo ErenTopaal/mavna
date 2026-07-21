@@ -1,0 +1,49 @@
+import { CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cctp";
+import type { NetworkId } from "@mavna/core";
+import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
+
+/**
+ * The SDK, assembled once for the app.
+ *
+ * The network is read from the environment rather than inferred, because a
+ * product that moves money must never be ambiguous about which one it is on and
+ * a default would eventually be wrong in the worst possible direction.
+ */
+export const NETWORK: NetworkId =
+  import.meta.env.VITE_MAVNA_NETWORK === "mainnet" ? "mainnet" : "testnet";
+
+const config = createNetworkConfig({
+  id: NETWORK,
+  rpcUrl: import.meta.env.VITE_STELLAR_RPC_URL ?? PUBLIC_TESTNET_RPC_URL,
+});
+
+export const rpc: RpcClient = new RpcClient({ url: config.rpcUrl });
+
+export const cctp: CctpAdapter = new CctpAdapter({
+  network: NETWORK,
+  rpc,
+  baseReserveStroops: config.baseReserveStroops,
+});
+
+/** Every chain a user can send from, with the name its own registry gives it. */
+export const SOURCE_CHAINS: ReadonlyArray<{ id: string; name: string }> = Object.entries(
+  EVM_DEPLOYMENTS[NETWORK],
+)
+  .map(([id, deployment]) => ({ id, name: deployment.name }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+export const STELLAR_CHAIN_ID = NETWORK === "mainnet" ? "stellar" : "stellar-testnet";
+
+/**
+ * Where the form starts.
+ *
+ * Alphabetical order put "Amoy" first, which is nobody's expectation. Ethereum is
+ * the chain most people hold USDC on and the one the test funds are on, so it is
+ * the default when present rather than whatever happens to sort earliest.
+ */
+export const DEFAULT_SOURCE_CHAIN: string =
+  (NETWORK === "mainnet" ? "ethereum" : "ethereum-sepolia") in EVM_DEPLOYMENTS[NETWORK]
+    ? NETWORK === "mainnet"
+      ? "ethereum"
+      : "ethereum-sepolia"
+    : (SOURCE_CHAINS[0]?.id ?? "");

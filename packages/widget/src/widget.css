@@ -248,6 +248,12 @@
 
 /* ------------------------------------------------------------ signatures --- */
 
+.mv-trust {
+  margin: 0;
+  font-size: 13px;
+  color: var(--mv-muted);
+}
+
 .mv-signatures {
   margin: 0;
   font-size: 13px;

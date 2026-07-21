@@ -13,7 +13,7 @@ import { ROUTE, ROUTE_SET, SCENARIOS } from "./fixtures.js";
  */
 export function WidgetStates(): ReactElement {
   return (
-    <main className="min-h-dvh bg-background px-4 py-10 sm:px-8">
+    <div>
       <header className="mb-10">
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Widget states</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -73,7 +73,7 @@ export function WidgetStates(): ReactElement {
           </div>
         </section>
       ))}
-    </main>
+    </div>
   );
 }
 
