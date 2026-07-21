@@ -183,6 +183,48 @@ describe("CctpAdapter", () => {
     expect(chains).toContain("arbitrum-sepolia");
   });
 
+  /**
+   * The claim, checked rather than asserted.
+   *
+   * "Supports every chain Circle routes from" is easy to write in a README and
+   * easy to be wrong about. This quotes from every single one and reports which,
+   * if any, cannot be quoted, so the number in the documentation is a measurement.
+   */
+  it("quotes from every chain it says it supports", async () => {
+    const chains = await adapter.supportedChains();
+    const outcomes = await Promise.all(
+      chains.map(async (chainId) => {
+        const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+        return { chainId, ok: isRoute(result), why: isRoute(result) ? "" : result.explanation };
+      }),
+    );
+
+    const failed = outcomes.filter((o) => !o.ok);
+    if (failed.length > 0) {
+      throw new Error(
+        `these chains did not quote: ${failed.map((f) => `${f.chainId} (${f.why})`).join("; ")}`,
+      );
+    }
+    expect(outcomes).toHaveLength(chains.length);
+  });
+
+  it("builds a burn on every chain, each with that chain's own USDC", async () => {
+    const chains = await adapter.supportedChains();
+    const tokens = new Map<string, string>();
+
+    for (const chainId of chains) {
+      const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+      if (!isRoute(result)) throw new Error(`${chainId}: ${result.explanation}`);
+      const [tx] = await adapter.buildTransactions(result);
+      const payload = JSON.parse(tx?.payload ?? "{}") as { args: string[] };
+      tokens.set(chainId, String(payload.args[3]).toLowerCase());
+    }
+
+    // Every chain must burn a different token. A collision would mean one chain's
+    // USDC address leaked into another, which burns something that is not USDC.
+    expect(new Set(tokens.values()).size).toBe(tokens.size);
+  });
+
   it("quotes from a chain other than the one it was built against", async () => {
     const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId: "base-sepolia" } }));
     if (!isRoute(result)) throw new Error(result.explanation);
