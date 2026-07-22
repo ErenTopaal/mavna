@@ -17,8 +17,21 @@
  *
  * Run: pnpm --filter @mavna/adapter-cctp exec node ../../../scripts/verify-cctp-chains.mjs
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { encodeFunctionData, pad } from "viem";
+
+/**
+ * Endpoints that carry a credential in the URL, read from `.env` and never
+ * written down here. An absent one drops that chain from the sweep rather than
+ * failing the run: the rest of the registry does not depend on it.
+ */
+const secrets = new Map();
+if (existsSync(".env")) {
+  for (const line of readFileSync(".env", "utf8").split("\n")) {
+    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (match?.[1] !== undefined) secrets.set(match[1], match[2]);
+  }
+}
 
 const MESSENGER = {
   // CCTP V2 uses one deterministic address per network across every EVM chain.
@@ -266,11 +279,8 @@ const CHAINS = {
       id: "pharos-testnet",
       domain: 31,
       evmChainId: 688689,
-      rpc: [
-        "https://api.zan.top/public/pharos-testnet",
-        "https://testnet.dplabs-internal.com",
-        "https://testnet.pharosnetwork.xyz",
-      ],
+      // Supplied by the project owner. The key is in the URL, so it lives in .env.
+      rpc: [secrets.get("PHAROS_TESTNET_RPC_URL")].filter(Boolean),
     },
     { id: "cronos-testnet", domain: 32, evmChainId: 338, rpc: ["https://evm-t3.cronos.org"] },
     { id: "x-layer-sepolia", domain: 37, evmChainId: 195, rpc: ["https://testrpc.xlayer.tech"] },
@@ -279,27 +289,92 @@ const CHAINS = {
 
 const TIMEOUT = 12_000;
 
+/** `--only=pharos-testnet` narrows the sweep, for looking at one chain closely. */
+const only = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * One request at a time per host, with a small gap between them.
+ *
+ * Sweeping every chain at once is fine for most providers and fatal for the
+ * metered ones: a compute-unit limit answers concurrent calls with 429 or 403,
+ * which reads exactly like "no deployment here" and would silently drop a
+ * perfectly good chain from the registry. Serialising per host costs a few
+ * seconds and removes a whole class of wrong answer.
+ */
+const hostQueues = new Map();
+
+function throttle(url, work) {
+  const host = new URL(url).host;
+  const previous = hostQueues.get(host) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const result = await work();
+    await wait(120);
+    return result;
+  });
+  // Keep the chain going even when a link rejects, or one failure stalls the host.
+  hostQueues.set(
+    host,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
+/**
+ * Ask an endpoint, trying each URL and backing off when told to slow down.
+ *
+ * Sweeping twenty-one chains at once made a rate-limited provider answer 403,
+ * which reads exactly like "this chain has no deployment" and would have quietly
+ * dropped a perfectly good chain from the registry. Being throttled is not the
+ * same as being absent, so it is retried rather than recorded.
+ */
 async function rpcCall(urls, method, params) {
   let last;
   for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(TIMEOUT),
-      });
-      const text = await response.text();
-      let body;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
-        body = JSON.parse(text);
-      } catch {
-        throw new Error(`non-JSON reply (HTTP ${response.status})`);
+        const response = await throttle(url, () =>
+          fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+            signal: AbortSignal.timeout(TIMEOUT),
+          }),
+        );
+
+        if (response.status === 403 || response.status === 429 || response.status >= 500) {
+          last = new Error(`HTTP ${response.status}`);
+          await wait(600 * 2 ** attempt);
+          continue;
+        }
+
+        const text = await response.text();
+        let body;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          throw new Error(`non-JSON reply (HTTP ${response.status})`);
+        }
+        if (body.error) {
+          const message = String(body.error.message ?? `${method} failed`);
+          // Some providers report a quota inside a 200 response instead of a
+          // status code, which would otherwise be recorded as a real failure.
+          if (/limit|quota|rate|too many/i.test(message)) {
+            last = new Error(message);
+            await wait(600 * 2 ** attempt);
+            continue;
+          }
+          throw new Error(message);
+        }
+        return body.result;
+      } catch (error) {
+        last = error;
+        if (attempt < 3) await wait(400 * 2 ** attempt);
       }
-      if (body.error) throw new Error(body.error.message ?? `${method} failed`);
-      return body.result;
-    } catch (error) {
-      last = error;
     }
   }
   throw last ?? new Error("no endpoint answered");
@@ -403,10 +478,25 @@ const registry = await fetch("https://chainid.network/chains.json", {
   .then((r) => r.json())
   .then((all) => new Map(all.map((c) => [c.chainId, c])));
 
+/**
+ * Chains the community registry does not carry, filled in from a known source.
+ *
+ * Kept small and separate on purpose: anything here is a human's word rather than
+ * a lookup, so it should be obvious which entries are which.
+ */
+const OVERRIDES = {
+  // Supplied by the project owner along with the endpoint.
+  688689: { name: "Pharos Atlantic Testnet", explorer: "https://atlantic.pharosscan.xyz" },
+};
+
 function describe(evmChainId) {
   const entry = registry.get(evmChainId);
   const explorer = entry?.explorers?.find((e) => e.url?.startsWith("https"));
-  return { name: entry?.name, explorer: explorer?.url };
+  const override = OVERRIDES[evmChainId];
+  return {
+    name: entry?.name ?? override?.name,
+    explorer: explorer?.url ?? override?.explorer,
+  };
 }
 
 const results = { mainnet: [], testnet: [] };
@@ -418,9 +508,10 @@ for (const network of ["testnet", "mainnet"]) {
   await verifyUsdc(seedChain.rpc, SEED[network].usdc);
   console.log(`  ${network}: seed USDC verified on ${seedChain.id}`);
 
-  const settled = await Promise.allSettled(CHAINS[network].map((chain) => inspect(network, chain)));
+  const wanted = only === undefined ? CHAINS[network] : CHAINS[network].filter((c) => c.id === only);
+  const settled = await Promise.allSettled(wanted.map((chain) => inspect(network, chain)));
   settled.forEach((outcome, index) => {
-    const chain = CHAINS[network][index];
+    const chain = wanted[index];
     if (outcome.status === "fulfilled") {
       results[network].push({ ...outcome.value, ...describe(chain.evmChainId) });
       console.log(`  ✓ ${network}/${chain.id} usdc=${outcome.value.usdc}`);
