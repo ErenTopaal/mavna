@@ -145,15 +145,13 @@ const CHAINS = {
     { id: "ink", domain: 21, evmChainId: 57073, rpc: ["https://rpc-gel.inkonchain.com"] },
     { id: "plume", domain: 22, evmChainId: 98866, rpc: ["https://rpc.plume.org"] },
     {
-      id: "arc",
-      domain: 26,
-      evmChainId: 5042,
-      rpc: ["https://rpc.arc.network", "https://arc-mainnet.g.alchemy.com/public"],
-    },
-    {
       id: "edge",
       domain: 28,
       evmChainId: 3343,
+      // EDGE keeps its messenger somewhere else entirely. The first sweep
+      // reported it as having none, because it was looking where every other
+      // chain keeps one.
+      messenger: "0x98706A006bc632Df31CAdFCBD43F38887ce2ca5c",
       rpc: ["https://edge-mainnet.g.alchemy.com/public"],
     },
     {
@@ -167,6 +165,12 @@ const CHAINS = {
       domain: 31,
       evmChainId: 688688,
       rpc: ["https://api.zan.top/public/pharos-mainnet"],
+    },
+    {
+      id: "injective",
+      domain: 29,
+      evmChainId: 1776,
+      rpc: ["https://sentry.evm-rpc.injective.network"],
     },
     { id: "cronos", domain: 32, evmChainId: 25, rpc: ["https://evm.cronos.org"] },
     { id: "x-layer", domain: 37, evmChainId: 196, rpc: ["https://rpc.xlayer.tech"] },
@@ -263,17 +267,19 @@ const CHAINS = {
     {
       id: "edge-testnet",
       domain: 28,
-      evmChainId: 3344,
+      evmChainId: 33431,
       rpc: [
         "https://edge-testnet.g.alchemy.com/public",
         "https://edge-sepolia.g.alchemy.com/public",
       ],
     },
     {
-      id: "morph-holesky",
+      id: "morph-hoodi",
       domain: 30,
-      evmChainId: 2810,
-      rpc: ["https://rpc-quicknode-holesky.morphl2.io", "https://rpc-holesky.morphl2.io"],
+      evmChainId: 2910,
+      // Hoodi, not Holesky. Circle's own table names the Hoodi network, and the
+      // Holesky endpoints this used to probe are a different, retired chain.
+      rpc: ["https://rpc-hoodi.morphl2.io"],
     },
     {
       id: "pharos-testnet",
@@ -281,6 +287,12 @@ const CHAINS = {
       evmChainId: 688689,
       // Supplied by the project owner. The key is in the URL, so it lives in .env.
       rpc: [secrets.get("PHAROS_TESTNET_RPC_URL")].filter(Boolean),
+    },
+    {
+      id: "injective-testnet",
+      domain: 29,
+      evmChainId: 1439,
+      rpc: ["https://k8s.testnet.json-rpc.injective.network"],
     },
     { id: "cronos-testnet", domain: 32, evmChainId: 338, rpc: ["https://evm-t3.cronos.org"] },
     { id: "x-layer-sepolia", domain: 37, evmChainId: 195, rpc: ["https://testrpc.xlayer.tech"] },
@@ -416,12 +428,14 @@ async function verifyUsdc(rpc, address) {
 }
 
 async function inspect(network, chain) {
-  const messenger = MESSENGER[network];
+  // A per-chain override wins. The deterministic address is a candidate to probe,
+  // never a fact: EDGE keeps its mainnet messenger somewhere else entirely.
+  const messenger = chain.messenger ?? MESSENGER[network];
   const seed = SEED[network];
 
   const code = await getCode(chain.rpc, messenger);
   if (code === "0x" || code.length <= 4) {
-    throw new Error("no TokenMessengerV2 code at the deterministic address");
+    throw new Error(`no TokenMessengerV2 code at ${messenger}`);
   }
 
   const minter = addressFrom(

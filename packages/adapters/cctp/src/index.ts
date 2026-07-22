@@ -53,3 +53,15 @@ export {
   SOLANA_USDC,
   solanaInstructionDataHex,
 } from "./solana.js";
+export type {
+  StarknetBurnParams,
+  StarknetCall,
+  StarknetDeployment,
+  StarknetInvoke,
+} from "./starknet.js";
+export {
+  buildStarknetBurn,
+  byteArrayCalldata,
+  STARKNET_DEPLOYMENTS,
+  starknetSelector,
+} from "./starknet.js";

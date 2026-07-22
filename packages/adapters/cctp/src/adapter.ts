@@ -119,6 +119,20 @@ export class CctpAdapter implements BridgeAdapter {
     try {
       destination = await inspectDestination(this.rpc, request.destination, this.stellarUsdc);
     } catch (cause) {
+      // A node that is merely behind is NOT an address that cannot receive.
+      //
+      // The freshness guard refuses a read taken from a lagging node, which is
+      // right, but reporting that as "destination-unsupported" tells a user their
+      // address is unusable when the truth is "ask again in a moment". The two
+      // are opposite in every way that matters: one is permanent and their fault,
+      // the other is transient and ours.
+      if (cause instanceof MavnaError && cause.retryable) {
+        return this.decline(
+          "temporarily-unavailable",
+          "Stellar did not answer freshly enough to check that address. Nothing is wrong " +
+            "with it; try again in a moment.",
+        );
+      }
       return this.decline(
         "destination-unsupported",
         // Our own wording, never the raw error, so nothing about the address the
@@ -242,6 +256,9 @@ export class CctpAdapter implements BridgeAdapter {
     if (nonEvm?.family === "solana") {
       return [await this.buildSolana(route, sends, maxFee, options)];
     }
+    if (nonEvm?.family === "starknet") {
+      return [await this.buildStarknet(route, sends, maxFee)];
+    }
 
     const call = buildBurn({
       amount: sends,
@@ -315,6 +332,36 @@ export class CctpAdapter implements BridgeAdapter {
       format: "solana-instruction",
       describes: instruction.describes,
       ephemeralSigners: instruction.ephemeralSigners,
+    };
+  }
+
+  /**
+   * The Starknet burn, with its builder loaded only now.
+   *
+   * Two calls rather than one: Starknet has no allowance-free transfer, so USDC
+   * has to be approved for the messenger first. Wallets there send several calls
+   * in one transaction as a matter of course, so it is still a single signature.
+   */
+  private async buildStarknet(
+    route: Route,
+    sends: bigint,
+    maxFee: bigint,
+  ): Promise<UnsignedTransaction> {
+    const { buildStarknetBurn } = await import("./starknet.js");
+    const invoke = buildStarknetBurn({
+      amount: sends,
+      stellarRecipient: route.destination,
+      network: this.network,
+      maxFee,
+      finality: FINALITY.standard,
+    });
+
+    return {
+      chainId: route.fromChain.id,
+      payload: JSON.stringify(invoke.calls),
+      format: "starknet-invoke",
+      describes: invoke.describes,
+      ephemeralSigners: [],
     };
   }
 

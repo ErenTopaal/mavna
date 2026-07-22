@@ -54,6 +54,25 @@ const ask = (over: Partial<QuoteRequest> = {}): QuoteRequest => ({
 
 const isRoute = (result: Route | RouteRejection): result is Route => "receives" in result;
 
+/**
+ * Quote, retrying only the rejection that says to.
+ *
+ * Sweeping every chain in one run makes many reads of the same Stellar
+ * destination in quick succession, and the freshness guard refuses any taken from
+ * a node that has fallen behind. That is the guard working. A real caller answers
+ * "try again in a moment" by trying again in a moment, so the test does too, and
+ * every other rejection still fails the run immediately.
+ */
+async function quoteRetrying(request: QuoteRequest): Promise<Route | RouteRejection> {
+  let last: Route | RouteRejection = await adapter.quote(request);
+  for (let attempt = 0; attempt < 4 && !isRoute(last); attempt += 1) {
+    if (last.reason !== "temporarily-unavailable") return last;
+    await new Promise((resolve) => setTimeout(resolve, 1_500 * (attempt + 1)));
+    last = await adapter.quote(request);
+  }
+  return last;
+}
+
 describe("CctpAdapter", () => {
   it("quotes a real route into an account that already holds USDC", async () => {
     const result = await adapter.quote(ask());
@@ -174,6 +193,23 @@ describe("CctpAdapter", () => {
     );
   });
 
+  it("quotes from Starknet and builds an invoke rather than a contract call", async () => {
+    const result = await adapter.quote(
+      ask({ from: { ...USDC_SEPOLIA, chainId: "starknet-sepolia" } }),
+    );
+    if (!isRoute(result)) throw new Error(result.explanation);
+    expect(result.fromChain.name).toBe("Starknet Sepolia");
+
+    const [tx] = await adapter.buildTransactions(result);
+    expect(tx?.format).toBe("starknet-invoke");
+    // Nothing ephemeral to sign here, unlike Solana.
+    expect(tx?.ephemeralSigners).toEqual([]);
+
+    const calls = JSON.parse(tx?.payload ?? "[]") as { entrypoint: string }[];
+    // Approve, then burn. One signature, two calls, which is ordinary on Starknet.
+    expect(calls.map((c) => c.entrypoint)).toEqual(["approve", "deposit_for_burn_with_hook"]);
+  });
+
   it("reports nothing at all for a transfer that was never submitted", async () => {
     const phase = await adapter.status({
       sourceTxHash: undefined,
@@ -217,6 +253,7 @@ describe("CctpAdapter", () => {
     // every other address here was derived from its own chain and checked.
     expect(chains.length).toBeGreaterThanOrEqual(20);
     expect(chains).toContain("solana-devnet");
+    expect(chains).toContain("starknet-sepolia");
     expect(chains).toContain("ethereum-sepolia");
     expect(chains).toContain("base-sepolia");
     expect(chains).toContain("arbitrum-sepolia");
@@ -231,12 +268,19 @@ describe("CctpAdapter", () => {
    */
   it("quotes from every chain it says it supports", async () => {
     const chains = await adapter.supportedChains();
-    const outcomes = await Promise.all(
-      chains.map(async (chainId) => {
-        const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId } }));
-        return { chainId, ok: isRoute(result), why: isRoute(result) ? "" : result.explanation };
-      }),
-    );
+    // Sequential on purpose. Quoting them all at once means twenty-four
+    // simultaneous reads of the same Stellar destination, and the freshness guard
+    // rightly refuses a read from a node that has fallen behind. That is the
+    // guard working, not a chain failing, so the test does not provoke it.
+    const outcomes = [];
+    for (const chainId of chains) {
+      const result = await quoteRetrying(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+      outcomes.push({
+        chainId,
+        ok: isRoute(result),
+        why: isRoute(result) ? "" : result.explanation,
+      });
+    }
 
     const failed = outcomes.filter((o) => !o.ok);
     if (failed.length > 0) {
@@ -251,8 +295,10 @@ describe("CctpAdapter", () => {
     const chains = await adapter.supportedChains();
     const tokens = new Map<string, string>();
 
-    for (const chainId of chains.filter((c) => !c.startsWith("solana"))) {
-      const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+    for (const chainId of chains.filter(
+      (c) => !c.startsWith("solana") && !c.startsWith("starknet"),
+    )) {
+      const result = await quoteRetrying(ask({ from: { ...USDC_SEPOLIA, chainId } }));
       if (!isRoute(result)) throw new Error(`${chainId}: ${result.explanation}`);
       const [tx] = await adapter.buildTransactions(result);
       const payload = JSON.parse(tx?.payload ?? "{}") as { args: string[] };
