@@ -508,7 +508,8 @@ for (const network of ["testnet", "mainnet"]) {
   await verifyUsdc(seedChain.rpc, SEED[network].usdc);
   console.log(`  ${network}: seed USDC verified on ${seedChain.id}`);
 
-  const wanted = only === undefined ? CHAINS[network] : CHAINS[network].filter((c) => c.id === only);
+  const wanted =
+    only === undefined ? CHAINS[network] : CHAINS[network].filter((c) => c.id === only);
   const settled = await Promise.allSettled(wanted.map((chain) => inspect(network, chain)));
   settled.forEach((outcome, index) => {
     const chain = wanted[index];

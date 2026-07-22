@@ -28,6 +28,7 @@ import { buildBurn, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
 import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
+import { nonEvmChainFor, nonEvmChainsFor, nonEvmExplorerTxUrl } from "./nonevm.js";
 
 /**
  * CCTP as a rail the routing engine can race.
@@ -40,6 +41,21 @@ import { canonicalToLocal } from "./delivery.js";
 
 /** Circle quotes `minimumFee` in basis points of the amount burned. */
 const BPS = 10_000n;
+
+/** What a non-EVM chain needs that a route cannot carry on its own. */
+export interface BuildOptions {
+  readonly solana?: {
+    /** The wallet paying and signing, base58. */
+    readonly owner: string;
+    /**
+     * A fresh keypair's public key. The caller creates it and signs with it; the
+     * burn writes its message into that brand new account.
+     */
+    readonly messageSentEventData: string;
+    /** Undefined uses the owner's associated token account for USDC. */
+    readonly burnTokenAccount?: string | undefined;
+  };
+}
 
 export interface CctpAdapterOptions {
   readonly network: NetworkId;
@@ -74,12 +90,14 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   supportedChains(): Promise<readonly string[]> {
-    return Promise.resolve(sourceChainsFor(this.network));
+    return Promise.resolve([...sourceChainsFor(this.network), ...nonEvmChainsFor(this.network)]);
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
-    const deployment = deploymentFor(this.network, request.from.chainId);
-    if (deployment === undefined) {
+    // Circle's domain is all quoting needs; how the burn is built is a question
+    // for later and differs per family.
+    const domain = this.domainOf(request.from.chainId);
+    if (domain === undefined) {
       return this.decline(
         "chain-unsupported",
         `Mavna does not move funds from ${request.from.chainId} yet.`,
@@ -114,7 +132,7 @@ export class CctpAdapter implements BridgeAdapter {
       return this.decline("destination-unsupported", destination.lane.reason);
     }
 
-    const fee = await this.bridgeFee(deployment.domain, BigInt(request.sends.baseUnits));
+    const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
     if (fee === undefined) {
       return this.decline(
         "temporarily-unavailable",
@@ -212,10 +230,18 @@ export class CctpAdapter implements BridgeAdapter {
     };
   }
 
-  async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+  async buildTransactions(
+    route: Route,
+    options: BuildOptions = {},
+  ): Promise<readonly UnsignedTransaction[]> {
     const sends = BigInt(route.sends.baseUnits);
     const bridgeFee = route.fees.find((f) => f.kind === "bridge");
     const maxFee = bridgeFee === undefined ? 0n : BigInt(bridgeFee.total.baseUnits);
+
+    const nonEvm = nonEvmChainFor(this.network, route.fromChain.id);
+    if (nonEvm?.family === "solana") {
+      return [await this.buildSolana(route, sends, maxFee, options)];
+    }
 
     const call = buildBurn({
       amount: sends,
@@ -239,8 +265,64 @@ export class CctpAdapter implements BridgeAdapter {
         }),
         format: "evm-tx",
         describes: call.describes,
+        ephemeralSigners: [],
       },
     ];
+  }
+
+  /**
+   * The Solana burn, with its builder loaded only now.
+   *
+   * A dynamic import keeps Solana's address library out of the bundle of every
+   * integrator who never sends from Solana, which is most of them. The plan asks
+   * for adapters that do not ship what they do not use, and this is the same idea
+   * one level down.
+   */
+  private async buildSolana(
+    route: Route,
+    sends: bigint,
+    maxFee: bigint,
+    options: BuildOptions,
+  ): Promise<UnsignedTransaction> {
+    if (options.solana === undefined) {
+      throw new MavnaError(
+        "Sending from Solana needs the wallet's address and a fresh keypair for the " +
+          "message account. Pass them as `solana` to buildTransactions; the SDK will " +
+          "not create a keypair, because creating one means holding a secret key.",
+        { retryable: false },
+      );
+    }
+
+    const { buildSolanaBurn } = await import("./solana.js");
+    const instruction = await buildSolanaBurn({
+      amount: sends,
+      stellarRecipient: route.destination,
+      network: this.network,
+      owner: options.solana.owner,
+      messageSentEventData: options.solana.messageSentEventData,
+      burnTokenAccount: options.solana.burnTokenAccount,
+      maxFee,
+      finality: FINALITY.standard,
+    });
+
+    return {
+      chainId: route.fromChain.id,
+      payload: JSON.stringify({
+        programId: instruction.programId,
+        keys: instruction.keys,
+        data: instruction.data,
+      }),
+      format: "solana-instruction",
+      describes: instruction.describes,
+      ephemeralSigners: instruction.ephemeralSigners,
+    };
+  }
+
+  /** Circle's domain for a chain, whichever family it belongs to. */
+  private domainOf(chainId: string): number | undefined {
+    return (
+      deploymentFor(this.network, chainId)?.domain ?? nonEvmChainFor(this.network, chainId)?.domain
+    );
   }
 
   /**
@@ -275,7 +357,10 @@ export class CctpAdapter implements BridgeAdapter {
     const ref = {
       chainId,
       txHash: handle.sourceTxHash,
-      explorerUrl: explorerTxUrl(this.network, chainId, handle.sourceTxHash),
+      explorerUrl:
+        nonEvmChainFor(this.network, chainId) === undefined
+          ? explorerTxUrl(this.network, chainId, handle.sourceTxHash)
+          : nonEvmExplorerTxUrl(this.network, chainId, handle.sourceTxHash),
     };
 
     if (attestation === undefined || attestation.status !== "complete") {
@@ -327,11 +412,11 @@ export class CctpAdapter implements BridgeAdapter {
   ): Promise<{ attestation: Attestation; chainId: string } | undefined> {
     const candidates =
       sourceChainId === undefined
-        ? sourceChainsFor(this.network)
-        : [sourceChainId].filter((id) => deploymentFor(this.network, id) !== undefined);
+        ? [...sourceChainsFor(this.network), ...nonEvmChainsFor(this.network)]
+        : [sourceChainId].filter((id) => this.domainOf(id) !== undefined);
 
     const lookups = candidates.map(async (chainId) => {
-      const domain = deploymentFor(this.network, chainId)?.domain;
+      const domain = this.domainOf(chainId);
       if (domain === undefined) return undefined;
       const rows = await this.attestations.byTransaction(domain, txHash);
       const attestation = rows.find((row) => row.destinationDomain === STELLAR_DOMAIN) ?? rows[0];
@@ -402,6 +487,15 @@ function chainRefFor(network: NetworkId, chainId: string): ChainRef {
       id: chainId,
       name: "Stellar",
       explorerTxUrl: (hash) => `https://stellar.expert/explorer/${path}/tx/${hash}`,
+    };
+  }
+
+  const nonEvm = nonEvmChainFor(network, chainId);
+  if (nonEvm !== undefined) {
+    return {
+      id: chainId,
+      name: nonEvm.name,
+      explorerTxUrl: (hash) => nonEvmExplorerTxUrl(network, chainId, hash),
     };
   }
 

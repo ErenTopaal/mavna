@@ -26,3 +26,5 @@ allowBuilds:
   esbuild: true
   "@biomejs/biome": true
   oxlint: true
+  bufferutil: set this to true or false
+  utf-8-validate: set this to true or false

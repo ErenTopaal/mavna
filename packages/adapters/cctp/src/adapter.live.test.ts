@@ -136,6 +136,44 @@ describe("CctpAdapter", () => {
     expect(payload.args[2]).toBe(payload.args[4]);
   });
 
+  /**
+   * Solana is not EVM, and the burn there is an Anchor instruction rather than a
+   * contract call. Quoting is the same either way, because Circle prices by
+   * domain; only building differs.
+   */
+  it("quotes from Solana and builds an instruction rather than a contract call", async () => {
+    const result = await adapter.quote(
+      ask({ from: { ...USDC_SEPOLIA, chainId: "solana-devnet" } }),
+    );
+    if (!isRoute(result)) throw new Error(result.explanation);
+    expect(result.fromChain.name).toBe("Solana Devnet");
+
+    const [tx] = await adapter.buildTransactions(result, {
+      solana: {
+        owner: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        messageSentEventData: "AaXs7cLGcSVAsEt8QxstVrqhLhYN2iGhFNRemwYnHitV",
+      },
+    });
+    expect(tx?.format).toBe("solana-instruction");
+    // Said out loud rather than discovered as a failed signature.
+    expect(tx?.ephemeralSigners).toEqual(["message_sent_event_data"]);
+
+    const payload = JSON.parse(tx?.payload ?? "{}") as { keys: unknown[]; programId: string };
+    expect(payload.keys).toHaveLength(18);
+    expect(payload.programId).toBe("CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe");
+  });
+
+  it("refuses to invent a Solana keypair, and says what it needs instead", async () => {
+    const result = await adapter.quote(
+      ask({ from: { ...USDC_SEPOLIA, chainId: "solana-devnet" } }),
+    );
+    if (!isRoute(result)) throw new Error(result.explanation);
+    // The SDK does not hold keys. Asking for them is better than making one.
+    await expect(adapter.buildTransactions(result)).rejects.toThrow(
+      /will\s+not\s+create a keypair/,
+    );
+  });
+
   it("reports nothing at all for a transfer that was never submitted", async () => {
     const phase = await adapter.status({
       sourceTxHash: undefined,
@@ -178,6 +216,7 @@ describe("CctpAdapter", () => {
     // Twenty-one, not one. Sepolia was the only one exercised end to end, but
     // every other address here was derived from its own chain and checked.
     expect(chains.length).toBeGreaterThanOrEqual(20);
+    expect(chains).toContain("solana-devnet");
     expect(chains).toContain("ethereum-sepolia");
     expect(chains).toContain("base-sepolia");
     expect(chains).toContain("arbitrum-sepolia");
@@ -212,7 +251,7 @@ describe("CctpAdapter", () => {
     const chains = await adapter.supportedChains();
     const tokens = new Map<string, string>();
 
-    for (const chainId of chains) {
+    for (const chainId of chains.filter((c) => !c.startsWith("solana"))) {
       const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId } }));
       if (!isRoute(result)) throw new Error(`${chainId}: ${result.explanation}`);
       const [tx] = await adapter.buildTransactions(result);

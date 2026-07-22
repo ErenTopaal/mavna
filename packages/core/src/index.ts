@@ -1,6 +1,7 @@
 export type {
   BridgeAdapter,
   QuoteRequest,
+  TransactionFormat,
   TransferHandle,
   UnsignedTransaction,
 } from "./adapter.js";

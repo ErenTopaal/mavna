@@ -1,4 +1,4 @@
-export type { CctpAdapterOptions } from "./adapter.js";
+export type { BuildOptions, CctpAdapterOptions } from "./adapter.js";
 export { CctpAdapter } from "./adapter.js";
 export type { Attestation, AttestationStatus } from "./attestation.js";
 export { AttestationService, HASH_FORMAT } from "./attestation.js";
@@ -38,3 +38,18 @@ export {
   parseForwarderHookData,
   toHex,
 } from "./hook.js";
+export type { ChainFamily, NonEvmChain } from "./nonevm.js";
+export {
+  NON_EVM_CHAINS,
+  nonEvmChainFor,
+  nonEvmChainsFor,
+  nonEvmExplorerTxUrl,
+} from "./nonevm.js";
+export type { SolanaAccountMeta, SolanaBurnParams, SolanaInstruction } from "./solana.js";
+export {
+  associatedTokenAddress,
+  buildSolanaBurn,
+  SOLANA_PROGRAMS,
+  SOLANA_USDC,
+  solanaInstructionDataHex,
+} from "./solana.js";

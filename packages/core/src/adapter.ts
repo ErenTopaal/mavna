@@ -23,14 +23,40 @@ export interface QuoteRequest {
   readonly maxSlippageBps: number;
 }
 
+/**
+ * How a payload should be read. One per chain family, because they share nothing.
+ *
+ * `solana-instruction` rather than a whole message: a complete Solana message
+ * needs a fee payer and a recent blockhash, both of which belong to the wallet
+ * and go stale in about a minute. Handing over the instruction lets the wallet
+ * compose and price the transaction the way it already knows how.
+ */
+export type TransactionFormat =
+  | "stellar-xdr"
+  | "evm-tx"
+  | "solana-instruction"
+  | "starknet-invoke"
+  | "cosmos-msg";
+
 /** A transaction the caller must sign. The SDK never signs and never submits. */
 export interface UnsignedTransaction {
   readonly chainId: string;
   /** Opaque to the SDK. The caller's wallet knows how to read it. */
   readonly payload: string;
-  readonly format: "stellar-xdr" | "evm-tx" | "solana-message";
+  readonly format: TransactionFormat;
   /** Said in terms that mean something, so consent can be informed. */
   readonly describes: string;
+  /**
+   * Accounts the caller must generate a fresh keypair for and sign with.
+   *
+   * Solana's burn writes its message into a brand new account, so one exists that
+   * is neither the user nor anything we can derive. Carrying the requirement here
+   * means a caller learns about it from the type rather than from a failed
+   * signature, and it stays empty on every chain that has no such thing.
+   *
+   * The SDK does not create these. It does not hold keys, ever.
+   */
+  readonly ephemeralSigners: readonly string[];
 }
 
 /**
