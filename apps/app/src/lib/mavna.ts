@@ -1,4 +1,4 @@
-import { CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cctp";
+import { CctpAdapter, EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
 import type { NetworkId } from "@mavna/core";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
 
@@ -25,12 +25,17 @@ export const cctp: CctpAdapter = new CctpAdapter({
   baseReserveStroops: config.baseReserveStroops,
 });
 
-/** Every chain a user can send from, with the name its own registry gives it. */
-export const SOURCE_CHAINS: ReadonlyArray<{ id: string; name: string }> = Object.entries(
-  EVM_DEPLOYMENTS[NETWORK],
-)
-  .map(([id, deployment]) => ({ id, name: deployment.name }))
-  .sort((a, b) => a.name.localeCompare(b.name));
+/**
+ * Every chain a user can send from, with the name its own registry gives it.
+ *
+ * Both families, not just the EVM one. Listing only the generated registry left
+ * Solana and Starknet out of the picker while the adapter happily quoted them,
+ * so the app understated what it could do by two chains.
+ */
+export const SOURCE_CHAINS: ReadonlyArray<{ id: string; name: string }> = [
+  ...Object.entries(EVM_DEPLOYMENTS[NETWORK]).map(([id, chain]) => ({ id, name: chain.name })),
+  ...Object.entries(NON_EVM_CHAINS[NETWORK]).map(([id, chain]) => ({ id, name: chain.name })),
+].sort((a, b) => a.name.localeCompare(b.name));
 
 export const STELLAR_CHAIN_ID = NETWORK === "mainnet" ? "stellar" : "stellar-testnet";
 
