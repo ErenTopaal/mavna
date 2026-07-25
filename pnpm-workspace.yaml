@@ -26,5 +26,8 @@ allowBuilds:
   esbuild: true
   "@biomejs/biome": true
   oxlint: true
-  bufferutil: set this to true or false
-  utf-8-validate: set this to true or false
+  # Optional native speedups that ws asks for, pulled in through viem. Refused: they
+  # compile at install time to accelerate a WebSocket path we never take, since viem is
+  # here for HTTP calls and one hash. ws works without them.
+  bufferutil: false
+  utf-8-validate: false
