@@ -2,8 +2,15 @@ export type { BuildOptions, CctpAdapterOptions } from "./adapter.js";
 export { CctpAdapter } from "./adapter.js";
 export type { Attestation, AttestationStatus } from "./attestation.js";
 export { AttestationService, HASH_FORMAT } from "./attestation.js";
-export type { BurnCall, BurnParams } from "./burn.js";
-export { buildBurn, EVM_TESTNET, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
+export type { ApprovalCall, BurnCall, BurnParams } from "./burn.js";
+export {
+  buildApproval,
+  buildBurn,
+  ERC20_ABI,
+  EVM_TESTNET,
+  FINALITY,
+  TOKEN_MESSENGER_ABI,
+} from "./burn.js";
 export type { EvmDeployment } from "./chains.js";
 export {
   chainIdForDomain,

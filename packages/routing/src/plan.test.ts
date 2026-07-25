@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { assertPlanIsSound, planTransfer, signatureCount } from "./plan.js";
 
-const usdcToUsdc = { bridgeDelivers: "USDC", userWants: "USDC", arrivingXlmCoversReserve: false };
+const usdcToUsdc = {
+  bridgeDelivers: "USDC",
+  userWants: "USDC",
+  arrivingXlmCoversReserve: false,
+  sourceNeedsApproval: false,
+};
 
 describe("what a transfer actually requires", () => {
   it("needs nothing extra for a destination that is already ready", () => {
@@ -30,9 +35,34 @@ describe("what a transfer actually requires", () => {
       bridgeDelivers: "USDC",
       userWants: "XLM",
       arrivingXlmCoversReserve: false,
+      sourceNeedsApproval: false,
     });
     expect(same.some((s) => s.kind === "swap")).toBe(false);
     expect(different.some((s) => s.kind === "swap")).toBe(true);
+  });
+
+  it("counts the source-chain approval, because the user was promised a number", () => {
+    // On EVM the messenger pulls the funds with transferFrom, so an allowance has
+    // to be signed for separately first. Leaving it out of the count meant telling
+    // someone to expect one signature and then asking for two.
+    const withApproval = planTransfer({
+      destination: "ready",
+      ...usdcToUsdc,
+      sourceNeedsApproval: true,
+    });
+    expect(withApproval.map((s) => s.kind)).toEqual(["approve-source", "bridge"]);
+    expect(signatureCount(withApproval)).toBe(2);
+  });
+
+  it("puts the approval before the bridge, never after", () => {
+    const steps = planTransfer({
+      destination: "needs-account",
+      ...usdcToUsdc,
+      sourceNeedsApproval: true,
+    });
+    const kinds = steps.map((s) => s.kind);
+    expect(kinds.indexOf("approve-source")).toBeLessThan(kinds.indexOf("bridge"));
+    expect(() => assertPlanIsSound(steps)).not.toThrow();
   });
 
   it("skips sponsorship entirely when the arriving XLM pays for the account itself", () => {
@@ -43,6 +73,7 @@ describe("what a transfer actually requires", () => {
       bridgeDelivers: "XLM",
       userWants: "XLM",
       arrivingXlmCoversReserve: true,
+      sourceNeedsApproval: false,
     });
     expect(steps.map((s) => s.kind)).toEqual(["bridge"]);
   });
@@ -82,6 +113,17 @@ describe("orderings that are load-bearing", () => {
         { kind: "settle-account", label: "", needsUserSignature: false },
       ]),
     ).toThrow(/nothing to settle/);
+  });
+
+  it("refuses a plan that approves after it has already burned", () => {
+    // The burn reverts for want of an allowance, and the user has paid gas to be
+    // told so. Nothing about that is visible until it happens on chain.
+    expect(() =>
+      assertPlanIsSound([
+        { kind: "bridge", label: "", needsUserSignature: true },
+        { kind: "approve-source", label: "", needsUserSignature: true },
+      ]),
+    ).toThrow(/before the bridge/);
   });
 
   it("refuses a plan that moves nothing", () => {

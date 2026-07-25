@@ -155,7 +155,81 @@ export function buildBurn(params: BurnParams): BurnCall {
   };
 }
 
-/** The minimal ABI needed for the burn and its approval. */
+export interface ApprovalCall {
+  /** The USDC contract, which is where an allowance is recorded. */
+  readonly contract: string;
+  readonly functionName: "approve";
+  readonly args: readonly [spender: `0x${string}`, amount: bigint];
+  readonly describes: string;
+}
+
+/**
+ * The approval the burn cannot do without.
+ *
+ * `depositForBurnWithHook` does not take the user's tokens, it pulls them:
+ * `_depositAndBurn` calls `transferFrom(msg.sender, localMinter, amount)` on the
+ * token, executed by the messenger. So the messenger has to hold an allowance
+ * before the burn is sent, and without one the burn reverts having spent the
+ * user's gas. Read from Circle's `BaseTokenMessenger.sol`, not assumed.
+ *
+ * Two chains do not need this and are not routed here. Starknet puts several
+ * calls in one invoke, so its builder emits the approval alongside the burn.
+ * Solana's burn names `owner` as the authority and `owner` is already a signer,
+ * so there is nothing to delegate; confirmed against Circle's own
+ * `deposit_for_burn.rs`, where the burn is passed `ctx.accounts.owner`.
+ *
+ * The allowance is for exactly this transfer, never unlimited. An infinite
+ * approval is convenient once and then sits on the user's account forever as a
+ * standing claim on their funds, which is the thing this project's own rule
+ * forbids us holding.
+ */
+export function buildApproval(params: BurnParams): ApprovalCall {
+  const deployment = deploymentFor(params.network, params.sourceChainId);
+  if (deployment === undefined) {
+    throw new MavnaError(
+      `No verified CCTP deployment for ${params.sourceChainId} on ${params.network}.`,
+      { retryable: false },
+    );
+  }
+  if (params.amount <= 0n) {
+    throw new MavnaError("Refusing to approve a non-positive amount.", { retryable: false });
+  }
+
+  return {
+    contract: deployment.usdc,
+    functionName: "approve",
+    args: [deployment.tokenMessengerV2 as `0x${string}`, params.amount],
+    describes:
+      `Let Circle's transfer contract move ${params.amount} USDC base units from your ` +
+      "wallet, once. This does not send anything on its own.",
+  };
+}
+
+/** Just enough ERC-20 for the approval and for a caller to check it is needed. */
+export const ERC20_ABI = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+/** The minimal ABI needed for the burn itself. */
 export const TOKEN_MESSENGER_ABI = [
   {
     type: "function",

@@ -1,6 +1,7 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { buildBurn, FINALITY } from "./burn.js";
+import { buildApproval, buildBurn, FINALITY } from "./burn.js";
+import { deploymentFor } from "./chains.js";
 import { CCTP_CONTRACTS } from "./config.js";
 import { contractAddressToBytes32, toHex } from "./hook.js";
 
@@ -96,5 +97,35 @@ describe("defaults", () => {
   it("describes what it will do in terms a person could consent to", () => {
     expect(buildBurn(base).describes).toContain(recipient);
     expect(buildBurn(base).describes).toContain("Stellar");
+  });
+});
+
+describe("the approval the burn cannot run without", () => {
+  it("approves the messenger on the USDC contract, not the other way round", () => {
+    // The allowance lives on the token and names the messenger as spender. Getting
+    // these two the wrong way round produces a call that succeeds and approves
+    // nothing useful.
+    const approval = buildApproval(base);
+    const deployment = deploymentFor("testnet", "ethereum-sepolia");
+    expect(approval.contract).toBe(deployment?.usdc);
+    expect(approval.args[0]).toBe(deployment?.tokenMessengerV2);
+  });
+
+  it("approves exactly the amount being sent and never more", () => {
+    // An unlimited approval is a standing claim on the user's funds that outlives
+    // the transaction they signed, which is the one thing this project's own rule
+    // says we never hold.
+    const approval = buildApproval({ ...base, amount: 25_000_000n });
+    expect(approval.args[1]).toBe(25_000_000n);
+  });
+
+  it("refuses a chain it has no verified deployment for", () => {
+    expect(() => buildApproval({ ...base, sourceChainId: "not-a-chain" })).toThrow(
+      /No verified CCTP deployment/,
+    );
+  });
+
+  it("refuses to approve nothing", () => {
+    expect(() => buildApproval({ ...base, amount: 0n })).toThrow(/non-positive/);
   });
 });

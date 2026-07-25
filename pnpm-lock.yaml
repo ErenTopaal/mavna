@@ -318,6 +318,9 @@ importers:
       tailwind-merge:
         specifier: 3.6.0
         version: 3.6.0
+      viem:
+        specifier: 2.55.13
+        version: 2.55.13(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)(zod@4.4.3)
       zustand:
         specifier: 5.0.14
         version: 5.0.14(@types/react@19.2.18)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))

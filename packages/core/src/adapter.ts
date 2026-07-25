@@ -38,6 +38,32 @@ export type TransactionFormat =
   | "starknet-invoke"
   | "cosmos-msg";
 
+/**
+ * A check that decides whether a transaction is needed at all.
+ *
+ * Token approvals are the case this exists for. A rail that moves an ERC-20 out
+ * of a user's wallet needs a standing allowance first, but only when the wallet
+ * does not already have one, and asking a user to sign an approval they do not
+ * need costs them gas for nothing.
+ *
+ * The SDK cannot answer the question itself: reading an allowance needs a node on
+ * the source chain, and the caller is the one holding a wallet already connected
+ * to it. So the condition is stated in a form the caller can evaluate, rather
+ * than the transaction being emitted unconditionally and the waste being someone
+ * else's problem.
+ */
+export interface AllowanceCheck {
+  readonly kind: "erc20-allowance";
+  /** The token contract that records the allowance. */
+  readonly token: string;
+  /** Who the allowance must name. Not the recipient of the funds. */
+  readonly spender: string;
+  /** Skip the transaction when the existing allowance is at least this. */
+  readonly atLeastBaseUnits: string;
+}
+
+export type UnnecessaryWhen = AllowanceCheck;
+
 /** A transaction the caller must sign. The SDK never signs and never submits. */
 export interface UnsignedTransaction {
   readonly chainId: string;
@@ -46,6 +72,13 @@ export interface UnsignedTransaction {
   readonly format: TransactionFormat;
   /** Said in terms that mean something, so consent can be informed. */
   readonly describes: string;
+  /**
+   * When this can be left unsent, and how the caller checks.
+   *
+   * Undefined means always send it. Anything else is a condition to evaluate
+   * against the source chain first.
+   */
+  readonly unnecessaryWhen: UnnecessaryWhen | undefined;
   /**
    * Accounts the caller must generate a fresh keypair for and sign with.
    *

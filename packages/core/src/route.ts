@@ -18,7 +18,7 @@ export type TrustModel =
 
 export interface StepQuote {
   readonly id: string;
-  readonly kind: "bridge" | "swap" | "prepare-account" | "settle-account";
+  readonly kind: "approve-source" | "bridge" | "swap" | "prepare-account" | "settle-account";
   /** Which route source produced this. Errors must be attributable. */
   readonly source: string;
   readonly from: Amount;

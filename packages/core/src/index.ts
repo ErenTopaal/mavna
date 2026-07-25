@@ -1,8 +1,10 @@
 export type {
+  AllowanceCheck,
   BridgeAdapter,
   QuoteRequest,
   TransactionFormat,
   TransferHandle,
+  UnnecessaryWhen,
   UnsignedTransaction,
 } from "./adapter.js";
 export { ADAPTER_QUOTE_TIMEOUT_MS, isRejection } from "./adapter.js";

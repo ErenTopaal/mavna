@@ -26,9 +26,29 @@ export interface PlanInputs {
    * disappears and nothing needs sponsoring.
    */
   readonly arrivingXlmCoversReserve: boolean;
+  /**
+   * Whether the source chain makes the user approve the rail before it can move
+   * their tokens, as a transaction of its own.
+   *
+   * True on EVM: the messenger pulls the funds with `transferFrom`, so an
+   * allowance has to exist first and it cannot ride along in the same
+   * transaction. False where a chain lets one signature carry both, which is
+   * Starknet (several calls per invoke) and Solana (the burn's authority is the
+   * owner, who is already signing).
+   *
+   * It matters here rather than only in the builder because the user is promised
+   * a signature count upfront, and an approval they were not warned about is
+   * exactly the surprise that promise exists to prevent.
+   */
+  readonly sourceNeedsApproval: boolean;
 }
 
-export type PlannedStepKind = "prepare-account" | "bridge" | "settle-account" | "swap";
+export type PlannedStepKind =
+  | "approve-source"
+  | "prepare-account"
+  | "bridge"
+  | "settle-account"
+  | "swap";
 
 export interface PlannedStep {
   readonly kind: PlannedStepKind;
@@ -59,6 +79,15 @@ export function planTransfer(inputs: PlanInputs): readonly PlannedStep[] {
           : "Allow your account to hold this asset",
       // The user signs the operation that creates an obligation on their own
       // account, but pays nothing and needs no XLM to do it.
+      needsUserSignature: true,
+    });
+  }
+
+  if (inputs.sourceNeedsApproval) {
+    steps.push({
+      kind: "approve-source",
+      // Named for what the user is doing, not for the ERC-20 call underneath it.
+      label: "Allow the transfer to move your USDC",
       needsUserSignature: true,
     });
   }
@@ -108,11 +137,19 @@ export function assertPlanIsSound(steps: readonly PlannedStep[]): void {
   const bridge = kinds.indexOf("bridge");
   const prepare = kinds.indexOf("prepare-account");
   const settle = kinds.indexOf("settle-account");
+  const approve = kinds.indexOf("approve-source");
 
   if (bridge === -1) {
     throw new MavnaError("A transfer plan with no bridge step moves nothing.", {
       retryable: false,
     });
+  }
+  if (approve !== -1 && approve > bridge) {
+    throw new MavnaError(
+      "The approval must come before the bridge, or the burn reverts for want of " +
+        "an allowance and the user pays gas to be told so.",
+      { retryable: false },
+    );
   }
   if (prepare !== -1 && prepare > bridge) {
     throw new MavnaError(

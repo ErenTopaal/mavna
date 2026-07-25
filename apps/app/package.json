@@ -31,6 +31,7 @@
     "react-dom": "19.2.8",
     "react-hook-form": "7.85.0",
     "tailwind-merge": "3.6.0",
+    "viem": "2.55.13",
     "zustand": "5.0.14"
   },
   "devDependencies": {

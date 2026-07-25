@@ -24,7 +24,7 @@ import {
 } from "@mavna/stellar";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import { type Attestation, AttestationService } from "./attestation.js";
-import { buildBurn, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
+import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
 import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
@@ -186,6 +186,9 @@ export class CctpAdapter implements BridgeAdapter {
       userWants: request.to.id,
       // USDC is arriving, not XLM, so nothing about the account pays for itself.
       arrivingXlmCoversReserve: false,
+      // Only EVM makes the approval a transaction of its own. Starknet folds it
+      // into the same invoke and Solana needs none at all.
+      sourceNeedsApproval: nonEvmChainFor(this.network, request.from.chainId) === undefined,
     });
 
     const receives: Amount = { asset: request.to, baseUnits: delivered };
@@ -260,16 +263,40 @@ export class CctpAdapter implements BridgeAdapter {
       return [await this.buildStarknet(route, sends, maxFee)];
     }
 
-    const call = buildBurn({
+    const params = {
       amount: sends,
       stellarRecipient: route.destination,
-      network: this.network === "mainnet" ? "mainnet" : "testnet",
+      network: this.network === "mainnet" ? ("mainnet" as const) : ("testnet" as const),
       sourceChainId: route.fromChain.id,
       finality: FINALITY.standard,
       maxFee,
-    });
+    };
 
+    const approval = buildApproval(params);
+    const call = buildBurn(params);
+
+    // Two transactions, in this order. The messenger pulls the funds with
+    // transferFrom, so the allowance has to exist before the burn is sent.
     return [
+      {
+        chainId: route.fromChain.id,
+        payload: JSON.stringify({
+          to: approval.contract,
+          abi: ERC20_ABI,
+          functionName: approval.functionName,
+          args: approval.args.map((a) => (typeof a === "bigint" ? a.toString() : a)),
+        }),
+        format: "evm-tx",
+        describes: approval.describes,
+        ephemeralSigners: [],
+        // A wallet that has approved this much already should not be asked again.
+        unnecessaryWhen: {
+          kind: "erc20-allowance",
+          token: approval.contract,
+          spender: approval.args[0],
+          atLeastBaseUnits: sends.toString(),
+        },
+      },
       {
         chainId: route.fromChain.id,
         // The caller's wallet encodes this. The SDK never signs and never submits,
@@ -283,6 +310,7 @@ export class CctpAdapter implements BridgeAdapter {
         format: "evm-tx",
         describes: call.describes,
         ephemeralSigners: [],
+        unnecessaryWhen: undefined,
       },
     ];
   }
@@ -332,6 +360,9 @@ export class CctpAdapter implements BridgeAdapter {
       format: "solana-instruction",
       describes: instruction.describes,
       ephemeralSigners: instruction.ephemeralSigners,
+      // The burn's authority is the owner, who is already signing, so there is
+      // no delegate to set up and nothing to skip.
+      unnecessaryWhen: undefined,
     };
   }
 
@@ -362,6 +393,8 @@ export class CctpAdapter implements BridgeAdapter {
       format: "starknet-invoke",
       describes: invoke.describes,
       ephemeralSigners: [],
+      // The approval is one of the calls inside this invoke, so it is already here.
+      unnecessaryWhen: undefined,
     };
   }
 

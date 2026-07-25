@@ -106,16 +106,26 @@ describe("CctpAdapter", () => {
     expect(result.receivesAtLeast.baseUnits).toBe(result.receives.baseUnits);
   });
 
-  it("asks for one signature into a ready account and more into a new one", async () => {
+  it("asks for two signatures into a ready account and more into a new one", async () => {
     const ready = await adapter.quote(ask());
     const fresh = await adapter.quote(ask({ destination: UNFUNDED }));
     if (!isRoute(ready)) throw new Error(ready.explanation);
     if (!isRoute(fresh)) throw new Error(fresh.explanation);
 
-    expect(ready.signaturesRequired).toBe(1);
+    // Two, not one. This said one until the approval was found missing: on EVM the
+    // messenger pulls the funds with transferFrom, so the allowance is signed for
+    // separately. The old number was a promise the flow could not keep.
+    expect(ready.steps.map((s) => s.kind)).toEqual(["approve-source", "bridge"]);
+    expect(ready.signaturesRequired).toBe(2);
     // Preparing the account is signed by the user; settling it is not, because it
     // was signed in advance before any capital was committed.
-    expect(fresh.signaturesRequired).toBe(2);
+    expect(fresh.steps.map((s) => s.kind)).toEqual([
+      "prepare-account",
+      "approve-source",
+      "bridge",
+      "settle-account",
+    ]);
+    expect(fresh.signaturesRequired).toBe(3);
     expect(fresh.fees.some((f) => f.kind === "account-reserve")).toBe(true);
     expect(ready.fees.some((f) => f.kind === "account-reserve")).toBe(false);
   });
@@ -143,7 +153,16 @@ describe("CctpAdapter", () => {
     const result = await adapter.quote(ask());
     if (!isRoute(result)) throw new Error(result.explanation);
 
-    const [tx] = await adapter.buildTransactions(result);
+    // Approval first, then the burn. The messenger takes the funds with
+    // transferFrom, so without the allowance the burn reverts having spent gas.
+    const [approval, tx] = await adapter.buildTransactions(result);
+    expect(approval?.format).toBe("evm-tx");
+    const approvalPayload = JSON.parse(approval?.payload ?? "{}") as { functionName: string };
+    expect(approvalPayload.functionName).toBe("approve");
+    // Stated so a caller with an allowance already in place can skip it rather
+    // than burning the user's gas to approve what is approved.
+    expect(approval?.unnecessaryWhen?.kind).toBe("erc20-allowance");
+
     expect(tx?.format).toBe("evm-tx");
     expect(tx?.chainId).toBe("ethereum-sepolia");
     expect(tx?.describes).toContain(FUNDED);
@@ -153,6 +172,15 @@ describe("CctpAdapter", () => {
     // mintRecipient and destinationCaller are both the forwarder. Naming the user
     // in either position is what Circle warns is unrecoverable.
     expect(payload.args[2]).toBe(payload.args[4]);
+  });
+
+  it("tells the user about the approval signature rather than springing it on them", async () => {
+    const result = await adapter.quote(ask());
+    if (!isRoute(result)) throw new Error(result.explanation);
+    // Two on EVM: approve, then burn. This was one, which meant promising a count
+    // and then asking for more than it.
+    expect(result.steps.map((s) => s.kind)).toContain("approve-source");
+    expect(result.signaturesRequired).toBeGreaterThanOrEqual(2);
   });
 
   /**
@@ -300,9 +328,12 @@ describe("CctpAdapter", () => {
     )) {
       const result = await quoteRetrying(ask({ from: { ...USDC_SEPOLIA, chainId } }));
       if (!isRoute(result)) throw new Error(`${chainId}: ${result.explanation}`);
-      const [tx] = await adapter.buildTransactions(result);
-      const payload = JSON.parse(tx?.payload ?? "{}") as { args: string[] };
-      tokens.set(chainId, String(payload.args[3]).toLowerCase());
+      // Index 1 is the burn; index 0 is its approval.
+      const [, burn] = await adapter.buildTransactions(result);
+      const payload = JSON.parse(burn?.payload ?? "{}") as { args: string[] };
+      const token = payload.args[3];
+      if (token === undefined) throw new Error(`${chainId}: the burn named no token`);
+      tokens.set(chainId, token.toLowerCase());
     }
 
     // Every chain must burn a different token. A collision would mean one chain's
@@ -316,9 +347,11 @@ describe("CctpAdapter", () => {
     expect(result.fromChain.id).toBe("base-sepolia");
     expect(result.fromChain.name).toContain("Base");
 
-    const [tx] = await adapter.buildTransactions(result);
-    const payload = JSON.parse(tx?.payload ?? "{}") as { args: string[] };
-    // Base Sepolia's own USDC, not Sepolia's.
+    const [approval, burn] = await adapter.buildTransactions(result);
+    const payload = JSON.parse(burn?.payload ?? "{}") as { args: string[] };
+    // Base Sepolia's own USDC, not Sepolia's, in both the burn and its approval.
     expect(payload.args[3]?.toLowerCase()).toBe("0x036cbd53842c5426634e7929541ec2318f3dcf7e");
+    const approvalPayload = JSON.parse(approval?.payload ?? "{}") as { to: string };
+    expect(approvalPayload.to.toLowerCase()).toBe("0x036cbd53842c5426634e7929541ec2318f3dcf7e");
   });
 });
