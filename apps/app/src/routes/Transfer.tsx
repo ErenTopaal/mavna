@@ -1,7 +1,8 @@
-import type { Asset, RouteSet } from "@mavna/core";
+import type { Asset, Route, RouteSet } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import { RouteList, TransferPanel } from "@mavna/widget";
 import { useState } from "react";
+import { ConnectWallet } from "@/components/ConnectWallet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cctp, DEFAULT_SOURCE_CHAIN, NETWORK, SOURCE_CHAINS, STELLAR_CHAIN_ID } from "@/lib/mavna";
+import { type ExecutionEvent, execute } from "@/lib/execute";
+import {
+  cctp,
+  DEFAULT_SOURCE_CHAIN,
+  NETWORK,
+  SOURCE_CHAINS,
+  STELLAR_CHAIN_ID,
+  sourceChainDetail,
+} from "@/lib/mavna";
+import type { Connection } from "@/lib/wallet";
 
 /**
  * Ask for a quote, and show what came back.
@@ -168,19 +178,115 @@ export function Transfer() {
           ) : null}
 
           {chosen === undefined ? null : (
-            <TransferPanel
-              route={chosen}
-              steps={undefined}
-              outcome="in-flight"
-              onConfirm={undefined}
-              onRemedy={undefined}
-              theme={undefined}
-            />
+            <>
+              <TransferPanel
+                route={chosen}
+                steps={undefined}
+                outcome="in-flight"
+                onConfirm={undefined}
+                onRemedy={undefined}
+                theme={undefined}
+              />
+              <SendPanel route={chosen} chainId={chainId} />
+            </>
           )}
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Turning a quote into a transfer.
+ *
+ * Separated from the quoting above because it is where consent happens, and
+ * consent needs the user to see what they are about to do. Nothing here fires
+ * until they press the button, and the button says what pressing it costs.
+ */
+function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
+  const [connection, setConnection] = useState<Connection | undefined>(undefined);
+  const [events, setEvents] = useState<readonly ExecutionEvent[]>([]);
+  const [sending, setSending] = useState(false);
+  const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [done, setDone] = useState(false);
+
+  const chain = sourceChainDetail(chainId);
+
+  if (chain.kind !== "evm") {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This page cannot sign for {chain.name} yet. The quote above is real, and so is the route,
+        but sending needs a {chain.family} wallet.
+      </p>
+    );
+  }
+
+  async function send() {
+    if (connection === undefined || chain.kind !== "evm") return;
+    setSending(true);
+    setProblem(undefined);
+    setEvents([]);
+    try {
+      const transactions = await cctp.buildTransactions(route);
+      await execute({
+        connection,
+        route,
+        transactions,
+        chainName: chain.name,
+        evmChainId: chain.evmChainId,
+        nativeCurrency: chain.nativeCurrency,
+        onEvent: (event) => setEvents((all) => [...all, event]),
+      });
+      setDone(true);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "The transfer did not go through.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 border-t pt-6">
+      <ConnectWallet
+        connection={connection}
+        chainName={chain.name}
+        onConnect={setConnection}
+        onDisconnect={() => setConnection(undefined)}
+      />
+
+      {connection === undefined ? null : (
+        <Button onClick={() => void send()} disabled={sending || done}>
+          {sending ? "Waiting for your wallet…" : done ? "Sent" : "Send from this wallet"}
+        </Button>
+      )}
+
+      {events.length === 0 ? null : (
+        <ol className="space-y-1 text-sm">
+          {events.map((event) => (
+            <li key={`${event.kind}-${event.index}`} className="text-muted-foreground">
+              {describeEvent(event, chain.kind === "evm" ? chain.name : "")}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {problem === undefined ? null : <p className="text-sm text-destructive">{problem}</p>}
+    </div>
+  );
+}
+
+/** One line per event, saying what happened rather than which call it was. */
+function describeEvent(event: ExecutionEvent, chainName: string): string {
+  switch (event.kind) {
+    case "skipped":
+      return event.why;
+    case "awaiting-signature":
+      return `Confirm in your wallet: ${event.describes}`;
+    case "sent":
+      return `Sent to ${chainName}. Waiting for it to be included.`;
+    case "confirmed":
+      return `Included: ${event.hash}`;
+  }
 }
 
 /**

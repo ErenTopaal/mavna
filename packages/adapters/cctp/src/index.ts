@@ -11,7 +11,7 @@ export {
   FINALITY,
   TOKEN_MESSENGER_ABI,
 } from "./burn.js";
-export type { EvmDeployment } from "./chains.js";
+export type { EvmDeployment, NativeCurrency } from "./chains.js";
 export {
   chainIdForDomain,
   deploymentFor,

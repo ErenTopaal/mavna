@@ -1,4 +1,9 @@
-import { CctpAdapter, EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
+import {
+  CctpAdapter,
+  EVM_DEPLOYMENTS,
+  type NativeCurrency,
+  NON_EVM_CHAINS,
+} from "@mavna/adapter-cctp";
 import type { NetworkId } from "@mavna/core";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
 
@@ -38,6 +43,40 @@ export const SOURCE_CHAINS: ReadonlyArray<{ id: string; name: string }> = [
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const STELLAR_CHAIN_ID = NETWORK === "mainnet" ? "stellar" : "stellar-testnet";
+
+/**
+ * What sending from a chain needs, or why it cannot be sent from here yet.
+ *
+ * The adapter quotes and builds for every family. This page can only sign for
+ * EVM, because Solana and Starknet need their own wallet protocols, so it says
+ * so at the point of choosing rather than after a quote the user cannot act on.
+ */
+export interface EvmSource {
+  readonly kind: "evm";
+  readonly evmChainId: number;
+  readonly name: string;
+  readonly nativeCurrency: NativeCurrency | undefined;
+}
+
+export interface OtherSource {
+  readonly kind: "other";
+  readonly name: string;
+  readonly family: string;
+}
+
+export function sourceChainDetail(chainId: string): EvmSource | OtherSource {
+  const evm = EVM_DEPLOYMENTS[NETWORK][chainId];
+  if (evm !== undefined) {
+    return {
+      kind: "evm",
+      evmChainId: evm.evmChainId,
+      name: evm.name,
+      nativeCurrency: evm.nativeCurrency,
+    };
+  }
+  const other = NON_EVM_CHAINS[NETWORK][chainId];
+  return { kind: "other", name: other?.name ?? chainId, family: other?.family ?? "unknown" };
+}
 
 /**
  * Where the form starts.
