@@ -20,11 +20,23 @@ export interface RouteListProps {
   readonly routes: RouteSet;
   readonly selectedId: string | undefined;
   readonly onSelect: (routeId: string) => void;
+  /** Undefined follows the machine, which is right when nobody has said. */
+  readonly theme?: "light" | "dark" | undefined;
 }
 
-export function RouteList({ routes, selectedId, onSelect }: RouteListProps): ReactElement {
+/**
+ * This carries its own `mv-root` rather than assuming one is above it.
+ *
+ * Every token the stylesheet defines lives on that class, so rendering this
+ * without one resolves `--mv-ink` to nothing and the list quietly inherits the
+ * host page's colours instead of its own. That is not a visible error, it is
+ * near-black text on a dark page, and it shipped exactly that way in our own app
+ * because the playground happened to wrap it and the app did not. A component
+ * that can be rendered on its own has to scope itself.
+ */
+export function RouteList({ routes, selectedId, onSelect, theme }: RouteListProps): ReactElement {
   return (
-    <div className="mv-routes">
+    <div className="mv-root mv-routes" data-mv-theme={theme}>
       <ul className="mv-route-options">
         {routes.routes.map((route) => (
           <li key={route.id}>

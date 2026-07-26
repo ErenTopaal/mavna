@@ -22,6 +22,7 @@ import {
   STELLAR_CHAIN_ID,
   sourceChainDetail,
 } from "@/lib/mavna";
+import { useTheme } from "@/lib/theme";
 import type { Connection } from "@/lib/wallet";
 
 /**
@@ -94,6 +95,9 @@ export function Transfer() {
   }
 
   const chosen = routes?.routes.find((r) => r.id === selected) ?? routes?.routes[0];
+  // Told, not guessed. The widget follows the machine when nobody says, which is
+  // right in someone else's page and wrong in ours.
+  const theme = useTheme();
 
   return (
     <div className="space-y-8">
@@ -174,7 +178,7 @@ export function Transfer() {
       {routes === undefined ? null : (
         <div className="space-y-8">
           {routes.routes.length > 1 || routes.rejected.length > 0 ? (
-            <RouteList routes={routes} selectedId={selected} onSelect={setSelected} />
+            <RouteList routes={routes} selectedId={selected} onSelect={setSelected} theme={theme} />
           ) : null}
 
           {chosen === undefined ? null : (
@@ -185,7 +189,7 @@ export function Transfer() {
                 outcome="in-flight"
                 onConfirm={undefined}
                 onRemedy={undefined}
-                theme={undefined}
+                theme={theme}
               />
               <SendPanel route={chosen} chainId={chainId} />
             </>

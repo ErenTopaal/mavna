@@ -83,7 +83,9 @@ function RouteChoice({ theme }: { readonly theme: "light" | "dark" }): ReactElem
   return (
     <div className="mv-root" data-mv-theme={theme}>
       <div className="mv-panel">
-        <RouteList routes={ROUTE_SET} selectedId={selected} onSelect={setSelected} />
+        {/* Told explicitly, because the list now roots itself and a nested root
+            with no theme would follow the machine rather than this wrapper. */}
+        <RouteList routes={ROUTE_SET} selectedId={selected} onSelect={setSelected} theme={theme} />
       </div>
     </div>
   );

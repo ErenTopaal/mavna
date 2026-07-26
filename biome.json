@@ -6,6 +6,8 @@
       "!**/dist",
       "!**/.turbo",
       "!**/node_modules",
+      "!**/test-results",
+      "!**/playwright-report",
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml",
