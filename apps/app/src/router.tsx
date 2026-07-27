@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
 import { WidgetStates } from "@/dev/WidgetStates";
+import { Track } from "@/routes/Track";
 import { Transfer } from "@/routes/Transfer";
 
 /**
@@ -25,6 +26,19 @@ const transferRoute = createRoute({
 });
 
 /**
+ * Finding a transfer again, and this browser's own history.
+ *
+ * A separate route rather than a panel on the send page, because someone
+ * arriving here has already sent and is coming back to check, often days later
+ * and often from a link they kept.
+ */
+const trackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/track",
+  component: Track,
+});
+
+/**
  * The widget's every state, on one page.
  *
  * Shipped rather than kept local: the design rules require every failure state to
@@ -37,7 +51,7 @@ const widgetRoute = createRoute({
   component: WidgetStates,
 });
 
-const routeTree = rootRoute.addChildren([transferRoute, widgetRoute]);
+const routeTree = rootRoute.addChildren([transferRoute, trackRoute, widgetRoute]);
 
 export const router = createRouter({ routeTree });
 

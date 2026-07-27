@@ -1,5 +1,16 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "//": "Declared so Turborepo does not serve a cached result produced under different settings, and so the linter can tell a real variable from a typo. Passed through rather than hashed: these select which network and which endpoints to use, and one of them is a secret that must never become part of a cache key.",
+  "globalPassThroughEnv": [
+    "MAVNA_LIVE",
+    "MAVNA_NETWORK",
+    "SPONSOR_SECRET_KEY",
+    "SOROSWAP_API_KEY",
+    "STELLAR_RPC_URL",
+    "STELLAR_RPC_URL_TESTNET",
+    "STELLAR_RPC_URL_MAINNET",
+    "PHAROS_TESTNET_RPC_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

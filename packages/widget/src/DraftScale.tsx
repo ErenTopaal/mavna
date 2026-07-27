@@ -28,13 +28,24 @@ export interface DraftScaleProps {
   /** How the whole transfer ended, which decides whether the keel is drawn. */
   readonly outcome: "succeeded" | "refunded" | "partial" | "failed" | "in-flight";
   readonly onRemedy: ((stepId: string, remedy: Remedy) => void) | undefined;
+  /** Undefined follows the machine, which is right when nobody has said. */
+  readonly theme?: "light" | "dark" | undefined;
 }
 
-export function DraftScale({ steps, outcome, onRemedy }: DraftScaleProps): ReactElement {
+/**
+ * Carries its own `mv-root`, like the route list and for the same reason.
+ *
+ * Every token the stylesheet defines lives on that class. Rendered without one,
+ * `--mv-ink` resolves to nothing and the scale inherits the host page's colours
+ * instead of its own, which on a dark page is a near-invisible hull. It is a
+ * public export and can be rendered on its own, so it has to scope itself rather
+ * than assume a panel is above it.
+ */
+export function DraftScale({ steps, outcome, onRemedy, theme }: DraftScaleProps): ReactElement {
   const current = steps.find((step) => !isSettled(step.phase));
 
   return (
-    <ol className="mv-scale" data-mv-outcome={outcome}>
+    <ol className="mv-root mv-scale" data-mv-outcome={outcome} data-mv-theme={theme}>
       {steps.map((step) => {
         const remedy = remedyFor(step.phase);
         const note = noteFor(step);

@@ -1,3 +1,4 @@
+import { explorerTxUrl } from "@mavna/adapter-cctp";
 import type { Asset, Route, RouteSet } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import { RouteList, TransferPanel } from "@mavna/widget";
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { type ExecutionEvent, execute } from "@/lib/execute";
+import { remember } from "@/lib/history";
 import {
   cctp,
   DEFAULT_SOURCE_CHAIN,
@@ -232,7 +234,7 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
     setEvents([]);
     try {
       const transactions = await cctp.buildTransactions(route);
-      await execute({
+      const hashes = await execute({
         connection,
         route,
         transactions,
@@ -241,6 +243,24 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
         nativeCurrency: chain.nativeCurrency,
         onEvent: (event) => setEvents((all) => [...all, event]),
       });
+      // The burn is the last transaction and the one worth remembering: it is
+      // the key every recovery path is keyed on. Written after it lands rather
+      // than before, so nothing in history refers to a transfer that never
+      // happened.
+      const burnHash = hashes.at(-1);
+      if (burnHash !== undefined) {
+        remember({
+          sourceTxHash: burnHash,
+          sourceChainId: chainId,
+          sourceChainName: chain.name,
+          destination: route.destination,
+          sendsBaseUnits: route.sends.baseUnits,
+          symbol: route.sends.asset.symbol,
+          decimals: route.sends.asset.decimals,
+          startedAtUnix: Math.floor(Date.now() / 1000),
+          explorerUrl: explorerTxUrl(NETWORK, chainId, burnHash),
+        });
+      }
       setDone(true);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "The transfer did not go through.");

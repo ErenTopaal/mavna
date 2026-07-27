@@ -8,6 +8,8 @@ export {
 } from "./caps.js";
 export type { Channel, ChannelPoolOptions } from "./channels.js";
 export { ChannelPool } from "./channels.js";
+export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
+export { Deliverer } from "./deliver.js";
 export type {
   ChainSponsorshipView,
   ReconciliationReport,

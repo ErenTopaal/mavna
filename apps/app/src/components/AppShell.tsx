@@ -32,6 +32,9 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             <Link to="/" className="hover:text-foreground [&.active]:text-foreground">
               Send
             </Link>
+            <Link to="/track" className="hover:text-foreground [&.active]:text-foreground">
+              Find
+            </Link>
             <Link to="/dev/widget" className="hover:text-foreground [&.active]:text-foreground">
               Widget
             </Link>
