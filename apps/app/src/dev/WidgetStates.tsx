@@ -1,6 +1,7 @@
 import { RouteList, TransferPanel } from "@mavna/widget";
 import { type ReactElement, useState } from "react";
 import { ROUTE, ROUTE_SET, SCENARIOS } from "./fixtures.js";
+import { LivePlayground } from "./LivePlayground.js";
 
 /**
  * Every widget state, side by side, in both themes.
@@ -21,6 +22,8 @@ export function WidgetStates(): ReactElement {
           things and look the same, the design has failed.
         </p>
       </header>
+
+      <LivePlayground />
 
       <section className="mb-12">
         <h2 className="mb-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">

@@ -84,7 +84,13 @@ export function TransferPanel(props: TransferPanelProps): ReactElement {
             is not a question to answer only when there is a choice. */}
         {started ? null : <p className="mv-trust">{explainTrust(route.trustModel)}</p>}
 
-        {started ? <DraftScale steps={steps} outcome={outcome} onRemedy={onRemedy} /> : null}
+        {/* The theme is handed down rather than left for the scale to work out.
+            The scale scopes its own tokens, so nested inside this panel it would
+            otherwise start a second root that follows the machine while this one
+            follows what the host said, and the two would disagree. */}
+        {started ? (
+          <DraftScale steps={steps} outcome={outcome} onRemedy={onRemedy} theme={theme} />
+        ) : null}
 
         {started || onConfirm === undefined ? null : (
           <button type="button" className="mv-confirm" onClick={onConfirm}>
