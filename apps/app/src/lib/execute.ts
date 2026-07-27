@@ -52,6 +52,8 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     await switchChain(connection.provider, options.evmChainId, options.chainName);
   }
 
+  await assertBalanceCovers(options);
+
   const chain = chainFor(options.evmChainId, options.chainName, options.nativeCurrency);
   const hashes: Hash[] = [];
 
@@ -110,6 +112,47 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
   }
 
   return hashes;
+}
+
+/**
+ * Refuse before the first signature if the wallet cannot cover the transfer.
+ *
+ * Without this the flow asks for the approval, the user pays gas for it, and then
+ * the burn reverts on a balance the app could have read at any point. It is the
+ * same failure the missing approval caused, one step later, and just as avoidable.
+ *
+ * The allowance the burn needs is read from the approval's own stated condition,
+ * so this cannot drift from what is actually being asked for.
+ */
+async function assertBalanceCovers(options: ExecuteOptions): Promise<void> {
+  const condition = options.transactions
+    .map((t) => t.unnecessaryWhen)
+    .find((c) => c?.kind === "erc20-allowance");
+  if (condition === undefined) return;
+
+  const needed = BigInt(condition.atLeastBaseUnits);
+  const held = await options.connection.reader.readContract({
+    address: condition.token as Address,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [options.connection.address],
+  });
+
+  if (held < needed) {
+    const { symbol, decimals } = options.route.sends.asset;
+    throw new Error(
+      `This wallet holds ${format(held, decimals)} ${symbol} and the transfer needs ` +
+        `${format(needed, decimals)}. Nothing has been sent.`,
+    );
+  }
+}
+
+/** Base units to a readable figure, without going near a float. */
+function format(baseUnits: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = baseUnits / scale;
+  const fraction = (baseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction === "" ? whole.toString() : `${whole}.${fraction}`;
 }
 
 /**

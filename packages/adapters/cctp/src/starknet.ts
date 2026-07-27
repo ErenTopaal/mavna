@@ -1,6 +1,6 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import { keccak256, toBytes } from "viem";
-import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
+import { CCTP_CONTRACTS, readableUsdc, STELLAR_DOMAIN } from "./config.js";
 import { buildForwarderHookData, contractAddressToBytes32 } from "./hook.js";
 
 /**
@@ -180,7 +180,7 @@ export function buildStarknetBurn(params: StarknetBurnParams): StarknetInvoke {
   return {
     calls,
     describes:
-      `Send ${params.amount} USDC base units to ${params.stellarRecipient} on Stellar, ` +
+      `Send ${readableUsdc(params.amount)} USDC to ${params.stellarRecipient} on Stellar, ` +
       `via Circle, ${finality === 1000 ? "on the fast path" : "on the standard path"}.`,
   };
 }

@@ -1,6 +1,6 @@
 import { MavnaError } from "@mavna/core";
 import { deploymentFor } from "./chains.js";
-import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
+import { CCTP_CONTRACTS, readableUsdc, STELLAR_DOMAIN } from "./config.js";
 import { buildForwarderHookData, contractAddressToBytes32, toHex } from "./hook.js";
 
 /**
@@ -150,7 +150,7 @@ export function buildBurn(params: BurnParams): BurnCall {
       hookData,
     ],
     describes:
-      `Send ${params.amount} USDC base units to ${params.stellarRecipient} on Stellar, ` +
+      `Send ${readableUsdc(params.amount)} USDC to ${params.stellarRecipient} on Stellar, ` +
       `via Circle, ${finality === FINALITY.fast ? "on the fast path" : "on the standard path"}.`,
   };
 }
@@ -200,7 +200,7 @@ export function buildApproval(params: BurnParams): ApprovalCall {
     functionName: "approve",
     args: [deployment.tokenMessengerV2 as `0x${string}`, params.amount],
     describes:
-      `Let Circle's transfer contract move ${params.amount} USDC base units from your ` +
+      `Let Circle's transfer contract move ${readableUsdc(params.amount)} USDC from your ` +
       "wallet, once. This does not send anything on its own.",
   };
 }
@@ -216,6 +216,13 @@ export const ERC20_ABI = [
       { name: "amount", type: "uint256" },
     ],
     outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
   },
   {
     type: "function",

@@ -129,3 +129,21 @@ describe("the approval the burn cannot run without", () => {
     expect(() => buildApproval({ ...base, amount: 0n })).toThrow(/non-positive/);
   });
 });
+
+describe("what the user is shown before they sign", () => {
+  it("says the amount they typed, not the amount the contract sees", () => {
+    // "5000000 USDC base units" is the machine's number. A signature is consent,
+    // and consent needs a figure the signer recognises as the one they entered.
+    const approval = buildApproval({ ...base, amount: 5_000_000n });
+    expect(approval.describes).toContain("5 USDC");
+    expect(approval.describes).not.toContain("base units");
+
+    const call = buildBurn({ ...base, amount: 5_000_000n });
+    expect(call.describes).toContain("5 USDC");
+    expect(call.describes).not.toContain("base units");
+  });
+
+  it("keeps the cents rather than rounding them away", () => {
+    expect(buildBurn({ ...base, amount: 1_234_567n }).describes).toContain("1.234567 USDC");
+  });
+});

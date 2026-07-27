@@ -1,6 +1,6 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/addresses";
-import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
+import { CCTP_CONTRACTS, readableUsdc, STELLAR_DOMAIN } from "./config.js";
 import { buildForwarderHookData, contractAddressToBytes32, toHex } from "./hook.js";
 
 /**
@@ -202,7 +202,7 @@ export async function buildSolanaBurn(params: SolanaBurnParams): Promise<SolanaI
       }),
     ).toString("base64"),
     describes:
-      `Send ${params.amount} USDC base units to ${params.stellarRecipient} on Stellar, ` +
+      `Send ${readableUsdc(params.amount)} USDC to ${params.stellarRecipient} on Stellar, ` +
       `via Circle, ${finality === 1000 ? "on the fast path" : "on the standard path"}.`,
     ephemeralSigners: ["message_sent_event_data"],
   };

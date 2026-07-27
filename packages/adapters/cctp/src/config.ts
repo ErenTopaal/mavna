@@ -90,3 +90,37 @@ export function stellarDomainFor(_network: NetworkId): number {
 export function IRIS_BASE_URL(network: NetworkId): string {
   return CCTP_CONTRACTS[network].irisBaseUrl;
 }
+
+/**
+ * USDC's decimals on every chain a burn starts from.
+ *
+ * Six, everywhere, and verified rather than assumed: the EVM sweep asks each
+ * token whether it agrees it is USDC with six decimals and drops any chain that
+ * says otherwise, and the Solana and Starknet scripts check the same thing
+ * against their own registries. Stellar's seven is a separate number and is
+ * handled at the delivery boundary, not here.
+ */
+export const USDC_SOURCE_DECIMALS = 6;
+
+/**
+ * A base-unit integer as a person would read it.
+ *
+ * Used in the sentences a user is shown before signing. "5000000 USDC base
+ * units" is the machine's number, and a signature is consent, which needs the
+ * amount to be one the signer recognises as the amount they typed.
+ *
+ * String arithmetic throughout. A float here would round the very figure the
+ * user is being asked to agree to.
+ */
+export function readableUsdc(baseUnits: bigint): string {
+  const scale = 10n ** BigInt(USDC_SOURCE_DECIMALS);
+  const negative = baseUnits < 0n;
+  const value = negative ? -baseUnits : baseUnits;
+  const whole = value / scale;
+  const fraction = (value % scale)
+    .toString()
+    .padStart(USDC_SOURCE_DECIMALS, "0")
+    .replace(/0+$/, "");
+  const text = fraction === "" ? whole.toString() : `${whole}.${fraction}`;
+  return negative ? `-${text}` : text;
+}
