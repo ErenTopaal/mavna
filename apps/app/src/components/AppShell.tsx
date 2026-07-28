@@ -2,7 +2,7 @@ import { AnchorIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { NETWORK } from "@/lib/mavna";
+import { NETWORK, RPC_IS_A_DEFAULT } from "@/lib/mavna";
 
 /**
  * The frame every page sits in.
@@ -19,6 +19,16 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       {NETWORK === "testnet" ? (
         <p className="bg-destructive/10 px-4 py-1.5 text-center text-xs font-medium text-destructive">
           Test network. Nothing here is real money.
+        </p>
+      ) : null}
+
+      {/* On mainnet the money is real, and an endpoint nobody chose is a party
+          this product depends on without having said so. It gets one line rather
+          than a dismissible banner, because a warning that can be dismissed is a
+          warning nobody has read. */}
+      {NETWORK === "mainnet" && RPC_IS_A_DEFAULT ? (
+        <p className="bg-destructive/10 px-4 py-1.5 text-center text-xs font-medium text-destructive">
+          Reading Stellar through a public node nobody here chose. Set your own before sending.
         </p>
       ) : null}
 

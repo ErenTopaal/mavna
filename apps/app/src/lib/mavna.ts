@@ -5,7 +5,12 @@ import {
   NON_EVM_CHAINS,
 } from "@mavna/adapter-cctp";
 import type { NetworkId } from "@mavna/core";
-import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
+import {
+  createNetworkConfig,
+  PUBLIC_MAINNET_RPC_URLS,
+  PUBLIC_TESTNET_RPC_URL,
+  RpcClient,
+} from "@mavna/stellar";
 
 /**
  * The SDK, assembled once for the app.
@@ -17,10 +22,28 @@ import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/s
 export const NETWORK: NetworkId =
   import.meta.env.VITE_MAVNA_NETWORK === "mainnet" ? "mainnet" : "testnet";
 
-const config = createNetworkConfig({
-  id: NETWORK,
-  rpcUrl: import.meta.env.VITE_STELLAR_RPC_URL ?? PUBLIC_TESTNET_RPC_URL,
-});
+/**
+ * The endpoint, defaulted per network rather than per build.
+ *
+ * This used to fall back to the testnet endpoint whatever the network was set
+ * to, so selecting mainnet without also setting a URL produced a mainnet
+ * configuration pointed at the test network: mainnet contract addresses, mainnet
+ * asset issuers, and a node that has never heard of either. Nothing about that
+ * announces itself; it reads as a chain that has lost your account.
+ *
+ * The foundation runs no public main-network node, so the mainnet default is a
+ * third party's. That is a real dependency rather than a detail, which is why the
+ * app states which endpoint it is using rather than leaving it implicit, and why
+ * an operator is expected to set their own before there is real money involved.
+ */
+export const RPC_URL: string =
+  import.meta.env.VITE_STELLAR_RPC_URL ??
+  (NETWORK === "mainnet" ? (PUBLIC_MAINNET_RPC_URLS[0] ?? "") : PUBLIC_TESTNET_RPC_URL);
+
+/** True when nobody chose the endpoint, which is worth saying out loud on mainnet. */
+export const RPC_IS_A_DEFAULT: boolean = import.meta.env.VITE_STELLAR_RPC_URL === undefined;
+
+const config = createNetworkConfig({ id: NETWORK, rpcUrl: RPC_URL });
 
 export const rpc: RpcClient = new RpcClient({ url: config.rpcUrl });
 
