@@ -5,6 +5,7 @@ import {
   NON_EVM_CHAINS,
 } from "@mavna/adapter-cctp";
 import type { NetworkId } from "@mavna/core";
+import { type CircuitBreaker, createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import {
   createNetworkConfig,
   PUBLIC_MAINNET_RPC_URLS,
@@ -46,6 +47,23 @@ export const RPC_IS_A_DEFAULT: boolean = import.meta.env.VITE_STELLAR_RPC_URL ==
 const config = createNetworkConfig({ id: NETWORK, rpcUrl: RPC_URL });
 
 export const rpc: RpcClient = new RpcClient({ url: config.rpcUrl });
+
+/**
+ * Sources an operator has taken out of rotation, read from configuration.
+ *
+ * Set `VITE_MAVNA_DISABLED_SOURCES` to something like
+ * `cctp:Circle is degraded right now` and the next quote declines that rail with
+ * that sentence instead of routing money through it. Required by the security
+ * rules, which ask for a way to stop using a degraded third party that does not
+ * wait for a release.
+ *
+ * In this app the value is baked in at build time, so acting on it is a redeploy
+ * of static files rather than a code change. A server-rendered host reads the
+ * same list per request; the breaker takes a function precisely so it can.
+ */
+export const breaker: CircuitBreaker = createCircuitBreaker(() =>
+  parseDisabledSources(import.meta.env.VITE_MAVNA_DISABLED_SOURCES),
+);
 
 export const cctp: CctpAdapter = new CctpAdapter({
   network: NETWORK,

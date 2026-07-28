@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { execute } from "@/lib/execute";
 import { remember } from "@/lib/history";
 import {
+  breaker,
   cctp,
   DEFAULT_SOURCE_CHAIN,
   NETWORK,
@@ -76,13 +77,17 @@ export function LivePlayground(): ReactElement {
         decimals: USDC_DECIMALS_ON_STELLAR,
         curatedBy: "Circle",
       };
-      const result = await raceAdapters([cctp], {
-        from,
-        to,
-        sends: { asset: from, baseUnits: toBaseUnits(amount, USDC_DECIMALS_ON_EVM) },
-        destination: destination.trim(),
-        maxSlippageBps: 50,
-      });
+      const result = await raceAdapters(
+        [cctp],
+        {
+          from,
+          to,
+          sends: { asset: from, baseUnits: toBaseUnits(amount, USDC_DECIMALS_ON_EVM) },
+          destination: destination.trim(),
+          maxSlippageBps: 50,
+        },
+        { breaker },
+      );
       const first = result.routes[0];
       if (first === undefined) {
         setProblem(result.rejected[0]?.explanation ?? "No route was offered for that.");

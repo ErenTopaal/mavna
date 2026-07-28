@@ -17,6 +17,7 @@ import {
 import { type ExecutionEvent, execute } from "@/lib/execute";
 import { remember } from "@/lib/history";
 import {
+  breaker,
   cctp,
   DEFAULT_SOURCE_CHAIN,
   NETWORK,
@@ -85,7 +86,7 @@ export function Transfer() {
         },
         // Routes render as they land rather than all at once, so the wait reads as
         // progress instead of a spinner.
-        { onUpdate: setRoutes },
+        { onUpdate: setRoutes, breaker },
       );
       setRoutes(result);
       setSelected(result.routes[0]?.id);

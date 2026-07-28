@@ -7,6 +7,7 @@ import {
   type RouteRejection,
   type RouteSet,
 } from "@mavna/core";
+import { ALWAYS_OPEN, type CircuitBreaker, rejectionForDisabled } from "./circuit.js";
 
 /**
  * Asking every rail at once.
@@ -24,6 +25,15 @@ export interface RaceOptions {
   /** How long any single adapter gets before the race moves on without it. */
   readonly timeoutMs?: number;
   /**
+   * Lets an operator take a source out of rotation without a release.
+   *
+   * Required by the security rules: a dependency on a third party is a
+   * dependency on their incidents, and the window between knowing and being able
+   * to deploy is exactly when money is lost. Defaults to letting everything
+   * through, so nothing changes for a caller who has no incident to respond to.
+   */
+  readonly breaker?: CircuitBreaker;
+  /**
    * Called each time a source answers, so an interface can show routes as they
    * land rather than all at once at the end. This is what makes the wait feel
    * like progress instead of a spinner.
@@ -37,6 +47,7 @@ export async function raceAdapters(
   options: RaceOptions = {},
 ): Promise<RouteSet> {
   const timeoutMs = options.timeoutMs ?? ADAPTER_QUOTE_TIMEOUT_MS;
+  const breaker = options.breaker ?? ALWAYS_OPEN;
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [];
   let settled = 0;
@@ -51,6 +62,16 @@ export async function raceAdapters(
 
   await Promise.all(
     adapters.map(async (adapter) => {
+      // Checked here rather than by the caller filtering the list, so a disabled
+      // source still reports itself and its reason instead of vanishing.
+      const disabledBecause = breaker.reasonFor(adapter.id);
+      if (disabledBecause !== undefined) {
+        rejected.push(rejectionForDisabled(adapter, disabledBecause));
+        settled += 1;
+        publish();
+        return;
+      }
+
       try {
         const result = await withTimeout(adapter.quote(request), timeoutMs, adapter.id);
         if (isRejection(result)) rejected.push(result);
