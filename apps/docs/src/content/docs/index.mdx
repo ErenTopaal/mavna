@@ -1,0 +1,46 @@
+---
+title: Mavna
+description: Move USDC into Stellar from twenty-six chains, with an SDK that builds transactions and never signs them.
+tableOfContents: false
+---
+
+Mavna moves USDC into Stellar. It quotes a transfer across every rail that can
+carry it, tells you what will actually arrive after fees, and hands back unsigned
+transactions for your wallet to sign.
+
+Circle's CCTP is the rail documented here, and the one everything on this site
+has been run against: 26 source chains on testnet, 25 on mainnet, across EVM,
+Solana and Starknet. Circle's standard path charges nothing to reach Stellar, so
+a quote out of this SDK is the underlying rate rather than somebody's margin on
+top of it.
+
+Other rails are being built. None of them are described here, because nothing
+here describes something that has not been run.
+
+## Two ways in
+
+**[The SDK](/quickstart/sdk/)** is for a team that already has an interface.
+You configure a network, ask for a quote, and get back a route with the amount
+that lands, the fees behind it, how many signatures it will take, and the
+transactions to sign. Nothing in the SDK holds a key, signs, or submits.
+
+**[The widget](/quickstart/widget/)** is for a team that wants the whole flow.
+It renders the quote, the confirmation, and the wait. React is a peer dependency
+and everything else is 2.69 kB minified and brotlied, against a 12 kB ceiling
+that CI enforces. It is styled entirely by CSS custom properties, so it can be
+made to look like your product rather than like ours.
+
+## Before you start
+
+None of these packages are on npm yet and the `@mavna` scope does not exist.
+[What is published](/install/) says exactly what you can install today and how,
+and both quickstarts assume you have read it.
+
+## What the SDK will not do
+
+It will not sign. It will not submit. It will not take custody of anything at any
+point, which is a property you can check by reading the packages rather than a
+claim you have to accept: nothing under `packages/` imports a signer.
+
+That means the last step of every integration is yours. The SDK gives you a
+payload and tells you, in words meant for a person, what signing it will do.

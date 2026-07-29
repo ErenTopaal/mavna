@@ -76,6 +76,66 @@ export async function estimateGasFee(
 }
 
 /**
+ * What an interchain TOKEN transfer costs, which is not the same number.
+ *
+ * `estimateGasFee` prices one message. An interchain transfer is two, because it
+ * routes through the hub, and the endpoint below knows that: asked for
+ * base-sepolia to Stellar it answers with a breakdown of both legs, where the
+ * generic estimator answers with less. Measured on the same pair at the same
+ * moment, 1001610 against 842003.
+ *
+ * Underpaying is the failure this whole rail has to avoid, so the transfer is
+ * priced with the endpoint built for it. Axelar's own explorer does the same for
+ * exactly this case: its add-gas control switches to this endpoint when a message
+ * is bound for the hub.
+ *
+ * Same trap as its sibling, and worse: the response is a BARE NUMBER with no
+ * JSON object around it at all, so anything reading a field off it gets nothing.
+ */
+export async function estimateItsFee(
+  network: NetworkId,
+  sourceChain: string,
+  destinationChain: string,
+  gasLimit = "200000",
+  gasMultiplier = 1.1,
+): Promise<string> {
+  const response = await fetch(`${GMP_API[network]}/estimateITSFee`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceChain,
+      destinationChain,
+      sourceTokenSymbol: "XLM",
+      gasLimit,
+      gasMultiplier,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new MavnaError(`Axelar's transfer fee estimator returned HTTP ${response.status}.`, {
+      retryable: response.status >= 500,
+    });
+  }
+
+  const body: unknown = await response.json();
+
+  // An object here means an error, because a success is a bare number.
+  if (typeof body === "object" && body !== null) {
+    const record = body as Record<string, unknown>;
+    throw new MavnaError(
+      `Axelar declined to price a transfer from ${sourceChain} to ${destinationChain}: ` +
+        describe(record.message ?? record.error),
+      { retryable: false },
+    );
+  }
+
+  const fee = readFeeField(body, "totalFee");
+  // Zero means the chain name was not recognised, not that delivery is free.
+  assertFeeIsPlausible(fee, destinationChain);
+  return fee;
+}
+
+/**
  * Read a fee field without letting a wrong shape through as a number.
  *
  * `String(value)` on an object produces "[object Object]", which then reaches

@@ -1,0 +1,83 @@
+---
+title: Core types
+description: The money, route and execution model, lifted from packages/core when this page is built.
+---
+
+import { Content as Money } from "../../../generated/source-money.md";
+import { Content as RouteTypes } from "../../../generated/source-route.md";
+import { Content as Execution } from "../../../generated/source-execution.md";
+
+Three files hold the whole model. Everything below is the real source, copied in
+at build time.
+
+## Money
+
+<Money />
+
+Two rules here and neither bends.
+
+Amounts are integers in base units carried as strings. Floating point on money is
+a defect, and 7-decimal Stellar amounts exceed what a double represents exactly,
+so this is a concrete failure rather than a stylistic one. `amountOf` builds one
+and throws on anything that is not a non-negative integer.
+
+An asset is code **and** issuer, never code alone. Anyone can issue a Stellar
+asset called `USDC`, and treating the code as identity is a phishing vector that
+will eventually be used. `sameAsset` compares identity rather than symbol.
+
+`curatedBy` says who vouched for an asset appearing in a list someone picks from.
+Where the product presents a list, somebody is curating it, and that trust
+boundary should be visible rather than implicit.
+
+`account-reserve` is a fee kind of its own because it is not a fee anyone takes.
+It becomes XLM locked in the user's own account as their reserve and returns to
+them if they ever close it. Naming it separately lets an interface say so instead
+of overstating what the transfer costs.
+
+## Routes
+
+<RouteTypes />
+
+`receives` is what actually lands after every fee, and it is the primary number
+in any interface built on this. Never `sends`. `receivesAtLeast` is the worst
+case the user has agreed to, so their exposure is bounded by their own choice.
+
+`signaturesRequired` counts every signature the whole transfer will ask for,
+including ones whose transactions a given adapter does not build. Telling someone
+upfront is the point; surfacing prompts one at a time is the failure it exists to
+prevent.
+
+`RouteRejection` is structural rather than a silent omission, because a user has
+to be able to see why a route is unavailable instead of watching it quietly not
+appear. `RouteSet` carries routes and rejections together with a `complete` flag,
+since partial results are the normal case when sources are raced.
+
+Execution state is grafted onto the quoted shape rather than replacing it, so a
+fresh quote and a transfer in flight are the same type.
+
+## Execution
+
+<Execution />
+
+The payload is narrowed by phase. A step that has no transaction cannot carry a
+transaction link, so rendering one is a compile error rather than a runtime check
+somebody forgets.
+
+`stalled` exists as a phase of its own because the alternative is a user unable
+to tell "slow but proceeding" from "stalled and needs you". `refunded` and
+`partial` are terminal states rather than kinds of `done`, because a refunded
+transfer filed under success reads as money received.
+
+Every failure carries a `Remedy`, and every remedy says what the user can do.
+`unrecoverable` is one of them, stated plainly, so nobody retries forever hoping.
+
+`canAdvance` refuses to apply an update to a terminal step. A slow poll arriving
+after success would otherwise walk the interface backwards, and a user who sees
+"pending" after "done" will retry, which is how one failure becomes two payments.
+
+## Errors
+
+Everything this project throws is a `MavnaError`, which carries `retryable`. That
+flag is the difference between "the network was too stale to answer" and "this
+address cannot receive", and showing the first as the second tells a user their
+address is broken when it is not.

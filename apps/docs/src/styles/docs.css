@@ -1,0 +1,267 @@
+/*
+ * The documentation site's own palette.
+ *
+ * Same neutral scale as the widget, transcribed from the same preset, for the
+ * same reason the widget matches the app: the three surfaces should read as one
+ * product without sharing a stack. Starlight's default is a blue-tinted grey with
+ * a purple accent, which belongs to Starlight rather than to this project.
+ *
+ * Dark is the base and light is the override, because that is the order
+ * Starlight declares them in and fighting it costs specificity for nothing.
+ */
+
+:root {
+  --sl-color-white: oklch(0.985 0 0);
+  --sl-color-gray-1: oklch(0.95 0 0);
+  --sl-color-gray-2: oklch(0.87 0 0);
+  --sl-color-gray-3: oklch(0.708 0 0);
+  --sl-color-gray-4: oklch(0.556 0 0);
+  --sl-color-gray-5: oklch(0.35 0 0);
+  --sl-color-gray-6: oklch(0.26 0 0);
+  --sl-color-gray-7: oklch(0.225 0 0);
+  --sl-color-black: oklch(0.16 0 0);
+
+  /*
+   * The accent is the ink itself, not a hue.
+   *
+   * Every documentation site in this category picks a brand colour and scatters
+   * it across links, active sidebar rows and buttons. This product has exactly
+   * one chromatic value and it means something has gone wrong, so spending a
+   * second one on decoration would make the first one quieter.
+   */
+  --sl-color-accent-low: oklch(0.3 0 0);
+  --sl-color-accent: oklch(0.75 0 0);
+  --sl-color-accent-high: oklch(0.95 0 0);
+
+  --sl-color-bg: oklch(0.16 0 0);
+  --sl-color-bg-nav: oklch(0.16 0 0);
+  --sl-color-bg-sidebar: oklch(0.16 0 0);
+  --sl-color-bg-inline-code: oklch(0.245 0 0);
+  --sl-color-hairline: oklch(1 0 0 / 10%);
+  --sl-color-hairline-light: oklch(1 0 0 / 8%);
+  --sl-color-hairline-shade: oklch(1 0 0 / 6%);
+
+  --sl-content-width: 48rem;
+}
+
+:root[data-theme="light"] {
+  --sl-color-white: oklch(0.145 0 0);
+  --sl-color-gray-1: oklch(0.22 0 0);
+  --sl-color-gray-2: oklch(0.35 0 0);
+  --sl-color-gray-3: oklch(0.556 0 0);
+  --sl-color-gray-4: oklch(0.708 0 0);
+  --sl-color-gray-5: oklch(0.87 0 0);
+  --sl-color-gray-6: oklch(0.955 0 0);
+  --sl-color-gray-7: oklch(0.975 0 0);
+  --sl-color-black: oklch(1 0 0);
+
+  --sl-color-accent-low: oklch(0.93 0 0);
+  --sl-color-accent: oklch(0.35 0 0);
+  --sl-color-accent-high: oklch(0.145 0 0);
+
+  --sl-color-bg: oklch(1 0 0);
+  --sl-color-bg-nav: oklch(1 0 0);
+  --sl-color-bg-sidebar: oklch(1 0 0);
+  --sl-color-bg-inline-code: oklch(0.965 0 0);
+  --sl-color-hairline: oklch(0.922 0 0);
+  --sl-color-hairline-light: oklch(0.94 0 0);
+  --sl-color-hairline-shade: oklch(0.955 0 0);
+}
+
+/* Amounts and version numbers sit in columns all over this site and must not
+   shimmer as digits change. Same rule as the product. */
+:root {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Headings that separate rather than announce.
+ *
+ * The reference pages are long lists of names and the default heading scale
+ * makes every one of them a billboard. A mark above the section does the
+ * separating and lets the type stay close to body size.
+ *
+ * A fixed-width tick rather than a rule across the column: Starlight sizes
+ * headings to their text, so a border would be as long as the words above it
+ * and a different length on every section, which reads as an accident.
+ */
+.sl-markdown-content h2:not(:where(.not-content *)) {
+  position: relative;
+  padding-top: 1.75rem;
+  font-size: var(--sl-text-xl);
+  letter-spacing: -0.01em;
+}
+
+.sl-markdown-content h2:not(:where(.not-content *))::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 24px;
+  block-size: 1px;
+  background: var(--sl-color-gray-3);
+}
+
+.sl-markdown-content h3:not(:where(.not-content *)) {
+  font-size: var(--sl-text-base);
+  letter-spacing: -0.005em;
+}
+
+/* Reference tables are two or three narrow columns of identifiers. Left aligned,
+   monospaced where they are code, and no zebra striping. */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  font-size: var(--sl-text-sm);
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  font-weight: 500;
+  color: var(--sl-color-gray-3);
+}
+
+/* Inside a reference table every cell is code already, so the chip that marks
+   inline code in prose adds nothing and makes a page of names look busy. */
+.sl-markdown-content table code:not(:where(.not-content *)) {
+  background: none;
+  padding: 0;
+  border: 0;
+}
+
+/* Identifiers are one word. Breaking `--mv-ground` across two lines to save
+   forty pixels makes the column harder to scan than a wider table would. */
+.sl-markdown-content td:first-child code:not(:where(.not-content *)) {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- playground --- */
+
+/*
+ * The playground's own shell.
+ *
+ * Deliberately plain: it frames a live copy of the widget, and a frame with
+ * opinions of its own would compete with the thing it exists to show.
+ */
+.mv-play {
+  display: grid;
+  gap: var(--sl-content-gap-y, 1.5rem);
+  margin-block: 1.5rem;
+}
+
+@media (min-width: 60rem) {
+  .mv-play {
+    grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.mv-play-controls {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.mv-play-stage {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 7.2px;
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.mv-play-group {
+  display: grid;
+  gap: 0.5rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.mv-play-group legend {
+  font-size: var(--sl-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sl-color-gray-3);
+  padding: 0;
+}
+
+.mv-play-field {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+}
+
+.mv-play-field > span {
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+}
+
+.mv-play-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mv-play input[type="text"],
+.mv-play input[type="number"],
+.mv-play select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-white);
+  background: var(--sl-color-black);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 5.2px;
+  padding: 0.35rem 0.5rem;
+}
+
+.mv-play button {
+  font: inherit;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-black);
+  background: var(--sl-color-white);
+  border: 0;
+  border-radius: 5.2px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.mv-play button[data-quiet] {
+  color: var(--sl-color-gray-2);
+  background: none;
+  border: 1px solid var(--sl-color-hairline);
+}
+
+.mv-play button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* The empty state before a quote exists. It is a real state, not a gap: the
+   widget renders a transfer and there is no transfer yet. */
+.mv-play-empty {
+  color: var(--sl-color-gray-3);
+  font-size: var(--sl-text-sm);
+  margin: 0;
+}
+
+.mv-play-problem {
+  color: var(--sl-color-red-high, oklch(0.704 0.191 22.216));
+  font-size: var(--sl-text-sm);
+  margin: 0;
+}
+
+.mv-play-output {
+  margin: 0;
+  font-size: var(--sl-text-sm);
+}
+
+.mv-play-swatch {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  flex: none;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 3px;
+}
+
+.mv-play-output pre {
+  margin-block-end: 0.5rem;
+}

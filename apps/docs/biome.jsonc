@@ -1,0 +1,32 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "root": false,
+  "extends": "//",
+  "files": {
+    // A nested config replaces the root's file list rather than adding to it, so
+    // the root's exclusions are repeated here. The two additions are Astro's
+    // generated types and the reference tables this package writes from the
+    // packages' own source before every build.
+    "includes": [
+      "**",
+      "!dist",
+      "!.astro",
+      "!.turbo",
+      "!node_modules",
+      "!src/generated",
+      "!**/*.md",
+      "!**/*.yml",
+      "!**/*.yaml"
+    ]
+  },
+  "linter": {
+    "rules": {
+      "suspicious": {
+        // The runnable example prints its quote and the reference generator
+        // prints what it wrote. Both are command line programs whose output is
+        // the entire point of running them.
+        "noConsole": "off"
+      }
+    }
+  }
+}

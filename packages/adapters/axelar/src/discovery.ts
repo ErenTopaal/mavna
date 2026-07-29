@@ -31,6 +31,8 @@ interface ChainRow {
   readonly id?: string;
   readonly chain_type?: string;
   readonly gateway?: { address?: string };
+  /** Set on chains Axelar has retired. They stay listed, so this must be read. */
+  readonly deprecated?: boolean;
 }
 
 /**
@@ -77,6 +79,39 @@ export async function discoverStellarChain(network: NetworkId): Promise<AxelarSt
   }
 
   return { id: row.id, gateway };
+}
+
+/**
+ * Which chains Axelar is actually running right now.
+ *
+ * The registry marks retired chains `deprecated` rather than removing them, and
+ * on testnet nine of them are. Listing a retired chain as somewhere a user can
+ * send from offers a route into a deployment nobody is relaying for, which is the
+ * same class of mistake as a stale Stellar name and just as quiet.
+ *
+ * The families are Axelar's own: EVM chains are `evm` on some entries and `vm` on
+ * others, and hyperliquid, the one testnet chain that reaches Stellar today, is
+ * `vm`. So family is not a usable filter here and the caller decides what it can
+ * build for, from the deployment configuration where the distinction is honest.
+ */
+export async function discoverLiveChains(network: NetworkId): Promise<readonly string[]> {
+  const response = await fetch(CHAINS_API[network]);
+  if (!response.ok) {
+    throw new MavnaError(`Could not reach Axelar's chain registry (HTTP ${response.status}).`, {
+      retryable: response.status >= 500,
+    });
+  }
+
+  const rows = (await response.json()) as ChainRow[];
+  if (!Array.isArray(rows)) {
+    throw new MavnaError("Axelar's chain registry returned an unexpected shape.", {
+      retryable: false,
+    });
+  }
+
+  return rows
+    .filter((row) => typeof row.id === "string" && row.deprecated !== true)
+    .map((row) => row.id as string);
 }
 
 /**

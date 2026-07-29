@@ -1,0 +1,30 @@
+{
+  "name": "@mavna/docs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/sync-reference.mjs && astro dev",
+    "build": "node scripts/sync-reference.mjs && astro build",
+    "preview": "astro preview",
+    "typecheck": "node scripts/sync-reference.mjs && astro sync && tsc --noEmit",
+    "sync:reference": "node scripts/sync-reference.mjs",
+    "example:quote": "node examples/quote.ts"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.41.7",
+    "@mavna/adapter-cctp": "workspace:*",
+    "@mavna/core": "workspace:*",
+    "@mavna/routing": "workspace:*",
+    "@mavna/status": "workspace:*",
+    "@mavna/stellar": "workspace:*",
+    "@mavna/widget": "workspace:*",
+    "astro": "7.2.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4"
+  }
+}

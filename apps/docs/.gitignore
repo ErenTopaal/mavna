@@ -1,0 +1,5 @@
+# Astro's generated types and build cache.
+.astro/
+
+# Written by scripts/sync-reference.mjs on every build, straight from the packages.
+src/generated/

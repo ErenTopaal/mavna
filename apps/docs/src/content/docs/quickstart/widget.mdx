@@ -1,0 +1,120 @@
+---
+title: Widget quickstart
+description: Render the whole transfer flow, then make it look like your product rather than ours.
+---
+
+import { Code } from "@astrojs/starlight/components";
+import { Content as PanelProps } from "../../../generated/source-widget-panel.md";
+import { Content as ScaleProps } from "../../../generated/source-widget-scale.md";
+import { Content as RoutesProps } from "../../../generated/source-widget-routes.md";
+import panel from "../../../../examples/Panel.tsx?raw";
+
+`@mavna/widget` renders a quote, the confirmation, and the wait, from the same
+`Route` the SDK hands you. React 19 is a peer dependency. Nothing else is
+bundled: no icon package, no animation runtime, no webfont, because the widget
+runs in your page and every kilobyte is yours to pay for.
+
+Read [what is published](/install/) first. Nothing is on npm.
+
+## The one line that is easy to miss
+
+```ts
+import "@mavna/widget/widget.css";
+```
+
+Once, anywhere in your app. The build extracts the stylesheet into a file of its
+own and strips this import from the emitted JavaScript, so importing only the
+component renders every state completely unstyled and throws nothing: no error,
+no warning, no console entry. It looks like a broken component rather than a
+missing import.
+
+The widget warns about it in development, by reading back a custom property that
+only the stylesheet defines. That check compiles away in production builds.
+
+## Render it
+
+<Code code={panel} lang="tsx" title="apps/docs/examples/Panel.tsx" />
+
+Two states, one component. `steps` undefined means this is still a quote, so the
+panel shows what will arrive, what it costs, how many signatures it will ask for,
+and a confirm button. Pass `steps` and the button is replaced by the draft scale,
+which is where the transfer's progress lives.
+
+## Props
+
+Every prop is required, including the ones that accept `undefined`. That is
+deliberate: `steps` being absent means something specific, and a prop you can
+forget to pass is a state you can forget to handle.
+
+<PanelProps />
+
+`outcome` comes straight out of `outcomeOf` in `@mavna/status`, which returns
+exactly this union. `refunded` and `partial` are terminal states of their own
+rather than kinds of success, because a returned transfer that renders as a plain
+success is a lie about someone's money.
+
+### The draft scale
+
+<ScaleProps />
+
+`ScaleStep` is structurally what `TrackedStep` from `@mavna/status` already is,
+so there is nothing to map between the status machine and the widget.
+
+The scale distinguishes `pending` from `stalled`, and that distinction is the
+reason it exists. A user should be able to tell "slow but proceeding" from
+"stalled and needs you" without reading, and a state that does not exist cannot
+be shown. A stalled step carries a `Remedy`, and every remedy renders as an
+action rather than a message with nothing beside it.
+
+### Choosing between routes
+
+<RoutesProps />
+
+`RouteList` takes a whole `RouteSet`, not an array, because it renders the
+rejections too. A user has to be able to see why a route is unavailable rather
+than watch it quietly not appear.
+
+It carries its own `mv-root` class, so you can render it on its own without
+wrapping it in anything.
+
+## Making it yours
+
+Theming is CSS custom properties and nothing else. There is no theme prop taking
+an object, no CSS-in-JS, and no build-tool adoption on your side.
+
+```css
+.mv-root {
+  --mv-surface: #101014;
+  --mv-ink: #f4f4f5;
+  --mv-rule: rgb(255 255 255 / 12%);
+  --mv-radius: 12px;
+
+  /* Adopt your page's typeface. The default is a system stack, because a guest
+     component that drags a webfont into someone else's product is exactly the
+     imposition this package exists to avoid. */
+  --mv-font: inherit;
+}
+```
+
+Every token is listed in [theming](/reference/theming/), read out of the
+stylesheet that declares them, along with the one thing about the selector that
+will otherwise cost you an afternoon.
+
+Light and dark need no instruction. The widget follows the system preference
+unless you say otherwise, and `theme="light"` or `theme="dark"` wins in both
+directions, which matters because a light host on a dark OS is common.
+
+## What it will not do to your page
+
+It does not own the viewport. No fixed positioning, no full-screen overlays, no
+z-index escalation, no scroll locking, no listeners on anything it does not own,
+and no globals.
+
+It adapts to its container rather than to the screen, using a container query, so
+it renders correctly in a 360px sidebar and a 900px page without being told which
+one it is in. Every dimension is in pixels rather than `rem`, because `rem`
+resolves against your root font size: a host that scales `html` would otherwise
+rescale the widget's geometry while the box it was given stays the same size,
+which overflows rather than adapts.
+
+Styles are scoped under `.mv-root` and leak in neither direction.
