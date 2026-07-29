@@ -17,6 +17,7 @@ import {
 import { type ExecutionEvent, execute } from "@/lib/execute";
 import { remember } from "@/lib/history";
 import {
+  ADAPTERS,
   breaker,
   cctp,
   DEFAULT_SOURCE_CHAIN,
@@ -76,7 +77,7 @@ export function Transfer() {
       };
 
       const result = await raceAdapters(
-        [cctp],
+        ADAPTERS,
         {
           from,
           to,

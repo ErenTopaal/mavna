@@ -1,10 +1,12 @@
+import { AxelarAdapter } from "@mavna/adapter-axelar";
 import {
   CctpAdapter,
   EVM_DEPLOYMENTS,
   type NativeCurrency,
   NON_EVM_CHAINS,
 } from "@mavna/adapter-cctp";
-import type { NetworkId } from "@mavna/core";
+import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
+import type { BridgeAdapter, NetworkId } from "@mavna/core";
 import { type CircuitBreaker, createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import {
   createNetworkConfig,
@@ -70,6 +72,30 @@ export const cctp: CctpAdapter = new CctpAdapter({
   rpc,
   baseReserveStroops: config.baseReserveStroops,
 });
+
+export const axelar: AxelarAdapter = new AxelarAdapter({ network: NETWORK, rpc });
+
+export const layerzero: LayerZeroAdapter = new LayerZeroAdapter({
+  network: NETWORK,
+  rpc,
+  baseReserveStroops: config.baseReserveStroops,
+});
+
+/**
+ * Every rail, raced together.
+ *
+ * All three are asked at once and whatever answers is shown, which is the whole
+ * point of the routing engine: a slow rail costs its own route and nothing else,
+ * and a rail that declines says why rather than quietly not appearing.
+ *
+ * On testnet two of the three will usually decline, and that is the honest
+ * picture rather than a fault. Circle is the only rail that can move a
+ * stablecoin there; Axelar's Stellar testnet has one load-test token registered
+ * and nothing else; LayerZero's registry carries no testnet at all. The
+ * comparison this product exists to show is a mainnet comparison, and the
+ * interface says so by naming the reason each time.
+ */
+export const ADAPTERS: readonly BridgeAdapter[] = [cctp, axelar, layerzero];
 
 /**
  * Every chain a user can send from, with the name its own registry gives it.

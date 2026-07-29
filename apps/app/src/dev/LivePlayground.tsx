@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { execute } from "@/lib/execute";
 import { remember } from "@/lib/history";
 import {
+  ADAPTERS,
   breaker,
   cctp,
   DEFAULT_SOURCE_CHAIN,
@@ -78,7 +79,7 @@ export function LivePlayground(): ReactElement {
         curatedBy: "Circle",
       };
       const result = await raceAdapters(
-        [cctp],
+        ADAPTERS,
         {
           from,
           to,

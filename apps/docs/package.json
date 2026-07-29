@@ -12,6 +12,7 @@
     "example:quote": "node examples/quote.ts"
   },
   "dependencies": {
+    "@astrojs/react": "6.0.2",
     "@astrojs/starlight": "0.41.7",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/core": "workspace:*",

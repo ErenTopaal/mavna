@@ -265,3 +265,30 @@
 .mv-play-output pre {
   margin-block-end: 0.5rem;
 }
+
+/* ---------------------------------------------------------------- sidebar --- */
+
+/*
+ * The current page, marked rather than highlighted.
+ *
+ * Starlight fills the active row with the accent colour. With an achromatic
+ * accent that becomes a solid block of ink, which makes navigation the loudest
+ * thing on a reference page. A tick in the margin says the same thing and lets
+ * the sidebar recede, which is where a sidebar belongs.
+ */
+#starlight__sidebar a[aria-current="page"],
+#starlight__sidebar a[aria-current="page"]:hover,
+#starlight__sidebar a[aria-current="page"]:focus {
+  position: relative;
+  color: var(--sl-color-white);
+  background-color: transparent;
+}
+
+#starlight__sidebar a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0.35em;
+  inset-inline-start: 0;
+  inline-size: 2px;
+  background: var(--sl-color-white);
+}

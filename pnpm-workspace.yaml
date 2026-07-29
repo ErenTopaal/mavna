@@ -4,6 +4,18 @@ packages:
   - "apps/*"
   - "services/*"
 
+# @astrojs/react still asks for @vitejs/plugin-react 5.x, which runs on Babel and drags in
+# semver@6.3.1, a release with weaker trust evidence than the versions before it. That is
+# exactly what trustPolicy below is for, so the answer is to remove the Babel tree rather
+# than to make the check quieter: version 6 uses Vite 8's Oxc transform and has no Babel at
+# all, and it is the version the app already builds with. One entry, and it strengthens the
+# supply chain rather than relaxing it.
+#
+# This lives here rather than in package.json because pnpm 11 no longer reads the "pnpm"
+# field from package.json; it warns and ignores it.
+overrides:
+  "@vitejs/plugin-react": "6.0.5"
+
 # Supply chain. A compromised release of our widget would harm every wallet that
 # embedded it, which is why these are tighter than the defaults rather than left alone.
 
