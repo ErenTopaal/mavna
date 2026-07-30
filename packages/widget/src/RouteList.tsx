@@ -91,6 +91,7 @@ const TRUST: Readonly<Record<TrustModel, string>> = {
   "native-mint": "The issuer destroys and reissues it. Nobody holds your money in between.",
   "validator-set": "A named group of validators has to agree before it is released.",
   "solver-network": "Someone fronts you the money and claims it back later.",
+  "dvn-stack": "Whoever issued this token picked who checks the transfer.",
   "liquidity-pool": "A shared pool holds both sides and swaps between them.",
 };
 

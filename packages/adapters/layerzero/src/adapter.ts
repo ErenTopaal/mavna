@@ -101,18 +101,16 @@ export interface LayerZeroAdapterOptions {
 export class LayerZeroAdapter implements BridgeAdapter {
   readonly id = "layerzero";
   /**
-   * A set of verifiers attests, and the application chooses which.
+   * A set of verifiers attests, and the token's owner chose which.
    *
-   * This should read "dvn-stack", which is what a LayerZero DVN set actually is
-   * and what it was specified as. `TrustModel` in `@mavna/core` does not carry
-   * that member yet, and this package must not edit core, so the nearest honest
-   * neighbour stands in: a DVN set genuinely is a named set of verifiers that
-   * must attest. What it flattens is that the set is chosen per application
-   * rather than fixed by the network, which is a real difference from Axelar and
-   * one a user weighing the two deserves to see. One line to change once core
-   * carries the member.
+   * Kept apart from `validator-set` because the difference is the user's to
+   * weigh rather than ours to flatten. Axelar's validators are the network's and
+   * are the same for everybody. A DVN set belongs to whoever deployed the token,
+   * so two routes on this same rail can be verified by entirely different
+   * parties, and `describeDvnStack` says which ones on every transaction this
+   * adapter builds.
    */
-  readonly trustModel: TrustModel = "validator-set";
+  readonly trustModel: TrustModel = "dvn-stack";
 
   private readonly network: NetworkId;
   private readonly rpc: RpcClient;

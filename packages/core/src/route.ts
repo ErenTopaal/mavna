@@ -14,7 +14,12 @@ export type TrustModel =
   | "native-mint" // the issuer burns and mints; nobody holds your money in between
   | "validator-set" // a named set of validators attests to the transfer
   | "solver-network" // a competing market of solvers fronts the funds
-  | "liquidity-pool"; // a pool holds both sides and swaps between them
+  | "liquidity-pool" // a pool holds both sides and swaps between them
+  // The application picks its own verifiers rather than inheriting a fixed set.
+  // Kept apart from validator-set because the difference is the user's to weigh:
+  // who is trusted is chosen by whoever deployed the token, not by the network,
+  // so two routes on the same rail can have different answers.
+  | "dvn-stack";
 
 export interface StepQuote {
   readonly id: string;
