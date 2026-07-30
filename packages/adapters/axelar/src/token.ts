@@ -67,10 +67,10 @@ export interface ItsToken {
 
 export interface ResolveInputs {
   readonly network: NetworkId;
+  /** The API-facing chain name, because the only use here is an index lookup. */
   readonly sourceChainId: string;
   readonly tokenService: string;
   readonly tokenAddress: string;
-  readonly stellarChainId: string;
   readonly evm: EvmReader;
   readonly stellar: StellarItsReader;
 }
@@ -161,17 +161,23 @@ export async function resolveItsToken(inputs: ResolveInputs): Promise<ItsToken> 
  * Asking only the sending chain is the observed failure: a name can pass there
  * and be dropped afterwards, and the tokens and the gas go with it. So the answer
  * has to come from both, and disagreement is a no.
+ *
+ * BOTH names here are the contract-facing ones. A contract answers a name it does
+ * not know with a plain `false` rather than an error, so passing an API name
+ * gives a confident no: Stellar's token service on mainnet says false to
+ * "ethereum" and true to "Ethereum", and nothing about the first answer looks
+ * wrong.
  */
 export async function chainsTrustEachOther(inputs: {
   readonly evm: EvmReader;
   readonly stellar: StellarItsReader;
   readonly tokenService: string;
-  readonly sourceChainId: string;
-  readonly stellarChainId: string;
+  readonly sourceAxelarId: string;
+  readonly stellarAxelarId: string;
 }): Promise<boolean> {
   const [sending, receiving] = await Promise.all([
-    inputs.evm.trustsChain(inputs.tokenService, inputs.stellarChainId),
-    inputs.stellar.trustsChain(inputs.sourceChainId),
+    inputs.evm.trustsChain(inputs.tokenService, inputs.stellarAxelarId),
+    inputs.stellar.trustsChain(inputs.sourceAxelarId),
   ]);
   return sending && receiving;
 }

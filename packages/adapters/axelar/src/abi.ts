@@ -1,4 +1,5 @@
 import { MavnaError } from "@mavna/core";
+import { classifyAddress } from "@mavna/stellar";
 
 /**
  * Just enough ABI coding to ask an EVM chain a question.
@@ -161,15 +162,33 @@ export function decodeString(data: string): string {
  * documentation says it in words: "For Stellar, addresses must be converted to
  * ASCII byte arrays to be properly recognized by the ITS contract." Not base32
  * decoded, not padded, not length prefixed. The strkey alphabet is ASCII, so
- * UTF-8 and ASCII agree here, but the check below makes that a fact rather than
- * an assumption.
+ * UTF-8 and ASCII agree here, but encoding through ASCII explicitly makes that a
+ * fact rather than an assumption.
+ *
+ * The kind is checked, not just the alphabet. Axelar validate the destination as
+ * an account or a contract and reject everything else, and every other strkey is
+ * spelled from the same letters: a muxed address passes a pattern match happily
+ * and would be encoded and sent to a service that will not accept it.
  */
 export function encodeStellarDestination(address: string): string {
-  if (!/^[A-Z2-7]+$/.test(address)) {
+  let kind: string;
+  try {
+    kind = classifyAddress(address).kind;
+  } catch {
     throw new MavnaError(
-      `Refusing to encode "${address}" as a Stellar destination: it is not a strkey.`,
+      "Refusing to encode that as a Stellar destination: it is not a Stellar address.",
       { retryable: false },
     );
   }
+
+  if (kind !== "account" && kind !== "contract") {
+    throw new MavnaError(
+      `Refusing to encode a Stellar ${kind} address as a destination. This route ` +
+        "delivers to an account or a contract, and Axelar's own encoder accepts " +
+        "nothing else.",
+      { retryable: false },
+    );
+  }
+
   return `0x${Buffer.from(address, "ascii").toString("hex")}`;
 }

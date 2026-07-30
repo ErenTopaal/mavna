@@ -167,10 +167,11 @@ export function assertDvnStackIsSound(inputs: {
   if (!isExplicitlyConfigured(app)) {
     throw new MavnaError(
       `The OFT at ${oft} has set no DVN configuration of its own for endpoint ${eid} and is ` +
-        "inheriting the network default. The default is not a fixed set: it can be changed " +
-        "without the application acting, and LayerZero's mainnet default currently names a " +
-        "DVN that is not deployed, so the quote fails at send time rather than here. " +
-        "Refusing to route through a verifier set nobody chose.",
+        "inheriting the network default. That default is not a fixed set: LayerZero can change " +
+        "who verifies this token's transfers without the token's owner acting, and on Stellar " +
+        "mainnet the default currently names a DVN that is not deployed at all, which turns " +
+        "into a failure at send time rather than a refusal here. Refusing to route money " +
+        "through a verifier set nobody chose.",
       { retryable: false },
     );
   }

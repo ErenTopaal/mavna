@@ -113,9 +113,9 @@ describe("saying the trust model out loud", () => {
   });
 
   it("gets the singular right, because copy a user reads should not be broken", () => {
-    expect(
-      describeDvnStack({ ...usdt0OnEthereum, requiredDVNCount: 1, confirmations: 1n }),
-    ).toBe("1 named verifier must agree, after 1 source-chain confirmation.");
+    expect(describeDvnStack({ ...usdt0OnEthereum, requiredDVNCount: 1, confirmations: 1n })).toBe(
+      "1 named verifier must agree, after 1 source-chain confirmation.",
+    );
   });
 
   it("describes a threshold over an optional pool", () => {

@@ -34,8 +34,21 @@ export interface NativeCurrency {
 }
 
 export interface AxelarChain {
-  /** Axelar's own identifier, which is what their contracts and APIs speak. */
+  /**
+   * The name Axelar's APIs speak: the chain registry, the message search and the
+   * fee estimators. Always lower case.
+   */
   readonly id: string;
+  /**
+   * The name Axelar's CONTRACTS speak, which is NOT always the same string.
+   *
+   * Nine chains carry a capitalised form here, and on mainnet two of them are
+   * Ethereum and Avalanche. Asking Stellar's token service about "ethereum"
+   * returns false while "Ethereum" returns true, so using the API name against a
+   * contract silently declines the two largest routes this rail has. Measured
+   * across every mainnet chain, not inferred.
+   */
+  readonly axelarId: string;
   readonly name: string;
   /** "evm", "stellar", "svm", "sui", "xrpl". Decides what can be built for it. */
   readonly family: string;
@@ -112,11 +125,15 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
 
   const chains = new Map<string, AxelarChain>();
   for (const [key, chain] of Object.entries(raw)) {
-    const id = chain.axelarId ?? key;
+    // Keyed by the configuration's own key, which is what every Axelar API
+    // answers to. The contract-facing name is carried alongside rather than
+    // used as the key, because the two differ on nine chains.
+    const id = key;
     const symbol = chain.tokenSymbol;
     const decimals = chain.decimals;
     chains.set(id, {
       id,
+      axelarId: chain.axelarId ?? key,
       name: chain.name ?? id,
       family: chain.chainType ?? "unknown",
       evmChainId: typeof chain.chainId === "number" ? chain.chainId : undefined,
@@ -138,10 +155,15 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
   return chains;
 }
 
-/** One chain, or a refusal that names it. Never a guess. */
+/**
+ * One chain, or a refusal that names it. Never a guess.
+ *
+ * Accepts either of a chain's two names, so a caller holding the one a contract
+ * gave it does not have to know which kind it is holding.
+ */
 export async function chainConfig(network: NetworkId, id: string): Promise<AxelarChain> {
   const chains = await loadChains(network);
-  const chain = chains.get(id);
+  const chain = chains.get(id) ?? [...chains.values()].find((row) => row.axelarId === id);
   if (chain === undefined) {
     throw new MavnaError(
       `Axelar publishes no deployment for "${id}" on ${network}. Names here are ` +

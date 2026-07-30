@@ -17,7 +17,7 @@ import { classifyAddress, type RpcClient } from "@mavna/stellar";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, discoverLiveChains, discoverStellarChain } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
-import { estimateItsFee } from "./fees.js";
+import { priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { StellarItsReader } from "./stellar-its.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
@@ -142,7 +142,6 @@ export class AxelarAdapter implements BridgeAdapter {
           sourceChainId: source.chain.id,
           tokenService: source.address,
           tokenAddress: request.from.id,
-          stellarChainId: stellar.id,
           evm,
           stellar: stellarIts,
         }),
@@ -150,8 +149,8 @@ export class AxelarAdapter implements BridgeAdapter {
           evm,
           stellar: stellarIts,
           tokenService: source.address,
-          sourceChainId: source.chain.id,
-          stellarChainId: stellar.id,
+          sourceAxelarId: source.chain.axelarId,
+          stellarAxelarId: stellar.id,
         }),
       ]);
     } catch (cause) {
@@ -161,7 +160,9 @@ export class AxelarAdapter implements BridgeAdapter {
       return this.declineFrom(
         cause,
         "temporarily-unavailable",
-        "Axelar did not answer in time to check this transfer. Nothing has been sent.",
+        // Names the rail rather than the vendor, and says the thing that matters
+        // most to someone looking at it: nothing left their wallet.
+        "This route did not answer in time. Nothing has been sent, and it is worth trying again.",
       );
     }
 
@@ -185,7 +186,7 @@ export class AxelarAdapter implements BridgeAdapter {
     let stellarDecimals: number;
     try {
       const [fee, decimals] = await Promise.all([
-        estimateItsFee(this.network, source.chain.id, stellar.id),
+        priceTransfer(this.network, source.chain.id, stellar.id),
         stellarIts.tokenDecimals(token.stellarToken),
       ]);
       deliveryFee = BigInt(fee);
@@ -303,7 +304,6 @@ export class AxelarAdapter implements BridgeAdapter {
       sourceChainId: source.chain.id,
       tokenService: source.address,
       tokenAddress: route.sends.asset.id,
-      stellarChainId: stellar.id,
       evm,
       stellar: stellarIts,
     });
@@ -313,8 +313,8 @@ export class AxelarAdapter implements BridgeAdapter {
         evm,
         stellar: stellarIts,
         tokenService: source.address,
-        sourceChainId: source.chain.id,
-        stellarChainId: stellar.id,
+        sourceAxelarId: source.chain.axelarId,
+        stellarAxelarId: stellar.id,
       }))
     ) {
       throw new MavnaError(
@@ -326,13 +326,16 @@ export class AxelarAdapter implements BridgeAdapter {
 
     // Priced now, not at quote time, and asserted positive on the way through.
     // Zero here would be accepted by the contract and the message emitted anyway.
-    const gasValue = BigInt(await estimateItsFee(this.network, source.chain.id, stellar.id));
+    const gasValue = BigInt(await priceTransfer(this.network, source.chain.id, stellar.id));
 
     const amount = BigInt(route.sends.baseUnits);
     const transfer = buildInterchainTransfer({
       tokenService: source.address,
       tokenId: token.tokenId,
-      destinationChain: stellar.id,
+      // The contract-facing name. It matches the API name for Stellar, but the
+      // two are read from different fields on purpose so this stays right if
+      // Stellar ever picks up a capitalised form the way Ethereum has.
+      destinationChain: (await chainConfig(this.network, stellar.id)).axelarId,
       destination: route.destination,
       amount,
       gasValue,
@@ -425,15 +428,11 @@ export class AxelarAdapter implements BridgeAdapter {
 
     const ref = this.refFor(first.sourceChain ?? handle.sourceChainId, handle.sourceTxHash);
 
-    if (first.refunded) {
-      return {
-        phase: "refunded",
-        ref,
-        to: first.sourceAddress ?? "the sending wallet",
-        returned: this.amountFrom(first),
-      };
-    }
-
+    // Deliberately NOT branching on Axelar's `refunded`. That flag is about the
+    // leftover delivery payment going home, which happens on transfers that
+    // delivered perfectly, so reading it as a returned transfer reports a
+    // successful one as sent back. There is no field here that means the tokens
+    // came home, so this adapter never claims they did.
     if (first.underpaid) {
       return {
         phase: "stalled",
@@ -560,7 +559,7 @@ export class AxelarAdapter implements BridgeAdapter {
     // payment is the one thing this codebase never does with money. Paying the
     // full price cannot underpay, and the gas service returns what is not spent.
     const amount = BigInt(
-      await estimateItsFee(this.network, chainId, first.finalDestinationChain ?? stellar.id),
+      await priceTransfer(this.network, chainId, first.finalDestinationChain ?? stellar.id),
     );
 
     const call = buildAddGas({

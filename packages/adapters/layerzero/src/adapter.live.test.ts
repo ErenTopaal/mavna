@@ -4,7 +4,7 @@ import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mav
 import { beforeAll, describe, expect, it } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
 import { STELLAR_SIDE } from "./config.js";
-import { Discovery, type ResolvedRoute } from "./discovery.js";
+import { Discovery, type ResolvedRoute, readStellarOft } from "./discovery.js";
 import { isExplicitlyConfigured, verifierThreshold } from "./dvn.js";
 
 /**
@@ -401,7 +401,8 @@ describe("building the transactions", () => {
     if (!isRoute(quoted)) throw new Error(quoted.explanation);
     expect(quoted.steps.map((s) => s.kind)).toContain("approve-source");
     const transactions = await mainnet.buildTransactions(quoted);
-    const signatures = transactions.length + quoted.steps.filter((s) => s.kind.includes("account")).length;
+    const signatures =
+      transactions.length + quoted.steps.filter((s) => s.kind.includes("account")).length;
     expect(quoted.signaturesRequired).toBeLessThanOrEqual(signatures);
   });
 });
@@ -477,23 +478,31 @@ describe("testnet, where the pathway exists and the token does not", () => {
 
     expect(isRoute(result)).toBe(false);
     if (isRoute(result)) return;
-    expect(result.explanation).toContain("no OFT registry for any testnet");
-    // Said out loud, so nobody concludes the chain is unsupported when the
-    // pathway is in fact there and working.
-    expect(result.explanation).toContain("does exist");
+    // Written for whoever reads it on screen. The reason it happens belongs in a
+    // comment; what a person needs is that this is not their input being wrong
+    // and that another route may work.
+    expect(result.explanation).toContain("carries no token on the test network");
+    expect(result.explanation).toContain("Another route may work here");
+    // And no jargon leaks into a consumer surface.
+    for (const word of ["OFT", "registry", "DVN", "endpoint", "`"]) {
+      expect(result.explanation).not.toContain(word);
+    }
   });
 
   /**
    * The regression this rail most needs, run against a real deployment.
    *
-   * savETH is an OFT genuinely peered to Stellar testnet, and its Stellar side
-   * is registered on the endpoint LayerZero deployed in April and stopped
-   * advertising in August. Resolution must therefore either refuse it, or, if
-   * that OFT is ever re-registered, resolve it against the endpoint the registry
-   * currently names. What it must never do is accept a peer on a superseded
-   * endpoint, which is a transfer that vanishes.
+   * savETH is an OFT genuinely peered to Stellar testnet and it has carried
+   * delivered transfers in both directions. It also fails two of this package's
+   * gates, which is why it makes such a good test: its Stellar side is
+   * registered on the endpoint LayerZero deployed in April and stopped
+   * advertising in August, and it set no DVN configuration of its own.
+   *
+   * Either refusal is correct and the order between them is not the point. What
+   * must never happen is a route resolving with a peer on a superseded
+   * endpoint, because that is a transfer that vanishes with no error.
    */
-  it("never accepts a peer registered on an endpoint LayerZero no longer advertises", async () => {
+  it("refuses a real OFT that fails a safety gate, and never resolves one that does", async () => {
     const named = new Discovery({
       network: "testnet",
       rpc: testnetRpc,
@@ -515,10 +524,37 @@ describe("testnet, where the pathway exists and the token does not", () => {
       refusal = cause;
     }
 
-    if (resolved === undefined) {
-      expect(String((refusal as Error).message)).toContain("registered on endpoint");
+    if (resolved !== undefined) {
+      // Should it ever be rewired, it must be rewired to the current endpoint.
+      expect(resolved.stellar.endpoint).toBe(current.endpoint);
       return;
     }
-    expect(resolved.stellar.endpoint).toBe(current.endpoint);
+
+    const message = String((refusal as Error).message);
+    expect(message).toContain("0x925a1f6c01beb2870960a2b7c6f030271a7bb0e3");
+    expect(message).toMatch(/verifier set nobody chose|registered on endpoint/);
+  });
+
+  /**
+   * The endpoint check on its own, against the contract that fails it.
+   *
+   * Asserted separately from the refusal above so it cannot be masked by
+   * whichever gate happens to run first. This reads the Stellar contract savETH
+   * points at and shows it is registered somewhere LayerZero no longer names.
+   */
+  it("sees that a live Stellar OFT is on an endpoint the registry has moved off", async () => {
+    const testnetDiscovery = new Discovery({ network: "testnet", rpc: testnetRpc });
+    const current = await testnetDiscovery.stellar();
+    expect(current.eid).toBe(STELLAR_SIDE.testnet.eid);
+
+    const peer = await readStellarOft(
+      testnetRpc,
+      "CAEDHIBRKOEPXSPQF4P6QWO6GTQHJM5T4RB2IBGOEP7VVQJJA3AX5XCY",
+    );
+    expect(peer.endpoint).toMatch(/^C[A-Z2-7]{55}$/);
+    expect(peer.token).toMatch(/^C[A-Z2-7]{55}$/);
+    // Both contracts are real and both are live. They are not the same one, and
+    // that is the entire hazard this package refuses to walk into.
+    expect(peer.endpoint).not.toBe(current.endpoint);
   });
 });

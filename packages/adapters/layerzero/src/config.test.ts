@@ -2,13 +2,12 @@ import type { NetworkId } from "@mavna/core";
 import { describe, expect, it } from "vitest";
 import {
   chainIdForLayerZeroKey,
-  EVM_SOURCES,
   explorerTxUrl,
-  readableAmount,
   ROUTED_SYMBOLS,
+  readableAmount,
+  STELLAR_SIDE,
   sourceChainsFor,
   sourceFor,
-  STELLAR_SIDE,
   stellarExplorerTxUrl,
 } from "./config.js";
 

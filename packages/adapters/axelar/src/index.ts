@@ -27,7 +27,7 @@ export {
 export type { EthCall } from "./evm.js";
 export { EvmReader, EvmRevert, fetchEthCall } from "./evm.js";
 export type { GasEstimate } from "./fees.js";
-export { estimateGasFee, estimateItsFee } from "./fees.js";
+export { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";
 export { buildAddGas, GAS_SERVICE_ABI, GmpApi, legDelivered } from "./gmp.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";

@@ -6,12 +6,11 @@ import {
   RpcClient,
 } from "@mavna/stellar";
 import { describe, expect, it } from "vitest";
-import { SELECTORS } from "./abi.js";
 import { AxelarAdapter } from "./adapter.js";
 import { chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { discoverLiveChains, discoverStellarChain } from "./discovery.js";
 import { EvmReader } from "./evm.js";
-import { estimateItsFee } from "./fees.js";
+import { estimateItsFee, priceTransfer } from "./fees.js";
 import { StellarItsReader } from "./stellar-its.js";
 import { chainsTrustEachOther, resolveItsToken, TOKEN_MANAGER } from "./token.js";
 
@@ -42,8 +41,7 @@ const AXE_HYPERLIQUID = "0x671CD182bb1f4f6c7cfcf47D6c6BeDdda1BB1130";
 
 const STELLAR_ACCOUNT = "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU";
 /** A custodial address form. Valid on Stellar, refused by Axelar's own encoder. */
-const MUXED =
-  "MCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVAAAAAAAAAAAAAJUQ";
+const MUXED = "MCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIUAAAAAAAAAAAAHCXE";
 
 const ixe: Asset = {
   chainId: "base-sepolia",
@@ -200,8 +198,8 @@ describe("the trust check, which two token service versions answer differently",
         evm: new EvmReader(source.rpcUrl),
         stellar,
         tokenService: source.address,
-        sourceChainId: "base-sepolia",
-        stellarChainId: stellarChain.id,
+        sourceAxelarId: "base-sepolia",
+        stellarAxelarId: stellarChain.id,
       }),
     ).resolves.toBe(true);
 
@@ -214,14 +212,13 @@ describe("the trust check, which two token service versions answer differently",
 describe("resolving a token against both chains", () => {
   it("resolves the pair that actually moves on testnet", async () => {
     const source = await evmTokenService("testnet", "base-sepolia");
-    const { stellarChain, stellar } = await testnetReaders();
+    const { stellar } = await testnetReaders();
 
     const token = await resolveItsToken({
       network: "testnet",
       sourceChainId: "base-sepolia",
       tokenService: source.address,
       tokenAddress: IXE_BASE_SEPOLIA,
-      stellarChainId: stellarChain.id,
       evm: new EvmReader(source.rpcUrl),
       stellar,
     });
@@ -238,14 +235,13 @@ describe("resolving a token against both chains", () => {
 
   it("resolves the token the specification names, from the chain it lives on", async () => {
     const source = await evmTokenService("testnet", "hyperliquid");
-    const { stellarChain, stellar } = await testnetReaders();
+    const { stellar } = await testnetReaders();
 
     const token = await resolveItsToken({
       network: "testnet",
       sourceChainId: "hyperliquid",
       tokenService: source.address,
       tokenAddress: AXE_HYPERLIQUID,
-      stellarChainId: stellarChain.id,
       evm: new EvmReader(source.rpcUrl),
       stellar,
     });
@@ -260,7 +256,7 @@ describe("resolving a token against both chains", () => {
 
   it("refuses a token that is not set up for this route", async () => {
     const source = await evmTokenService("testnet", "base-sepolia");
-    const { stellarChain, stellar } = await testnetReaders();
+    const { stellar } = await testnetReaders();
     await expect(
       resolveItsToken({
         network: "testnet",
@@ -268,7 +264,6 @@ describe("resolving a token against both chains", () => {
         tokenService: source.address,
         // A real ERC-20 on base-sepolia that was never linked: Circle's USDC.
         tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        stellarChainId: stellarChain.id,
         evm: new EvmReader(source.rpcUrl),
         stellar,
       }),
@@ -340,9 +335,7 @@ describe("quoting", () => {
   });
 
   it("declines a chain Axelar does not run", async () => {
-    const result = await adapter.quote(
-      ask({ from: { ...ixe, chainId: "not-a-real-chain" } }),
-    );
+    const result = await adapter.quote(ask({ from: { ...ixe, chainId: "not-a-real-chain" } }));
     expect(isRoute(result)).toBe(false);
     if (isRoute(result)) return;
     expect(result.reason).toBe("chain-unsupported");
@@ -411,36 +404,46 @@ describe("building the transactions", () => {
   it("refuses to build when the destination is one Axelar cannot encode", async () => {
     const quote = await adapter.quote(ask());
     if (!isRoute(quote)) return;
-    await expect(
-      adapter.buildTransactions({ ...quote, destination: MUXED }),
-    ).rejects.toThrow(/strkey/);
+    await expect(adapter.buildTransactions({ ...quote, destination: MUXED })).rejects.toThrow(
+      /muxed/,
+    );
   });
 });
 
 describe("pricing, and the zero that means something else", () => {
   it("prices the transfer above zero for a chain it knows", async () => {
     const { stellarChain } = await testnetReaders();
-    const fee = await estimateItsFee("testnet", "base-sepolia", stellarChain.id);
+    const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id);
     expect(BigInt(fee)).toBeGreaterThan(0n);
   });
 
   it("fails closed on a chain name it does not know, rather than quoting free", async () => {
-    // Axelar answers an unrecognised name with zero and HTTP 200. Paying zero
-    // gas strands the message with no automatic recovery.
-    await expect(estimateItsFee("testnet", "base-sepolia", "stellar")).rejects.toThrow();
-    await expect(estimateItsFee("testnet", "base-sepolia", "made-up-chain")).rejects.toThrow();
+    // "stellar" is the MAINNET name and does not exist on testnet. Paying for a
+    // name nobody recognises strands the message with no automatic recovery.
+    await expect(priceTransfer("testnet", "base-sepolia", "stellar")).rejects.toThrow();
+    await expect(priceTransfer("testnet", "base-sepolia", "made-up-chain")).rejects.toThrow();
   });
 
-  it("prices the transfer higher than the single-message estimate", async () => {
+  it("shows WHY the transfer estimator alone cannot be trusted to catch that", async () => {
+    // It answers an unrecognised destination with a plausible non-zero number
+    // rather than the zero the mandatory assertion looks for. So the name is
+    // checked with the estimator that does return zero, and this one only says
+    // how much to pay. Left as a test because if Axelar ever fixes it, the
+    // reason for the two-call arrangement has gone and someone should know.
+    const bogus = await estimateItsFee("testnet", "base-sepolia", "made-up-chain");
+    expect(BigInt(bogus)).toBeGreaterThan(0n);
+  });
+
+  it("pays the two-message price, not the one-message one", async () => {
     // A transfer is two messages because it routes through a hub. Pricing it as
     // one underpays, and underpaying is what strands transfers on this rail.
     const { estimateGasFee } = await import("./fees.js");
     const { stellarChain } = await testnetReaders();
-    const [single, transfer] = await Promise.all([
+    const [single, paid] = await Promise.all([
       estimateGasFee("testnet", "base-sepolia", stellarChain.id),
-      estimateItsFee("testnet", "base-sepolia", stellarChain.id),
+      priceTransfer("testnet", "base-sepolia", stellarChain.id),
     ]);
-    expect(BigInt(transfer)).toBeGreaterThan(BigInt(single.totalFee));
+    expect(BigInt(paid)).toBeGreaterThan(BigInt(single.totalFee));
   });
 });
 
@@ -527,7 +530,6 @@ describe("mainnet, where the assets people actually hold are", () => {
       // Real USDC. A plain ERC-20 that has no idea it is an interchain token, so
       // its identifier can only come from Axelar's published list.
       tokenAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      stellarChainId: stellarChain.id,
       evm: new EvmReader(source.rpcUrl),
       stellar: new StellarItsReader(mainnetRpc, service, "mainnet"),
     });
@@ -543,5 +545,31 @@ describe("mainnet, where the assets people actually hold are", () => {
   it("finds the Stellar chain under its unversioned mainnet name", async () => {
     const chain = await discoverStellarChain("mainnet");
     expect(chain.id).toBe("stellar");
+  });
+
+  it("asks the contracts by the name the CONTRACTS use, not the one the APIs use", async () => {
+    const chains = await loadChains("mainnet");
+    const ethereum = chains.get("ethereum");
+    // The two names differ here, and this is the whole reason both are carried.
+    expect(ethereum?.id).toBe("ethereum");
+    expect(ethereum?.axelarId).toBe("Ethereum");
+
+    const stellarChain = await discoverStellarChain("mainnet");
+    const stellarConfig = await chainConfig("mainnet", stellarChain.id);
+    const service = stellarConfig.interchainTokenService;
+    if (service === undefined) throw new Error("no Stellar token service on mainnet");
+    const stellar = new StellarItsReader(mainnetRpc, service, "mainnet");
+
+    // The failure this guards against, demonstrated rather than described: the
+    // API name is not an error, it is a confident no. Using it would silently
+    // decline the largest route this rail has.
+    await expect(stellar.trustsChain(ethereum?.axelarId ?? "")).resolves.toBe(true);
+    await expect(stellar.trustsChain(ethereum?.id ?? "")).resolves.toBe(false);
+  });
+
+  it("looks a chain up by either of its names", async () => {
+    const byApiName = await chainConfig("mainnet", "ethereum");
+    const byContractName = await chainConfig("mainnet", "Ethereum");
+    expect(byContractName.id).toBe(byApiName.id);
   });
 });

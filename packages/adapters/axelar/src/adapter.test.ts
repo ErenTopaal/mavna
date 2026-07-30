@@ -31,7 +31,9 @@ describe("the destination encoding", () => {
   it("matches the worked example Axelar publishes", () => {
     // Straight from their own `common/README.md`, which the token service's
     // source links to as the encoding reference. Their output, not ours.
-    expect(encodeStellarDestination("CC6FYRUBDJVTATQ55KGPMD2JQFY775BTSJQMRNJEWPEJFUXPOBFSMEOX")).toBe(
+    expect(
+      encodeStellarDestination("CC6FYRUBDJVTATQ55KGPMD2JQFY775BTSJQMRNJEWPEJFUXPOBFSMEOX"),
+    ).toBe(
       "0x4343364659525542444a565441545135354b47504d44324a5146593737354254534a514d524e4a455750454a465558504f4246534d454f58",
     );
   });
@@ -39,7 +41,9 @@ describe("the destination encoding", () => {
   it("matches what a real delivered transfer actually carried", () => {
     // Read off Axelar's record of a transfer that landed on Stellar testnet, so
     // this is the encoding as the contract accepted it rather than as documented.
-    expect(encodeStellarDestination("CBCUM3NTEZJ3HJIKUWRLF45VH5VIP4DDRYZNURG45V6J6KETUNCYBESE")).toBe(
+    expect(
+      encodeStellarDestination("CBCUM3NTEZJ3HJIKUWRLF45VH5VIP4DDRYZNURG45V6J6KETUNCYBESE"),
+    ).toBe(
       "0x434243554d334e54455a4a33484a494b5557524c46343556483556495034444452595a4e555247343556364a364b4554554e435942455345",
     );
   });
@@ -51,9 +55,27 @@ describe("the destination encoding", () => {
     expect((encoded.length - 2) / 2).toBe(56);
   });
 
-  it("refuses anything that is not a strkey", () => {
-    expect(() => encodeStellarDestination("0x1234")).toThrow(/strkey/);
-    expect(() => encodeStellarDestination("")).toThrow(/strkey/);
+  it("refuses anything that is not a Stellar address", () => {
+    expect(() => encodeStellarDestination("0x1234")).toThrow(/not a Stellar address/);
+    expect(() => encodeStellarDestination("")).toThrow(/not a Stellar address/);
+  });
+
+  it("refuses a muxed address, which the letters alone would let through", () => {
+    // Spelled from the same alphabet as an account address, so a pattern match
+    // passes it happily. Axelar's encoder accepts an account or a contract and
+    // nothing else, so sending one arrives at a service that will not take it.
+    expect(() =>
+      encodeStellarDestination(
+        "MCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIUAAAAAAAAAAAAHCXE",
+      ),
+    ).toThrow(/muxed/);
+  });
+
+  it("refuses forms that are valid strkeys but cannot receive anything", () => {
+    // A liquidity pool id. Well formed, and not a payment destination.
+    expect(() =>
+      encodeStellarDestination("LADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQPEA4"),
+    ).toThrow(/Refusing to encode/);
   });
 });
 
@@ -98,12 +120,12 @@ describe("the ABI coding, against calldata produced independently", () => {
   });
 
   it("decodes a bool", () => {
-    expect(
-      decodeBool("0x0000000000000000000000000000000000000000000000000000000000000001"),
-    ).toBe(true);
-    expect(
-      decodeBool("0x0000000000000000000000000000000000000000000000000000000000000000"),
-    ).toBe(false);
+    expect(decodeBool("0x0000000000000000000000000000000000000000000000000000000000000001")).toBe(
+      true,
+    );
+    expect(decodeBool("0x0000000000000000000000000000000000000000000000000000000000000000")).toBe(
+      false,
+    );
   });
 
   it("decodes a string, honouring its offset", () => {
@@ -171,9 +193,9 @@ describe("gas, which cannot be left out", () => {
   });
 
   it("refuses an empty destination chain, which would be a stale name", () => {
-    expect(() =>
-      buildInterchainTransfer({ ...base, destinationChain: "", gasValue: 1n }),
-    ).toThrow(/destination chain/);
+    expect(() => buildInterchainTransfer({ ...base, destinationChain: "", gasValue: 1n })).toThrow(
+      /destination chain/,
+    );
   });
 
   it("says what it will do in terms a person can weigh", () => {

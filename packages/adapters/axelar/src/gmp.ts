@@ -63,7 +63,15 @@ export interface GmpRecord {
   /** True when Axelar says the delivery was underpaid. Three flags, any of them. */
   readonly underpaid: boolean;
   readonly errored: boolean;
-  readonly refunded: boolean;
+  /**
+   * That Axelar returned the UNSPENT GAS, which is routine.
+   *
+   * Emphatically not "the transfer was sent back". It is set on transfers that
+   * delivered perfectly, because the leftover delivery payment goes home either
+   * way, so reading it as a refunded transfer reports a successful one as
+   * returned to sender. Confirmed against a transfer that landed.
+   */
+  readonly gasRefunded: boolean;
   /** The hub transaction carrying the second leg, once there is one. */
   readonly callbackTransactionHash: string | undefined;
   readonly sourceAddress: string | undefined;
@@ -159,7 +167,7 @@ function read(row: RawRecord): GmpRecord {
       row.is_not_enough_gas === true ||
       row.not_enough_gas_to_execute === true,
     errored: row.status === "error",
-    refunded: row.refunded !== undefined && row.refunded !== null && row.refunded !== false,
+    gasRefunded: row.refunded !== undefined && row.refunded !== null && row.refunded !== false,
     callbackTransactionHash: row.callback?.transactionHash,
     sourceAddress: transfer?.sourceAddress,
     destinationAddress: transfer?.destinationAddress,

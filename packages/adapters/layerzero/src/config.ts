@@ -145,7 +145,19 @@ export interface EvmSource {
  *
  * Membership is not a claim that a transfer works, only that the chain is worth
  * asking. Every quote re-derives the endpoint, the OFT, the peer and the DVN
- * configuration from these chains and declines when any of it is missing.
+ * configuration from these chains and declines when any of it is missing. Three
+ * mainnet chains here were declining as of 12 August 2026, and they are kept
+ * rather than pruned because the reason is somebody else's configuration and can
+ * change without warning in either direction, and because a user is owed a
+ * reason rather than a chain that quietly does not appear:
+ *
+ *   Hyperliquid EVM and X Layer carry USDT0, but its `peers(30600)` is unset on
+ *   both, so no message can leave for Stellar at all.
+ *
+ *   Berachain is peered, but USDT0 there has chosen no DVN set of its own and is
+ *   inheriting the network default, which this package refuses to route through.
+ *
+ * `scripts/verify-layerzero.mjs` reports the current list on every run.
  *
  * Corn (LayerZero key `mp1`, chain id 21000000) carries USDT0 and supports the
  * Stellar pathway, but every public RPC in LayerZero's registry for it was

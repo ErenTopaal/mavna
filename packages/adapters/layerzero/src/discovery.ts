@@ -582,13 +582,16 @@ export async function readStellarOft(rpc: RpcClient, contract: string): Promise<
  * deserves to know it is not their input that is wrong.
  */
 function noCandidatesExplanation(network: NetworkId, chainId: string): string {
+  // Written for whoever reads it on screen, which is a person deciding how to
+  // move their money and not a developer reading an API reference. "OFT",
+  // "registry" and the name of a configuration field all belong in the comment
+  // above rather than in front of them. What they need is that it is not their
+  // input that is wrong and that there is another route.
   if (network === "mainnet") {
-    return `LayerZero's registry lists no OFT on ${chainId} for the tokens this rail carries.`;
+    return `This route carries no token from ${chainId} to Stellar. Another route may.`;
   }
   return (
-    "LayerZero publishes no OFT registry for any testnet, so there is no token to route. " +
-    "The protocol pathway to Stellar testnet does exist and has carried transfers, but every " +
-    "OFT peered to it is a private deployment whose token cannot be obtained. Pass your own " +
-    "OFT as `ofts` to use this rail on testnet."
+    "This route carries no token on the test network. It works on the main network, " +
+    "where it is the only way to bring USDT to Stellar. Another route may work here."
   );
 }

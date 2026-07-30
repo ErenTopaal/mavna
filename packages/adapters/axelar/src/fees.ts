@@ -76,18 +76,49 @@ export async function estimateGasFee(
 }
 
 /**
- * What an interchain TOKEN transfer costs, which is not the same number.
+ * What to pay for a token transfer, priced by both estimators.
  *
- * `estimateGasFee` prices one message. An interchain transfer is two, because it
- * routes through the hub, and the endpoint below knows that: asked for
- * base-sepolia to Stellar it answers with a breakdown of both legs, where the
- * generic estimator answers with less. Measured on the same pair at the same
- * moment, 1001610 against 842003.
+ * They are each unreliable in a different direction, which is why both are
+ * called rather than one being picked:
  *
- * Underpaying is the failure this whole rail has to avoid, so the transfer is
- * priced with the endpoint built for it. Axelar's own explorer does the same for
- * exactly this case: its add-gas control switches to this endpoint when a message
- * is bound for the hub.
+ * `estimateGasFee` prices ONE message. A token transfer is two, because it routes
+ * through the hub, so its number is too low to pay. But it validates the chain
+ * name: an unrecognised destination comes back as zero.
+ *
+ * `estimateITSFee` prices both legs and is the number Axelar's own explorer uses
+ * for exactly this case. But it does NOT validate the destination. Asked about
+ * "stellar" on testnet, or "made-up-chain", it returns the same non-zero default
+ * rather than zero, so the mandatory greater-than-zero assertion never fires on
+ * it and a wrong name sails straight through.
+ *
+ * So the name is checked with the one that fails closed, and the payment comes
+ * from the one that knows the real shape of the journey. Measured together on
+ * base-sepolia to Stellar: 840796 against 1048188, and 0 against 803988 for a
+ * name that does not exist.
+ */
+export async function priceTransfer(
+  network: NetworkId,
+  sourceChain: string,
+  destinationChain: string,
+): Promise<string> {
+  // Runs first and on its own. Its zero is the only thing either endpoint offers
+  // that catches a stale or misspelled chain name.
+  const single = await estimateGasFee(network, sourceChain, destinationChain);
+  const both = await estimateItsFee(network, sourceChain, destinationChain);
+
+  // The larger of the two. Overpaying is returned by the gas service after
+  // delivery; underpaying strands the transfer with no automatic recovery, so
+  // the two are not symmetric and the choice is not close.
+  const highest = BigInt(both) > BigInt(single.totalFee) ? both : single.totalFee;
+  assertFeeIsPlausible(highest, destinationChain);
+  return highest;
+}
+
+/**
+ * The two-leg price on its own.
+ *
+ * Exported because it is a real reading of a real endpoint, but `priceTransfer`
+ * is what should be paid: this number alone has no chain-name check behind it.
  *
  * Same trap as its sibling, and worse: the response is a BARE NUMBER with no
  * JSON object around it at all, so anything reading a field off it gets nothing.
