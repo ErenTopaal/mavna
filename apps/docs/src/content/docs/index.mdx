@@ -1,34 +1,59 @@
 ---
 title: Mavna
-description: Move USDC into Stellar from twenty-six chains, with an SDK that builds transactions and never signs them.
+description: Move value into Stellar across three rails, raced together, with an SDK that builds transactions and never signs them.
 tableOfContents: false
 ---
 
-Mavna moves USDC into Stellar. It quotes a transfer across every rail that can
-carry it, tells you what will actually arrive after fees, and hands back unsigned
-transactions for your wallet to sign.
+Mavna moves value into Stellar. It asks every rail that could carry a transfer at
+the same time, tells you what will actually arrive after fees and who you are
+trusting to deliver it, and hands back unsigned transactions for your wallet to
+sign.
 
-Circle's CCTP is the rail documented here, and the one everything on this site
-has been run against: 26 source chains on testnet, 25 on mainnet, across EVM,
-Solana and Starknet. Circle's standard path charges nothing to reach Stellar, so
-a quote out of this SDK is the underlying rate rather than somebody's margin on
-top of it.
+## Three rails, asked at once
 
-Other rails are being built. None of them are described here, because nothing
-here describes something that has not been run.
+Each is a separate package implementing the same
+[`BridgeAdapter`](/reference/bridge-adapter/) interface, and each carries a
+different trust model, which is the comparison this product exists to show.
+
+**Circle CCTP** burns and mints through the issuer, so nobody holds the money in
+between. 26 source chains on testnet and 25 on mainnet, across EVM, Solana and
+Starknet, carrying USDC. Circle's standard path into Stellar charges nothing, so
+a quote is the underlying rate rather than a reseller's margin on it.
+
+**Axelar** is a named validator set attesting to the transfer, reaching Stellar
+through its Interchain Token Service. On mainnet six ITS assets reach Stellar,
+including Axelar-wrapped USDC, which is the pairing that makes ranking meaningful:
+a native mint and a validator set quoting the same dollar side by side. **On
+testnet it can do almost nothing**, and that is a property of Axelar's deployment
+rather than of this adapter. Its Stellar testnet has exactly one registered
+interchain token, a load-test token called AXE, reaching one counterparty chain.
+
+**LayerZero** moves OFTs, and on mainnet it is the only route to native USDT on
+Stellar, from 12 source chains. **On testnet it carries nothing at all**:
+LayerZero's OFT registry has no testnet entries on any chain, so there is no
+token to name. Three testnet chains report the Stellar pathway as supported, and
+if you have deployed your own OFT you can name it directly rather than being
+offered a route nobody can take.
+
+So on testnet you will usually see one route and two refusals. That is the honest
+picture rather than a fault, and every refusal carries a reason and a sentence
+saying what it means.
 
 ## Two ways in
 
-**[The SDK](/quickstart/sdk/)** is for a team that already has an interface.
-You configure a network, ask for a quote, and get back a route with the amount
-that lands, the fees behind it, how many signatures it will take, and the
-transactions to sign. Nothing in the SDK holds a key, signs, or submits.
+**[The SDK](/quickstart/sdk/)** is for a team that already has an interface. You
+configure a network, ask for a quote, and get back routes with the amount that
+lands, the fees behind it, how many signatures it will take, and the transactions
+to sign. Rails that decline come back beside them with the reason, because a user
+has to be able to see why a route is missing rather than watch it quietly not
+appear.
 
-**[The widget](/quickstart/widget/)** is for a team that wants the whole flow.
-It renders the quote, the confirmation, and the wait. React is a peer dependency
-and everything else is 2.69 kB minified and brotlied, against a 12 kB ceiling
-that CI enforces. It is styled entirely by CSS custom properties, so it can be
-made to look like your product rather than like ours.
+**[The widget](/quickstart/widget/)** is for a team that wants the whole flow. It
+renders the quote, the confirmation, and the wait. React is a peer dependency and
+everything else is 2.69 kB minified and brotlied, against a 12 kB ceiling that CI
+enforces. It is styled entirely by CSS custom properties, so it can be made to
+look like your product rather than like ours. The
+[playground](/playground/) is the fastest way to see that.
 
 ## Before you start
 

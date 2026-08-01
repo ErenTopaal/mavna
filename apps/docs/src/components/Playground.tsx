@@ -9,12 +9,6 @@
  * That is why there is a form in front of the preview. A quote needs a
  * destination, and inventing one so the page looks busier on first paint would
  * make every number below it a decoration.
- *
- * Nothing imports this yet. Mounting a React island needs `@astrojs/react`, and
- * installing it is refused by the workspace's `trustPolicy: no-downgrade` over
- * `semver@6.3.1` in its babel tree. That is a supply-chain decision for the
- * repository owner rather than something to work around here, so the component
- * is finished and typechecked and the page that renders it is not written.
  */
 import { CCTP_CONTRACTS, CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cctp";
 import type { Asset, NetworkId, RouteSet } from "@mavna/core";
@@ -65,7 +59,7 @@ export function Playground(): ReactElement {
 
   const [overrides, setOverrides] = useState<Overrides>({});
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"no" | "yes" | "refused">("no");
 
   const css = useMemo(() => stylesheet(overrides), [overrides]);
   const route = routes?.routes.find((r) => r.id === selected) ?? routes?.routes[0];
@@ -116,149 +110,160 @@ export function Playground(): ReactElement {
 
   return (
     <div className="mv-play not-content">
-      <div className="mv-play-controls">
-        <fieldset className="mv-play-group">
-          <legend>Quote</legend>
-
-          <label className="mv-play-field">
-            <span>From</span>
-            <select
-              value={chainId}
-              onChange={(event) => {
-                setChainId(event.target.value);
-              }}
-            >
-              {SOURCE_CHAINS.map((chain) => (
-                <option key={chain.id} value={chain.id}>
-                  {chain.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="mv-play-field">
-            <span>USDC</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={amount}
-              onChange={(event) => {
-                setAmount(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="mv-play-field">
-            <span>To this Stellar address</span>
-            <input
-              type="text"
-              spellCheck={false}
-              placeholder="G..."
-              value={destination}
-              onChange={(event) => {
-                setDestination(event.target.value);
-              }}
-            />
-          </label>
-
-          <button
-            type="button"
-            disabled={asking || destination.trim() === ""}
-            onClick={() => {
-              void quote();
-            }}
-          >
-            {asking ? "Asking Circle and Stellar" : "Get a real quote"}
-          </button>
-        </fieldset>
-
-        <fieldset className="mv-play-group">
-          <legend>Theme</legend>
-          <label className="mv-play-field">
-            <span>Follows the machine unless you say otherwise</span>
-            <select
-              value={theme}
-              onChange={(event) => {
-                setTheme(event.target.value as "system" | "light" | "dark");
-              }}
-            >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
-        </fieldset>
-
-        <fieldset className="mv-play-group">
-          <legend>Tokens</legend>
-          {TOKENS.map((token) => (
-            <label className="mv-play-field" key={token.name}>
-              <span>
-                {token.label} <code>{token.name}</code>
-              </span>
-              <span className="mv-play-row">
-                {token.swatch ? <Swatch value={overrides[token.name]} token={token.name} /> : null}
-                <input
-                  type="text"
-                  spellCheck={false}
-                  placeholder="unchanged"
-                  value={overrides[token.name] ?? ""}
-                  onChange={(event) => {
-                    setOverrides((current) => ({
-                      ...current,
-                      [token.name]: event.target.value,
-                    }));
-                  }}
-                />
-              </span>
-            </label>
-          ))}
-          <button
-            type="button"
-            data-quiet=""
-            disabled={css === undefined}
-            onClick={() => {
-              setOverrides({});
-              setCopied(false);
-            }}
-          >
-            Back to the defaults
-          </button>
-        </fieldset>
-      </div>
-
       {/* Exactly the block the copy button hands over, applied to this page. The
           preview and the snippet cannot disagree, because they are one string. */}
       {css === undefined ? null : <style>{css}</style>}
 
-      <div className="mv-play-stage">
-        {route === undefined ? (
-          <p className="mv-play-empty">
-            {routes === undefined
-              ? "Paste a Stellar address and ask for a quote. The panel renders what actually comes back."
-              : "No route. The reasons are below."}
-          </p>
-        ) : (
-          <TransferPanel
-            route={route}
-            steps={undefined}
-            outcome="in-flight"
-            onConfirm={undefined}
-            onRemedy={undefined}
-            theme={theme === "system" ? undefined : theme}
-          />
-        )}
+      <div className="mv-play-split">
+        <div className="mv-play-controls">
+          <fieldset className="mv-play-group">
+            <legend>Quote</legend>
 
-        {routes !== undefined && routes.rejected.length > 0 ? (
-          <RouteList
-            routes={routes}
-            selectedId={selected}
-            onSelect={setSelected}
-            theme={theme === "system" ? undefined : theme}
-          />
-        ) : null}
+            <label className="mv-play-field">
+              <span>From</span>
+              <select
+                value={chainId}
+                onChange={(event) => {
+                  setChainId(event.target.value);
+                }}
+              >
+                {SOURCE_CHAINS.map((chain) => (
+                  <option key={chain.id} value={chain.id}>
+                    {chain.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        {problem === undefined ? null : <p className="mv-play-problem">{problem}</p>}
+            <label className="mv-play-field">
+              <span>USDC</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(event) => {
+                  setAmount(event.target.value);
+                }}
+              />
+            </label>
+
+            <label className="mv-play-field">
+              <span>To this Stellar address</span>
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="G..."
+                value={destination}
+                onChange={(event) => {
+                  setDestination(event.target.value);
+                }}
+              />
+            </label>
+
+            <button
+              type="button"
+              disabled={asking || destination.trim() === ""}
+              onClick={() => {
+                void quote();
+              }}
+            >
+              {asking ? "Asking Circle and Stellar" : "Get a real quote"}
+            </button>
+          </fieldset>
+
+          <fieldset className="mv-play-group">
+            <legend>Theme</legend>
+            <label className="mv-play-field">
+              <span>Follows the machine unless you say otherwise</span>
+              <select
+                value={theme}
+                onChange={(event) => {
+                  setTheme(event.target.value as "system" | "light" | "dark");
+                }}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset className="mv-play-group">
+            <legend>Tokens</legend>
+            {TOKENS.map((token) => (
+              <label className="mv-play-field" key={token.name}>
+                <span>
+                  {token.label} <code>{token.name}</code>
+                </span>
+                <span className="mv-play-row">
+                  {token.swatch ? (
+                    <Swatch
+                      value={overrides[token.name]}
+                      token={token.name}
+                      theme={theme === "system" ? undefined : theme}
+                    />
+                  ) : null}
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    placeholder="unchanged"
+                    value={overrides[token.name] ?? ""}
+                    onChange={(event) => {
+                      setOverrides((current) => ({
+                        ...current,
+                        [token.name]: event.target.value,
+                      }));
+                      // What is on the clipboard is no longer what is on the
+                      // page, so the button must stop claiming otherwise.
+                      setCopied("no");
+                    }}
+                  />
+                </span>
+              </label>
+            ))}
+            <button
+              type="button"
+              data-quiet=""
+              disabled={css === undefined}
+              onClick={() => {
+                setOverrides({});
+                setCopied("no");
+              }}
+            >
+              Back to the defaults
+            </button>
+          </fieldset>
+        </div>
+
+        <div className="mv-play-stage">
+          {route === undefined ? (
+            <p className="mv-play-empty">
+              {routes === undefined
+                ? "Paste a Stellar address and ask for a quote. The panel renders what actually comes back."
+                : "No route. The reasons are below."}
+            </p>
+          ) : (
+            <TransferPanel
+              route={route}
+              steps={undefined}
+              outcome="in-flight"
+              onConfirm={undefined}
+              onRemedy={undefined}
+              theme={theme === "system" ? undefined : theme}
+            />
+          )}
+
+          {routes !== undefined && routes.rejected.length > 0 ? (
+            <RouteList
+              routes={routes}
+              selectedId={selected}
+              onSelect={setSelected}
+              theme={theme === "system" ? undefined : theme}
+            />
+          ) : null}
+
+          {problem === undefined ? null : <p className="mv-play-problem">{problem}</p>}
+        </div>
       </div>
 
       <div className="mv-play-output">
@@ -269,15 +274,23 @@ export function Playground(): ReactElement {
             <pre>
               <code>{css}</code>
             </pre>
+            {/* A browser that refuses clipboard access must not leave a button
+                saying "Copied" over nothing. The block is on the page either
+                way, so the honest failure is to say select it yourself. */}
             <button
               type="button"
               onClick={() => {
-                void navigator.clipboard.writeText(css).then(() => {
-                  setCopied(true);
-                });
+                navigator.clipboard.writeText(css).then(
+                  () => {
+                    setCopied("yes");
+                  },
+                  () => {
+                    setCopied("refused");
+                  },
+                );
               }}
             >
-              {copied ? "Copied" : "Copy"}
+              {copied === "yes" ? "Copied" : copied === "refused" ? "Select it above" : "Copy"}
             </button>
           </>
         )}
@@ -293,12 +306,24 @@ export function Playground(): ReactElement {
  * not a colour the browser understands, which is more useful than validating the
  * string ourselves and being wrong about a format CSS accepts.
  */
-function Swatch({ value, token }: { value: string | undefined; token: string }): ReactElement {
+function Swatch({
+  value,
+  token,
+  theme,
+}: {
+  value: string | undefined;
+  token: string;
+  theme: "light" | "dark" | undefined;
+}): ReactElement {
   return (
     // Carries mv-root so the widget's own tokens are defined on it, which is what
-    // lets an untouched field preview the real default rather than a copy of it.
+    // lets an untouched field preview the real default rather than a copy of it,
+    // and data-mv-theme so it previews the default for the theme being looked at.
+    // Without that it followed the machine while the panel beside it did not, and
+    // showed white as black.
     <span
       className="mv-root mv-play-swatch"
+      data-mv-theme={theme}
       aria-hidden="true"
       style={{ background: value === undefined || value === "" ? `var(${token})` : value }}
     />

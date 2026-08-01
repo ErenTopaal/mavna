@@ -10,7 +10,9 @@
  * state of the destination is read off Stellar, so a wrong address produces a
  * real refusal rather than a placeholder.
  */
+import { AxelarAdapter } from "@mavna/adapter-axelar";
 import { CCTP_CONTRACTS, CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cctp";
+import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
 import type { Asset, NetworkId, Route } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
@@ -28,6 +30,14 @@ const config = createNetworkConfig({ id: NETWORK, rpcUrl: PUBLIC_TESTNET_RPC_URL
 const rpc = new RpcClient({ url: config.rpcUrl });
 
 const cctp = new CctpAdapter({
+  network: NETWORK,
+  rpc,
+  baseReserveStroops: config.baseReserveStroops,
+});
+
+const axelar = new AxelarAdapter({ network: NETWORK, rpc });
+
+const layerzero = new LayerZeroAdapter({
   network: NETWORK,
   rpc,
   baseReserveStroops: config.baseReserveStroops,
@@ -70,9 +80,10 @@ const to: Asset = {
 // a defect, not a shortcut.
 const baseUnits = toBaseUnits(amount, from.decimals);
 
-// One adapter here, but the shape is the same with several: they are raced, and
-// partial results arrive through onUpdate rather than everything at the end.
-const routes = await raceAdapters([cctp], {
+// All three rails at once. A slow one costs its own route and nothing else, and
+// onUpdate lets an interface render each answer as it lands instead of waiting
+// for the last of them.
+const routes = await raceAdapters([cctp, axelar, layerzero], {
   from,
   to,
   sends: { asset: from, baseUnits },
@@ -80,6 +91,8 @@ const routes = await raceAdapters([cctp], {
   maxSlippageBps: 50,
 });
 
+// A rail that cannot carry this transfer says so, and says why. On testnet two
+// of these three will decline, which is the honest picture rather than a fault.
 for (const rejection of routes.rejected) {
   console.error(`${rejection.source} declined (${rejection.reason}): ${rejection.explanation}`);
 }

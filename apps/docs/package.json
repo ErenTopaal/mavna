@@ -14,7 +14,9 @@
   "dependencies": {
     "@astrojs/react": "6.0.2",
     "@astrojs/starlight": "0.41.7",
+    "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
+    "@mavna/adapter-layerzero": "workspace:*",
     "@mavna/core": "workspace:*",
     "@mavna/routing": "workspace:*",
     "@mavna/status": "workspace:*",

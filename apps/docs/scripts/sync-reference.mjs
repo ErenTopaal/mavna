@@ -26,6 +26,8 @@ const PACKAGES = [
   { name: "@mavna/status", dir: "packages/status" },
   { name: "@mavna/swap", dir: "packages/swap" },
   { name: "@mavna/adapter-cctp", dir: "packages/adapters/cctp" },
+  { name: "@mavna/adapter-axelar", dir: "packages/adapters/axelar" },
+  { name: "@mavna/adapter-layerzero", dir: "packages/adapters/layerzero" },
   { name: "@mavna/widget", dir: "packages/widget" },
 ];
 

@@ -24,6 +24,7 @@ import {
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
 import {
+  chainIdForLayerZeroKey,
   type EvmSource,
   explorerTxUrl,
   readableAmount,
@@ -523,18 +524,29 @@ export class LayerZeroAdapter implements BridgeAdapter {
   async status(handle: TransferHandle): Promise<StepPhase> {
     if (handle.sourceTxHash === undefined) return { phase: "idle" };
 
-    const chainId = handle.sourceChainId ?? "unknown";
-    const explorerUrl =
-      handle.sourceChainId === undefined
-        ? scanMessageUrl(this.network, handle.sourceTxHash)
-        : explorerTxUrl(this.network, handle.sourceChainId, handle.sourceTxHash);
-    const ref = { chainId, txHash: handle.sourceTxHash, explorerUrl };
-
     const messages = await this.scan.byTransaction(handle.sourceTxHash);
     // One transaction can carry several messages. Ours is the one bound for
     // Stellar; anything else in the same transaction is not this transfer.
     const stellarEid = STELLAR_SIDE[this.network].eid;
     const message = messages.find((m) => m.pathway?.dstEid === stellarEid) ?? messages[0];
+
+    // Which chain it left from, taken from the message when the caller did not
+    // say. Someone who closed the tab may have nothing but a hash, and this
+    // product's stated advantage over the prior art is recovering from whatever
+    // they still have rather than telling them it is lost.
+    const chainId =
+      handle.sourceChainId ??
+      chainIdForLayerZeroKey(this.network, message?.pathway?.sender?.chain ?? "");
+
+    const explorerUrl =
+      chainId === undefined
+        ? scanMessageUrl(this.network, handle.sourceTxHash)
+        : explorerTxUrl(this.network, chainId, handle.sourceTxHash);
+    const ref = {
+      chainId: chainId ?? "unknown",
+      txHash: handle.sourceTxHash,
+      explorerUrl,
+    };
 
     if (message === undefined) {
       return { phase: "pending", ref, expectedByUnix: 0 };
@@ -560,7 +572,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
     }
 
     const deliveredTx = message.destination?.tx?.txHash;
-    const received = this.receivedFrom(message.source?.tx, handle);
+    const received = await this.receivedFrom(message.source?.tx, chainId);
     if (received === undefined) {
       // Delivered, but the payload was not indexed with it, so the amount cannot
       // be stated. Claiming a number here would be inventing one.
@@ -588,12 +600,12 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * recipient's balance instead would report their whole holding as if this
    * transfer had delivered it.
    */
-  private receivedFrom(
+  private async receivedFrom(
     tx: { readonly payload?: string } | undefined,
-    handle: TransferHandle,
-  ): Amount | undefined {
+    chainId: string | undefined,
+  ): Promise<Amount | undefined> {
     const payload = tx?.payload;
-    if (payload === undefined) return undefined;
+    if (payload === undefined || chainId === undefined) return undefined;
 
     let amountSd: bigint;
     try {
@@ -602,23 +614,27 @@ export class LayerZeroAdapter implements BridgeAdapter {
       return undefined;
     }
 
-    // Shared decimals are six on every OFT this rail carries, and the Stellar
-    // side reports the difference. Without a resolved route in hand the
-    // difference cannot be read, so the source chain is needed to find one.
-    const source = handle.sourceChainId;
-    if (source === undefined) return undefined;
-    const cached = this.discovery.cachedRoute(source);
-    if (cached === undefined) return undefined;
+    // The payload counts in shared decimals and Stellar counts in seven, and
+    // only the OFT knows the difference between them. Resolving rather than
+    // reading a cache, because a caller polling status in a fresh process has
+    // no cache and would otherwise watch a delivered transfer sit at pending
+    // forever. Discovery caches it after the first call.
+    let route: ResolvedRoute;
+    try {
+      route = await this.discovery.routeFrom(chainId);
+    } catch {
+      return undefined;
+    }
 
     return {
       asset: {
         chainId: STELLAR_SIDE[this.network].chainId,
-        id: cached.stellar.token,
-        symbol: cached.tokenSymbol,
+        id: route.stellar.token,
+        symbol: route.tokenSymbol,
         decimals: STELLAR_DECIMALS,
         curatedBy: "LayerZero",
       },
-      baseUnits: sharedToStellar(amountSd, cached.stellar.decimalsDiff).toString(),
+      baseUnits: sharedToStellar(amountSd, route.stellar.decimalsDiff).toString(),
     };
   }
 

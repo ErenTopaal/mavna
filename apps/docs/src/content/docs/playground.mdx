@@ -1,0 +1,23 @@
+---
+title: Playground
+description: The real widget, against a real quote, with the theme tokens under your hands.
+tableOfContents: false
+---
+
+import { Playground } from "../../components/Playground";
+
+This is the widget from `@mavna/widget`, not a picture of it, and the quote it
+renders comes off the live network: the chain list is the CCTP adapter's own
+registry, the fee is Circle's, and the destination is inspected on Stellar
+testnet before anything is priced.
+
+Which is why there is a form first. A quote needs somewhere to send money to, and
+a made-up one would turn every number below into decoration. Any Stellar address
+works, including one that does not exist yet, in which case the quote will
+include the reserve for creating it.
+
+<Playground client:only="react" />
+
+Nothing here can move money. There is no wallet, no signing and no submission on
+this page, because the SDK does not do any of those things: it quotes and it
+builds, and what you would sign belongs to your wallet.

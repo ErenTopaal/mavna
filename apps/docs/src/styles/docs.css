@@ -141,15 +141,29 @@
  * opinions of its own would compete with the thing it exists to show.
  */
 .mv-play {
+  container-type: inline-size;
   display: grid;
-  gap: var(--sl-content-gap-y, 1.5rem);
+  gap: 1.5rem;
   margin-block: 1.5rem;
 }
 
-@media (min-width: 60rem) {
-  .mv-play {
-    grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
-    align-items: start;
+.mv-play-split {
+  display: grid;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+/*
+ * Split on the playground's own width, not the window's.
+ *
+ * A viewport query put the controls beside the panel on a wide screen while the
+ * prose column they both sit in was still 768px, which squeezed the widget into
+ * a quarter of it. The widget answers to its container for exactly this reason,
+ * and so should the thing framing it.
+ */
+@container (min-width: 40rem) {
+  .mv-play-split {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
   }
 }
 

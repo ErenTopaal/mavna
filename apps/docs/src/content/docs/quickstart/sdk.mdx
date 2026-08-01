@@ -24,9 +24,11 @@ node apps/docs/examples/quote.ts GBD4SMJWOYPPTVSRUK7J5M3JHHOOIEUMWYGQOLHVHUDL4ZN
 Any Stellar address works, including one that does not exist yet. Node 24 runs
 TypeScript directly, so there is no build step between the file and the output.
 
-That command prints this, and every number in it came off the network:
+That command prints this, and every line of it came off the network:
 
 ```
+layerzero declined (asset-unsupported): This route carries no token on the test network. It works on the main network, where it is the only way to bring USDT to Stellar. Another route may work here.
+axelar declined (temporarily-unavailable): This route did not answer in time. Nothing has been sent, and it is worth trying again.
 Route cctp-ethereum-sepolia-stellar via cctp
   sends     25.0 USDC
   receives  25.0 USDC
@@ -44,6 +46,13 @@ Route cctp-ethereum-sepolia-stellar via cctp
   evm-tx on ethereum-sepolia: Let Circle's transfer contract move 25 USDC from your wallet, once. This does not send anything on its own.  (skippable, see unnecessaryWhen)
   evm-tx on ethereum-sepolia: Send 25 USDC to GBD4SMJWOYPPTVSRUK7J5M3JHHOOIEUMWYGQOLHVHUDL4ZN2ESE3BJYA on Stellar, via Circle, on the standard path.
 ```
+
+Three rails were asked at once and one of them answered. That is the normal
+result on testnet and the two refusals are worth reading rather than skipping:
+LayerZero has no token to carry there at all, and Axelar did not come back inside
+the three-second racing budget, which is what the budget is for. Neither is an
+exception, an empty list, or a silent omission. Both are values in
+`RouteSet.rejected` with a reason you can branch on and a sentence you can show.
 
 The bridge fee is genuinely zero. Circle's standard path charges nothing into
 Stellar, which is the whole commercial argument for building on it directly: a
@@ -119,7 +128,7 @@ integer.
 A rejection, not an exception. `raceAdapters` returns a `RouteSet` carrying both:
 
 ```ts
-const routes = await raceAdapters([cctp], request);
+const routes = await raceAdapters([cctp, axelar, layerzero], request);
 for (const rejection of routes.rejected) {
   console.error(`${rejection.source}: ${rejection.explanation}`);
 }
@@ -137,14 +146,22 @@ cctp declined (amount-too-small): This transfer is too small to set up a new Ste
 The second is the interesting one. It refuses and then says what would work,
 which is the point of checking at quote time rather than after a signature.
 
-`temporarily-unavailable` is the reason to handle deliberately: it means the
-Stellar read was too stale to trust, not that the address is bad. Showing it as a
-destination problem tells a user their address is unusable when the truth is to
-ask again in a moment.
+`temporarily-unavailable` is the reason to handle deliberately, and it means two
+different things depending on who said it. From CCTP it usually means the Stellar
+read was too stale to trust, not that the address is bad. From the race itself it
+means that rail did not answer inside `ADAPTER_QUOTE_TIMEOUT_MS`, which is 3000.
+Neither is a verdict on the transfer, and showing either as a destination problem
+tells a user their address is unusable when the truth is to ask again.
 
-`RouteSet.complete` tells you whether every source has answered. With several
-adapters, pass `onUpdate` and render routes as they land instead of waiting for
-the slowest one. Partial results are the normal case, not a degraded one.
+`RouteSet.complete` tells you whether every source has answered. Pass `onUpdate`
+and render routes as they land rather than waiting for the slowest one:
+
+```ts
+await raceAdapters(adapters, request, { onUpdate: (partial) => render(partial) });
+```
+
+Partial results are the normal case here, not a degraded one, so an interface
+built on this should look intentional while it is still filling in.
 
 ## Signing is yours, and there are more signatures than transactions
 

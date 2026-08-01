@@ -9,10 +9,12 @@ import { Content as Stellar } from "../../../generated/exports-stellar.md";
 import { Content as Status } from "../../../generated/exports-status.md";
 import { Content as Swap } from "../../../generated/exports-swap.md";
 import { Content as Cctp } from "../../../generated/exports-adapter-cctp.md";
+import { Content as Axelar } from "../../../generated/exports-adapter-axelar.md";
+import { Content as LayerZero } from "../../../generated/exports-adapter-layerzero.md";
 import { Content as Widget } from "../../../generated/exports-widget.md";
 
-Seven packages. Each table is read out of that package's `src/index.ts` when this
-site is built, so a name here is a name that exists.
+Nine packages, three of them rails. Each table is read out of that package's
+`src/index.ts` when this site is built, so a name here is a name that exists.
 
 Every package is ESM only, ships its own types, and is pinned exactly rather than
 by range.
@@ -82,6 +84,37 @@ hidden. `buildForwarderHookData`, `contractAddressToBytes32` and
 no recovery, and they are exported so they can be tested and audited directly.
 
 <Cctp />
+
+## `@mavna/adapter-axelar`
+
+Axelar as a rail, reaching Stellar through its Interchain Token Service. A
+validator set attesting rather than an issuer burning and minting.
+
+**Nothing about Axelar's deployment is a constant in here.** Not the chain names,
+not the contract addresses, not the token identifiers: every one is resolved at
+runtime. That is not caution for its own sake. Axelar registers Stellar under a
+versioned chain identifier that changes when they redeploy, old identifiers are
+never retired, and a stale name routes into a graveyard rather than erroring. The
+fee estimator returns zero for an unknown name, which would underpay and strand a
+transfer. `assertChainAgrees` and `assertFeeIsPlausible` exist because both
+failures are silent.
+
+<Axelar />
+
+## `@mavna/adapter-layerzero`
+
+LayerZero OFTs, and on mainnet the only route to native USDT on Stellar.
+
+`ROUTED_SYMBOLS` is empty for testnet, deliberately. LayerZero's OFT registry
+carries no testnet chains on any chain, so there is nothing to resolve a symbol
+against, and every OFT actually peered to Stellar testnet is a private deployment
+whose token nobody else can obtain. Naming a default there would be quoting a
+route no user can take. Pass your own through `LayerZeroAdapterOptions.ofts`.
+
+`assertDvnStackIsSound` is the one to read before trusting a route: it checks the
+verifier stack rather than assuming the defaults are configured.
+
+<LayerZero />
 
 ## `@mavna/widget`
 
