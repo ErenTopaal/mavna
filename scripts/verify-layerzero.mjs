@@ -100,6 +100,62 @@ const finding = (where, message) => {
 
 const detail = (message) => console.log(`      ${message}`);
 
+/**
+ * Renders an arbitrary value readably, so a failure says something.
+ *
+ * `String(value)` on an object produces "[object Object]", which names nothing.
+ * This project already paid for that once, in the Axelar fee reader, where an
+ * unexpected shape reached `BigInt()` and threw a SyntaxError mentioning neither
+ * the field nor the value. A verification script that reports a problem and
+ * hides what it was is worse than no script.
+ */
+function describe(value) {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "nothing at all";
+  if (typeof value === "bigint") return value.toString();
+  try {
+    const json = JSON.stringify(value, (_key, item) =>
+      typeof item === "bigint" ? item.toString() : item,
+    );
+    return json ?? "a value with no readable form";
+  } catch {
+    return "a value that could not be read";
+  }
+}
+
+/** An error's own words, without letting a thrown non-Error come out as nothing. */
+function reason(error) {
+  return error instanceof Error && typeof error.message === "string"
+    ? error.message
+    : describe(error);
+}
+
+/**
+ * An address a contract returned, lowercased, or a hard stop.
+ *
+ * Shape matters more here than anywhere else in this script. The endpoint check
+ * below decides whether a token speaks through the contract we believe it does,
+ * and two unreadable values both stringify to "[object Object]" and therefore
+ * compare EQUAL. That is a security check passing precisely when it should not.
+ */
+function readAddress(value, what) {
+  if (typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value)) return value.toLowerCase();
+  throw new Error(`${what} is not an address: ${describe(value)}`);
+}
+
+/** Bytes a contract returned. Length is not checked; being hex at all is. */
+function readHex(value, what) {
+  if (typeof value === "string" && /^0x([0-9a-fA-F]{2})*$/.test(value)) return value;
+  throw new Error(`${what} is not a hex string: ${describe(value)}`);
+}
+
+/** A count or a small integer a contract returned, as a number. */
+function readCount(value, what) {
+  const numeric = typeof value === "bigint" ? Number(value) : value;
+  if (typeof numeric === "number" && Number.isInteger(numeric) && numeric >= 0) return numeric;
+  throw new Error(`${what} is not a whole number: ${describe(value)}`);
+}
+
 const TIMEOUT = 15_000;
 
 async function getJson(url) {
@@ -117,7 +173,7 @@ async function evmRpc(url, method, params) {
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = await response.json();
-  if (body.error) throw new Error(String(body.error.message ?? "call failed").slice(0, 120));
+  if (body.error) throw new Error(describe(body.error.message ?? body.error).slice(0, 120));
   return body.result;
 }
 
@@ -137,7 +193,7 @@ async function pickNodes(source) {
     try {
       seen = Number(await evmRpc(url, "eth_chainId", []));
     } catch (error) {
-      wrong.push(`${url} unreachable (${String(error.message).slice(0, 60)})`);
+      wrong.push(`${url} unreachable (${reason(error).slice(0, 60)})`);
       continue;
     }
     if (seen !== source.evmChainId) {
@@ -435,7 +491,7 @@ for (const network of networks) {
     try {
       reportedEid = Number(await callContract(url, ABI, endpoint, "eid"));
     } catch (error) {
-      note(false, `the endpoint at ${endpoint} answers (${String(error.message).slice(0, 70)})`);
+      note(false, `the endpoint at ${endpoint} answers (${reason(error).slice(0, 70)})`);
       continue;
     }
     note(
@@ -476,104 +532,152 @@ for (const network of networks) {
       console.log(`\n  -- ${symbol} on ${chainId}`);
       detail(address);
 
-      const peer = await callContract(url, ABI, address, "peers", [side.eid]);
-      if (/^0x0{64}$/.test(peer)) {
-        finding(
-          `${symbol} on ${chainId}`,
-          "not peered to Stellar, so nothing can be sent from here yet",
-        );
-        continue;
-      }
-      note(true, "it is peered to Stellar");
-
-      const [token, approvalRequired, shared, oftEndpoint, enforced] = await Promise.all([
-        callContract(url, ABI, address, "token"),
-        callContract(url, ABI, address, "approvalRequired"),
-        callContract(url, ABI, address, "sharedDecimals"),
-        callContract(url, ABI, address, "endpoint"),
-        callContract(url, ABI, address, "enforcedOptions", [side.eid, 1]),
-      ]);
-      // The OFT's own view of which endpoint it speaks through, against the one
-      // the registry lists. A token wired to some other endpoint would be
-      // configured and quoted through a contract it does not actually use.
-      note(
-        String(oftEndpoint).toLowerCase() ===
-          String(endpointFor(source, rootMetadata)).toLowerCase(),
-        "the OFT speaks through the endpoint LayerZero lists for this chain",
-      );
-
-      const tokenDecimals = Number(await callContract(url, ABI, token, "decimals"));
-      detail(
-        `token ${String(token)} (${tokenDecimals} decimals), shared ${String(shared)}, ` +
-          `approval ${approvalRequired ? "required" : "not required"}`,
-      );
-      note(
-        Number(shared) <= tokenDecimals,
-        "the token has at least as many decimals as the wire format carries",
-      );
-
-      // The Stellar side, asked which endpoint it belongs to. This is the check
-      // the retired-deployment hazard makes necessary.
-      const stellarOft = StrKey.encodeContract(Buffer.from(peer.slice(2), "hex"));
-      const oftStorage = await stellarInstance(server, stellarOft);
-      note(oftStorage !== undefined, `its Stellar peer ${stellarOft} exists on the ledger`);
-      if (oftStorage !== undefined) {
-        note(
-          oftStorage.get("Endpoint") === stellarEndpoint,
-          "its Stellar peer is registered on the endpoint the registry names",
-        );
-        if (oftStorage.get("Endpoint") !== stellarEndpoint) {
-          detail(`it is on ${oftStorage.get("Endpoint")}, which is not the advertised endpoint`);
-        }
-        const diff = Number(oftStorage.get("DecimalsDiff") ?? 0);
-        note(
-          Number(shared) + diff === 7,
-          `shared decimals plus the Stellar side's difference is 7 (${String(shared)} + ${diff})`,
-        );
-      }
-
-      // The verifier set, and whether anyone chose it. `getConfig` on the
-      // endpoint merges in the defaults and so cannot answer this; only the
-      // send library's raw view can.
-      const sendLib = await callContract(
-        url,
-        ABI,
-        endpointFor(source, rootMetadata),
-        "getSendLibrary",
-        [address, side.eid],
-      );
-      const [effective, app] = await Promise.all([
-        callContract(url, ULN_ABI, sendLib, "getUlnConfig", [address, side.eid]),
-        callContract(url, ULN_ABI, sendLib, "getAppUlnConfig", [address, side.eid]),
-      ]);
-      note(
-        effective.requiredDVNCount + effective.optionalDVNThreshold > 0,
-        `${effective.requiredDVNCount} verifier(s) must attest, ` +
-          `after ${effective.confirmations} confirmations`,
-      );
-      if (app.requiredDVNCount === 0 && app.optionalDVNCount === 0) {
-        finding(
-          `${symbol} on ${chainId}`,
-          "its verifier set is inherited from the network default rather than chosen, so the " +
-            "adapter declines this route",
-        );
-      } else {
-        note(true, "the verifier set is explicitly configured rather than inherited");
-      }
-
-      // Our encoder against a real one. The enforced bytes were produced by
-      // whoever deployed this token, using LayerZero's own tooling, so matching
-      // them is an independent check that this package encodes options correctly.
-      if (enforced !== "0x" && enforced.startsWith("0x0003010011")) {
-        const gas = BigInt(`0x${enforced.slice(14)}`);
-        note(
-          executorLzReceiveOption(gas) === enforced,
-          `our option encoder reproduces the enforced bytes for ${gas} gas`,
-        );
-      } else {
-        detail(`enforced options are ${enforced === "0x" ? "unset" : String(enforced)}`);
+      try {
+        await inspectToken({
+          url,
+          source,
+          chainId,
+          symbol,
+          address,
+          server,
+          stellarEndpoint,
+          side,
+        });
+      } catch (error) {
+        // A shape we did not expect means this contract is not what we think it
+        // is, which is a failure worth recording rather than one worth crashing
+        // the rest of the sweep over.
+        note(false, `${symbol} on ${chainId} could be read: ${reason(error)}`);
       }
     }
+  }
+}
+
+/**
+ * One token, from its EVM contract all the way through to its Stellar peer.
+ *
+ * Split out so a contract that answers with an unexpected shape stops this token
+ * rather than the whole run, and so every value that came off a chain passes
+ * through a reader before it reaches a comparison or a sentence.
+ */
+async function inspectToken(context) {
+  const { url, source, chainId, symbol, address, server, stellarEndpoint, side } = context;
+
+  const peer = readHex(await callContract(url, ABI, address, "peers", [side.eid]), "the peer");
+  if (/^0x0{64}$/.test(peer)) {
+    finding(
+      `${symbol} on ${chainId}`,
+      "not peered to Stellar, so nothing can be sent from here yet",
+    );
+    return;
+  }
+  note(true, "it is peered to Stellar");
+
+  const [rawToken, approvalRequired, rawShared, rawOftEndpoint, rawEnforced] = await Promise.all([
+    callContract(url, ABI, address, "token"),
+    callContract(url, ABI, address, "approvalRequired"),
+    callContract(url, ABI, address, "sharedDecimals"),
+    callContract(url, ABI, address, "endpoint"),
+    callContract(url, ABI, address, "enforcedOptions", [side.eid, 1]),
+  ]);
+
+  const token = readAddress(rawToken, "the OFT's token");
+  const shared = readCount(rawShared, "the shared decimals");
+  const enforced = readHex(rawEnforced, "the enforced options");
+
+  // The OFT's own view of which endpoint it speaks through, against the one
+  // the registry lists. A token wired to some other endpoint would be
+  // configured and quoted through a contract it does not actually use.
+  //
+  // Both sides go through `readAddress` first, and that is the point rather
+  // than tidiness: stringifying two unreadable values gives "[object
+  // Object]" twice, which compares equal and turns this check into one that
+  // passes exactly when it should fail.
+  note(
+    readAddress(rawOftEndpoint, "the OFT's endpoint") ===
+      readAddress(endpointFor(source, rootMetadata), "the registry's endpoint"),
+    "the OFT speaks through the endpoint LayerZero lists for this chain",
+  );
+
+  const tokenDecimals = readCount(
+    await callContract(url, ABI, token, "decimals"),
+    "the token's decimals",
+  );
+  detail(
+    `token ${token} (${tokenDecimals} decimals), shared ${shared}, ` +
+      `approval ${approvalRequired === true ? "required" : "not required"}`,
+  );
+  note(
+    shared <= tokenDecimals,
+    "the token has at least as many decimals as the wire format carries",
+  );
+
+  // The Stellar side, asked which endpoint it belongs to. This is the check
+  // the retired-deployment hazard makes necessary.
+  const stellarOft = StrKey.encodeContract(Buffer.from(peer.slice(2), "hex"));
+  const oftStorage = await stellarInstance(server, stellarOft);
+  note(oftStorage !== undefined, `its Stellar peer ${stellarOft} exists on the ledger`);
+  if (oftStorage !== undefined) {
+    const peerEndpoint = oftStorage.get("Endpoint");
+    note(
+      peerEndpoint === stellarEndpoint,
+      "its Stellar peer is registered on the endpoint the registry names",
+    );
+    if (peerEndpoint !== stellarEndpoint) {
+      detail(`it is on ${describe(peerEndpoint)}, which is not the advertised endpoint`);
+    }
+    const diff = readCount(oftStorage.get("DecimalsDiff") ?? 0, "the Stellar decimals gap");
+    note(
+      shared + diff === 7,
+      `shared decimals plus the Stellar side's difference is 7 (${shared} + ${diff})`,
+    );
+  }
+
+  // The verifier set, and whether anyone chose it. `getConfig` on the
+  // endpoint merges in the defaults and so cannot answer this; only the
+  // send library's raw view can.
+  const sendLib = await callContract(
+    url,
+    ABI,
+    endpointFor(source, rootMetadata),
+    "getSendLibrary",
+    [address, side.eid],
+  );
+  const [effective, app] = await Promise.all([
+    callContract(url, ULN_ABI, sendLib, "getUlnConfig", [address, side.eid]),
+    callContract(url, ULN_ABI, sendLib, "getAppUlnConfig", [address, side.eid]),
+  ]);
+  const required = readCount(effective.requiredDVNCount, "the required DVN count");
+  const threshold = readCount(effective.optionalDVNThreshold, "the optional DVN threshold");
+  const confirmations = readCount(effective.confirmations, "the confirmation depth");
+  note(
+    required + threshold > 0,
+    `${required} verifier(s) must attest, after ${confirmations} confirmations`,
+  );
+  if (
+    readCount(app.requiredDVNCount, "the app's required DVN count") === 0 &&
+    readCount(app.optionalDVNCount, "the app's optional DVN count") === 0
+  ) {
+    finding(
+      `${symbol} on ${chainId}`,
+      "its verifier set is inherited from the network default rather than chosen, so the " +
+        "adapter declines this route",
+    );
+  } else {
+    note(true, "the verifier set is explicitly configured rather than inherited");
+  }
+
+  // Our encoder against a real one. The enforced bytes were produced by
+  // whoever deployed this token, using LayerZero's own tooling, so matching
+  // them is an independent check that this package encodes options correctly.
+  if (enforced !== "0x" && enforced.startsWith("0x0003010011")) {
+    const gas = BigInt(`0x${enforced.slice(14)}`);
+    note(
+      executorLzReceiveOption(gas) === enforced,
+      `our option encoder reproduces the enforced bytes for ${gas} gas`,
+    );
+  } else {
+    detail(`enforced options are ${enforced === "0x" ? "unset" : enforced}`);
   }
 }
 
