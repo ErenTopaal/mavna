@@ -1,3 +1,5 @@
+export type { PriceOptions } from "./price.js";
+export { XlmPriceSource } from "./price.js";
 export type { AddressKind, ClassifiedAddress } from "./address.js";
 export {
   assertCanReceive,
@@ -13,12 +15,13 @@ export {
   PUBLIC_MAINNET_RPC_URLS,
   PUBLIC_TESTNET_RPC_URL,
 } from "./network.js";
-export type { ReserveInputs, ReserveQuote } from "./reserve.js";
+export type { ArrivingValue, ReserveInputs, ReserveQuote } from "./reserve.js";
 export {
   belowFloorGuidance,
   meetsFloor,
   quoteReserve,
   stroopsToXlm,
+  valueInXlm,
   xlmToStroops,
 } from "./reserve.js";
 export type { FreshRead, LedgerFloor, RpcClientOptions } from "./rpc.js";

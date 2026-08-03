@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
+import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { CctpAdapter } from "./adapter.js";
 import { CCTP_CONTRACTS } from "./config.js";
@@ -72,6 +74,12 @@ async function quoteRetrying(request: QuoteRequest): Promise<Route | RouteReject
   }
   return last;
 }
+
+const SPONSOR = Keypair.fromSecret(
+  readFileSync(new URL("../../../../.env", import.meta.url).pathname, "utf8").match(
+    /^SPONSOR_SECRET_KEY=(S\w+)/m,
+  )?.[1] ?? "",
+);
 
 describe("CctpAdapter", () => {
   it("quotes a real route into an account that already holds USDC", async () => {
@@ -353,5 +361,52 @@ describe("CctpAdapter", () => {
     expect(payload.args[3]?.toLowerCase()).toBe("0x036cbd53842c5426634e7929541ec2318f3dcf7e");
     const approvalPayload = JSON.parse(approval?.payload ?? "{}") as { to: string };
     expect(approvalPayload.to.toLowerCase()).toBe("0x036cbd53842c5426634e7929541ec2318f3dcf7e");
+  });
+});
+
+describe("a destination that has never existed", () => {
+  /**
+   * The product's whole reason for being, checked rather than assumed.
+   *
+   * The quote for a brand new account promises to prepare it. For a long time
+   * nothing produced that transaction: the quote said three signatures and
+   * `buildTransactions` returned two, so a user would have signed the burn and
+   * watched the delivery bounce off an account that could not hold dollars.
+   */
+  const fresh = (): string => Keypair.random().publicKey();
+
+  it("promises to prepare the account, and actually builds it", async () => {
+    const result = await adapter.quote(ask({ destination: fresh() }));
+    if (!isRoute(result)) throw new Error(result.explanation);
+
+    expect(result.steps.map((s) => s.kind)).toContain("prepare-account");
+
+    const sponsorAccount = await rpc.loadAccount(SPONSOR.publicKey());
+    const built = await adapter.buildTransactions(result, {
+      stellar: { sponsorAccount, network },
+    });
+
+    // Every promised signature has a transaction behind it, and the Stellar one
+    // comes first: value arriving at an unprepared account is rejected whole.
+    expect(built).toHaveLength(result.signaturesRequired);
+    expect(built[0]?.format).toBe("stellar-xdr");
+    expect(built.slice(1).map((t) => t.format)).toEqual(["evm-tx", "evm-tx"]);
+  });
+
+  it("refuses to build a short list when it has no sponsor to pay with", async () => {
+    // Returning two transactions for a three signature quote would be the same
+    // defect wearing a different shape.
+    const result = await adapter.quote(ask({ destination: fresh() }));
+    if (!isRoute(result)) throw new Error(result.explanation);
+
+    await expect(adapter.buildTransactions(result)).rejects.toThrow(/has to be prepared/);
+  });
+
+  it("measures the floor in the asset arriving, not in XLM", async () => {
+    // Five dollars is comfortably above the floor for a new account. It was
+    // being refused because the floor is an amount of XLM and the arriving
+    // amount is USDC, and both are seven decimal integers that look alike.
+    const result = await adapter.quote(ask({ destination: fresh() }));
+    expect(isRoute(result)).toBe(true);
   });
 });

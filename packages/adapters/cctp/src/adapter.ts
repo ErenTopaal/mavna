@@ -15,13 +15,19 @@ import type {
 import { MavnaError } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
+  type ArrivingValue,
   belowFloorGuidance,
+  buildPreparation,
   type DestinationLane,
   inspectDestination,
   meetsFloor,
+  type NetworkConfig,
   quoteReserve,
   type RpcClient,
+  valueInXlm,
+  XlmPriceSource,
 } from "@mavna/stellar";
+import type { Account } from "@stellar/stellar-sdk";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import { type Attestation, AttestationService } from "./attestation.js";
 import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
@@ -44,6 +50,25 @@ const BPS = 10_000n;
 
 /** What a non-EVM chain needs that a route cannot carry on its own. */
 export interface BuildOptions {
+  /**
+   * What preparing the destination's Stellar account needs.
+   *
+   * A route whose steps include `prepare-account` cannot be executed without
+   * this, and the builder refuses rather than quietly returning a shorter list.
+   * That refusal matters: the quote promises a number of signatures, and handing
+   * back fewer transactions than promised is how a user signs two of three and
+   * watches their money bounce.
+   *
+   * The sponsor account is loaded by the caller because loading it is a network
+   * read against an account this package does not own, and the sequence number
+   * has to be the one the caller will actually submit against.
+   */
+  readonly stellar?: {
+    /** The sponsor, already loaded, whose sequence number this will consume. */
+    readonly sponsorAccount: Account;
+    /** Resolved network configuration, for the passphrase. */
+    readonly network: NetworkConfig;
+  };
   readonly solana?: {
     /** The wallet paying and signing, base58. */
     readonly owner: string;
@@ -68,6 +93,13 @@ export interface CctpAdapterOptions {
   readonly baseReserveStroops: number;
   /** Injectable so tests do not have to reach Circle to exercise the quoting. */
   readonly attestations?: AttestationService;
+  /**
+   * Prices the arriving asset in XLM, so the sponsorship floor can be compared
+   * against it. Injectable for the same reason as the attestation service.
+   */
+  readonly prices?: XlmPriceSource;
+  /** Where the order book is read from. Defaults per network. */
+  readonly horizonUrl?: string;
 }
 
 export class CctpAdapter implements BridgeAdapter {
@@ -80,6 +112,7 @@ export class CctpAdapter implements BridgeAdapter {
   private readonly baseReserveStroops: number;
   private readonly attestations: AttestationService;
   private readonly stellarUsdc: StellarAsset;
+  private readonly prices: XlmPriceSource;
 
   constructor(options: CctpAdapterOptions) {
     this.network = options.network;
@@ -87,6 +120,15 @@ export class CctpAdapter implements BridgeAdapter {
     this.baseReserveStroops = options.baseReserveStroops;
     this.attestations = options.attestations ?? new AttestationService(options.network);
     this.stellarUsdc = new StellarAsset("USDC", CCTP_CONTRACTS[options.network].usdcIssuer);
+    this.prices =
+      options.prices ??
+      new XlmPriceSource({
+        horizonUrl:
+          options.horizonUrl ??
+          (options.network === "mainnet"
+            ? "https://horizon.stellar.org"
+            : "https://horizon-testnet.stellar.org"),
+      });
   }
 
   supportedChains(): Promise<readonly string[]> {
@@ -174,7 +216,29 @@ export class CctpAdapter implements BridgeAdapter {
     // instead of BigInt is how a transfer quietly loses its last digit.
     const delivered = canonicalToLocal((sends - fee).toString());
 
-    if (!meetsFloor(reserve, BigInt(delivered))) {
+    // Converted before comparing, because the floor is an amount of XLM and this
+    // is an amount of USDC. Both are integers with seven decimals on Stellar and
+    // neither announces which asset it is, which is exactly how they came to be
+    // compared directly: the floor was roughly six times too strict and told
+    // people their transfer was too small when it was not.
+    let arriving: ArrivingValue;
+    try {
+      arriving = valueInXlm(
+        BigInt(delivered),
+        request.to.decimals,
+        await this.prices.xlmStroopsPerUnit(this.stellarUsdc),
+      );
+    } catch (cause) {
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "Stellar's market is not answering, so the smallest workable transfer " +
+              "cannot be worked out right now.",
+      );
+    }
+
+    if (!meetsFloor(reserve, arriving)) {
       // The designed copy, reused rather than reworded: it offers a way forward
       // instead of refusing, which is the whole point of checking at quote time.
       return this.decline("amount-too-small", belowFloorGuidance(reserve));
@@ -275,9 +339,15 @@ export class CctpAdapter implements BridgeAdapter {
     const approval = buildApproval(params);
     const call = buildBurn(params);
 
-    // Two transactions, in this order. The messenger pulls the funds with
-    // transferFrom, so the allowance has to exist before the burn is sent.
+    // Preparation first, because the ordering is not a preference. Value arriving
+    // at an account that cannot hold it is rejected as a whole unit: nothing is
+    // lost and nothing lands, and the message sits deliverable until somebody
+    // fixes the account. Emitting it here is what makes the promised step real
+    // rather than a line in a quote nothing produces.
+    const preparation = this.buildPreparationFor(route, options);
+
     return [
+      ...preparation,
       {
         chainId: route.fromChain.id,
         payload: JSON.stringify({
@@ -309,6 +379,60 @@ export class CctpAdapter implements BridgeAdapter {
         }),
         format: "evm-tx",
         describes: call.describes,
+        ephemeralSigners: [],
+        unnecessaryWhen: undefined,
+      },
+    ];
+  }
+
+  /**
+   * The Stellar side of the transfer, when the destination needs one.
+   *
+   * Returns nothing for a destination that is already able to receive, which is
+   * most of them: a contract address needs no trustline at all, and an account
+   * that already holds USDC needs no preparation. Cost falls to zero in those
+   * cases and this correctly produces no transaction.
+   *
+   * Where preparation IS needed it is required, not optional. A caller who did
+   * not supply what it needs gets an error naming exactly what is missing,
+   * rather than a shorter list of transactions than the quote promised.
+   */
+  private buildPreparationFor(route: Route, options: BuildOptions): readonly UnsignedTransaction[] {
+    const needsPreparing = route.steps.some((step) => step.kind === "prepare-account");
+    if (!needsPreparing) return [];
+
+    if (options.stellar === undefined) {
+      throw new MavnaError(
+        "This destination cannot hold USDC yet, so its Stellar account has to be " +
+          "prepared before anything is sent. Pass `stellar` to buildTransactions " +
+          "with the sponsor account that will pay for it. Building the burn without " +
+          "it would promise a delivery that bounces.",
+        { retryable: false },
+      );
+    }
+
+    const { sponsorAccount, network } = options.stellar;
+    const transaction = buildPreparation({
+      network,
+      sponsorAccount,
+      userAddress: route.destination,
+      // A brand new account needs creating; one that merely lacks the trustline
+      // does not. The quote already worked this out, so it is read back rather
+      // than re-derived against a chain that may have moved since.
+      createAccount: route.steps.some(
+        (step) => step.kind === "prepare-account" && step.to.baseUnits === "0",
+      ),
+      assets: [this.stellarUsdc],
+    });
+
+    return [
+      {
+        chainId: stellarChainId(this.network),
+        payload: transaction.toXDR(),
+        format: "stellar-xdr",
+        describes:
+          `Let ${route.destination} hold USDC on Stellar. Somebody else pays the ` +
+          "deposit this needs, and it stays yours.",
         ephemeralSigners: [],
         unnecessaryWhen: undefined,
       },

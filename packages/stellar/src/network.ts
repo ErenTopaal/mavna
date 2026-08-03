@@ -12,6 +12,13 @@ export interface NetworkConfig {
   readonly id: NetworkId;
   readonly passphrase: string;
   readonly rpcUrl: string;
+  /**
+   * Horizon, for the two things RPC genuinely cannot do: path finding and the
+   * order book. Both were probed and every candidate RPC method answers "method
+   * not found". The operational path stays on RPC; this is not a second data
+   * source, it is the only source for those two questions.
+   */
+  readonly horizonUrl: string;
   /** Base reserve in stroops. Read from a ledger header rather than assumed. */
   readonly baseReserveStroops: number;
   readonly explorer: {
@@ -38,12 +45,16 @@ export function createNetworkConfig(input: {
   id: NetworkId;
   rpcUrl: string;
   baseReserveStroops?: number;
+  readonly horizonUrl?: string;
 }): NetworkConfig {
   const isTestnet = input.id === "testnet";
   return {
     id: input.id,
     passphrase: isTestnet ? Networks.TESTNET : Networks.PUBLIC,
     rpcUrl: input.rpcUrl,
+    horizonUrl:
+      input.horizonUrl ??
+      (isTestnet ? "https://horizon-testnet.stellar.org" : "https://horizon.stellar.org"),
     // 0.5 XLM at the time of writing, confirmed from a ledger header on both
     // networks. Overridable because it is a network parameter, not a constant.
     baseReserveStroops: input.baseReserveStroops ?? 5_000_000,
