@@ -15,12 +15,15 @@ import type {
 import { MavnaError } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
+  type ArrivingValue,
   belowFloorGuidance,
   type DestinationLane,
   inspectDestination,
   meetsFloor,
   quoteReserve,
   type RpcClient,
+  valueInXlm,
+  XlmPriceSource,
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
 import {
@@ -78,6 +81,10 @@ export interface LayerZeroAdapterOptions {
    * It is a network parameter and has changed before.
    */
   readonly baseReserveStroops: number;
+  /** Prices the arriving token in XLM, so the sponsorship floor can be compared. */
+  readonly prices?: XlmPriceSource;
+  /** Where the order book is read from. Defaults per network. */
+  readonly horizonUrl?: string;
   /**
    * OFTs this caller knows about that LayerZero's registry does not.
    *
@@ -116,6 +123,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
   private readonly network: NetworkId;
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
+  private readonly prices: XlmPriceSource;
   private readonly lzReceiveGas: bigint | undefined;
   private readonly discovery: Discovery;
   private readonly scan: ScanService;
@@ -125,6 +133,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
+    this.prices =
+      options.prices ??
+      new XlmPriceSource({
+        horizonUrl:
+          options.horizonUrl ??
+          (options.network === "mainnet"
+            ? "https://horizon.stellar.org"
+            : "https://horizon-testnet.stellar.org"),
+      });
     this.lzReceiveGas = options.lzReceiveGas;
     this.passphrase = options.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
     this.discovery = new Discovery({
@@ -304,7 +321,28 @@ export class LayerZeroAdapter implements BridgeAdapter {
         "Nothing would arrive: the amount is smaller than this token's smallest transferable unit.",
       );
     }
-    if (!meetsFloor(reserve, delivered)) {
+    // Converted first. The floor is an amount of XLM and this is an amount of
+    // whatever token the route carries; both are integers and neither says which
+    // asset it is. Comparing them directly made the floor wrong by the exchange
+    // rate, which for a dollar against XLM is about six times.
+    let arriving: ArrivingValue;
+    try {
+      arriving = valueInXlm(
+        delivered,
+        request.to.decimals,
+        await this.prices.xlmStroopsPerUnit(stellarAssetFor(request.to)),
+      );
+    } catch (cause) {
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "Stellar's market is not answering, so the smallest workable transfer " +
+              "cannot be worked out right now.",
+      );
+    }
+
+    if (!meetsFloor(reserve, arriving)) {
       return this.decline("amount-too-small", belowFloorGuidance(reserve));
     }
 
@@ -740,4 +778,16 @@ function xlmAsset(chainId: string): Asset {
     decimals: STELLAR_DECIMALS,
     curatedBy: "Stellar",
   };
+}
+
+/**
+ * The Stellar asset a route delivers, as the order book knows it.
+ *
+ * Asset ids here are `CODE:ISSUER`, which is the only unambiguous form: anyone
+ * can issue an asset called USDC, so the code alone is not an identity.
+ */
+function stellarAssetFor(asset: { readonly id: string; readonly symbol: string }): StellarAsset {
+  const [code, issuer] = asset.id.split(":");
+  if (issuer === undefined || issuer === "") return StellarAsset.native();
+  return new StellarAsset(code ?? asset.symbol, issuer);
 }

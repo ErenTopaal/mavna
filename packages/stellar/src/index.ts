@@ -1,5 +1,3 @@
-export type { PriceOptions } from "./price.js";
-export { XlmPriceSource } from "./price.js";
 export type { AddressKind, ClassifiedAddress } from "./address.js";
 export {
   assertCanReceive,
@@ -15,6 +13,8 @@ export {
   PUBLIC_MAINNET_RPC_URLS,
   PUBLIC_TESTNET_RPC_URL,
 } from "./network.js";
+export type { PriceOptions } from "./price.js";
+export { XlmPriceSource } from "./price.js";
 export type { ArrivingValue, ReserveInputs, ReserveQuote } from "./reserve.js";
 export {
   belowFloorGuidance,
