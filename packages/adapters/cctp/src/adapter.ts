@@ -315,6 +315,20 @@ export class CctpAdapter implements BridgeAdapter {
     route: Route,
     options: BuildOptions = {},
   ): Promise<readonly UnsignedTransaction[]> {
+    // A rail builds its own routes and nobody else's. Without this, handing a
+    // route quoted by another adapter to this one produces a Circle burn priced
+    // against a fee that rail never charged, while the interface tells the user
+    // they chose the other one. It is masked today only because the other rails
+    // happen to decline the pairs this app asks about, which is an accident and
+    // not a guard.
+    if (route.source !== this.id) {
+      throw new MavnaError(
+        `This route came from ${route.source}, so ${this.id} cannot build it. ` +
+          "Ask the adapter that quoted it.",
+        { retryable: false },
+      );
+    }
+
     const sends = BigInt(route.sends.baseUnits);
     const bridgeFee = route.fees.find((f) => f.kind === "bridge");
     const maxFee = bridgeFee === undefined ? 0n : BigInt(bridgeFee.total.baseUnits);
@@ -580,8 +594,14 @@ export class CctpAdapter implements BridgeAdapter {
       handle.destinationAddress,
       this.stellarUsdc,
     );
+    // The amount Circle attested, converted to Stellar's seven decimals. This is
+    // what "arrived" means: the mint either happened for this message or it did
+    // not, and the recipient's balance cannot tell the two apart.
+    const expected =
+      attestation.amount === undefined ? undefined : BigInt(canonicalToLocal(attestation.amount));
+
     const balance = destination.trustline?.balanceStroops;
-    if (balance === undefined || BigInt(balance) === 0n) {
+    if (balance === undefined || expected === undefined || BigInt(balance) < expected) {
       return { phase: "pending", ref, expectedByUnix: 0 };
     }
 
@@ -596,7 +616,7 @@ export class CctpAdapter implements BridgeAdapter {
           decimals: 7,
           curatedBy: "Circle",
         },
-        baseUnits: balance,
+        baseUnits: expected.toString(),
       },
     };
   }

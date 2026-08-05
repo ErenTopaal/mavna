@@ -38,6 +38,15 @@ export interface Attestation {
    * on their decoded fields at all, this is parsed from the raw message.
    */
   readonly hookData: string | undefined;
+  /**
+   * What Circle attested was burned, in its canonical six decimals.
+   *
+   * Carried because a delivery cannot be confirmed without it. The recipient's
+   * balance alone cannot tell an arrival from money they already had: a user who
+   * holds any USDC would be told their transfer was done the moment it was
+   * attested, and one who holds none would sit at pending forever.
+   */
+  readonly amount: string | undefined;
 }
 
 export class AttestationService {
@@ -156,5 +165,6 @@ function toAttestation(raw: unknown): Attestation {
     destinationDomain: Number(decoded.destinationDomain ?? -1),
     delayReason: (row.delayReason as string | null) ?? null,
     hookData: typeof body.hookData === "string" ? body.hookData : undefined,
+    amount: typeof body.amount === "string" && /^\d+$/.test(body.amount) ? body.amount : undefined,
   };
 }

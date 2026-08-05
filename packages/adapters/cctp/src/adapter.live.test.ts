@@ -410,3 +410,33 @@ describe("a destination that has never existed", () => {
     expect(isRoute(result)).toBe(true);
   });
 });
+
+describe("two ways this adapter could lie", () => {
+  it("refuses to build a route another rail quoted", async () => {
+    // Without this, picking an Axelar route and pressing send produced a Circle
+    // burn priced against a fee Axelar never charged, while the interface said
+    // the user had chosen Axelar. It was hidden only because the other rails
+    // happen to decline the pairs this app asks about.
+    const result = await adapter.quote(ask());
+    if (!isRoute(result)) throw new Error(result.explanation);
+
+    const borrowed = { ...result, source: "axelar" };
+    await expect(adapter.buildTransactions(borrowed)).rejects.toThrow(/came from axelar/);
+  });
+
+  it("calls a transfer done on what Circle attested, not on a balance", async () => {
+    // The real transfer moved 5 USDC into an account that ended up holding 6.
+    // Reading the balance would report 6 as "received", and would have reported
+    // done before the money arrived, because the account already held some.
+    const phase = await adapter.status({
+      sourceTxHash: "0x8b05173c947f416c508d783139e1cf2083ebb005e727d1c12a2845ca38254a2d",
+      sourceChainId: "ethereum-sepolia",
+      depositAddress: undefined,
+      destinationAddress: FUNDED,
+    });
+
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    expect(phase.received.baseUnits).toBe("50000000");
+  });
+});
