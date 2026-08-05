@@ -4,10 +4,18 @@ import {
   isRejection,
   type QuoteRequest,
   type Route,
+  type RouteRanking,
   type RouteRejection,
   type RouteSet,
+  rankRoutes,
 } from "@mavna/core";
 import { ALWAYS_OPEN, type CircuitBreaker, rejectionForDisabled } from "./circuit.js";
+import {
+  applyIntegratorFee,
+  attachSwapLeg,
+  type IntegratorFee,
+  type SwapAttachment,
+} from "./enrich.js";
 
 /**
  * Asking every rail at once.
@@ -39,6 +47,23 @@ export interface RaceOptions {
    * like progress instead of a spinner.
    */
   readonly onUpdate?: (partial: RouteSet) => void;
+  /**
+   * Convert what the rails deliver into what the user asked for.
+   *
+   * When set, every adapter is asked for the delivered asset and the conversion
+   * is attached to each route as it lands, priced by the exchange layer. Without
+   * it, a request for anything the rails do not deliver natively has no route.
+   */
+  readonly swap?: SwapAttachment;
+  /**
+   * The integrator's cut, applied to every route and itemised on it.
+   *
+   * Runs even at zero basis points, so turning a fee on is a configuration
+   * change rather than a code path nobody has ever exercised.
+   */
+  readonly integratorFee?: IntegratorFee;
+  /** How routes are ordered. The default is the best net outcome. */
+  readonly ranking?: RouteRanking;
 }
 
 export async function raceAdapters(
@@ -52,12 +77,33 @@ export async function raceAdapters(
   const rejected: RouteRejection[] = [];
   let settled = 0;
 
+  // The rails are asked for what they can actually deliver. The conversion into
+  // what the user wants is attached afterwards, per route, so a rail never has
+  // to know the exchange layer exists.
+  const railRequest: QuoteRequest =
+    options.swap === undefined ? request : { ...request, to: options.swap.delivered };
+
   const publish = (): void => {
     options.onUpdate?.({
-      routes: [...routes],
+      // Ranked every time, not only at the end: the first route on screen is the
+      // default selection, and the default must be the best net outcome even
+      // while slower rails are still answering.
+      routes: rankRoutes(routes, options.ranking ?? "best-received"),
       rejected: [...rejected],
       complete: settled === adapters.length,
     });
+  };
+
+  const enrich = async (route: Route): Promise<Route | RouteRejection> => {
+    let out: Route | RouteRejection = route;
+    if (options.swap !== undefined) {
+      out = await attachSwapLeg(out, options.swap, request.maxSlippageBps);
+      if (isRejection(out)) return out;
+    }
+    if (options.integratorFee !== undefined) {
+      out = applyIntegratorFee(out, options.integratorFee);
+    }
+    return out;
   };
 
   await Promise.all(
@@ -73,7 +119,8 @@ export async function raceAdapters(
       }
 
       try {
-        const result = await withTimeout(adapter.quote(request), timeoutMs, adapter.id);
+        const quoted = await withTimeout(adapter.quote(railRequest), timeoutMs, adapter.id);
+        const result = isRejection(quoted) ? quoted : await enrich(quoted);
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);
       } catch (error) {
@@ -88,7 +135,11 @@ export async function raceAdapters(
     }),
   );
 
-  return { routes, rejected, complete: true };
+  return {
+    routes: rankRoutes(routes, options.ranking ?? "best-received"),
+    rejected,
+    complete: true,
+  };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, source: string): Promise<T> {
@@ -131,11 +182,13 @@ function toRejection(source: string, error: unknown): RouteRejection {
       source,
       reason: "timed-out",
       explanation: "This route source did not respond in time.",
+      retryable: true,
     };
   }
   return {
     source,
     reason: "errored",
     explanation: "This route source could not be reached.",
+    retryable: true,
   };
 }

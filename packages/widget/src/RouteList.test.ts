@@ -53,6 +53,7 @@ describe("describeRejection", () => {
     const rejection: RouteRejection = {
       source: "allbridge",
       reason: "amount-too-small",
+      retryable: false,
       explanation: "Send at least 50 USDC to use this route.",
     };
     expect(describeRejection(rejection)).toBe(

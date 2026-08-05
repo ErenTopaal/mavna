@@ -305,11 +305,13 @@ export const ROUTE_SET: RouteSet = {
     {
       source: "allbridge",
       reason: "amount-too-small",
+      retryable: false,
       explanation: "Send at least 50 USDC to use this route.",
     },
     {
       source: "soroswap",
       reason: "no-liquidity",
+      retryable: true,
       explanation: "Not enough liquidity for this pair right now. Try a smaller amount.",
     },
   ],

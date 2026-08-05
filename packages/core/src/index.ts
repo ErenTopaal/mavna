@@ -23,7 +23,7 @@ export type {
   StepQuote,
   TrustModel,
 } from "./route.js";
-export { pairKey, rankRoutes } from "./route.js";
+export { pairKey, rankRoutes, rejectionIsRetryable } from "./route.js";
 export {
   baseUnits,
   basisPoints,

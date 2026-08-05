@@ -105,5 +105,7 @@ export function rejectionForDisabled(adapter: BridgeAdapter, reason: string): Ro
     source: adapter.id,
     reason: "temporarily-unavailable",
     explanation: reason,
+    // An operator turned it off and an operator will turn it back on.
+    retryable: true,
   };
 }

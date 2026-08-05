@@ -31,12 +31,14 @@ export class ReferenceAdapter implements BridgeAdapter {
         source: this.id,
         reason: "chain-unsupported",
         explanation: "This rail moves value between chains, not within one.",
+        retryable: false,
       };
     }
     return {
       source: this.id,
       reason: "temporarily-unavailable",
       explanation: "The reference rail never quotes; it exists to prove the interface.",
+      retryable: true,
     };
   }
 

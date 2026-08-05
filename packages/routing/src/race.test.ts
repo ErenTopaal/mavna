@@ -15,7 +15,15 @@ function adapter(id: string, behaviour: () => Promise<Route | RouteRejection>): 
   };
 }
 
-const route = (source: string): Route => ({ source }) as Route;
+// Enough of a route for ranking to hold it: the race now orders results by net
+// outcome on every publish, so even a stub has to carry a number to rank by.
+const route = (source: string, receivesBaseUnits = "1"): Route =>
+  ({
+    source,
+    receives: { asset: { symbol: "USDC", decimals: 7 }, baseUnits: receivesBaseUnits },
+    estimatedSeconds: 60,
+    signaturesRequired: 1,
+  }) as Route;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("racing route sources", () => {
@@ -62,6 +70,7 @@ describe("racing route sources", () => {
         adapter("picky", async () => ({
           source: "picky",
           reason: "amount-too-small",
+          retryable: false,
           explanation: "Send at least $1.",
         })),
       ],

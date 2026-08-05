@@ -12,7 +12,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError } from "@mavna/core";
+import { MavnaError, rejectionIsRetryable } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -674,7 +674,7 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation };
+    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
   }
 }
 

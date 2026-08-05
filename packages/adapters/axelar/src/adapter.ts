@@ -12,7 +12,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError } from "@mavna/core";
+import { MavnaError, rejectionIsRetryable } from "@mavna/core";
 import { classifyAddress, type RpcClient } from "@mavna/stellar";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, discoverLiveChains, discoverStellarChain } from "./discovery.js";
@@ -656,7 +656,7 @@ export class AxelarAdapter implements BridgeAdapter {
   }
 
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation };
+    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
   }
 
   /** A rejection that keeps a retryable failure distinct from a permanent no. */

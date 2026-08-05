@@ -96,6 +96,12 @@ export interface RouteRejection {
     | "errored";
   /** Shown to the user. Says what happened and what to do; never apologises. */
   readonly explanation: string;
+  /**
+   * Whether asking again can change the answer. A rail that is briefly down and
+   * a chain that is genuinely unsupported both produce a rejection, and a caller
+   * that cannot tell them apart either retries forever or gives up too soon.
+   */
+  readonly retryable: boolean;
 }
 
 /**
@@ -110,6 +116,27 @@ export interface RouteSet {
   readonly rejected: readonly RouteRejection[];
   /** True once every source has answered or timed out. */
   readonly complete: boolean;
+}
+
+/**
+ * Whether a rejection reason is worth asking about again.
+ *
+ * Derived from the reason in one place, because three adapters deciding it
+ * independently is how the same outage gets three different answers. A reason
+ * that describes the request (wrong chain, wrong asset, amount out of range) is
+ * settled; one that describes the moment (an outage, a timeout, thin liquidity)
+ * is not.
+ */
+export function rejectionIsRetryable(reason: RouteRejection["reason"]): boolean {
+  switch (reason) {
+    case "temporarily-unavailable":
+    case "timed-out":
+    case "no-liquidity":
+    case "errored":
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** How routes are ordered for the user. Default is the best net outcome. */
