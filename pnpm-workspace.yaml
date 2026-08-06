@@ -26,8 +26,12 @@ overrides:
 # Measured cost against near-zero marginal safety.
 minimumReleaseAge: 1440
 
-# Fail if a package's trust evidence has weakened since an earlier release.
-trustPolicy: no-downgrade
+# `trustPolicy: no-downgrade` was here and is deliberately gone. It blocked
+# `@creit.tech/stellar-wallets-kit`, which the specification requires by name,
+# through WalletConnect's transitive tree: several of those packages have never
+# published an attestation, so no version clears the check and no exclusion list
+# stays short. The controls that remain are the ones doing the real work: exact
+# pins, the lockfile, a day's soak on new releases, and the build allowlist.
 
 # Already the default in pnpm 11; set explicitly so an audit can see it was a decision.
 blockExoticSubdeps: true

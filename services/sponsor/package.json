@@ -8,11 +8,13 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --root ../..",
-    "publish:check": "echo 'not published'"
+    "publish:check": "echo 'not published'",
+    "start": "node dist/main.mjs"
   },
   "dependencies": {
     "@mavna/core": "workspace:*",
     "@mavna/stellar": "workspace:*",
-    "@stellar/stellar-sdk": "16.2.0"
+    "@stellar/stellar-sdk": "16.2.0",
+    "@mavna/adapter-cctp": "workspace:*"
   }
 }

@@ -180,7 +180,11 @@ function classify(cause: unknown): DeliveryOutcome {
   }
   // Circle's transmitter refuses a nonce it has already used, which is exactly
   // what a duplicate delivery looks like and is a success from the user's side.
-  if (/nonce already used|already been used|#\s*4\b/i.test(text)) {
+  // 6908 is `NonceAlreadyUsed` in the transmitter's own error enum, read from
+  // `message-transmitter-v2/src/lib.rs` rather than guessed: the first guess
+  // here matched prose that never appears, and a retried delivery of an
+  // already-landed transfer reported an error instead of the truth.
+  if (/#\s*6908\b|nonce already used/i.test(text)) {
     return { kind: "already-delivered" };
   }
 

@@ -525,6 +525,9 @@ importers:
 
   services/sponsor:
     dependencies:
+      '@mavna/adapter-cctp':
+        specifier: workspace:*
+        version: link:../../packages/adapters/cctp
       '@mavna/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -44,7 +44,8 @@ describe("what a failed delivery actually means", () => {
   });
 
   it("reads a spent nonce as already delivered, which is a success", async () => {
-    const outcome = await delivererThatFailsWith("nonce already used").deliver({
+    // The number Circle's transmitter actually raises, from its own source.
+    const outcome = await delivererThatFailsWith("HostError: Error(Contract, #6908)").deliver({
       messageHex: "0xabcd",
       attestationHex: "0x1234",
     });
