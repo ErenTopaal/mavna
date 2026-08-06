@@ -28,8 +28,16 @@ const route: Route = {
   id: "cctp-test",
   source: "cctp",
   trustModel: "native-mint",
-  fromChain: { id: "ethereum-sepolia", name: "Ethereum Sepolia", explorerTxUrl: undefined },
-  toChain: { id: "stellar-testnet", name: "Stellar Testnet", explorerTxUrl: undefined },
+  fromChain: {
+    id: "ethereum-sepolia",
+    name: "Ethereum Sepolia",
+    explorerTxUrl: (hash: string) => `https://example.test/tx/${hash}`,
+  },
+  toChain: {
+    id: "stellar-testnet",
+    name: "Stellar Testnet",
+    explorerTxUrl: (hash: string) => `https://example.test/tx/${hash}`,
+  },
   destination: "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU",
   sends: { asset: { ...usdc, chainId: "ethereum-sepolia", decimals: 6 }, baseUnits: "5000000" },
   receives: { asset: usdc, baseUnits: "50000000" },
