@@ -15,14 +15,25 @@ import { CCTP_CONTRACTS, CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cct
 import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
 import type { Asset, NetworkId, Route } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
-import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
+import {
+  createNetworkConfig,
+  PUBLIC_MAINNET_RPC_URLS,
+  PUBLIC_TESTNET_RPC_URL,
+  RpcClient,
+} from "@mavna/stellar";
 
-const NETWORK: NetworkId = "testnet";
+const NETWORK = "testnet" as NetworkId;
 
 // Which network, said out loud rather than defaulted. Nothing in this codebase is
 // meaningful on only one, and a default would eventually be wrong in the worst
 // possible direction.
-const config = createNetworkConfig({ id: NETWORK, rpcUrl: PUBLIC_TESTNET_RPC_URL });
+// The endpoint follows the network. Pinning the testnet URL here regardless of
+// NETWORK was a real bug the app also had: mainnet contract addresses against a
+// node that has never heard of them reads as a chain that lost your account.
+const config = createNetworkConfig({
+  id: NETWORK,
+  rpcUrl: NETWORK === "mainnet" ? (PUBLIC_MAINNET_RPC_URLS[0] ?? "") : PUBLIC_TESTNET_RPC_URL,
+});
 
 // The Stellar reader. It refuses answers from a node behind the highest ledger it
 // has already seen, because the public endpoint is load balanced across nodes at

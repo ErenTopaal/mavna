@@ -52,8 +52,11 @@ export interface Attestation {
 export class AttestationService {
   private readonly baseUrl: string;
 
-  constructor(network: NetworkId) {
-    this.baseUrl = IRIS_BASE_URL(network);
+  constructor(network: NetworkId, baseUrl?: string) {
+    // Overridable because the requirements say every external endpoint must be
+    // pointable at infrastructure the integrator controls, and this one is the
+    // sole price source for every quote on this rail.
+    this.baseUrl = baseUrl ?? IRIS_BASE_URL(network);
   }
 
   /**

@@ -1,0 +1,50 @@
+# Run the whole of Mavna yourself, which the specification requires be possible:
+# no mandatory hosted service, no account with this project, every endpoint
+# yours to point elsewhere.
+#
+#   SPONSOR_SECRET_KEY=S... docker compose up
+#
+# Two services. The app is static files behind a web server; the sponsor is the
+# one process with a key, and its section says exactly what that key can do.
+services:
+  app:
+    image: node:24.19.0-alpine
+    working_dir: /repo
+    volumes:
+      - .:/repo
+    # Preview rather than dev: the dev server inlines CSS through Vite's own
+    # pipeline, which serves a bundle no integrator ever receives.
+    command: >
+      sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
+             pnpm install --frozen-lockfile &&
+             pnpm --filter @mavna/app build &&
+             pnpm --filter @mavna/app exec vite preview --host --port 4319 --strictPort"
+    ports:
+      - "4319:4319"
+    environment:
+      VITE_MAVNA_NETWORK: ${MAVNA_NETWORK:-testnet}
+      VITE_STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
+      VITE_MAVNA_SPONSOR_URL: ${MAVNA_SPONSOR_URL:-http://localhost:8787}
+      VITE_MAVNA_DISABLED_SOURCES: ${MAVNA_DISABLED_SOURCES:-}
+
+  # The only process holding a key. It prepares accounts it pays for and
+  # triggers deliveries whose recipient Circle's attestation already fixed.
+  # It cannot touch user funds; that is checkable by reading services/sponsor.
+  sponsor:
+    image: node:24.19.0-alpine
+    working_dir: /repo
+    volumes:
+      - .:/repo
+    command: >
+      sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
+             pnpm install --frozen-lockfile &&
+             pnpm --filter @mavna/sponsor-service build &&
+             node services/sponsor/dist/main.mjs"
+    ports:
+      - "8787:8787"
+    environment:
+      MAVNA_NETWORK: ${MAVNA_NETWORK:-testnet}
+      STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
+      SPONSOR_SECRET_KEY: ${SPONSOR_SECRET_KEY:?the sponsor cannot pay without its key}
+      MAVNA_ALLOWED_ORIGINS: ${MAVNA_ALLOWED_ORIGINS:-http://localhost:4319}
+      PORT: "8787"

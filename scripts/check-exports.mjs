@@ -29,6 +29,10 @@ for (const root of roots) {
         // Declaration files declare, they do not export anything an index could
         // re-export. Requiring one here would be a rule with no failure behind it.
         !f.endsWith(".d.ts") &&
+        // An entry point is run, not imported. Re-exporting one from the index
+        // would execute its side effects in every consumer that touches the
+        // package, which for the sponsor's main means starting a server.
+        f !== "main.ts" &&
         f !== "index.ts",
     );
     const index = readFileSync(`${src}/index.ts`, "utf8");

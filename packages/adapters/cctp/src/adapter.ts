@@ -100,6 +100,8 @@ export interface CctpAdapterOptions {
   readonly prices?: XlmPriceSource;
   /** Where the order book is read from. Defaults per network. */
   readonly horizonUrl?: string;
+  /** Circle's attestation service. Overridable to an integrator's own proxy. */
+  readonly irisUrl?: string;
 }
 
 export class CctpAdapter implements BridgeAdapter {
@@ -118,7 +120,8 @@ export class CctpAdapter implements BridgeAdapter {
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
-    this.attestations = options.attestations ?? new AttestationService(options.network);
+    this.attestations =
+      options.attestations ?? new AttestationService(options.network, options.irisUrl);
     this.stellarUsdc = new StellarAsset("USDC", CCTP_CONTRACTS[options.network].usdcIssuer);
     this.prices =
       options.prices ??
