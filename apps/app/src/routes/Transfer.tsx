@@ -1,7 +1,9 @@
 import { explorerTxUrl } from "@mavna/adapter-cctp";
 import type { Asset, Route, RouteSet } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
+import { buildPathPayment } from "@mavna/swap";
 import { RouteList, TransferPanel } from "@mavna/widget";
+import { TransactionBuilder } from "@stellar/stellar-sdk";
 import { useState } from "react";
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { Button } from "@/components/ui/button";
@@ -22,10 +24,14 @@ import {
   cctp,
   DEFAULT_SOURCE_CHAIN,
   NETWORK,
+  rpc,
   SOURCE_CHAINS,
-  STELLAR_CHAIN_ID,
+  sdex,
   sourceChainDetail,
   sourceDomain,
+  USDC_ON_STELLAR,
+  XLM_ON_STELLAR,
+  XLM_SWAP,
 } from "@/lib/mavna";
 import { requestDelivery, requestPreparation, sponsorIsUp, submitPreparation } from "@/lib/sponsor";
 import { connectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallet";
@@ -42,16 +48,10 @@ import type { Connection } from "@/lib/wallet";
  */
 
 const USDC_DECIMALS_ON_EVM = 6;
-const USDC_DECIMALS_ON_STELLAR = 7;
-
-/** The issuer is part of the asset's identity; a bare symbol is not one. */
-const STELLAR_USDC_ISSUER =
-  NETWORK === "mainnet"
-    ? "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-    : "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 
 export function Transfer() {
   const [chainId, setChainId] = useState(DEFAULT_SOURCE_CHAIN);
+  const [wanted, setWanted] = useState<"USDC" | "XLM">("USDC");
   const [amount, setAmount] = useState("25");
   const [destination, setDestination] = useState("");
   const [routes, setRoutes] = useState<RouteSet | undefined>(undefined);
@@ -71,13 +71,7 @@ export function Transfer() {
         decimals: USDC_DECIMALS_ON_EVM,
         curatedBy: "Circle",
       };
-      const to: Asset = {
-        chainId: STELLAR_CHAIN_ID,
-        id: `USDC:${STELLAR_USDC_ISSUER}`,
-        symbol: "USDC",
-        decimals: USDC_DECIMALS_ON_STELLAR,
-        curatedBy: "Circle",
-      };
+      const to: Asset = wanted === "XLM" ? XLM_ON_STELLAR : USDC_ON_STELLAR;
 
       const result = await raceAdapters(
         ADAPTERS,
@@ -89,8 +83,13 @@ export function Transfer() {
           maxSlippageBps: 50,
         },
         // Routes render as they land rather than all at once, so the wait reads as
-        // progress instead of a spinner.
-        { onUpdate: setRoutes, breaker },
+        // progress instead of a spinner. When the user wants an asset the rails do
+        // not deliver, the conversion leg is priced and attached per route here.
+        {
+          onUpdate: setRoutes,
+          breaker,
+          swap: wanted === "XLM" ? XLM_SWAP : undefined,
+        },
       );
       setRoutes(result);
       setSelected(result.routes[0]?.id);
@@ -146,6 +145,22 @@ export function Transfer() {
                   {chain.name}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="wanted">Receive</Label>
+          <Select
+            value={wanted}
+            onValueChange={(value) => setWanted((value as "USDC" | "XLM") ?? "USDC")}
+          >
+            <SelectTrigger id="wanted">
+              <SelectValue placeholder="USDC" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="USDC">USDC</SelectItem>
+              <SelectItem value="XLM">XLM</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -294,6 +309,49 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
     );
   }
 
+  /**
+   * Convert what arrived into what was asked for, on Stellar's own exchange.
+   *
+   * Quoted fresh at execution rather than reusing the quote from minutes ago,
+   * because the market has moved since and the user's floor must be computed
+   * against the price they are actually getting. If the market moves past that
+   * floor the operation fails whole and they keep the USDC: the safe direction.
+   */
+  async function convertOnStellar(): Promise<void> {
+    const owner = stellarAddress ?? (await connectStellarWallet());
+    setStellarAddress(owner);
+    if (owner !== route.destination) {
+      throw new Error(
+        "The conversion spends from the receiving account, so only its owner can " +
+          "sign it. The USDC has arrived and is theirs either way.",
+      );
+    }
+
+    note("Converting to XLM on Stellar's exchange.");
+    const quote = await sdex.quote({
+      assetIn: USDC_ON_STELLAR.id,
+      assetOut: "native",
+      amountIn:
+        route.steps.find((step) => step.kind === "swap")?.from.baseUnits ?? route.sends.baseUnits,
+      maxSlippageBps: 50,
+      destinationKind: "account",
+    });
+    const account = await rpc.loadAccount(owner);
+    const unsigned = buildPathPayment({
+      networkPassphrase:
+        NETWORK === "mainnet"
+          ? "Public Global Stellar Network ; September 2015"
+          : "Test SDF Network ; September 2015",
+      account,
+      quote,
+    });
+    note("Approve the conversion in your Stellar wallet.");
+    const signed = await signWithStellarWallet(unsigned.toXDR(), owner);
+    const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
+    const submitted = await rpc.submit("conversion", async () => parsed as never);
+    note(`Converted. Included on Stellar: ${submitted.txHash}`);
+  }
+
   async function send() {
     if (connection === undefined || chain.kind !== "evm") return;
     setSending(true);
@@ -341,6 +399,9 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
       }
       if (burnHash !== undefined) {
         await deliverToStellar(burnHash);
+      }
+      if (route.steps.some((step) => step.kind === "swap")) {
+        await convertOnStellar();
       }
       setDone(true);
     } catch (error) {

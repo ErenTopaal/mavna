@@ -54,16 +54,16 @@ export interface RaceOptions {
    * is attached to each route as it lands, priced by the exchange layer. Without
    * it, a request for anything the rails do not deliver natively has no route.
    */
-  readonly swap?: SwapAttachment;
+  readonly swap?: SwapAttachment | undefined;
   /**
    * The integrator's cut, applied to every route and itemised on it.
    *
    * Runs even at zero basis points, so turning a fee on is a configuration
    * change rather than a code path nobody has ever exercised.
    */
-  readonly integratorFee?: IntegratorFee;
+  readonly integratorFee?: IntegratorFee | undefined;
   /** How routes are ordered. The default is the best net outcome. */
-  readonly ranking?: RouteRanking;
+  readonly ranking?: RouteRanking | undefined;
 }
 
 export async function raceAdapters(

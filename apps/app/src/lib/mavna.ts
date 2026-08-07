@@ -6,14 +6,20 @@ import {
   NON_EVM_CHAINS,
 } from "@mavna/adapter-cctp";
 import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
-import type { BridgeAdapter, NetworkId } from "@mavna/core";
-import { type CircuitBreaker, createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
+import type { BridgeAdapter, Asset as MavnaAsset, NetworkId } from "@mavna/core";
+import {
+  type CircuitBreaker,
+  createCircuitBreaker,
+  parseDisabledSources,
+  type SwapAttachment,
+} from "@mavna/routing";
 import {
   createNetworkConfig,
   PUBLIC_MAINNET_RPC_URLS,
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
 } from "@mavna/stellar";
+import { SdexProvider } from "@mavna/swap";
 
 /**
  * The SDK, assembled once for the app.
@@ -96,6 +102,47 @@ export const layerzero: LayerZeroAdapter = new LayerZeroAdapter({
  * interface says so by naming the reason each time.
  */
 export const ADAPTERS: readonly BridgeAdapter[] = [cctp, axelar, layerzero];
+
+/** The issuer is part of the identity; a bare code never is. */
+export const STELLAR_USDC_ISSUER: string =
+  NETWORK === "mainnet"
+    ? "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+    : "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+
+export const USDC_ON_STELLAR: MavnaAsset = {
+  chainId: NETWORK === "mainnet" ? "stellar" : "stellar-testnet",
+  id: `USDC:${STELLAR_USDC_ISSUER}`,
+  symbol: "USDC",
+  decimals: 7,
+  curatedBy: "Circle",
+};
+
+export const XLM_ON_STELLAR: MavnaAsset = {
+  chainId: NETWORK === "mainnet" ? "stellar" : "stellar-testnet",
+  id: "native",
+  symbol: "XLM",
+  decimals: 7,
+  curatedBy: "Stellar",
+};
+
+/**
+ * Stellar's own exchange, for arriving in an asset the bridges do not deliver.
+ *
+ * The one venue executable on both networks with nothing but the network
+ * itself: Soroswap indexes no testnet, and Aquarius executes through a router
+ * contract that is its own integration. Quoting and execution both live-proven
+ * against the real orderbook.
+ */
+export const sdex: SdexProvider = new SdexProvider(NETWORK);
+
+/** The pieces raceAdapters needs to attach the conversion leg. */
+export const XLM_SWAP: SwapAttachment = {
+  provider: sdex,
+  delivered: USDC_ON_STELLAR,
+  deliveredContract: USDC_ON_STELLAR.id,
+  wanted: XLM_ON_STELLAR,
+  wantedContract: "native",
+};
 
 /**
  * Every chain a user can send from, with the name its own registry gives it.
