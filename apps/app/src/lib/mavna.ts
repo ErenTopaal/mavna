@@ -131,6 +131,11 @@ export interface OtherSource {
   readonly family: string;
 }
 
+/** Circle's domain for a chain, which is what a delivery is keyed on. */
+export function sourceDomain(chainId: string): number {
+  return EVM_DEPLOYMENTS[NETWORK][chainId]?.domain ?? NON_EVM_CHAINS[NETWORK][chainId]?.domain ?? 0;
+}
+
 export function sourceChainDetail(chainId: string): EvmSource | OtherSource {
   const evm = EVM_DEPLOYMENTS[NETWORK][chainId];
   if (evm !== undefined) {

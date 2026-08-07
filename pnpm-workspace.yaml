@@ -47,3 +47,15 @@ allowBuilds:
   # here for HTTP calls and one hash. ws works without them.
   bufferutil: false
   utf-8-validate: false
+  # The wallet kit's tree asks for these. All refused: every one is a native
+  # compile or postinstall for a Node-side path a browser bundle never loads.
+  # The hardware-wallet crypto (blake-hash, secp256k1, tiny-secp256k1) ships JS
+  # fallbacks; `usb` is Node's USB stack, and in a browser Ledger speaks WebUSB;
+  # protobufjs and the appkit postinstalls are build conveniences, not needs.
+  "@reown/appkit": false
+  "@stellar/stellar-sdk": false
+  blake-hash: false
+  protobufjs: false
+  secp256k1: false
+  tiny-secp256k1: false
+  usb: false

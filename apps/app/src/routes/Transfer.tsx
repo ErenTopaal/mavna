@@ -25,7 +25,10 @@ import {
   SOURCE_CHAINS,
   STELLAR_CHAIN_ID,
   sourceChainDetail,
+  sourceDomain,
 } from "@/lib/mavna";
+import { requestDelivery, requestPreparation, sponsorIsUp, submitPreparation } from "@/lib/sponsor";
+import { connectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallet";
 import { useTheme } from "@/lib/theme";
 import type { Connection } from "@/lib/wallet";
 
@@ -213,12 +216,16 @@ export function Transfer() {
  */
 function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
   const [connection, setConnection] = useState<Connection | undefined>(undefined);
+  const [stellarAddress, setStellarAddress] = useState<string | undefined>(undefined);
   const [events, setEvents] = useState<readonly ExecutionEvent[]>([]);
+  const [notes, setNotes] = useState<readonly string[]>([]);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [done, setDone] = useState(false);
 
   const chain = sourceChainDetail(chainId);
+  const needsPreparing = route.steps.some((step) => step.kind === "prepare-account");
+  const note = (text: string): void => setNotes((all) => [...all, text]);
 
   if (chain.kind !== "evm") {
     return (
@@ -229,12 +236,81 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
     );
   }
 
+  /**
+   * Prove control of the destination and let it hold USDC, before anything burns.
+   *
+   * The account being prepared signs the operations that create obligations on
+   * itself, so only its owner can do this. Someone sending to an address they do
+   * not control is told so here, at the point of choosing, rather than after
+   * their money is in flight and bouncing off an unprepared account.
+   */
+  async function prepareDestination(): Promise<void> {
+    note("Connect the Stellar wallet that owns the receiving address.");
+    const address = await connectStellarWallet();
+    setStellarAddress(address);
+    if (address !== route.destination) {
+      throw new Error(
+        "Only the owner of the receiving account can allow it to hold USDC. " +
+          "Connect that wallet, or send to an address that can already receive.",
+      );
+    }
+
+    note("Asking the sponsor to set the account up. Somebody else pays the deposit.");
+    const preparation = await requestPreparation(route.destination, chainId);
+    note("Approve this in your Stellar wallet. It costs you nothing.");
+    const signed = await signWithStellarWallet(preparation.xdr, address);
+    const submitted = await submitPreparation(signed);
+    note(`Your account is ready. Included on Stellar: ${submitted.txHash}`);
+  }
+
+  /**
+   * The last mile, ours to trigger because Circle's own forwarding service
+   * cannot serve Stellar. Retrying is always safe: the transmitter refuses a
+   * nonce it has already used, so a duplicate cannot mint twice.
+   */
+  async function deliverToStellar(burnHash: string): Promise<void> {
+    const domain = sourceDomain(chainId);
+    note("Waiting for Circle to attest the transfer. On this path that takes a few minutes.");
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      const outcome = await requestDelivery(burnHash, domain);
+      if (outcome.kind === "delivered") {
+        note(`Delivered on Stellar: ${outcome.txHash}`);
+        return;
+      }
+      if (outcome.kind === "already-delivered") {
+        note("Delivered on Stellar.");
+        return;
+      }
+      if (outcome.kind === "recipient-not-ready") {
+        // Nothing was consumed; the message stays deliverable. Saying so beats a
+        // failure a user would retry from the top, paying to burn twice.
+        throw new Error(outcome.detail);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    }
+    throw new Error(
+      "Circle has not attested this transfer yet. Your funds are safe and this page " +
+        "can finish the delivery later: find the transfer under Find.",
+    );
+  }
+
   async function send() {
     if (connection === undefined || chain.kind !== "evm") return;
     setSending(true);
     setProblem(undefined);
     setEvents([]);
+    setNotes([]);
     try {
+      if (needsPreparing) {
+        if (!(await sponsorIsUp())) {
+          throw new Error(
+            "Setting up a new Stellar account needs the sponsor service, which is not " +
+              "reachable right now. Nothing has been sent.",
+          );
+        }
+        await prepareDestination();
+      }
+
       const transactions = await cctp.buildTransactions(route);
       const hashes = await execute({
         connection,
@@ -263,6 +339,9 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
           explorerUrl: explorerTxUrl(NETWORK, chainId, burnHash),
         });
       }
+      if (burnHash !== undefined) {
+        await deliverToStellar(burnHash);
+      }
       setDone(true);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "The transfer did not go through.");
@@ -284,6 +363,25 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
         <Button onClick={() => void send()} disabled={sending || done}>
           {sending ? "Waiting for your wallet…" : done ? "Sent" : "Send from this wallet"}
         </Button>
+      )}
+
+      {stellarAddress === undefined ? null : (
+        <p className="text-sm text-muted-foreground">
+          Stellar wallet:{" "}
+          <span className="tabular-nums">
+            {stellarAddress.slice(0, 4)}…{stellarAddress.slice(-4)}
+          </span>
+        </p>
+      )}
+
+      {notes.length === 0 ? null : (
+        <ol className="space-y-1 text-sm">
+          {notes.map((entry) => (
+            <li key={entry} className="text-muted-foreground">
+              {entry}
+            </li>
+          ))}
+        </ol>
       )}
 
       {events.length === 0 ? null : (

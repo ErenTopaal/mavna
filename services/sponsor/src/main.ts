@@ -64,5 +64,7 @@ const server = createSponsorServer({
 
 const port = Number(process.env.PORT ?? 8787);
 server.listen(port, () => {
-  console.log(`[sponsor] listening on :${port}, network ${networkId}`);
+  // The one line an operator needs at start-up, on stderr with the rest of the
+  // process's own reporting; stdout stays clean for anything piped through it.
+  console.error(`[sponsor] listening on :${port}, network ${networkId}`);
 });

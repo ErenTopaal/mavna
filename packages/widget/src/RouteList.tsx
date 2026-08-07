@@ -22,6 +22,16 @@ export interface RouteListProps {
   readonly onSelect: (routeId: string) => void;
   /** Undefined follows the machine, which is right when nobody has said. */
   readonly theme?: "light" | "dark" | undefined;
+  /**
+   * Route sources this integrator is willing to show, by id.
+   *
+   * A wallet team must be able to narrow what their users see, down to a single
+   * conservative rail, without forking anything. Undefined shows everything.
+   * Filtering happens here as well as at the quoting layer because a host that
+   * races fewer adapters saves the network calls, but a host that cannot touch
+   * the quoting still gets the restriction by props alone.
+   */
+  readonly sources?: readonly string[] | undefined;
 }
 
 /**
@@ -34,11 +44,25 @@ export interface RouteListProps {
  * because the playground happened to wrap it and the app did not. A component
  * that can be rendered on its own has to scope itself.
  */
-export function RouteList({ routes, selectedId, onSelect, theme }: RouteListProps): ReactElement {
+export function RouteList({
+  routes,
+  selectedId,
+  onSelect,
+  theme,
+  sources,
+}: RouteListProps): ReactElement {
+  const shown =
+    sources === undefined
+      ? routes
+      : {
+          ...routes,
+          routes: routes.routes.filter((route) => sources.includes(route.source)),
+          rejected: routes.rejected.filter((rejection) => sources.includes(rejection.source)),
+        };
   return (
     <div className="mv-root mv-routes" data-mv-theme={theme}>
       <ul className="mv-route-options">
-        {routes.routes.map((route) => (
+        {shown.routes.map((route) => (
           <li key={route.id}>
             <button
               type="button"
@@ -65,9 +89,9 @@ export function RouteList({ routes, selectedId, onSelect, theme }: RouteListProp
         rail is down, and the difference decides whether the user should change
         the amount or come back later.
       */}
-      {routes.rejected.length === 0 ? null : (
+      {shown.rejected.length === 0 ? null : (
         <ul className="mv-route-rejections">
-          {routes.rejected.map((rejection) => (
+          {shown.rejected.map((rejection) => (
             <li key={`${rejection.source}-${rejection.reason}`} className="mv-route-rejection">
               <span className="mv-route-rejection-source">{rejection.source}</span>
               {rejection.explanation}
@@ -76,7 +100,7 @@ export function RouteList({ routes, selectedId, onSelect, theme }: RouteListProp
         </ul>
       )}
 
-      {routes.complete ? null : <p className="mv-route-pending">Still asking other routes.</p>}
+      {shown.complete ? null : <p className="mv-route-pending">Still asking other routes.</p>}
     </div>
   );
 }

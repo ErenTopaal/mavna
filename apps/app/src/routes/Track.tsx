@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { forgetHistory, readHistory, type TransferRecord } from "@/lib/history";
-import { cctp } from "@/lib/mavna";
+import { cctp, sourceDomain } from "@/lib/mavna";
+import { requestDelivery } from "@/lib/sponsor";
 import { useTheme } from "@/lib/theme";
 
 /**
@@ -30,7 +31,47 @@ export function Track() {
   );
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
+  const [finishing, setFinishing] = useState(false);
+  const [remedyNote, setRemedyNote] = useState<string | undefined>(undefined);
+
   useEffect(() => setHistory(readHistory()), []);
+
+  /**
+   * Trigger the mint for whatever transfer is on screen.
+   *
+   * Works from nothing but the source transaction, which is the point of this
+   * page: the person here has closed the tab, changed devices, or been sent a
+   * hash by someone else, and none of that should matter.
+   */
+  async function finishDelivery(): Promise<void> {
+    const hash = query.trim();
+    if (!/^(0x)?[0-9a-fA-F]{64}$/.test(hash)) {
+      setRemedyNote("Finishing a delivery needs the transaction you sent. Paste it above.");
+      return;
+    }
+    setFinishing(true);
+    setRemedyNote(undefined);
+    try {
+      // The source chain is unknown here, so every domain is tried through the
+      // adapter's own search when checking, but delivery needs the right one.
+      // The history entry carries it when this browser sent the transfer.
+      const known = history.find((r) => r.sourceTxHash.toLowerCase() === hash.toLowerCase());
+      const domain = known === undefined ? 0 : sourceDomain(known.sourceChainId);
+      const outcome = await requestDelivery(hash.startsWith("0x") ? hash : `0x${hash}`, domain);
+      if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
+        setRemedyNote("Delivered. The funds are on Stellar.");
+        await look(hash);
+      } else if (outcome.kind === "not-attested-yet") {
+        setRemedyNote("Circle has not attested it yet. Nothing is wrong; try again in a minute.");
+      } else {
+        setRemedyNote(outcome.detail);
+      }
+    } catch (error) {
+      setRemedyNote(error instanceof Error ? error.message : "That did not work.");
+    } finally {
+      setFinishing(false);
+    }
+  }
 
   async function look(input: string) {
     setLooking(true);
@@ -85,27 +126,48 @@ export function Track() {
       {problem === undefined ? null : <p className="text-sm text-destructive">{problem}</p>}
 
       {found === undefined ? null : (
-        <DraftScale
-          steps={[{ id: "bridge", label: "Move your funds to Stellar", phase: found }]}
-          outcome={outcomeOf({
-            id: "lookup",
-            updatedAtUnix: Math.floor(Date.now() / 1000),
-            steps: [
-              {
-                id: "bridge",
-                label: "",
-                phase: found,
-                // Unknown from a lookup: someone arriving with only a hash never
-                // saw the quote these came from, and inventing a schedule the
-                // scale would then draw against is worse than admitting neither.
-                expectedSeconds: 0,
-                startedAtUnix: undefined,
-              },
-            ],
-          })}
-          onRemedy={undefined}
-          theme={theme}
-        />
+        <>
+          <DraftScale
+            steps={[{ id: "bridge", label: "Move your funds to Stellar", phase: found }]}
+            outcome={outcomeOf({
+              id: "lookup",
+              updatedAtUnix: Math.floor(Date.now() / 1000),
+              steps: [
+                {
+                  id: "bridge",
+                  label: "",
+                  phase: found,
+                  // Unknown from a lookup: someone arriving with only a hash never
+                  // saw the quote these came from, and inventing a schedule the
+                  // scale would then draw against is worse than admitting neither.
+                  expectedSeconds: 0,
+                  startedAtUnix: undefined,
+                },
+              ],
+            })}
+            onRemedy={(_step, remedy) => {
+              // The one remedy this rail has is finishing the delivery, and it is
+              // wired to the same control below so both paths lead somewhere.
+              if (remedy.kind === "retry" || remedy.kind === "wait") void finishDelivery();
+            }}
+            theme={theme}
+          />
+
+          {/*
+          Recoverable from inside the product, which the requirements state
+          outright: no explorer, no documentation, no support thread. Retrying
+          is always safe because Circle's transmitter refuses a nonce it has
+          already used, so a duplicate cannot mint twice.
+        */}
+          {found.phase === "done" ? null : (
+            <Button variant="outline" disabled={finishing} onClick={() => void finishDelivery()}>
+              {finishing ? "Finishing…" : "Finish the delivery"}
+            </Button>
+          )}
+          {remedyNote === undefined ? null : (
+            <p className="text-sm text-muted-foreground">{remedyNote}</p>
+          )}
+        </>
       )}
 
       <section className="space-y-3 border-t pt-6">
