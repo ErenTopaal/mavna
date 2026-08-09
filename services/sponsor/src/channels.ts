@@ -63,6 +63,18 @@ export class ChannelPool {
    * Releasing early would let a second ladder be built on sequence numbers the
    * first ladder still occupies.
    */
+  /**
+   * The key for a channel this pool owns, by address.
+   *
+   * Exists so a settlement stored as XDR can be signed at submission time: the
+   * transaction names its channel as source, and the store holds no keys.
+   */
+  keypairFor(address: string): Keypair | undefined {
+    const leased = [...this.leased.values()].find((l) => l.channel.address === address);
+    if (leased !== undefined) return leased.channel.keypair;
+    return this.available.find((c) => c.address === address)?.keypair;
+  }
+
   release(transferId: string): void {
     const lease = this.leased.get(transferId);
     if (lease === undefined) return;

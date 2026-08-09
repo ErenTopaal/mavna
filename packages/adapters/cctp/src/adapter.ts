@@ -17,17 +17,14 @@ import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
   belowFloorGuidance,
-  buildPreparation,
   type DestinationLane,
   inspectDestination,
   meetsFloor,
-  type NetworkConfig,
   quoteReserve,
   type RpcClient,
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
-import type { Account } from "@stellar/stellar-sdk";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import { type Attestation, AttestationService } from "./attestation.js";
 import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
@@ -50,25 +47,6 @@ const BPS = 10_000n;
 
 /** What a non-EVM chain needs that a route cannot carry on its own. */
 export interface BuildOptions {
-  /**
-   * What preparing the destination's Stellar account needs.
-   *
-   * A route whose steps include `prepare-account` cannot be executed without
-   * this, and the builder refuses rather than quietly returning a shorter list.
-   * That refusal matters: the quote promises a number of signatures, and handing
-   * back fewer transactions than promised is how a user signs two of three and
-   * watches their money bounce.
-   *
-   * The sponsor account is loaded by the caller because loading it is a network
-   * read against an account this package does not own, and the sequence number
-   * has to be the one the caller will actually submit against.
-   */
-  readonly stellar?: {
-    /** The sponsor, already loaded, whose sequence number this will consume. */
-    readonly sponsorAccount: Account;
-    /** Resolved network configuration, for the passphrase. */
-    readonly network: NetworkConfig;
-  };
   readonly solana?: {
     /** The wallet paying and signing, base58. */
     readonly owner: string;
@@ -356,15 +334,14 @@ export class CctpAdapter implements BridgeAdapter {
     const approval = buildApproval(params);
     const call = buildBurn(params);
 
-    // Preparation first, because the ordering is not a preference. Value arriving
-    // at an account that cannot hold it is rejected as a whole unit: nothing is
-    // lost and nothing lands, and the message sits deliverable until somebody
-    // fixes the account. Emitting it here is what makes the promised step real
-    // rather than a line in a quote nothing produces.
-    const preparation = this.buildPreparationFor(route, options);
-
+    // Only the source chain's transactions. The Stellar side, preparing the
+    // account and settling the deposit, deliberately does NOT come from here:
+    // the cost decision requires preparation as late as the ordering allows,
+    // after Circle's attestation exists, and a transaction built now would
+    // carry a sponsor sequence number minutes stale by then. The sponsor
+    // service builds those at their moment; the steps and the signature count
+    // on the route are the promise, and the service is who keeps it.
     return [
-      ...preparation,
       {
         chainId: route.fromChain.id,
         payload: JSON.stringify({
@@ -396,60 +373,6 @@ export class CctpAdapter implements BridgeAdapter {
         }),
         format: "evm-tx",
         describes: call.describes,
-        ephemeralSigners: [],
-        unnecessaryWhen: undefined,
-      },
-    ];
-  }
-
-  /**
-   * The Stellar side of the transfer, when the destination needs one.
-   *
-   * Returns nothing for a destination that is already able to receive, which is
-   * most of them: a contract address needs no trustline at all, and an account
-   * that already holds USDC needs no preparation. Cost falls to zero in those
-   * cases and this correctly produces no transaction.
-   *
-   * Where preparation IS needed it is required, not optional. A caller who did
-   * not supply what it needs gets an error naming exactly what is missing,
-   * rather than a shorter list of transactions than the quote promised.
-   */
-  private buildPreparationFor(route: Route, options: BuildOptions): readonly UnsignedTransaction[] {
-    const needsPreparing = route.steps.some((step) => step.kind === "prepare-account");
-    if (!needsPreparing) return [];
-
-    if (options.stellar === undefined) {
-      throw new MavnaError(
-        "This destination cannot hold USDC yet, so its Stellar account has to be " +
-          "prepared before anything is sent. Pass `stellar` to buildTransactions " +
-          "with the sponsor account that will pay for it. Building the burn without " +
-          "it would promise a delivery that bounces.",
-        { retryable: false },
-      );
-    }
-
-    const { sponsorAccount, network } = options.stellar;
-    const transaction = buildPreparation({
-      network,
-      sponsorAccount,
-      userAddress: route.destination,
-      // A brand new account needs creating; one that merely lacks the trustline
-      // does not. The quote already worked this out, so it is read back rather
-      // than re-derived against a chain that may have moved since.
-      createAccount: route.steps.some(
-        (step) => step.kind === "prepare-account" && step.to.baseUnits === "0",
-      ),
-      assets: [this.stellarUsdc],
-    });
-
-    return [
-      {
-        chainId: stellarChainId(this.network),
-        payload: transaction.toXDR(),
-        format: "stellar-xdr",
-        describes:
-          `Let ${route.destination} hold USDC on Stellar. Somebody else pays the ` +
-          "deposit this needs, and it stays yours.",
         ephemeralSigners: [],
         unnecessaryWhen: undefined,
       },

@@ -45,6 +45,22 @@ export function submitPreparation(signedXdr: string): Promise<{ txHash: string; 
   return post("/submit", { signedXdr });
 }
 
+/** The unsigned settlement, built on a channel the sponsor runs. */
+export function requestSettlement(
+  destination: string,
+  sourceChainId: string,
+): Promise<{ xdr: string; channel: string }> {
+  return post("/settlement", { destination, sourceChainId });
+}
+
+/** The user has signed; the sponsor holds it until their money lands. */
+export function commitSettlement(
+  destination: string,
+  signedXdr: string,
+): Promise<{ held: boolean }> {
+  return post("/settlement/commit", { destination, signedXdr });
+}
+
 export type SponsorDelivery =
   | { kind: "delivered"; txHash: string; ledger: number }
   | { kind: "already-delivered" }
@@ -52,8 +68,12 @@ export type SponsorDelivery =
   | { kind: "not-attested-yet" };
 
 /** Trigger the mint for an attested burn. Retrying is always safe. */
-export function requestDelivery(txHash: string, domain: number): Promise<SponsorDelivery> {
-  return post("/deliver", { txHash, domain });
+export function requestDelivery(
+  txHash: string,
+  domain: number,
+  destination?: string,
+): Promise<SponsorDelivery & { settled?: boolean; settlementTxHash?: string }> {
+  return post("/deliver", { txHash, domain, destination });
 }
 
 /** Whether a sponsor is reachable at all, for saying so before it matters. */

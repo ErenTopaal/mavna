@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
 import { Keypair } from "@stellar/stellar-sdk";
@@ -74,12 +73,6 @@ async function quoteRetrying(request: QuoteRequest): Promise<Route | RouteReject
   }
   return last;
 }
-
-const SPONSOR = Keypair.fromSecret(
-  readFileSync(new URL("../../../../.env", import.meta.url).pathname, "utf8").match(
-    /^SPONSOR_SECRET_KEY=(S\w+)/m,
-  )?.[1] ?? "",
-);
 
 describe("CctpAdapter", () => {
   it("quotes a real route into an account that already holds USDC", async () => {
@@ -366,40 +359,36 @@ describe("CctpAdapter", () => {
 
 describe("a destination that has never existed", () => {
   /**
-   * The product's whole reason for being, checked rather than assumed.
+   * The product's whole reason for being, checked at the quoting layer.
    *
-   * The quote for a brand new account promises to prepare it. For a long time
-   * nothing produced that transaction: the quote said three signatures and
-   * `buildTransactions` returned two, so a user would have signed the burn and
-   * watched the delivery bounce off an account that could not hold dollars.
+   * The promise is on the route: prepare, approve, burn, settle, three
+   * signatures. The source-chain builder returns the two EVM legs and no more,
+   * because the Stellar side is DELIBERATELY not built here: the cost decision
+   * requires preparation after Circle's attestation exists, minutes from now,
+   * and the sponsor service builds it at that moment with a fresh sequence.
+   * An earlier version built the preparation upfront, which violated the
+   * lateness rule that §6.1 of the cost decision calls the only mitigation for
+   * the one permanent loss in the design.
    */
   const fresh = (): string => Keypair.random().publicKey();
 
-  it("promises to prepare the account, and actually builds it", async () => {
+  it("promises the whole plan, and builds exactly the source-chain legs", async () => {
     const result = await adapter.quote(ask({ destination: fresh() }));
     if (!isRoute(result)) throw new Error(result.explanation);
 
-    expect(result.steps.map((s) => s.kind)).toContain("prepare-account");
+    expect(result.steps.map((s) => s.kind)).toEqual([
+      "prepare-account",
+      "approve-source",
+      "bridge",
+      "settle-account",
+    ]);
+    expect(result.signaturesRequired).toBe(3);
 
-    const sponsorAccount = await rpc.loadAccount(SPONSOR.publicKey());
-    const built = await adapter.buildTransactions(result, {
-      stellar: { sponsorAccount, network },
-    });
-
-    // Every promised signature has a transaction behind it, and the Stellar one
-    // comes first: value arriving at an unprepared account is rejected whole.
-    expect(built).toHaveLength(result.signaturesRequired);
-    expect(built[0]?.format).toBe("stellar-xdr");
-    expect(built.slice(1).map((t) => t.format)).toEqual(["evm-tx", "evm-tx"]);
-  });
-
-  it("refuses to build a short list when it has no sponsor to pay with", async () => {
-    // Returning two transactions for a three signature quote would be the same
-    // defect wearing a different shape.
-    const result = await adapter.quote(ask({ destination: fresh() }));
-    if (!isRoute(result)) throw new Error(result.explanation);
-
-    await expect(adapter.buildTransactions(result)).rejects.toThrow(/has to be prepared/);
+    const built = await adapter.buildTransactions(result);
+    // Two here, and the third signature is the Stellar preparation, whose
+    // builder is the sponsor service at attestation time.
+    expect(built.map((t) => t.format)).toEqual(["evm-tx", "evm-tx"]);
+    expect(built.every((t) => t.chainId === "ethereum-sepolia")).toBe(true);
   });
 
   it("measures the floor in the asset arriving, not in XLM", async () => {

@@ -33,7 +33,14 @@ import {
   XLM_ON_STELLAR,
   XLM_SWAP,
 } from "@/lib/mavna";
-import { requestDelivery, requestPreparation, sponsorIsUp, submitPreparation } from "@/lib/sponsor";
+import {
+  commitSettlement,
+  requestDelivery,
+  requestPreparation,
+  requestSettlement,
+  sponsorIsUp,
+  submitPreparation,
+} from "@/lib/sponsor";
 import { connectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallet";
 import { useTheme } from "@/lib/theme";
 import type { Connection } from "@/lib/wallet";
@@ -252,14 +259,16 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
   }
 
   /**
-   * Prove control of the destination and let it hold USDC, before anything burns.
+   * Prove control of the destination and sign the settlement, before anything
+   * burns and before the sponsor commits a stroop.
    *
-   * The account being prepared signs the operations that create obligations on
-   * itself, so only its owner can do this. Someone sending to an address they do
-   * not control is told so here, at the point of choosing, rather than after
-   * their money is in flight and bouncing off an unprepared account.
+   * This ordering is the cost decision's spine. The settlement is one
+   * transaction for one amount with a bounded life, signed while the user is
+   * present: consent to a known act, not a standing permission. Holding it is
+   * what lets the sponsor lend the deposit instead of gifting it, and collecting
+   * it FIRST is what closes the case where someone receives and walks away.
    */
-  async function prepareDestination(): Promise<void> {
+  async function collectSettlement(): Promise<string> {
     note("Connect the Stellar wallet that owns the receiving address.");
     const address = await connectStellarWallet();
     setStellarAddress(address);
@@ -270,7 +279,28 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
       );
     }
 
-    note("Asking the sponsor to set the account up. Somebody else pays the deposit.");
+    const built = await requestSettlement(route.destination, chainId);
+    note(
+      "Approve the repayment first. When your money arrives, a sliver of it buys " +
+        "the deposit back for whoever fronted it. Nothing moves until then.",
+    );
+    const signed = await signWithStellarWallet(built.xdr, address);
+    await commitSettlement(route.destination, signed);
+    note("Repayment signed and held. Now nothing is committed until your transfer is certain.");
+    return address;
+  }
+
+  /**
+   * Prepare the account, only now that the attestation exists.
+   *
+   * As late as the ordering allows, which the cost decision calls load-bearing:
+   * every second between committing the deposit and the money arriving is the
+   * window where a failed bridge turns it into the one permanent loss in the
+   * design. Attestation-first shrinks that window from the bridge's minutes to
+   * the seconds between these two calls.
+   */
+  async function prepareNow(address: string): Promise<void> {
+    note("Your transfer is attested. Setting the account up now, at the last moment.");
     const preparation = await requestPreparation(route.destination, chainId);
     note("Approve this in your Stellar wallet. It costs you nothing.");
     const signed = await signWithStellarWallet(preparation.xdr, address);
@@ -283,22 +313,31 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
    * cannot serve Stellar. Retrying is always safe: the transmitter refuses a
    * nonce it has already used, so a duplicate cannot mint twice.
    */
-  async function deliverToStellar(burnHash: string): Promise<void> {
+  async function deliverToStellar(burnHash: string, owner: string | undefined): Promise<void> {
     const domain = sourceDomain(chainId);
     note("Waiting for Circle to attest the transfer. On this path that takes a few minutes.");
+    let prepared = false;
     for (let attempt = 0; attempt < 90; attempt += 1) {
-      const outcome = await requestDelivery(burnHash, domain);
-      if (outcome.kind === "delivered") {
-        note(`Delivered on Stellar: ${outcome.txHash}`);
-        return;
-      }
-      if (outcome.kind === "already-delivered") {
+      const outcome = await requestDelivery(burnHash, domain, route.destination);
+      if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
         note("Delivered on Stellar.");
+        if (outcome.settled === true) {
+          note(
+            "The deposit repaid itself out of the arrival. You own the account " +
+              "outright, and nobody is owed anything.",
+          );
+        }
         return;
       }
       if (outcome.kind === "recipient-not-ready") {
-        // Nothing was consumed; the message stays deliverable. Saying so beats a
-        // failure a user would retry from the top, paying to burn twice.
+        // The attestation exists, the simulation bounced off the unprepared
+        // account, and nothing was consumed. This is the designed moment to
+        // prepare: after certainty, before delivery.
+        if (owner !== undefined && !prepared) {
+          await prepareNow(owner);
+          prepared = true;
+          continue;
+        }
         throw new Error(outcome.detail);
       }
       await new Promise((resolve) => setTimeout(resolve, 20_000));
@@ -359,6 +398,7 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
     setEvents([]);
     setNotes([]);
     try {
+      let owner: string | undefined;
       if (needsPreparing) {
         if (!(await sponsorIsUp())) {
           throw new Error(
@@ -366,7 +406,7 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
               "reachable right now. Nothing has been sent.",
           );
         }
-        await prepareDestination();
+        owner = await collectSettlement();
       }
 
       const transactions = await cctp.buildTransactions(route);
@@ -398,7 +438,7 @@ function SendPanel({ route, chainId }: { route: Route; chainId: string }) {
         });
       }
       if (burnHash !== undefined) {
-        await deliverToStellar(burnHash);
+        await deliverToStellar(burnHash, owner);
       }
       if (route.steps.some((step) => step.kind === "swap")) {
         await convertOnStellar();
