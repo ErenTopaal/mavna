@@ -31,6 +31,7 @@ import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } fr
 import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
+import { contractAddressToBytes32 } from "./hook.js";
 import { nonEvmChainFor, nonEvmChainsFor, nonEvmExplorerTxUrl } from "./nonevm.js";
 
 /**
@@ -93,6 +94,7 @@ export class CctpAdapter implements BridgeAdapter {
   private readonly attestations: AttestationService;
   private readonly stellarUsdc: StellarAsset;
   private readonly prices: XlmPriceSource;
+  private readonly horizonUrl: string;
 
   constructor(options: CctpAdapterOptions) {
     this.network = options.network;
@@ -101,6 +103,11 @@ export class CctpAdapter implements BridgeAdapter {
     this.attestations =
       options.attestations ?? new AttestationService(options.network, options.irisUrl);
     this.stellarUsdc = new StellarAsset("USDC", CCTP_CONTRACTS[options.network].usdcIssuer);
+    this.horizonUrl =
+      options.horizonUrl ??
+      (options.network === "mainnet"
+        ? "https://horizon.stellar.org"
+        : "https://horizon-testnet.stellar.org");
     this.prices =
       options.prices ??
       new XlmPriceSource({
@@ -479,7 +486,17 @@ export class CctpAdapter implements BridgeAdapter {
    * distinction exists.
    */
   async status(handle: TransferHandle): Promise<StepPhase> {
-    if (handle.sourceTxHash === undefined) return { phase: "idle" };
+    if (handle.sourceTxHash === undefined) {
+      // A destination address alone is a first-class lookup key, which is the
+      // largest differentiator this product claims. Circle's index cannot
+      // answer it, because their API is keyed on the burn. Stellar's history
+      // can, because the arrival is on chain and the delivering contract is
+      // named in the transaction that credited the account.
+      if (handle.destinationAddress !== undefined) {
+        return this.arrivalAt(handle.destinationAddress);
+      }
+      return { phase: "idle" };
+    }
 
     const found = await this.findBurn(handle.sourceTxHash, handle.sourceChainId);
     if (found === undefined) {
@@ -597,6 +614,95 @@ export class CctpAdapter implements BridgeAdapter {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * What has arrived at an address, read from Stellar's own history.
+   *
+   * The proof is the crediting transaction's first parameter: an invocation of
+   * Circle's forwarder, compared byte for byte against the forwarder's decoded
+   * address rather than by name. A credit from anywhere else, an exchange, a
+   * friend, an imitation asset, does not count as this product's delivery.
+   *
+   * Says `idle` when nothing has been seen, deliberately: with only an address
+   * there is no evidence a transfer was even started, and "not found" must
+   * never be dressed up as "failed".
+   */
+  private async arrivalAt(destination: string): Promise<StepPhase> {
+    const issuer = CCTP_CONTRACTS[this.network].usdcIssuer;
+    const response = await fetch(
+      `${this.horizonUrl}/accounts/${destination}/effects?order=desc&limit=50`,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+    if (!response.ok) return { phase: "idle" };
+
+    const body = (await response.json()) as {
+      _embedded?: {
+        records?: readonly {
+          type?: string;
+          asset_code?: string;
+          asset_issuer?: string;
+          amount?: string;
+          _links?: { operation?: { href?: string } };
+        }[];
+      };
+    };
+
+    const forwarder = contractAddressToBytes32(CCTP_CONTRACTS[this.network].cctpForwarder);
+    const credits = (body._embedded?.records ?? []).filter(
+      (record) =>
+        record.type === "account_credited" &&
+        record.asset_code === "USDC" &&
+        record.asset_issuer === issuer,
+    );
+
+    for (const credit of credits) {
+      const operationUrl = credit._links?.operation?.href;
+      if (operationUrl === undefined) continue;
+      const operation = (await (
+        await fetch(operationUrl, { signal: AbortSignal.timeout(15_000) })
+      ).json()) as {
+        transaction_hash?: string;
+        parameters?: readonly { type?: string; value?: string }[];
+      };
+
+      const first = operation.parameters?.[0];
+      if (first?.type !== "Address" || first.value === undefined) continue;
+      // SCVal address XDR: 4 bytes discriminant, 4 bytes contract tag, 32 bytes.
+      const raw = Uint8Array.from(Buffer.from(first.value, "base64"));
+      const invoked = raw.subarray(8, 40);
+      const isForwarder =
+        invoked.length === forwarder.length &&
+        invoked.every((byte, index) => byte === forwarder[index]);
+      if (!isForwarder || operation.transaction_hash === undefined) continue;
+
+      const [whole = "0", fraction = ""] = (credit.amount ?? "0").split(".");
+      return {
+        phase: "done",
+        ref: {
+          chainId: stellarChainId(this.network),
+          txHash: operation.transaction_hash,
+          explorerUrl: `https://stellar.expert/explorer/${
+            this.network === "mainnet" ? "public" : "testnet"
+          }/tx/${operation.transaction_hash}`,
+        },
+        received: {
+          asset: {
+            chainId: stellarChainId(this.network),
+            id: `USDC:${issuer}`,
+            symbol: "USDC",
+            decimals: 7,
+            curatedBy: "Circle",
+          },
+          baseUnits: (
+            BigInt(whole) * 10_000_000n +
+            BigInt(fraction.padEnd(7, "0").slice(0, 7))
+          ).toString(),
+        },
+      };
+    }
+
+    return { phase: "idle" };
   }
 
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {

@@ -1,4 +1,4 @@
-import { outcomeOf, parseLookupKey, toHandle } from "@mavna/status";
+import { escalateIfOverdue, outcomeOf, parseLookupKey, toHandle } from "@mavna/status";
 import { DraftScale } from "@mavna/widget";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -81,7 +81,36 @@ export function Track() {
       // The parser is deliberately permissive: someone pasting from a wallet or
       // an explorer should not have to know which of the three things they have.
       const handle = toHandle(parseLookupKey(input));
-      setFound(await cctp.status(handle));
+      const phase = await cctp.status(handle);
+
+      // Slow and stalled must be tellable apart without reading. The adapter
+      // cannot judge it, because it has no idea when this transfer started; this
+      // browser's own history does, when it sent the transfer. Twice the
+      // standard path's ceiling before escalating, so ordinary slowness never
+      // cries wolf.
+      const started = history.find(
+        (r) => r.sourceTxHash.toLowerCase() === input.trim().toLowerCase().replace(/^0x/, "0x"),
+      )?.startedAtUnix;
+      const escalated =
+        started === undefined
+          ? phase
+          : escalateIfOverdue(
+              {
+                id: "bridge",
+                label: "",
+                phase,
+                expectedSeconds: 2400,
+                startedAtUnix: started,
+              },
+              Math.floor(Date.now() / 1000),
+              () => ({
+                kind: "retry",
+                because:
+                  "This has taken far longer than the path usually does. Finishing " +
+                  "the delivery is safe to try; a repeat cannot happen twice.",
+              }),
+            ).phase;
+      setFound(escalated);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : "That could not be looked up.");
     } finally {
