@@ -240,10 +240,13 @@ describe("CctpAdapter", () => {
   });
 
   it("reports nothing at all for a transfer that was never submitted", async () => {
+    // A brand new address, so there is genuinely nothing to find. This test
+    // used FUNDED until the address-only lookup became real, at which point it
+    // started correctly finding the delivery that account actually received.
     const phase = await adapter.status({
       sourceTxHash: undefined,
       depositAddress: undefined,
-      destinationAddress: FUNDED,
+      destinationAddress: Keypair.random().publicKey(),
       sourceChainId: undefined,
     });
     expect(phase.phase).toBe("idle");
