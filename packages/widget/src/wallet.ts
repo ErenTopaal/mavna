@@ -84,12 +84,29 @@ export interface Connection {
 }
 
 /**
- * Ask a wallet who is using it.
+ * Ask a wallet who is using it, and make the wallet actually respond.
  *
- * `eth_requestAccounts` is the only call here that prompts. Everything after it
- * is a read.
+ * `eth_requestAccounts` alone is silent once a site has been authorized before:
+ * it resolves with the account and the wallet never opens, which reads as a
+ * connect that did nothing. So this first asks for the account permission, which
+ * makes the wallet show its own account-selection UI every time, the connect
+ * experience people expect. Not every wallet implements that method, so a
+ * failure other than the user declining falls through to `eth_requestAccounts`,
+ * which still prompts on the first connect.
  */
 export async function connect(discovered: DiscoveredWallet): Promise<Connection> {
+  try {
+    await discovered.provider.request({
+      method: "wallet_requestPermissions",
+      params: [{ eth_accounts: {} }],
+    });
+  } catch (cause) {
+    if (isUserRejection(cause)) {
+      throw new Error("You did not connect the wallet, so nothing is connected.");
+    }
+    // Method not supported by this wallet; the request below still prompts.
+  }
+
   const accounts = await discovered.provider.request({ method: "eth_requestAccounts" });
   const address = accounts[0];
   if (address === undefined) {

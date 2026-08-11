@@ -29,21 +29,74 @@
      "styles silently absent". */
   --mv-loaded: 1;
 
-  --mv-ground: transparent;
-  --mv-surface: oklch(1 0 0);
-  --mv-ink: oklch(0.145 0 0);
-  --mv-muted: oklch(0.556 0 0);
-  --mv-rule: oklch(0.922 0 0);
-  --mv-rule-strong: oklch(0.708 0 0);
   /*
-   * The only chromatic value in the widget, and the preset's `destructive`.
+   * The design's palette as tokens: a light default with a dark override below.
    *
-   * It means something has gone wrong, and nothing else. It is deliberately NOT
-   * used for "approve this in your wallet", which is a normal thing to be asked
-   * and would be misrepresented by an alarm colour. That state is carried by the
-   * leader line and the copy instead.
+   * The dark set is the app's own, transcribed exactly from the Mavna App v2
+   * design (resources/mavna_design.zip), so the widget and the app read as one
+   * product. The light set is those neutrals inverted, for a host that runs light.
+   *
+   * A colour can carry more than one ROLE, and each role is its own token even
+   * when the value is identical, so a retheme moves them apart rather than
+   * together: 0.985 is text (--mv-ink), a white fill (--mv-white) and a hairline
+   * (--mv-line); 0.145 is the page ground (--mv-ground) and the text that sits ON
+   * a white fill (--mv-on-light). Collapsing any such pair would drag an unrelated
+   * element along on every theme change.
    */
-  --mv-signal: oklch(0.577 0.245 27.325);
+
+  /* Surfaces, deepest ground to most-raised. */
+  --mv-ground: oklch(0.985 0 0);
+  --mv-surface: oklch(1 0 0);
+  --mv-surface-2: oklch(0.97 0 0);
+  --mv-surface-3: oklch(0.94 0 0);
+  --mv-surface-4: oklch(0.9 0 0);
+
+  /* Ink, white fills and lines: same value, separate roles (see note above). */
+  --mv-ink: oklch(0.205 0 0);
+  --mv-white: oklch(0.205 0 0);
+  --mv-line: oklch(0.205 0 0);
+  --mv-on-light: oklch(0.985 0 0);
+  --mv-ink-strong: oklch(0.28 0 0);
+  --mv-cta-hover: oklch(0.32 0 0);
+  --mv-ink-2: oklch(0.36 0 0);
+  --mv-ink-3: oklch(0.42 0 0);
+  --mv-knob: oklch(0.3 0 0);
+
+  /* Muted text, brightest to faintest. */
+  --mv-muted: oklch(0.46 0 0);
+  --mv-muted-b: oklch(0.5 0 0);
+  --mv-muted-2: oklch(0.52 0 0);
+  --mv-faint: oklch(0.56 0 0);
+  --mv-faint-2: oklch(0.6 0 0);
+  --mv-faintest: oklch(0.64 0 0);
+
+  /* Rules: black-alpha on light, white-alpha on dark. Kept by role, not by value:
+     a rest hairline and a hover border are different tokens even at close alpha. */
+  --mv-rule-hair: oklch(0 0 0 / 0.07);
+  --mv-rule: oklch(0 0 0 / 0.1);
+  --mv-rule-2: oklch(0 0 0 / 0.12);
+  --mv-rule-strong: oklch(0 0 0 / 0.18);
+  --mv-rule-hover: oklch(0 0 0 / 0.18);
+  --mv-rule-max: oklch(0 0 0 / 0.24);
+  --mv-focus: oklch(0 0 0 / 0.2);
+  --mv-fill-dim: oklch(0 0 0 / 0.14);
+  --mv-track-neutral: oklch(0 0 0 / 0.16);
+
+  /*
+   * The one chromatic role: something has gone wrong, and nothing else. NOT used
+   * for "approve this in your wallet", a normal thing to be asked. The signal text
+   * is lighter and softer than the signal fills and borders on purpose, so the two
+   * stay separate tokens; the alpha variants derive from the fill so a host that
+   * retints the signal moves all of them at once.
+   */
+  --mv-signal: oklch(0.55 0.2 25);
+  --mv-signal-strong: oklch(0.55 0.22 25);
+  --mv-signal-line: color-mix(in oklab, var(--mv-signal-strong) 60%, transparent);
+  --mv-signal-outline: color-mix(in oklab, var(--mv-signal-strong) 50%, transparent);
+  --mv-signal-tint: color-mix(in oklab, var(--mv-signal-strong) 16%, transparent);
+
+  /* Overlay behind a popover or the drawer sheet. */
+  --mv-scrim: oklch(0 0 0 / 0.35);
 
   --mv-1: 4px;
   --mv-2: 8px;
@@ -66,6 +119,11 @@
   --mv-font:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  /* The design sets many labels in a mono face (the wordmark, wallet addresses,
+     tags). Same rule as the sans: a system stack by default, the host's face when
+     asked. The app points this at Azeret Mono, which it ships itself. */
+  --mv-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /*
    * The preset's radius is "small", which the shadcn CLI's own radius map defines
@@ -91,11 +149,10 @@
   --mv-hull: 14px;
 
   box-sizing: border-box;
-  /* Lets the panel respond to the space an integrator gives it rather than to
-     the viewport, which is the only thing it can actually know about. */
-  container-type: inline-size;
   color: var(--mv-ink);
-  background: var(--mv-ground);
+  /* The root stays transparent so an inline (compact) widget is a guest on the
+     host's own page. The wide and drawer layouts paint --mv-ground themselves. */
+  background: transparent;
   accent-color: var(--mv-ink);
   font-family: var(--mv-font);
   font-size: 14px;
@@ -135,513 +192,74 @@
  */
 @media (prefers-color-scheme: dark) {
   .mv-root:not([data-mv-theme="light"]) {
+    --mv-ground: oklch(0.145 0 0);
     --mv-surface: oklch(0.205 0 0);
+    --mv-surface-2: oklch(0.245 0 0);
+    --mv-surface-3: oklch(0.275 0 0);
+    --mv-surface-4: oklch(0.32 0 0);
     --mv-ink: oklch(0.985 0 0);
-    --mv-muted: oklch(0.708 0 0);
-    --mv-rule: oklch(1 0 0 / 10%);
-    --mv-rule-strong: oklch(0.556 0 0);
-    --mv-signal: oklch(0.704 0.191 22.216);
+    --mv-white: oklch(0.985 0 0);
+    --mv-line: oklch(0.985 0 0);
+    --mv-on-light: oklch(0.145 0 0);
+    --mv-ink-strong: oklch(0.9 0 0);
+    --mv-cta-hover: oklch(0.88 0 0);
+    --mv-ink-2: oklch(0.8 0 0);
+    --mv-ink-3: oklch(0.75 0 0);
+    --mv-knob: oklch(0.8 0 0);
+    --mv-muted: oklch(0.72 0 0);
+    --mv-muted-b: oklch(0.66 0 0);
+    --mv-muted-2: oklch(0.62 0 0);
+    --mv-faint: oklch(0.58 0 0);
+    --mv-faint-2: oklch(0.52 0 0);
+    --mv-faintest: oklch(0.46 0 0);
+    --mv-rule-hair: oklch(1 0 0 / 0.08);
+    --mv-rule: oklch(1 0 0 / 0.12);
+    --mv-rule-2: oklch(1 0 0 / 0.16);
+    --mv-rule-strong: oklch(1 0 0 / 0.24);
+    --mv-rule-hover: oklch(1 0 0 / 0.24);
+    --mv-rule-max: oklch(1 0 0 / 0.34);
+    --mv-focus: oklch(1 0 0 / 0.18);
+    --mv-fill-dim: oklch(1 0 0 / 0.22);
+    --mv-track-neutral: oklch(1 0 0 / 0.3);
+    --mv-signal: oklch(0.74 0.16 22);
+    --mv-signal-strong: oklch(0.7 0.19 22);
+    --mv-scrim: oklch(0 0 0 / 0.7);
   }
 }
 
 .mv-root[data-mv-theme="dark"] {
+  --mv-ground: oklch(0.145 0 0);
   --mv-surface: oklch(0.205 0 0);
+  --mv-surface-2: oklch(0.245 0 0);
+  --mv-surface-3: oklch(0.275 0 0);
+  --mv-surface-4: oklch(0.32 0 0);
   --mv-ink: oklch(0.985 0 0);
-  --mv-muted: oklch(0.708 0 0);
-  --mv-rule: oklch(1 0 0 / 10%);
-  --mv-rule-strong: oklch(0.556 0 0);
-  --mv-signal: oklch(0.704 0.191 22.216);
-}
-
-/* ---------------------------------------------------------------- panel --- */
-
-.mv-panel {
-  background: var(--mv-surface);
-  border: 1px solid var(--mv-rule);
-  border-radius: var(--mv-radius-lg);
-  padding: var(--mv-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--mv-5);
-}
-
-.mv-eyebrow {
-  margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--mv-muted);
-}
-
-/*
- * What lands, at the size of the thing that matters.
- *
- * The amount SENT is never the primary number here. A user is deciding whether
- * to accept an outcome, and the outcome is what arrives.
- */
-.mv-receives {
-  margin: var(--mv-1) 0 0;
-  font-size: 32px;
-  line-height: 1.1;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-
-.mv-receives-symbol {
-  font-size: 18px;
-  font-weight: 400;
-  color: var(--mv-muted);
-  margin-left: var(--mv-2);
-  letter-spacing: 0;
-}
-
-.mv-floor {
-  margin: var(--mv-2) 0 0;
-  font-size: 12px;
-  color: var(--mv-muted);
-}
-
-/* A failed transfer has no figure to report, and a large "0" would be read as a
-   balance. The slot keeps its position so the card does not reflow. */
-.mv-receives-none {
-  font-size: 22px;
-  color: var(--mv-muted);
-  font-weight: 400;
-  letter-spacing: 0;
-}
-
-/* ----------------------------------------------------------------- fees --- */
-
-.mv-fees {
-  margin: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--mv-2) var(--mv-4);
-  font-size: 13px;
-  border-top: 1px solid var(--mv-rule);
-  padding-top: var(--mv-4);
-}
-
-.mv-fee-name {
-  margin: 0;
-  color: var(--mv-muted);
-}
-
-.mv-fee-amount {
-  margin: 0;
-  text-align: right;
-}
-
-/* The reserve is not a fee. It becomes the user's own locked XLM and comes back
-   if they ever close the account, so it is set apart rather than summed in. */
-.mv-fee-name[data-mv-fee="account-reserve"],
-.mv-fee-amount[data-mv-fee="account-reserve"] {
-  color: var(--mv-ink);
-}
-
-.mv-fee-note {
-  grid-column: 1 / -1;
-  margin: 0;
-  font-size: 12px;
-  color: var(--mv-muted);
-}
-
-/* ------------------------------------------------------------ signatures --- */
-
-.mv-trust {
-  margin: 0;
-  font-size: 13px;
-  color: var(--mv-muted);
-}
-
-.mv-signatures {
-  margin: 0;
-  font-size: 13px;
-  color: var(--mv-muted);
-}
-
-.mv-signatures strong {
-  color: var(--mv-ink);
-  font-weight: 500;
-}
-
-/* --------------------------------------------------------------- routes --- */
-
-.mv-routes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mv-3);
-}
-
-.mv-route-options,
-.mv-route-rejections {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--mv-2);
-}
-
-.mv-route {
-  font: inherit;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 1px solid var(--mv-rule);
-  border-radius: var(--mv-radius);
-  padding: var(--mv-3);
-  cursor: pointer;
-  display: grid;
-  /* The amount and the timing share a row; the trust sentence spans beneath so it
-     has room to be a sentence rather than an abbreviation. */
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: var(--mv-3);
-  row-gap: var(--mv-1);
-  transition: border-color var(--mv-fast) var(--mv-ease);
-}
-
-.mv-route:hover {
-  border-color: var(--mv-rule-strong);
-}
-
-/* The chosen route is marked by weight, not by colour: the one chromatic value
-   in this widget means something went wrong and cannot also mean "selected". */
-.mv-route[aria-pressed="true"] {
-  border-color: var(--mv-ink);
-  box-shadow: inset 0 0 0 1px var(--mv-ink);
-}
-
-.mv-route-amount {
-  font-size: 18px;
-  font-weight: 500;
-}
-
-.mv-route-symbol {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--mv-muted);
-  margin-left: var(--mv-1);
-}
-
-.mv-route-meta {
-  font-size: 13px;
-  color: var(--mv-muted);
-  text-align: right;
-}
-
-.mv-route-trust {
-  grid-column: 1 / -1;
-  font-size: 13px;
-  color: var(--mv-muted);
-}
-
-.mv-route-rejection {
-  font-size: 13px;
-  color: var(--mv-muted);
-  padding-left: var(--mv-3);
-  border-left: 1px solid var(--mv-rule);
-}
-
-.mv-route-rejection-source {
-  color: var(--mv-ink);
-  margin-right: var(--mv-2);
-}
-
-.mv-route-pending {
-  margin: 0;
-  font-size: 13px;
-  color: var(--mv-muted);
-}
-
-/* ------------------------------------------------------------ the scale --- */
-
-/*
- * A draft scale, not a stepper.
- *
- * Draft marks are painted on a hull so anyone standing on the quay can read how
- * deep a vessel sits, and therefore how much it carries, without being told. The
- * same job here: how far a transfer has got, readable at a glance and without
- * reading a word.
- *
- * The hull is the two vertical rules. The part already traversed is submerged
- * and solid. The waterline is where the transfer is now, and it moves only while
- * the network is working. The moment progress depends on a person it thickens and
- * goes still, and if something has actually gone wrong it turns red as well.
- *
- * Motion is therefore information rather than atmosphere, which also means it
- * cannot be the ONLY carrier: weight, colour and the leader line say the same
- * thing in a still frame, for anyone who has motion turned off.
- */
-
-.mv-scale {
-  list-style: none;
-  margin: 0;
-  /* Room for the graduation marks, which sit outside the hull. */
-  padding: 0 0 0 var(--mv-2);
-  border-top: 1px solid var(--mv-rule);
-  padding-top: var(--mv-5);
-}
-
-.mv-step {
-  display: grid;
-  grid-template-columns: var(--mv-hull) minmax(0, 1fr);
-  column-gap: var(--mv-5);
-}
-
-.mv-gauge {
-  position: relative;
-  /* The hull. Drawn per row so consecutive rows form one continuous column. */
-  border-left: 1px solid var(--mv-rule);
-  border-right: 1px solid var(--mv-rule);
-}
-
-/* Submerged: this step is behind us. */
-.mv-step[data-mv-phase="done"] .mv-gauge {
-  background: var(--mv-ink);
-}
-
-/*
- * Drained.
- *
- * A refunded step was laden and then emptied, which is a different fact from
- * "never started" and must not render as the same empty hull. Hatching reads as
- * a compartment that held something and no longer does.
- */
-.mv-step[data-mv-phase="refunded"] .mv-gauge {
-  background: repeating-linear-gradient(-45deg, var(--mv-rule-strong) 0 1px, transparent 1px 5px);
-}
-
-/* Graduation mark: where this step's reading is taken. */
-/*
- * A graduation mark, crossing the hull rather than flanking it.
- *
- * Flanking alone left the laden section a solid black mass that read as a
- * progress bar. What makes a draft scale legible is that the marks stay visible
- * as the hull goes under, so the crossing line inverts to the surface colour on
- * a submerged step and the depth stays readable at every fill level.
- */
-.mv-tick {
-  position: absolute;
-  top: 9px;
-  left: -1px;
-  right: -1px;
-  height: 0;
-  border-top: 1px solid var(--mv-rule-strong);
-}
-
-.mv-step[data-mv-phase="done"] .mv-tick {
-  border-top-color: var(--mv-surface);
-}
-
-.mv-tick::before,
-.mv-tick::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  height: 1px;
-  width: 6px;
-  background: var(--mv-rule-strong);
-}
-
-.mv-tick::before {
-  right: 100%;
-  margin-right: 1px;
-}
-
-.mv-tick::after {
-  left: 100%;
-  margin-left: 1px;
-}
-
-/*
- * The one step that needs the user gets a leader line running from the hull to
- * its label, in the signal colour. It is the only thing on the scale that points
- * at anything, so the eye lands on the actionable row first.
- */
-.mv-step[data-mv-needs-user="true"] .mv-tick::after {
-  /* Deliberately shorter than the column gap. At the full gap it ran into the
-     label and rendered as a strikethrough, which reads as "cancelled" on the one
-     row that most needs to read as "act here". */
-  width: 13px;
-  background: var(--mv-ink);
-}
-
-/* Only when something has actually gone wrong does the leader turn red. Being
-   asked to approve a transaction is not a fault. */
-.mv-step[data-mv-phase="stalled"] .mv-tick::after,
-.mv-step[data-mv-phase="failed"] .mv-tick::after,
-.mv-step[data-mv-phase="partial"] .mv-tick::after {
-  background: var(--mv-signal);
-}
-
-/* The waterline. */
-.mv-water {
-  position: absolute;
-  top: 0;
-  left: -7px;
-  right: -7px;
-  height: 2px;
-  background: var(--mv-ink);
-}
-
-.mv-step[data-mv-phase="pending"] .mv-water {
-  animation: mv-waterline 4200ms var(--mv-swell) infinite alternate;
-}
-
-/*
- * Stopped settling.
- *
- * Every one of these is heavier and static, which is what separates "waiting on
- * the network" from "waiting on you" at a glance and without motion. Only the
- * faults are red; being asked to sign is a normal step, so it stays in ink.
- */
-.mv-step[data-mv-phase="blocked"] .mv-water {
-  height: 3px;
-}
-
-.mv-step[data-mv-phase="stalled"] .mv-water,
-.mv-step[data-mv-phase="failed"] .mv-water,
-.mv-step[data-mv-phase="partial"] .mv-water {
-  height: 3px;
-  background: var(--mv-signal);
-}
-
-@keyframes mv-waterline {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(3px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* Matching the selector it overrides, exactly, and placed after it.
-     `.mv-step .mv-water` was tried first and did nothing at all: one class lighter
-     than the rule it was cancelling, so the animation kept running for every user
-     who had asked for it to stop. Caught by a browser test, not by reading. */
-  .mv-step[data-mv-phase="pending"] .mv-water {
-    animation: none;
-  }
-}
-
-/*
- * The keel: a closing bar under the last step, drawn only when the transfer has
- * actually finished.
- *
- * Without it a finished transfer and one still in flight look nearly the same in
- * a still frame, because both are mostly-filled columns. This is the difference,
- * and it is visible before any label is read.
- */
-.mv-scale[data-mv-outcome="succeeded"] .mv-step:last-child .mv-gauge::after,
-.mv-scale[data-mv-outcome="refunded"] .mv-step:last-child .mv-gauge::after {
-  content: "";
-  position: absolute;
-  /* Wider than the hull on both sides. Flush, it disappeared into a fully laden
-     column; the overhang is the whole point, since that is what reads as a base
-     the vessel is resting on rather than more of the same bar. */
-  left: -9px;
-  right: -9px;
-  bottom: 0;
-  height: 3px;
-  background: var(--mv-ink);
-}
-
-.mv-scale[data-mv-outcome="refunded"] .mv-step:last-child .mv-gauge::after {
-  background: var(--mv-rule-strong);
-}
-
-/* ------------------------------------------------------------ step body --- */
-
-.mv-body {
-  padding-bottom: var(--mv-5);
-  min-width: 0;
-}
-
-.mv-step:last-child .mv-body {
-  padding-bottom: 0;
-}
-
-.mv-label {
-  margin: 0;
-  font-weight: 500;
-  color: var(--mv-ink);
-}
-
-.mv-step[data-mv-phase="idle"] .mv-label {
-  color: var(--mv-muted);
-  font-weight: 400;
-}
-
-.mv-note {
-  margin: var(--mv-1) 0 0;
-  font-size: 13px;
-  color: var(--mv-muted);
-}
-
-.mv-step[data-mv-needs-user="true"] .mv-note {
-  color: var(--mv-ink);
-}
-
-.mv-ref {
-  display: inline-block;
-  margin-top: var(--mv-2);
-  font-size: 12px;
-  color: var(--mv-muted);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: var(--mv-rule-strong);
-}
-
-.mv-ref:hover {
-  color: var(--mv-ink);
-}
-
-/* --------------------------------------------------------------- action --- */
-
-.mv-action {
-  /* Its own line. Inline, it butted straight against the explorer link with no
-     separation, so the one control attached to a problem read as part of a
-     sentence rather than as something to press. */
-  display: block;
-  width: fit-content;
-  margin-top: var(--mv-3);
-  font: inherit;
-  font-size: 13px;
-  color: var(--mv-ink);
-  background: transparent;
-  border: 1px solid var(--mv-signal);
-  border-radius: var(--mv-radius);
-  padding: var(--mv-2) var(--mv-3);
-  cursor: pointer;
-  transition:
-    background var(--mv-fast) var(--mv-ease),
-    color var(--mv-fast) var(--mv-ease);
-}
-
-.mv-action:hover {
-  background: var(--mv-signal);
-  color: var(--mv-surface);
-}
-
-.mv-confirm {
-  font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--mv-surface);
-  background: var(--mv-ink);
-  border: 1px solid var(--mv-ink);
-  border-radius: var(--mv-radius);
-  padding: var(--mv-3) var(--mv-4);
-  cursor: pointer;
-  width: 100%;
-  transition: opacity var(--mv-fast) var(--mv-ease);
-}
-
-.mv-confirm:hover {
-  opacity: 0.88;
+  --mv-white: oklch(0.985 0 0);
+  --mv-line: oklch(0.985 0 0);
+  --mv-on-light: oklch(0.145 0 0);
+  --mv-ink-strong: oklch(0.9 0 0);
+  --mv-cta-hover: oklch(0.88 0 0);
+  --mv-ink-2: oklch(0.8 0 0);
+  --mv-ink-3: oklch(0.75 0 0);
+  --mv-knob: oklch(0.8 0 0);
+  --mv-muted: oklch(0.72 0 0);
+  --mv-muted-b: oklch(0.66 0 0);
+  --mv-muted-2: oklch(0.62 0 0);
+  --mv-faint: oklch(0.58 0 0);
+  --mv-faint-2: oklch(0.52 0 0);
+  --mv-faintest: oklch(0.46 0 0);
+  --mv-rule-hair: oklch(1 0 0 / 0.08);
+  --mv-rule: oklch(1 0 0 / 0.12);
+  --mv-rule-2: oklch(1 0 0 / 0.16);
+  --mv-rule-strong: oklch(1 0 0 / 0.24);
+  --mv-rule-hover: oklch(1 0 0 / 0.24);
+  --mv-rule-max: oklch(1 0 0 / 0.34);
+  --mv-focus: oklch(1 0 0 / 0.18);
+  --mv-fill-dim: oklch(1 0 0 / 0.22);
+  --mv-track-neutral: oklch(1 0 0 / 0.3);
+  --mv-signal: oklch(0.74 0.16 22);
+  --mv-signal-strong: oklch(0.7 0.19 22);
+  --mv-scrim: oklch(0 0 0 / 0.7);
 }
 
 .mv-root :focus-visible {
@@ -663,26 +281,278 @@
   border: 0;
 }
 
-/* ------------------------------------------------------------ narrow --- */
+/* ----------------------------------------------------- design motion --- */
 
-@container (max-width: 360px) {
-  .mv-panel {
-    padding: var(--mv-4);
+/* The waterline drift and the quote sweep, carried over from the design. */
+@keyframes mv-water {
+  from {
+    transform: translateY(0);
   }
-
-  .mv-route {
-    grid-template-columns: minmax(0, 1fr);
+  to {
+    transform: translateY(3px);
   }
-
-  .mv-route-meta {
-    text-align: left;
+}
+@keyframes mv-sweep {
+  from {
+    transform: translateX(-100%);
   }
-
-  .mv-receives {
-    font-size: 26px;
+  to {
+    transform: translateX(220%);
   }
+}
+/* The resting panel's staggered rise, and a calm breathe on the anchor mark. */
+@keyframes mv-emerge {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mv-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+/* The active flight step's dot, so a waiting step reads as working. Shrinks
+   rather than grows, so it never overflows its cell and clips on the left. */
+@keyframes mv-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.86);
+    opacity: 0.55;
+  }
+}
 
-  .mv-step {
-    column-gap: var(--mv-4);
+/* ------------------------------------------------------------- grain --- */
+
+/*
+ * A faint film grain on the ground, behind every card. Self-contained: the
+ * texture is an inline SVG feTurbulence, so there is no shader library and no
+ * image to ship. It sits below the content on a negative z-index inside the
+ * widget's own stacking context (the flow root sets isolation), so the cards,
+ * which paint their own surface, cover it and the grain shows only in the ground.
+ */
+.mv-grain {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* --------------------------------------------------- scoped chrome --- */
+
+.mv-root a {
+  color: var(--mv-ink);
+  text-decoration: none;
+}
+.mv-root a:hover {
+  color: var(--mv-muted);
+}
+.mv-root input {
+  font: inherit;
+  color: inherit;
+}
+.mv-root input::placeholder {
+  color: var(--mv-faint-2);
+}
+.mv-root ::selection {
+  background: var(--mv-ink);
+  color: var(--mv-ground);
+}
+.mv-root ::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.mv-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mv-root ::-webkit-scrollbar-thumb {
+  background: var(--mv-rule-2);
+  border-radius: 999px;
+}
+.mv-root ::-webkit-scrollbar-thumb:hover {
+  background: var(--mv-rule-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-root *,
+  .mv-root *::before,
+  .mv-root *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every element's own animation. */
+    animation: none !important;
+  }
+}
+
+/* -------------------------------------------------------- drawer --- */
+
+/*
+ * The drawer variant: a trigger, and a lightbox the card floats into. The motion
+ * is CSS here (not the flow's own library), because the overlay mounts and unmounts
+ * and a keyframe is the simplest thing that survives that. Opening dims and blurs
+ * the page behind rather than replacing it, so a reader stays in the docs the
+ * button was embedded into; the card rises a little and fades in, centred.
+ */
+.mv-launch {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mv-on-light);
+  background: var(--mv-white);
+  border: 0;
+  border-radius: 999px;
+  padding: 14px 22px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  transition:
+    background var(--mv-fast) var(--mv-ease),
+    transform var(--mv-fast) var(--mv-ease);
+}
+.mv-launch:hover {
+  background: var(--mv-cta-hover);
+}
+.mv-launch:active {
+  transform: translateY(1px);
+}
+
+/* Above the host's own chrome, but short of the max so a host can still sit over
+   it deliberately. Centres the card and leaves a gutter so it never touches the
+   viewport edge, even on a short phone. */
+.mv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.mv-overlay-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--mv-scrim);
+  -webkit-backdrop-filter: blur(6px) saturate(1.05);
+  backdrop-filter: blur(6px) saturate(1.05);
+  cursor: pointer;
+  animation: mv-fade-in var(--mv-slow) var(--mv-ease);
+}
+/* A recognisable close in the corner, in case tapping the dimmed page is not
+   obvious when the card nearly fills a small screen. */
+.mv-overlay-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mv-white);
+  color: var(--mv-on-light);
+  cursor: pointer;
+  box-shadow: 0 6px 20px -8px oklch(0 0 0 / 0.5);
+  animation: mv-fade-in var(--mv-slow) var(--mv-ease);
+  transition:
+    background var(--mv-fast) var(--mv-ease),
+    transform var(--mv-fast) var(--mv-ease);
+}
+.mv-overlay-close:hover {
+  background: var(--mv-cta-hover);
+}
+.mv-overlay-close:active {
+  transform: translateY(1px);
+}
+.mv-overlay-close svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+/* The card is its own surface; the wrapper only positions it, lifts it off the
+   dimmed page with a shadow, and carries the entrance. */
+.mv-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(440px, 100%);
+  max-height: 100%;
+  border-radius: 18px;
+  box-shadow: 0 30px 80px -24px oklch(0 0 0 / 0.55);
+  animation: mv-dialog-in var(--mv-slow) var(--mv-ease);
+  outline: none;
+}
+.mv-overlay[data-mv-closing="true"] .mv-overlay-scrim,
+.mv-overlay[data-mv-closing="true"] .mv-overlay-close {
+  animation: mv-fade-out var(--mv-slow) var(--mv-ease) forwards;
+}
+.mv-overlay[data-mv-closing="true"] .mv-dialog {
+  animation: mv-dialog-out var(--mv-slow) var(--mv-ease) forwards;
+}
+
+@keyframes mv-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes mv-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px) scale(0.985);
+  }
+}
+@keyframes mv-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mv-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-overlay-scrim,
+  .mv-overlay-close,
+  .mv-dialog {
+    animation: none;
   }
 }

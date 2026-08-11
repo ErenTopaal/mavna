@@ -4,7 +4,12 @@
     "rootDir": "src",
     "types": ["node"],
     "jsx": "react-jsx",
-    "lib": ["es2023", "dom"]
+    "lib": ["es2023", "dom", "dom.iterable"],
+    // The widget now bundles a whole app-sized flow rather than a few presentational
+    // components. Isolated declarations would demand an explicit type on every
+    // internal export; the public API (MavnaWidget + config) is typed explicitly,
+    // and tsdown generates the published .d.ts from that surface.
+    "isolatedDeclarations": false
   },
   "include": ["src/**/*"]
 }

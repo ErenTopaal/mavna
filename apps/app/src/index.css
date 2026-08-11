@@ -1,0 +1,20 @@
+/*
+ * The app's own page-level styles: the two typefaces it ships, and a bare reset.
+ *
+ * The widget is font-agnostic by design (it never drags a webfont into a host
+ * page). The app is Mavna's own product, so it ships Instrument Sans and Azeret
+ * Mono through @fontsource and points the widget at them with theme.font /
+ * theme.fontMono. Everything else the interface needs is scoped inside .mv-root.
+ */
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
+@import "@fontsource/instrument-sans/600.css";
+@import "@fontsource/azeret-mono/300.css";
+@import "@fontsource/azeret-mono/400.css";
+@import "@fontsource/azeret-mono/500.css";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}

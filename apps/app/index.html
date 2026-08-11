@@ -5,23 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Mavna</title>
     <meta name="description" content="Move value onto Stellar from wherever it already is." />
-    <!-- So the browser's own furniture, scrollbars and form controls, matches. -->
-    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="/mavna-mark.png" />
     <!--
-      Set before the first paint, on purpose.
-
-      This has to be a blocking inline script rather than something React does on
-      mount: a class applied after hydration means one frame of a white page on a
-      dark machine, and a flash of the wrong theme is worse than not having the
-      theme at all. It is a class rather than only a media query because the
-      component library's own dark rules are written as `.dark *` and would not
-      fire otherwise.
+      The interface is dark only, by design. color-scheme dark keeps the browser's
+      own furniture (scrollbars, form controls) dark, and the inline background
+      paints the ground before the first frame so there is no white flash.
     -->
-    <script>
-      if (matchMedia("(prefers-color-scheme: dark)").matches) {
-        document.documentElement.classList.add("dark");
+    <meta name="color-scheme" content="dark" />
+    <style>
+      html,
+      body {
+        background: oklch(0.145 0 0);
       }
-    </script>
+    </style>
   </head>
   <body>
     <div id="root"></div>

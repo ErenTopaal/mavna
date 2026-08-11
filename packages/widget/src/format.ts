@@ -1,51 +1,52 @@
+/*
+ * The small number and address helpers the design uses, ported verbatim so the
+ * figures read exactly as designed, and given real base-unit conversion so
+ * nothing goes through a float where money is concerned.
+ */
 import type { Amount } from "@mavna/core";
 
-/**
- * Turning integer base units into something a person reads.
- *
- * There is no `Number` anywhere in this file and there never will be. An amount
- * arrives as an integer string in base units precisely so it survives the trip
- * intact, and parsing it to a float to add a decimal point would throw that away
- * at the last possible moment. 7-decimal Stellar amounts exceed what a double
- * represents exactly, so this would not be a theoretical defect.
- */
-export function formatAmount(amount: Amount): string {
-  const { baseUnits, asset } = amount;
-  const negative = baseUnits.startsWith("-");
-  const digits = negative ? baseUnits.slice(1) : baseUnits;
-  const padded = digits.padStart(asset.decimals + 1, "0");
-  const cut = padded.length - asset.decimals;
+const TWO_DP = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
-  const whole = padded.slice(0, cut);
-  const fraction = asset.decimals === 0 ? "" : padded.slice(cut);
-
-  // Trailing zeros carry no information and make columns of amounts harder to
-  // compare at a glance, so "1.5000000" reads as "1.5".
-  let end = fraction.length;
-  while (end > 0 && fraction[end - 1] === "0") end -= 1;
-  const trimmed = fraction.slice(0, end);
-
-  return `${negative ? "-" : ""}${group(whole)}${trimmed === "" ? "" : `.${trimmed}`}`;
+/** The design's `fmt`: a plain two-decimal grouped figure. */
+export function fmt(value: number): string {
+  return TWO_DP.format(value);
 }
 
-function group(whole: string): string {
-  let out = "";
-  for (let i = 0; i < whole.length; i += 1) {
-    const fromEnd = whole.length - i;
-    if (i > 0 && fromEnd % 3 === 0) out += ",";
-    out += whole[i];
-  }
-  return out;
+/** The design's `short`: a 5…4 elision for anything longer than 12 characters. */
+export function short(address: string): string {
+  return address.length <= 12 ? address : `${address.slice(0, 5)}…${address.slice(-4)}`;
+}
+
+/** The design's `destValid`: a Stellar public key, 56 chars starting with G. */
+export function destValid(address: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(address.trim());
 }
 
 /**
- * Stellar addresses are 56 characters and nobody reads them in full.
+ * Decimal text to integer base units, string arithmetic throughout.
  *
- * Both ends are kept because that is what a user compares against their wallet;
- * an abbreviation that keeps only the start is worse than useless for the one
- * thing people actually do with it.
+ * Ported from Transfer.tsx. `Number("0.1") * 1e6` is 100000.00000000001, and
+ * truncating that is how an amount quietly loses its last unit.
  */
-export function shortenAddress(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+export function toBaseUnits(input: string, decimals: number): string {
+  const trimmed = input.trim();
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === "" || trimmed === ".") return "0";
+  const [whole = "0", fraction = ""] = trimmed.split(".");
+  const padded = fraction.padEnd(decimals, "0").slice(0, decimals);
+  const digits = `${whole}${padded}`.replace(/^0+(?=\d)/, "");
+  return digits === "" ? "0" : digits;
+}
+
+/** Integer base units to a JS number for display formatting only. */
+export function fromBaseUnits(baseUnits: string, decimals: number): number {
+  const scale = 10 ** decimals;
+  return Number(BigInt(baseUnits)) / scale;
+}
+
+/** The decimal value of an Amount, for display formatting only. */
+export function amountValue(amount: Amount): number {
+  return fromBaseUnits(amount.baseUnits, amount.asset.decimals);
 }

@@ -24,22 +24,38 @@
     "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
   },
   "peerDependencies": {
-    "react": ">=19"
+    "react": ">=19",
+    "react-dom": ">=19"
   },
   "dependencies": {
-    "@mavna/core": "workspace:*"
+    "@creit.tech/stellar-wallets-kit": "2.5.0",
+    "@mavna/adapter-axelar": "workspace:*",
+    "@mavna/adapter-cctp": "workspace:*",
+    "@mavna/adapter-layerzero": "workspace:*",
+    "@mavna/core": "workspace:*",
+    "@mavna/routing": "workspace:*",
+    "@mavna/status": "workspace:*",
+    "@mavna/stellar": "workspace:*",
+    "@mavna/swap": "workspace:*",
+    "@stellar/stellar-sdk": "16.2.0",
+    "@web3icons/react": "4.1.20",
+    "motion": "13.1.0",
+    "viem": "2.55.13"
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "13.0.3",
     "@tsdown/css": "0.22.14",
     "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "react": "19.2.8",
+    "react-dom": "19.2.8",
     "size-limit": "13.0.3"
   },
   "size-limit": [
     {
       "path": "dist/index.mjs",
-      "limit": "12 kB",
+      "//": "Self-contained: the widget bundles the routing engine, the three rail adapters, the Stellar SDK, viem and the wallet kit, like the LI.FI widget it is modelled on. This is the gzipped budget for all of that, not a thin presentational component.",
+      "limit": "400 kB",
       "ignore": [
         "react"
       ]

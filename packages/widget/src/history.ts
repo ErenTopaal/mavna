@@ -35,9 +35,9 @@ export interface TransferRecord {
 }
 
 /** Reads what is there, and treats anything unreadable as nothing. */
-export function readHistory(): readonly TransferRecord[] {
+export function readHistory(key: string = KEY): readonly TransferRecord[] {
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(key);
     if (raw === null) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -57,11 +57,11 @@ export function readHistory(): readonly TransferRecord[] {
  * unique: the same address can be sent to many times, and the same amount many
  * times over.
  */
-export function remember(record: TransferRecord): readonly TransferRecord[] {
-  const existing = readHistory().filter((r) => r.sourceTxHash !== record.sourceTxHash);
+export function remember(record: TransferRecord, key: string = KEY): readonly TransferRecord[] {
+  const existing = readHistory(key).filter((r) => r.sourceTxHash !== record.sourceTxHash);
   const next = [record, ...existing].slice(0, KEEP);
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
+    window.localStorage.setItem(key, JSON.stringify(next));
   } catch {
     // Storage can be full or disabled outright. Losing the convenience is
     // acceptable; failing the transfer over it is not, so this stays quiet.
@@ -69,9 +69,9 @@ export function remember(record: TransferRecord): readonly TransferRecord[] {
   return next;
 }
 
-export function forgetHistory(): void {
+export function forgetHistory(key: string = KEY): void {
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(key);
   } catch {
     // Same reasoning as above.
   }
