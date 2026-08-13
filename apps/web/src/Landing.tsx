@@ -655,12 +655,7 @@ export function Landing(): ReactNode {
               "display: grid; grid-template-columns: 1.55fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; margin-top: clamp(36px, 5vw, 64px)",
             )}
           >
-            <div
-              data-reveal=""
-              style={s(
-                "border: 1px solid oklch(0.32 0.012 250); border-radius: 20px; padding: clamp(16px, 2.2vw, 28px); background: oklch(0.185 0.008 264); display: grid; justify-items: center",
-              )}
-            >
+            <div data-reveal="" style={s("display: grid; justify-items: center")}>
               <Live
                 hold={540}
                 style={{ width: "100%", maxWidth: 440 }}
@@ -668,7 +663,7 @@ export function Landing(): ReactNode {
                   integrator: "web.mavna.app",
                   network: "testnet",
                   variant: "compact",
-                  appearance: "dark",
+                  appearance: "light",
                 }}
               />
             </div>
@@ -1767,108 +1762,112 @@ export function Landing(): ReactNode {
           "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
         )}
       >
-        <h2
-          style={s(
-            "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 18ch",
-          )}
-        >
-          Inline in the page, or a tap away.
-        </h2>
-        <p
-          style={s(
-            "margin: clamp(18px, 2.4vw, 24px) 0 clamp(44px, 6vw, 72px); font-size: 16.5px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 56ch",
-          )}
-        >
-          Two ways to place the same flow, and both are the real widget, live against the test
-          network right here.
-        </p>
         <div
           data-row=""
           style={s(
-            "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 5vw, 72px); align-items: start",
+            "display: grid; grid-template-columns: 1fr 1.3fr; gap: clamp(24px, 5vw, 70px); align-items: end; padding-bottom: clamp(30px, 4vw, 48px)",
           )}
         >
-          <div>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              Compact
-            </div>
-            <p
-              style={s(
-                "margin: clamp(14px, 1.8vw, 20px) 0 0; font-weight: 300; font-size: clamp(21px, 2.4vw, 31px); line-height: 1.14; letter-spacing: -0.026em; color: oklch(0.24 0.012 250); max-width: 18ch",
-              )}
-            >
-              A card that lives in your page.
-            </p>
-            <p
-              style={s(
-                "margin: clamp(14px, 1.8vw, 20px) 0 clamp(26px, 3vw, 36px); font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
-              )}
-            >
-              Drop it into a sidebar, a checkout, or a panel. It takes the width you give it and sits
-              on your own surface, with no overlay and no takeover.
-            </p>
-            <div
-              style={s(
-                "border: 1px solid oklch(0.885 0.006 85); border-radius: 20px; padding: clamp(16px, 2vw, 26px); background: oklch(0.99 0.003 85); display: grid; justify-items: center",
-              )}
-            >
-              <Live
-                hold={520}
-                style={{ width: "100%", maxWidth: 420 }}
-                config={{
-                  integrator: "web.mavna.app",
-                  network: "testnet",
-                  variant: "compact",
-                  appearance: "light",
-                }}
-              />
-            </div>
-          </div>
-          <div>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              Drawer
-            </div>
-            <p
-              style={s(
-                "margin: clamp(14px, 1.8vw, 20px) 0 0; font-weight: 300; font-size: clamp(21px, 2.4vw, 31px); line-height: 1.14; letter-spacing: -0.026em; color: oklch(0.24 0.012 250); max-width: 18ch",
-              )}
-            >
-              A button, and the flow on demand.
-            </p>
-            <p
-              style={s(
-                "margin: clamp(14px, 1.8vw, 20px) 0 clamp(26px, 3vw, 36px); font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
-              )}
-            >
-              Place one trigger anywhere. It rises from the bottom over your page, and closes on its
-              own button or the Escape key the moment they are done.
-            </p>
-            <div
-              style={s(
-                "border: 1px solid oklch(0.885 0.006 85); border-radius: 20px; padding: clamp(22px, 3vw, 40px); background: oklch(0.99 0.003 85); display: grid; justify-items: center; align-content: center; min-height: 260px",
-              )}
-            >
-              <Live
-                hold={120}
-                style={{ display: "grid", justifyItems: "center" }}
-                config={{
-                  integrator: "web.mavna.app",
-                  network: "testnet",
-                  variant: "drawer",
-                  appearance: "light",
-                }}
-              />
-            </div>
-          </div>
+          <h2
+            style={s(
+              "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 13ch",
+            )}
+          >
+            One component. The whole flow.
+          </h2>
+          <p
+            style={s(
+              "margin: 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 52ch",
+            )}
+          >
+            A cross-chain deposit into Stellar is a project on its own: routing across bridges, live
+            quotes, wallets on both sides, the reserve on a brand-new account, the swap into the
+            asset they asked for, tracking, and recovery when one stalls. The widget is all of it,
+            already built, and it is the same flow our own app runs.
+          </p>
         </div>
+        <div
+          data-reveal=""
+          style={s(
+            "display: grid; justify-items: center; text-align: center; gap: clamp(18px, 2.2vw, 26px); margin: clamp(8px, 1.5vw, 16px) 0 clamp(30px, 4vw, 50px); padding: clamp(38px, 5.5vw, 68px) 0; border-top: 1px solid oklch(0.885 0.006 85); border-bottom: 1px solid oklch(0.885 0.006 85)",
+          )}
+        >
+          <span
+            style={s(
+              "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
+            )}
+          >
+            Try it live
+          </span>
+          <Live
+            hold={64}
+            style={{ display: "grid", justifyItems: "center" }}
+            config={{
+              integrator: "web.mavna.app",
+              network: "testnet",
+              variant: "drawer",
+              appearance: "light",
+            }}
+          />
+          <p
+            style={s(
+              "margin: 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.48 0.012 250); max-width: 44ch",
+            )}
+          >
+            One trigger you place anywhere. It rises from the bottom over your page, runs the whole
+            transfer, and closes on its own button or the Escape key.
+          </p>
+        </div>
+        <div
+          data-row2=""
+          style={s(
+            "display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(26px, 4vw, 60px)",
+          )}
+        >
+          {[
+            {
+              title: "It brings its own wallets",
+              note: "It discovers the browser wallets your user already holds on the sending side and the Stellar wallets on the other, connects them, and asks for each signature in plain words. You never build a wallet layer to embed it.",
+            },
+            {
+              title: "The real flow, not a demo",
+              note: "Every rail is raced on each quote, the figure your user sees is the one that lands, and the parts that usually sink an integration, the account reserve, the swap, a transfer that stalls, are handled inside it.",
+            },
+            {
+              title: "It stays a quiet guest",
+              note: "It builds the transactions and your users sign them, so no key ever touches your page or ours. Its styles are scoped to itself and reach nothing around them, so it drops in with no global to reason about.",
+            },
+          ].map((f) => (
+            <div
+              key={f.title}
+              style={s(
+                "padding-top: clamp(18px, 2.2vw, 24px); border-top: 1px solid oklch(0.885 0.006 85)",
+              )}
+            >
+              <div
+                style={s(
+                  "font-size: clamp(18px, 1.9vw, 22px); font-weight: 300; letter-spacing: -0.02em",
+                )}
+              >
+                {f.title}
+              </div>
+              <p
+                style={s(
+                  "margin: 12px 0 0; font-size: 15px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 34ch",
+                )}
+              >
+                {f.note}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p
+          style={s(
+            "margin: clamp(40px, 5vw, 64px) 0 0; font-weight: 300; font-size: clamp(20px, 2.4vw, 30px); line-height: 1.28; letter-spacing: -0.024em; color: oklch(0.30 0.012 250); max-width: 30ch",
+          )}
+        >
+          You ship a deposit flow in an afternoon, not a quarter.
+        </p>
       </section>
 
       <section
