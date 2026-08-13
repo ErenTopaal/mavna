@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "@mavna/widget/widget.css";
 import { Landing } from "./Landing.js";
 import "./landing.css";
 

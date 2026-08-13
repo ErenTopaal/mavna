@@ -1,3 +1,4 @@
+import { MavnaWidget, type MavnaWidgetConfig } from "@mavna/widget";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 
 /*
@@ -91,6 +92,41 @@ function FootLink({ href, children }: { href: string; children: ReactNode }): Re
     >
       {children}
     </Hover>
+  );
+}
+
+/** A real Mavna widget, mounted only once it nears the viewport so the landing does
+ *  not spin up several transfer engines on first paint. It holds its own height
+ *  until then, so the page does not jump when the widget arrives. */
+function Live({
+  config,
+  hold,
+  style,
+}: {
+  readonly config: MavnaWidgetConfig;
+  readonly hold: number;
+  readonly style?: CSSProperties;
+}): ReactNode {
+  const ref = useRef<HTMLDivElement>(null);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (show) return undefined;
+    const check = (): void => {
+      const el = ref.current;
+      if (el && el.getBoundingClientRect().top < window.innerHeight * 1.3) setShow(true);
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, [show]);
+  return (
+    <div ref={ref} style={{ minHeight: show ? undefined : hold, ...style }}>
+      {show ? <MavnaWidget config={config} /> : null}
+    </div>
   );
 }
 
@@ -259,6 +295,36 @@ export function Landing(): ReactNode {
       }
     }
 
+    // --- Reveal on scroll. Scroll-driven rather than IntersectionObserver, because
+    // a tab that is not the foreground one can withhold observer callbacks and leave
+    // whole sections stuck at opacity 0. will-change is dropped once a section has
+    // revealed, so it never keeps a stale composited layer that only a repaint (a
+    // stray hover) would clear. ---
+    const revealEls: HTMLElement[] = [];
+    if (!reduce) {
+      Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]")).forEach((el) => {
+        el.style.transition =
+          "opacity 1s cubic-bezier(.2,.7,.2,1), transform 1.1s cubic-bezier(.2,.7,.2,1)";
+        if (el.getBoundingClientRect().top < window.innerHeight * 0.92) return;
+        el.style.willChange = "opacity, transform";
+        el.style.opacity = "0";
+        el.style.transform = "translateY(24px)";
+        revealEls.push(el);
+      });
+    }
+    const revealVisible = (): void => {
+      for (let i = revealEls.length - 1; i >= 0; i -= 1) {
+        const el = revealEls[i];
+        if (el.getBoundingClientRect().top >= window.innerHeight * 0.9) continue;
+        el.style.opacity = "1";
+        el.style.transform = "none";
+        window.setTimeout(() => {
+          el.style.willChange = "auto";
+        }, 1300);
+        revealEls.splice(i, 1);
+      }
+    };
+
     // --- Chrome: header border after scroll, and the active section in the nav. ---
     const header = document.querySelector("header");
     const links = Array.from(
@@ -266,6 +332,7 @@ export function Landing(): ReactNode {
     ).filter((a) => ["#app", "#sdk", "#widget"].includes(a.getAttribute("href") ?? ""));
     const ids = ["app", "sdk", "widget"];
     const onScroll = (): void => {
+      revealVisible();
       if (header instanceof HTMLElement) {
         header.style.borderBottomColor =
           window.scrollY > 40 ? "oklch(0.885 0.006 85)" : "transparent";
@@ -283,37 +350,7 @@ export function Landing(): ReactNode {
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
 
-    // --- Reveal on scroll. ---
-    let io: IntersectionObserver | null = null;
-    if (!reduce && "IntersectionObserver" in window) {
-      const els = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]"));
-      els.forEach((el) => {
-        el.style.willChange = "opacity, transform";
-        el.style.transition =
-          "opacity 1s cubic-bezier(.2,.7,.2,1), transform 1.1s cubic-bezier(.2,.7,.2,1)";
-        if (el.getBoundingClientRect().top < window.innerHeight * 0.92) return;
-        el.style.opacity = "0";
-        el.style.transform = "translateY(24px)";
-      });
-      io = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((e) => {
-            if (!e.isIntersecting) return;
-            const t = e.target as HTMLElement;
-            t.style.opacity = "1";
-            t.style.transform = "none";
-            io?.unobserve(e.target);
-          });
-        },
-        { rootMargin: "0px 0px -12% 0px", threshold: 0.08 },
-      );
-      els.forEach((el) => {
-        io?.observe(el);
-      });
-    }
-
     return () => {
-      io?.disconnect();
       ro?.disconnect();
       if (raf) cancelAnimationFrame(raf);
       window.removeEventListener("scroll", onScroll);
@@ -384,7 +421,7 @@ export function Landing(): ReactNode {
       <section
         id="top"
         style={s(
-          "position: relative; min-height: min(calc(100svh - 76px), 1040px); display: grid; align-items: end; overflow: hidden",
+          "position: relative; min-height: calc(100svh - 76px); display: grid; align-items: end; overflow: hidden",
         )}
       >
         {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: a decorative background canvas, not focusable content. */}
@@ -618,14 +655,23 @@ export function Landing(): ReactNode {
               "display: grid; grid-template-columns: 1.55fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; margin-top: clamp(36px, 5vw, 64px)",
             )}
           >
-            <img
+            <div
               data-reveal=""
-              src="/assets/app-shot.png"
-              alt="The Mavna app: a transfer being composed on the left, ranked routes and declined rails on the right"
               style={s(
-                "width: 100%; height: auto; display: block; mask-image: linear-gradient(to right, transparent 0%, #000 7%, #000 93%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 6%, #000 94%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 7%, #000 93%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 6%, #000 94%, transparent 100%); mask-composite: intersect; -webkit-mask-composite: source-in",
+                "border: 1px solid oklch(0.32 0.012 250); border-radius: 20px; padding: clamp(16px, 2.2vw, 28px); background: oklch(0.185 0.008 264); display: grid; justify-items: center",
               )}
-            />
+            >
+              <Live
+                hold={540}
+                style={{ width: "100%", maxWidth: 440 }}
+                config={{
+                  integrator: "web.mavna.app",
+                  network: "testnet",
+                  variant: "compact",
+                  appearance: "dark",
+                }}
+              />
+            </div>
             <div
               data-reveal=""
               style={s("display: grid; gap: clamp(18px, 2.2vw, 24px); align-content: center")}
@@ -1710,6 +1756,116 @@ export function Landing(): ReactNode {
                   The quote, the confirmation and the wait, all inside it.
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        data-reveal=""
+        style={s(
+          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+        )}
+      >
+        <h2
+          style={s(
+            "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 18ch",
+          )}
+        >
+          Inline in the page, or a tap away.
+        </h2>
+        <p
+          style={s(
+            "margin: clamp(18px, 2.4vw, 24px) 0 clamp(44px, 6vw, 72px); font-size: 16.5px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 56ch",
+          )}
+        >
+          Two ways to place the same flow, and both are the real widget, live against the test
+          network right here.
+        </p>
+        <div
+          data-row=""
+          style={s(
+            "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 5vw, 72px); align-items: start",
+          )}
+        >
+          <div>
+            <div
+              style={s(
+                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
+              )}
+            >
+              Compact
+            </div>
+            <p
+              style={s(
+                "margin: clamp(14px, 1.8vw, 20px) 0 0; font-weight: 300; font-size: clamp(21px, 2.4vw, 31px); line-height: 1.14; letter-spacing: -0.026em; color: oklch(0.24 0.012 250); max-width: 18ch",
+              )}
+            >
+              A card that lives in your page.
+            </p>
+            <p
+              style={s(
+                "margin: clamp(14px, 1.8vw, 20px) 0 clamp(26px, 3vw, 36px); font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
+              )}
+            >
+              Drop it into a sidebar, a checkout, or a panel. It takes the width you give it and sits
+              on your own surface, with no overlay and no takeover.
+            </p>
+            <div
+              style={s(
+                "border: 1px solid oklch(0.885 0.006 85); border-radius: 20px; padding: clamp(16px, 2vw, 26px); background: oklch(0.99 0.003 85); display: grid; justify-items: center",
+              )}
+            >
+              <Live
+                hold={520}
+                style={{ width: "100%", maxWidth: 420 }}
+                config={{
+                  integrator: "web.mavna.app",
+                  network: "testnet",
+                  variant: "compact",
+                  appearance: "light",
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <div
+              style={s(
+                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
+              )}
+            >
+              Drawer
+            </div>
+            <p
+              style={s(
+                "margin: clamp(14px, 1.8vw, 20px) 0 0; font-weight: 300; font-size: clamp(21px, 2.4vw, 31px); line-height: 1.14; letter-spacing: -0.026em; color: oklch(0.24 0.012 250); max-width: 18ch",
+              )}
+            >
+              A button, and the flow on demand.
+            </p>
+            <p
+              style={s(
+                "margin: clamp(14px, 1.8vw, 20px) 0 clamp(26px, 3vw, 36px); font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
+              )}
+            >
+              Place one trigger anywhere. It rises from the bottom over your page, and closes on its
+              own button or the Escape key the moment they are done.
+            </p>
+            <div
+              style={s(
+                "border: 1px solid oklch(0.885 0.006 85); border-radius: 20px; padding: clamp(22px, 3vw, 40px); background: oklch(0.99 0.003 85); display: grid; justify-items: center; align-content: center; min-height: 260px",
+              )}
+            >
+              <Live
+                hold={120}
+                style={{ display: "grid", justifyItems: "center" }}
+                config={{
+                  integrator: "web.mavna.app",
+                  network: "testnet",
+                  variant: "drawer",
+                  appearance: "light",
+                }}
+              />
             </div>
           </div>
         </div>

@@ -469,6 +469,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@mavna/widget':
+        specifier: workspace:*
+        version: link:../../packages/widget
       react:
         specifier: 19.2.8
         version: 19.2.8
