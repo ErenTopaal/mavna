@@ -37,21 +37,6 @@ const navbar = (
         <span className="mv-wordmark">Mavna</span>
       </span>
     }
-    projectLink="https://mavna.app"
-    projectIcon={
-      <span className="mv-project-link">
-        mavna.app
-        <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" fill="none">
-          <path
-            d="M3.5 8.5L8.5 3.5M8.5 3.5H4.5M8.5 3.5V7.5"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </span>
-    }
   >
     <ThemeSwitch lite className="mv-theme-switch" />
   </Navbar>
