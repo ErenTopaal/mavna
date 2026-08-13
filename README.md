@@ -7,9 +7,11 @@ holds a key.
 
 It ships in three forms that share one engine:
 
-- **App** (`apps/app`) — the hosted interface at mavna.app.
-- **SDK** (`packages/*`) — the engine as a small set of packages to build on.
-- **Widget** (`packages/widget`) — the whole flow as one embeddable component.
+- **App** (`apps/app`): the hosted interface at [mavna.app](https://mavna.app).
+- **SDK** (`packages/*`): the engine as a small set of packages to build on.
+- **Widget** (`packages/widget`): the whole flow as one embeddable component.
+
+[Website](https://web.mavna.app) · [App](https://mavna.app) · [Docs](https://docs.mavna.app) · [Playground](https://playground.mavna.app)
 
 ## Layout
 
