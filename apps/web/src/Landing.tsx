@@ -514,19 +514,19 @@ export function Landing(): ReactNode {
         >
           {[
             {
-              href: "#app",
+              href: APP,
               tag: "Send",
               title: "Move money onto Stellar",
               note: "Paste an address, see what lands.",
             },
             {
-              href: "#sdk",
+              href: DOCS_SDK,
               tag: "Build",
               title: "Build it into your app",
-              note: "Quotes in, unsigned transactions out.",
+              note: "Quotes, routes, and transactions your users sign.",
             },
             {
-              href: "#widget",
+              href: PLAYGROUND,
               tag: "Embed",
               title: "Drop in the widget",
               note: "The whole transfer, inside your product.",
