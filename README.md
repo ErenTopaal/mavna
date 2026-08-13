@@ -18,26 +18,6 @@ It ships in three forms that share one engine:
 - [Docs](https://docs.mavna.app)
 - [Playground](https://playground.mavna.app)
 
-## Layout
-
-```
-packages/
-  core        shared types and route model
-  routing     races the rails, ranks the results, adds the swap
-  stellar     Stellar reads and account math
-  swap        Stellar's exchanges (orderbook, Soroswap, Aquarius)
-  status      follow a transfer and find it again later
-  adapters/   one per rail: cctp, axelar, layerzero
-  widget      the embeddable component
-apps/
-  app         the product
-  web         the landing page
-  playground  configure the widget against live quotes
-  docs        the documentation site
-services/
-  sponsor     signs the reserve so a new account needs no XLM to start
-```
-
 ## Develop
 
 Requires Node 24 and pnpm.
