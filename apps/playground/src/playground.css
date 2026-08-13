@@ -1,0 +1,488 @@
+/*
+ * The playground's chrome around the live widget.
+ *
+ * It inherits the Mavna product's identity on purpose — the same dark neutral
+ * ground, Instrument Sans, and the Azeret Mono uppercase eyebrows that the widget
+ * itself uses for labels — so the tool reads as part of the product rather than a
+ * separate thing. The one flourish is the spotlight: a soft glow that lifts the
+ * live widget onto a plinth so the eye lands on it first. Everything is prefixed
+ * `pg-`; nothing reaches inside the widget's own `.mv-root`.
+ */
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
+@import "@fontsource/instrument-sans/600.css";
+@import "@fontsource/azeret-mono/400.css";
+@import "@fontsource/azeret-mono/500.css";
+
+:root {
+  --pg-ground: oklch(0.975 0 0);
+  --pg-rail: oklch(0.955 0 0);
+  --pg-surface: oklch(1 0 0);
+  --pg-surface-2: oklch(0.93 0 0);
+  --pg-ink: oklch(0.205 0 0);
+  --pg-ink-2: oklch(0.34 0 0);
+  --pg-muted: oklch(0.5 0 0);
+  --pg-faint: oklch(0.6 0 0);
+  --pg-rule: oklch(0 0 0 / 0.09);
+  --pg-rule-2: oklch(0 0 0 / 0.16);
+  --pg-mono: "Azeret Mono", ui-monospace, monospace;
+  --pg-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The dark chrome, toggled from the header. Light is the default above. */
+:root[data-pg-theme="dark"] {
+  --pg-ground: oklch(0.145 0 0);
+  --pg-rail: oklch(0.168 0 0);
+  --pg-surface: oklch(0.205 0 0);
+  --pg-surface-2: oklch(0.245 0 0);
+  --pg-ink: oklch(0.985 0 0);
+  --pg-ink-2: oklch(0.82 0 0);
+  --pg-muted: oklch(0.66 0 0);
+  --pg-faint: oklch(0.52 0 0);
+  --pg-rule: oklch(1 0 0 / 0.08);
+  --pg-rule-2: oklch(1 0 0 / 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  background: var(--pg-ground);
+  color: var(--pg-ink);
+  font-family: var(--pg-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font-family: inherit;
+}
+
+.pg-app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* -------------------------------------------------------------- header --- */
+
+.pg-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  height: 58px;
+  border-bottom: 1px solid var(--pg-rule);
+}
+.pg-mark {
+  width: 20px;
+  height: 20px;
+  display: block;
+  color: var(--pg-ink);
+}
+.pg-brand {
+  font-family: var(--pg-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+}
+.pg-eyebrow {
+  font-family: var(--pg-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--pg-faint);
+  padding: 3px 8px;
+  border: 1px solid var(--pg-rule);
+  border-radius: 999px;
+}
+.pg-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.pg-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--pg-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pg-muted);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.pg-toggle:hover {
+  color: var(--pg-ink);
+  border-color: var(--pg-rule-2);
+}
+.pg-header-link {
+  font-size: 12.5px;
+  color: var(--pg-muted);
+  text-decoration: none;
+}
+.pg-header-link:hover {
+  color: var(--pg-ink);
+}
+
+.pg-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .pg-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+}
+
+/* ---------------------------------------------------------------- rail --- */
+
+.pg-rail {
+  background: var(--pg-rail);
+  border-right: 1px solid var(--pg-rule);
+  overflow-y: auto;
+  padding: 8px 0 32px;
+}
+.pg-group {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--pg-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.pg-group:last-child {
+  border-bottom: 0;
+}
+.pg-group-title {
+  margin: 0 0 2px;
+  font-family: var(--pg-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--pg-faint);
+}
+.pg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pg-row-label {
+  font-size: 13px;
+  color: var(--pg-ink-2);
+}
+
+.pg-seg {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--pg-ground);
+  border: 1px solid var(--pg-rule);
+  border-radius: 999px;
+}
+.pg-seg button {
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease;
+}
+.pg-seg button:hover {
+  color: var(--pg-ink);
+}
+.pg-seg button[data-on="true"] {
+  background: var(--pg-ink);
+  color: var(--pg-ground);
+}
+
+.pg-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--pg-ink);
+}
+.pg-check input {
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 1px solid var(--pg-rule-2);
+  border-radius: 5px;
+  background: var(--pg-ground);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 120ms ease;
+}
+.pg-check input:checked {
+  background: var(--pg-ink);
+  border-color: var(--pg-ink);
+}
+.pg-check input:checked::after {
+  content: "✓";
+  color: var(--pg-ground);
+  font-size: 11px;
+  font-family: var(--pg-mono);
+}
+
+.pg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pg-field-label {
+  font-family: var(--pg-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--pg-faint);
+}
+.pg-input {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--pg-ground);
+  color: var(--pg-ink);
+  border: 1px solid var(--pg-rule);
+  border-radius: 9px;
+}
+.pg-input:focus {
+  outline: none;
+  border-color: var(--pg-rule-2);
+}
+.pg-input::placeholder {
+  color: var(--pg-faint);
+}
+.pg-color {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--pg-rule);
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+}
+.pg-color::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.pg-color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+.pg-reset {
+  font-family: var(--pg-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pg-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.pg-reset:hover {
+  color: var(--pg-ink);
+}
+
+/* --------------------------------------------------------------- stage --- */
+
+.pg-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pg-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 56px 32px 40px;
+}
+/* The spotlight: a soft glow behind where the widget sits, so it reads as lit on
+   a plinth rather than floating on a flat panel. */
+.pg-spot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 52% at 50% 30%, oklch(1 0 0 / 0.85), transparent 70%),
+    linear-gradient(to bottom, oklch(0.99 0 0), var(--pg-ground) 62%);
+}
+/* Faint film grain, the same texture the product uses, tying the stage to it. */
+.pg-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+.pg-stage > .mv-root {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+  /* Lifts the widget off the light stage; follows the card's rounded shape. */
+  filter: drop-shadow(0 26px 50px oklch(0 0 0 / 0.16));
+}
+/* The drawer variant renders only its launch button here; centre it on the stage
+   (both axes) and give the pill its own lighter lift. */
+.pg-stage > .mv-root:has(.mv-launch) {
+  align-self: center;
+  text-align: center;
+  filter: drop-shadow(0 12px 26px oklch(0 0 0 / 0.16));
+}
+:root[data-pg-theme="dark"] .pg-spot {
+  background:
+    radial-gradient(52% 46% at 50% 34%, oklch(0.62 0.02 250 / 0.12), transparent 72%),
+    linear-gradient(to bottom, oklch(0.19 0 0), var(--pg-ground) 60%);
+}
+:root[data-pg-theme="dark"] .pg-stage > .mv-root {
+  filter: drop-shadow(0 24px 50px oklch(0 0 0 / 0.45));
+}
+:root[data-pg-theme="dark"] .pg-dock {
+  background: oklch(0.128 0 0);
+}
+
+/* ---------------------------------------------------------------- dock --- */
+
+.pg-dock {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--pg-rule);
+  background: oklch(0.965 0 0);
+}
+/* Drag this to resize the dock; the stage above takes the remaining height. */
+.pg-dock-handle {
+  flex: 0 0 auto;
+  height: 12px;
+  margin-top: -6px;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.pg-dock-grip {
+  width: 40px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--pg-rule-2);
+  transition: background 120ms ease;
+}
+.pg-dock-handle:hover .pg-dock-grip {
+  background: var(--pg-muted);
+}
+.pg-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 18px 0;
+}
+.pg-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--pg-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pg-faint);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 6px 12px;
+  cursor: pointer;
+}
+.pg-tab:hover {
+  color: var(--pg-muted);
+}
+.pg-tab[data-on="true"] {
+  color: var(--pg-ink);
+  border-bottom-color: var(--pg-ink);
+}
+.pg-tab-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--pg-surface-2);
+  color: var(--pg-ink-2);
+  letter-spacing: 0.04em;
+}
+.pg-dock-action {
+  margin-left: auto;
+  font-family: var(--pg-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--pg-muted);
+  border: 1px solid var(--pg-rule);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.pg-dock-action:hover {
+  color: var(--pg-ink);
+  border-color: var(--pg-rule-2);
+}
+.pg-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 18px;
+}
+
+.pg-code {
+  margin: 0;
+  font-family: var(--pg-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--pg-ink-2);
+  white-space: pre;
+}
+.pg-log {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--pg-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.pg-log-empty {
+  color: var(--pg-faint);
+  font-family: var(--pg-sans);
+  font-size: 12.5px;
+}
+.pg-log-row {
+  color: var(--pg-muted);
+  display: flex;
+  gap: 8px;
+}
+.pg-log-row::before {
+  content: "›";
+  color: var(--pg-faint);
+}
