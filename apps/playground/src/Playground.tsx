@@ -192,8 +192,22 @@ export function Playground(): ReactElement {
               </svg>
             )}
           </button>
+          <a className="pg-header-link" href="https://web.mavna.app">
+            Home
+          </a>
+          <a className="pg-header-link" href="https://mavna.app">
+            App
+          </a>
           <a className="pg-header-link" href="https://docs.mavna.app">
-            Docs ↗
+            Docs
+          </a>
+          <a
+            className="pg-header-link"
+            href="https://github.com/ErenTopaal/mavna"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub ↗
           </a>
         </div>
       </header>

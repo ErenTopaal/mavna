@@ -11,10 +11,36 @@ import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 
 
 const APP = "https://mavna.app";
 const DOCS = "https://docs.mavna.app";
+const DOCS_SDK = "https://docs.mavna.app/developers";
+const DOCS_WIDGET = "https://docs.mavna.app/widget";
 const PLAYGROUND = "https://playground.mavna.app";
 const GITHUB = "https://github.com/ErenTopaal/mavna";
 
-/** Parse an inline CSS declaration string into a React style object, verbatim. */
+/** Split a box shorthand value into top/right/bottom/left, respecting the spaces
+ *  inside functions like clamp(), and applying the 1/2/3/4-value CSS rules. */
+function boxSides(value: string): [string, string, string, string] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === " " && depth === 0) {
+      if (cur.trim() !== "") parts.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim() !== "") parts.push(cur.trim());
+  const [a = "0", b = a, c = a, d = b] = parts;
+  return [a, b, c, d];
+}
+
+/** Parse an inline CSS declaration string into a React style object. `padding`
+ *  and `margin` shorthands are expanded to longhands: a `Hover` that overrides a
+ *  single side (padding-left) must not sit next to the shorthand, or React drops
+ *  that side when the hover ends and the padding collapses. */
 function s(css: string): CSSProperties {
   const out: Record<string, string> = {};
   for (const decl of css.split(";")) {
@@ -22,8 +48,17 @@ function s(css: string): CSSProperties {
     if (i === -1) continue;
     const prop = decl.slice(0, i).trim();
     if (prop === "") continue;
+    const value = decl.slice(i + 1).trim();
     const key = prop.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-    out[key] = decl.slice(i + 1).trim();
+    if (key === "padding" || key === "margin") {
+      const [t, r, b, l] = boxSides(value);
+      out[`${key}Top`] = t;
+      out[`${key}Right`] = r;
+      out[`${key}Bottom`] = b;
+      out[`${key}Left`] = l;
+    } else {
+      out[key] = value;
+    }
   }
   return out as CSSProperties;
 }
@@ -315,6 +350,7 @@ export function Landing(): ReactNode {
     const revealVisible = (): void => {
       for (let i = revealEls.length - 1; i >= 0; i -= 1) {
         const el = revealEls[i];
+        if (el === undefined) continue;
         if (el.getBoundingClientRect().top >= window.innerHeight * 0.9) continue;
         el.style.opacity = "1";
         el.style.transform = "none";
@@ -388,13 +424,13 @@ export function Landing(): ReactNode {
               "display: flex; align-items: center; gap: clamp(18px, 3vw, 34px); font-size: 14px; color: oklch(0.52 0.012 250)",
             )}
           >
-            <a href="#app" style={s("transition: color .4s ease")}>
+            <a href={APP} style={s("transition: color .4s ease")}>
               App
             </a>
-            <a href="#sdk" style={s("transition: color .4s ease")}>
+            <a href={DOCS_SDK} style={s("transition: color .4s ease")}>
               SDK
             </a>
-            <a href="#widget" style={s("transition: color .4s ease")}>
+            <a href={DOCS_WIDGET} style={s("transition: color .4s ease")}>
               Widget
             </a>
             <a
@@ -571,19 +607,29 @@ export function Landing(): ReactNode {
             {
               tag: "App",
               items: [
-                "Your first transfer",
-                "Send to a new address",
-                "Track a transfer",
-                "What a transfer costs",
+                { label: "Your first transfer", href: `${DOCS}/guides/send` },
+                { label: "Send to a new address", href: `${DOCS}/guides/new-account` },
+                { label: "Track a transfer", href: `${DOCS}/guides/track` },
+                { label: "What a transfer costs", href: `${DOCS}/guides/costs` },
               ],
             },
             {
               tag: "SDK",
-              items: ["Quickstart", "Concepts", "Rails & networks", "Package reference"],
+              items: [
+                { label: "Quickstart", href: `${DOCS}/developers/quickstart` },
+                { label: "Concepts", href: `${DOCS}/developers/concepts` },
+                { label: "Rails & networks", href: `${DOCS}/developers/rails` },
+                { label: "Package reference", href: `${DOCS}/developers/reference/packages` },
+              ],
             },
             {
               tag: "Widget",
-              items: ["Quickstart", "Components", "Theming & config", "Security model"],
+              items: [
+                { label: "Quickstart", href: `${DOCS}/widget/quickstart` },
+                { label: "Configuration", href: `${DOCS}/widget/configuration` },
+                { label: "Theming", href: `${DOCS}/widget/theming` },
+                { label: "Security model", href: `${DOCS}/developers/security/model` },
+              ],
             },
           ].map((col) => (
             <div
@@ -600,8 +646,8 @@ export function Landing(): ReactNode {
                 {col.tag}
               </span>
               {col.items.map((item) => (
-                <DocLink key={item} href={DOCS}>
-                  {item}
+                <DocLink key={item.label} href={item.href}>
+                  {item.label}
                 </DocLink>
               ))}
             </div>
@@ -2026,7 +2072,7 @@ export function Landing(): ReactNode {
                 note: "Move money onto Stellar in one go.",
               },
               {
-                href: DOCS,
+                href: `${DOCS}/developers/quickstart`,
                 tag: "Build on it",
                 title: "SDK quickstart",
                 note: "One file, one real quote, off the live network.",
@@ -2102,8 +2148,9 @@ export function Landing(): ReactNode {
                 Product
               </span>
               <FootLink href={APP}>The app</FootLink>
-              <FootLink href={DOCS}>SDK</FootLink>
-              <FootLink href={PLAYGROUND}>Widget</FootLink>
+              <FootLink href={DOCS_SDK}>SDK</FootLink>
+              <FootLink href={DOCS_WIDGET}>Widget</FootLink>
+              <FootLink href={PLAYGROUND}>Playground</FootLink>
             </div>
             <div style={s("display: grid; gap: 13px; align-content: start")}>
               <span
