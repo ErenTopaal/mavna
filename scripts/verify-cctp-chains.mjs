@@ -493,24 +493,33 @@ const registry = await fetch("https://chainid.network/chains.json", {
   .then((all) => new Map(all.map((c) => [c.chainId, c])));
 
 /**
- * Chains the community registry does not carry, filled in from a known source.
+ * Chains the community registry gets wrong or does not carry, filled in from a
+ * known source.
  *
  * Kept small and separate on purpose: anything here is a human's word rather than
- * a lookup, so it should be obvious which entries are which.
+ * a lookup, so it should be obvious which entries are which. A chain listed here
+ * uses these values instead of the registry's, so a registry entry that names the
+ * wrong network is replaced rather than merged.
  */
 const OVERRIDES = {
-  // Supplied by the project owner along with the endpoint.
   // Name and explorer supplied by the project owner along with the endpoint. No
   // native currency: the community registry does not carry this chain, and the
   // public chain lists disagree with our own naming of it, so it is left unknown
   // rather than filled in from recollection.
   688689: { name: "Pharos Atlantic Testnet", explorer: "https://atlantic.pharosscan.xyz" },
+  // chainid.network maps 999 to Wanchain, a different network that used the id
+  // first; HyperEVM mainnet also answers on 999, so the registry entry is the
+  // wrong chain. Name and native currency match this repo's own Hyperliquid EVM
+  // testnet record (id hyperevm-testnet); no explorer is published, left unknown.
+  999: { name: "Hyperliquid EVM", nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 } },
 };
 
 function describe(evmChainId) {
-  const entry = registry.get(evmChainId);
-  const explorer = entry?.explorers?.find((e) => e.url?.startsWith("https"));
   const override = OVERRIDES[evmChainId];
+  // An override replaces the registry entry rather than filling gaps in it, so a
+  // registry row for the wrong network (a reused chainId) is discarded.
+  const entry = override ? undefined : registry.get(evmChainId);
+  const explorer = entry?.explorers?.find((e) => e.url?.startsWith("https"));
   // The gas token is not ETH everywhere. Assuming it is puts "ETH" in front of a
   // user paying in AVAX or POL, which is a small lie in a place where the whole
   // product's credibility is that its numbers are right.
