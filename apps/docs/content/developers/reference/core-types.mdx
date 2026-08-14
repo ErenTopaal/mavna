@@ -1,0 +1,35 @@
+---
+title: Core types
+description: The money, route, and execution models, lifted from the source at build time with their comments.
+---
+
+import Money from "../../../generated/source-money.mdx";
+import Route from "../../../generated/source-route.mdx";
+import Execution from "../../../generated/source-execution.mdx";
+
+# Core types
+
+The declarations below are the real lines from `@mavna/core`, comments included,
+copied out when this site is built. The comments are where the reasoning lives.
+
+## Money
+
+Assets, amounts, and fees. Identity is a chain plus an identifier, and money is an
+integer string. [Assets and amounts](/developers/concepts/model) is the prose.
+
+<Money />
+
+## Routes
+
+A quote and an in-flight transfer are the same type: execution state is grafted
+onto the quoted shape rather than mutating it. [Routes and
+rejections](/developers/concepts/routes) is the prose.
+
+<Route />
+
+## Execution
+
+The per-step phase, narrowed so a step with no transaction cannot carry a
+transaction link. [Status and recovery](/developers/concepts/status) is the prose.
+
+<Execution />

@@ -1,0 +1,52 @@
+---
+title: For integrators
+description: One React component that renders the whole transfer, connects both wallets itself, and is styled by CSS custom properties.
+---
+
+import { LiveWidget } from "../../components/LiveWidget";
+
+# The widget
+
+You have a wallet, an exchange, or any product whose users hold funds on other
+chains, and you want cross-chain deposits into Stellar without building routing,
+wallet connection, status tracking, and failure recovery yourself. The widget is
+that whole flow as one React component.
+
+`@mavna/widget` renders the whole thing. It is built on the routing engine, all
+three [rails](/developers/rails), the Stellar SDK, the EVM client, and the Stellar
+wallet kit, and it connects both wallets itself, so you render one component and
+pass one config object. React and React-DOM are its only peers, both version 19;
+everything else it needs comes as its dependencies.
+
+<LiveWidget />
+
+The widget above is the real component against the test network, the same code the
+app at mavna.app runs.
+
+## What you get
+
+- **The whole flow in one component.** Quote, route choice with trust models in
+  plain words, wallet connection, confirmation, live progress, and recovery, from
+  the same engine the SDK exposes.
+- **[Three layouts](/widget/variants).** An inline card, a full-page app, and a
+  drawer that rises from the bottom.
+- **[Theming through CSS custom properties](/widget/theming)** and a config field:
+  no theme object to learn, no CSS-in-JS, no build-tool adoption on your side.
+- **[Configuration for what it offers](/widget/configuration):** restrict chains
+  and rails, prefill and lock the form, take an integrator fee, point at your own
+  sponsor, hand wallet connection to your app, and receive events.
+
+Start with the [quickstart](/widget/quickstart), or open the full configurator in
+the [playground](/widget/playground).
+
+## What it does to your page
+
+The inline card is a guest. It is scoped entirely under its own `.mv-root` class,
+every class name is prefixed `mv-` so it cannot collide with yours, and it paints no
+background of its own, sitting on whatever surface you place it on. Every dimension
+is in pixels rather than `rem`, so a host page that scales its root font size does
+not rescale the widget's geometry.
+
+The drawer layout is an overlay by design: it is a popup, so it dims the page behind
+it and closes on its own button or the Escape key. You choose the layout, so you
+choose whether the widget is inline or takes over the viewport.

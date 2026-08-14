@@ -4,16 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/sync-reference.mjs && astro dev",
-    "build": "node scripts/sync-reference.mjs && astro build",
-    "preview": "astro preview",
-    "typecheck": "node scripts/sync-reference.mjs && astro sync && tsc --noEmit",
+    "dev": "node scripts/sync-reference.mjs && next dev",
+    "build": "node scripts/sync-reference.mjs && next build && pagefind --site .next/server/app --output-path public/_pagefind",
+    "start": "next start",
+    "typecheck": "node scripts/sync-reference.mjs && tsc --noEmit",
     "sync:reference": "node scripts/sync-reference.mjs",
     "example:quote": "node examples/quote.ts"
   },
   "dependencies": {
-    "@astrojs/react": "6.0.2",
-    "@astrojs/starlight": "0.41.7",
+    "@fontsource-variable/figtree": "5.3.0",
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
@@ -22,12 +21,16 @@
     "@mavna/status": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@mavna/widget": "workspace:*",
-    "astro": "7.2.0",
+    "next": "16.3.0",
+    "nextra": "4.6.1",
+    "nextra-theme-docs": "4.6.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4"
+    "@types/react-dom": "19.2.4",
+    "pagefind": "1.5.2",
+    "typescript": "6.0.3"
   }
 }

@@ -1,0 +1,48 @@
+---
+title: The adapter contract
+description: The interface a rail implements, lifted from the source. Adding a rail is one package that satisfies it.
+---
+
+import Interface from "../../../generated/source-adapter-interface.mdx";
+import Request from "../../../generated/source-adapter-request.mdx";
+import Transaction from "../../../generated/source-adapter-transaction.mdx";
+import Unnecessary from "../../../generated/source-adapter-unnecessary.mdx";
+import Handle from "../../../generated/source-adapter-handle.mdx";
+
+# The adapter contract
+
+A rail is one package that implements `BridgeAdapter`. Nothing in the interface
+names a specific bridge, chain, or SDK, so adding a rail requires no change
+anywhere else. The declarations below are the real lines from `@mavna/core`.
+
+## BridgeAdapter
+
+`quote` returns a route or a rejection, and returning a rejection is the normal,
+preferred outcome over throwing. `buildTransactions` builds, never signs, never
+submits. `recover` is the one optional member.
+
+<Interface />
+
+## What a quote is asked
+
+<Request />
+
+## What a build returns
+
+The payload is opaque to the SDK; the wallet knows how to read it. `describes` is a
+sentence for a person, so consent can be informed.
+
+<Transaction />
+
+`unnecessaryWhen` says when a transaction can be skipped, and how the caller
+checks:
+
+<Unnecessary />
+
+## What a transfer is found by
+
+Any of the source transaction, the deposit address, or the destination address is a
+first-class lookup key. [Status and recovery](/developers/concepts/status) is the
+prose.
+
+<Handle />

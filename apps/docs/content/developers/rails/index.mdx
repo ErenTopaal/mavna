@@ -1,0 +1,58 @@
+---
+title: The three rails
+asIndexPage: true
+description: What each rail carries, on which network, and why the differences are facts about the rails' own deployments rather than the product.
+---
+
+# The three rails
+
+Every rail is one package implementing the same
+[`BridgeAdapter`](/developers/reference/bridge-adapter) interface, and each carries
+a different [trust model](/developers/concepts/trust), which is the comparison the
+routing engine exists to show. The engine races all three on every quote, and each
+one answers for itself.
+
+| | [Circle CCTP](/developers/rails/cctp) | [Axelar ITS](/developers/rails/axelar) | [LayerZero OFT](/developers/rails/layerzero) |
+| --- | --- | --- | --- |
+| Adapter | `@mavna/adapter-cctp`, id `cctp` | `@mavna/adapter-axelar`, id `axelar` | `@mavna/adapter-layerzero`, id `layerzero` |
+| Trust model | `native-mint` | `validator-set` | `dvn-stack` |
+| Mechanism | The issuer burns on the source and mints on Stellar | A validator set attests; tokens move through the Interchain Token Service hub | Tokens implement OFT; verifiers chosen per token check each message |
+| Assets | USDC | Interchain Token Service tokens, USDC among them on mainnet | USDT0 on mainnet, plus any OFT you name yourself |
+
+## The network picture, stated precisely
+
+The engine is network-agnostic: the same adapters run on testnet and mainnet,
+selected by one configuration value. What differs per network is what each rail's
+own deployment offers, and that is the rail's fact, not the product's.
+
+**On the test network**, Circle's rail is complete: USDC moves from all 26 of its
+testnet source chains, and this repository's live tests and the hosted app
+complete transfers on it end to end, delivery and zero-XLM account setup included.
+Axelar resolves its chains and tokens from its registry at quote time, and its
+Stellar test deployment currently carries very little, so it usually declines.
+LayerZero's OFT registry lists no obtainable testnet token, so there is nothing
+public to route; a team that has deployed its own OFT names it directly and quotes
+over it.
+
+So a testnet quote usually shows one route and two refusals, each refusal carrying
+its reason in a sentence. That is the honest picture, and the app shows it rather
+than hiding it.
+
+**On the main network**, the same quote has more to say. Axelar carries Interchain
+Token Service tokens into Stellar, USDC among them, which is what makes ranking
+meaningful: a native mint and a validator set quoting the same dollar side by side.
+LayerZero carries USDT0 from twelve source chains, the only route to native USDT on
+Stellar. The mainnet configurations are not dormant: the repository's live test
+suite quotes them against the real networks.
+
+The hosted app at mavna.app runs on the test network today. Moving a deployment to
+mainnet is a configuration change (`VITE_MAVNA_NETWORK=mainnet` plus your own
+Stellar RPC provider), which the project requires of itself: no component may be
+meaningful on only one network.
+
+## Turning a rail off
+
+A dependency on a rail is a dependency on its incidents. Every deployment can take
+a source out of rotation without a release through the
+[circuit breaker](/developers/concepts/routes), and the disabled rail shows users
+the operator's sentence instead of silently disappearing.

@@ -1,0 +1,31 @@
+---
+title: Arrive as XLM
+description: Send USDC and receive XLM instead, converted on Stellar's own exchange as one step in the same transfer.
+---
+
+# Arrive as XLM
+
+You can send USDC and have the recipient arrive holding XLM, Stellar's own currency,
+instead of USDC. It is one toggle on the **Send to Stellar** screen and one flow,
+not a bridge followed by a manual trade.
+
+## Switch the receive asset
+
+Under **Receive on Stellar**, switch from `USDC` to `XLM`. The quote updates: it now
+shows the XLM amount you receive and the least you can receive, because the
+conversion runs at the live market rate and the rate can move between the quote and
+the moment it executes.
+
+## What happens
+
+The transfer bridges USDC exactly as before, and then a conversion step runs on
+Stellar's own exchange, turning the arrived USDC into XLM. The conversion spends from
+the receiving account, so the recipient signs it in their Stellar wallet; a
+[Stellar wallet](/guides/wallets) is needed on the receiving side for this reason.
+
+The rate is the market's. There is no separate conversion fee line: the quote shows
+the rate's outcome and the floor you agreed to. If the market has moved past that
+floor when the conversion runs, it refuses whole rather than deliver less, and the
+recipient keeps the USDC that arrived. The USDC is theirs either way.
+
+[How the swap leg works](/developers/concepts/swap) covers the mechanism.

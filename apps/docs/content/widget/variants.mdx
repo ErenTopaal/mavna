@@ -1,0 +1,47 @@
+---
+title: Variants
+description: Inline card, full-page app, or a drawer. One config field chooses the layout, and the drawer opens by prop, ref, or its own trigger.
+---
+
+import { LiveWidget } from "../../components/LiveWidget";
+import Component from "../../generated/source-widget-component.mdx";
+
+# Variants
+
+`variant` chooses the layout. The flow inside is the same; what changes is how it
+sits in your page.
+
+## Compact
+
+`variant: "compact"` (the default) is an inline card. It paints no background of its
+own and takes the width of its container, so it drops into a sidebar or a checkout
+panel as a guest.
+
+<LiveWidget variant="compact" />
+
+## Wide
+
+`variant: "wide"` is the full-page app, the layout mavna.app runs: a two-panel view
+with the form beside the routes. Use it when the widget is the page rather than a
+component on one.
+
+## Drawer
+
+`variant: "drawer"` is a popup that rises from the bottom over a dimmed page. It
+comes with its own trigger button, labelled "Bring funds to Stellar", and closes on
+that button, the Escape key, or the backdrop.
+
+<LiveWidget variant="drawer" />
+
+You can drive the drawer yourself instead of using its trigger. Pass the `open` prop
+to control it from your own button, and `onClose` fires once the close animation
+finishes. Or take a ref to the component and call the imperative handle:
+
+```tsx
+const ref = useRef<MavnaWidgetRef>(null);
+// ref.current?.openDrawer() / closeDrawer() / toggleDrawer() / isOpen()
+```
+
+## The component's types
+
+<Component />

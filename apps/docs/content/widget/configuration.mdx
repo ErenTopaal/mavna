@@ -1,0 +1,78 @@
+---
+title: Configuration
+description: Every field of the widget's config object, what it does, and the events it reports back.
+---
+
+import Config from "../../generated/source-widget-config.mdx";
+
+# Configuration
+
+The widget takes one object. `integrator` is the only required field; every other
+field narrows what the widget offers, points it at your own infrastructure, or wires
+it into your app. The exact type, generated from the source, is at the bottom of
+this page.
+
+## Identity and network
+
+- **`integrator`** (required). A string that identifies you and attributes any
+  integrator fee.
+- **`network`**. `"testnet"` or `"mainnet"`, defaulting to the test network. Mainnet
+  has no public Stellar node from the foundation, so it needs an explicit `rpcUrl`.
+- **`rpcUrl`**. The Stellar RPC endpoint. EVM reads go through the connected wallet,
+  never here.
+- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for zero-XLM arrival to
+  new accounts. It defaults to a local development sponsor, so set your own for
+  production.
+
+## Routing
+
+- **`routePriority`**. `"best-received"` (the default) or `"fastest"`, the initial
+  ranking.
+- **`fee`**. An integrator fee, `{ bps, recipient, recipientName }`. `bps` is an
+  integer in `[0, 1000]`. The fee is deducted from what the user receives and carried
+  on the route as an itemised `integrator` fee.
+- **`rails`**. Which rails to race and offer, as display names:
+  `["Circle", "Axelar", "LayerZero"]`. Defaults to all three.
+- **`disabledSources`**. Rails an operator has taken out of rotation, in the circuit
+  breaker's `id:reason` format using adapter ids, for example
+  `"cctp:Circle is paused"`. A disabled rail shows the reason rather than vanishing.
+- **`chains`**. `{ allow?, deny? }`, filtered over the network's real chain list by
+  Mavna slug. These narrow the list; they cannot add a chain the network does not
+  carry.
+- **`wanted`**. `"USDC"` or `"XLM"`, the asset the recipient arrives holding. The
+  send asset is always USDC.
+
+## Starting the form
+
+- **`fromChain`**. The chain the form starts on, by Mavna slug (for example
+  `"ethereum-sepolia"`).
+- **`fromAmount`**. The amount the form starts with.
+- **`toAddress`**. The recipient's Stellar address, pre-filled. Combine with
+  `requiredUI: ["destination"]` to lock it.
+
+## What the widget shows
+
+- **`hiddenUI`**. UI to remove: `"activity"`, `"settings"`, `"networkToggle"`,
+  `"railToggles"`, `"poweredBy"`.
+- **`requiredUI`**. UI to lock: `"destination"` fixes the recipient to `toAddress`.
+
+## Integration
+
+- **`keyPrefix`**. Namespaces this widget's local transfer history, so two
+  integrators on one origin do not share it.
+- **`walletConfig`**. Opt out of the widget's own wallet management:
+  `onConnect` replaces the built-in connect UI with your own, `evm` seeds an
+  already-connected EVM connection, and `stellar` provides your own Stellar signer.
+- **`onEvent`**. A callback that receives the widget's events.
+
+## Events
+
+`onEvent` reports what the flow is doing: `routesAvailable` (with a count and how
+many declined), `routeSelected` (the source and the amount received),
+`walletConnected` (the ecosystem and address), `transferStarted`,
+`transferStepUpdated` (a step id and its phase), `transferCompleted`, and
+`transferFailed` (with a reason). Each one is backed by a real signal in the flow.
+
+## The type
+
+<Config />

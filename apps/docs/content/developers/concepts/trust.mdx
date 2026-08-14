@@ -1,0 +1,48 @@
+---
+title: Trust models
+description: Who you are trusting to deliver a transfer is a first-class field on every route, and the comparison the routing engine exists to show.
+---
+
+# Trust models
+
+Every route carries a `trustModel`, and so does every adapter. Which parties a
+user is trusting to deliver a transfer is surfaced, not buried, because it is the
+comparison the routing engine exists to show: the same dollar can arrive over
+three different sets of assumptions, and a user gets to weigh them.
+
+```ts
+type TrustModel =
+  | "native-mint"
+  | "validator-set"
+  | "solver-network"
+  | "liquidity-pool"
+  | "dvn-stack";
+```
+
+The three rails in this repository use three of these:
+
+**`native-mint`** ([Circle CCTP](/developers/rails/cctp)). The issuer burns the
+token on the source chain and mints it on Stellar. Nobody holds the money in
+between, and there is no pool or wrapped representation. What you are trusting is
+the issuer.
+
+**`validator-set`** ([Axelar ITS](/developers/rails/axelar)). A named set of
+validators attests to the transfer, which moves through the Interchain Token
+Service. What you are trusting is that validator set.
+
+**`dvn-stack`** ([LayerZero OFT](/developers/rails/layerzero)). A set of verifiers
+attests, and the token's owner chose which. This is kept separate from
+`validator-set` on purpose: who is trusted is chosen by whoever deployed the
+token, not by the network, so two routes on the same rail can be verified by
+entirely different parties. The adapter names the verifiers on every transaction
+it builds.
+
+`solver-network` and `liquidity-pool` exist in the type for rails with those
+shapes. No adapter in this repository uses them today.
+
+## How it reaches a user
+
+The model is a plain value on the `Route`, and the widget renders it as a sentence
+a person can weigh without knowing the words. In the app and the widget, the trust
+model sits on every route card beside the amount and the time, so the choice
+between rails is a choice a user makes with the trade-off in front of them.

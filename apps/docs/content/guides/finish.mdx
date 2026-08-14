@@ -1,0 +1,33 @@
+---
+title: Finish a delivery
+description: If a delivery is taking longer than usual, trigger it yourself. Retrying is always safe.
+---
+
+# Finish a delivery
+
+Most transfers deliver on their own. If one is taking longer than usual, or you
+closed the tab during the wait, you can trigger the delivery yourself. Retrying is
+always safe: a delivery cannot happen twice.
+
+## Finish it
+
+Open **Activity** and [find the transfer](/guides/track) from the transaction you
+sent. When a transfer can be finished, a **Finish the delivery** button appears.
+Finishing needs the source transaction, so paste that rather than the destination
+address if you have the choice.
+
+Press it, and one of a few things happens:
+
+- **Delivered.** The funds are on Stellar, and the status updates to say so.
+- **Not attested yet.** Circle has not finished attesting the transfer. Nothing is
+  wrong; try again in a minute.
+- **Part of it arrived.** The status shows how much, and finishing the rest is safe
+  to try again.
+
+## Why it is safe
+
+A delivery is idempotent: the network records that a transfer has been delivered, so
+triggering it a second time cannot mint the funds twice. If a transfer's money has
+not been delivered, finishing delivers it; if it already has, finishing does
+nothing. There is no state in which pressing the button costs you. [How delivery is
+proven](/developers/concepts/delivery) covers why.

@@ -1,0 +1,71 @@
+---
+title: Your first transfer
+description: Move USDC from another chain to any Stellar address, start to finish, at mavna.app.
+---
+
+# Your first transfer
+
+You have USDC on another chain and you want it on Stellar. This takes one page, two
+wallets, and a few minutes. You see exactly what arrives before you send anything,
+and nothing moves until you confirm it in your own wallet.
+
+Open [mavna.app](https://mavna.app).
+
+## 1. Say what you are sending
+
+On **Send to Stellar**, set four things:
+
+- **Send from**: the chain your USDC is on. The list is every chain Mavna can move
+  from on the current network.
+- **The amount**, in USDC. Routes update as you type; there is no button to press
+  to see a quote.
+- **Receive on Stellar**: leave it on `USDC` to arrive holding USDC, or switch to
+  `XLM` to arrive holding Stellar's own currency. [Arriving as
+  XLM](/guides/receive-xlm) is its own short guide.
+- **Recipient**: the Stellar address it lands on. Any address works, including
+  [one that does not exist yet](/guides/new-account).
+
+## 2. Read the quote
+
+Every rail that can carry your transfer answers, and the routes appear as the
+answers land, ranked so the first one is the best net outcome. Each route shows the
+amount that actually arrives after every fee, how long it takes, how many approvals
+your wallets will be asked for, and [who you are
+trusting](/developers/concepts/trust) to deliver it. You can open a route for the
+full breakdown, or pick a different one.
+
+A rail that cannot carry your transfer says why in a sentence rather than silently
+not appearing. On the test network two of the three rails usually decline, because
+their own test deployments carry almost nothing; [rails and
+networks](/developers/rails) has the background.
+
+## 3. Connect and send
+
+Connect the wallet that holds your USDC. Any browser wallet that announces itself
+works; [wallets that work](/guides/wallets) has the list for both sides. When
+everything is ready, press **Review transfer**, check the summary, and press
+**Start transfer**.
+
+From there, everything that happens is a prompt in one of your wallets, and each
+prompt says in plain words what it does. For a destination that already holds USDC,
+there are two: one that allows Circle to move your USDC, once, for this exact
+amount, and one that sends it. Sending to [a brand-new
+address](/guides/new-account) adds a Stellar-side signature or two, and the page
+walks you through them.
+
+## 4. Wait, briefly
+
+The page narrates the wait: your transfer is sent, Circle attests it, and Mavna
+delivers it on Stellar. Attestation takes a few minutes, and the page says so while
+it happens: it is safe to close the tab. Every completed step links to the block
+explorer for the chain it happened on.
+
+When it lands, the page says **Arrived on Stellar**, and the funds are in the
+destination account.
+
+## If you close the tab
+
+Nothing is lost. Any transfer can be found again from the transaction you sent or
+the address you sent to, on any device, with nothing saved: [find a
+transfer](/guides/track). If a delivery is taking long, you can [finish it
+yourself](/guides/finish), and retrying is always safe.

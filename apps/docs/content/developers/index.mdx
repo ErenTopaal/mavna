@@ -1,0 +1,68 @@
+---
+title: Overview
+description: What the SDK is, how the packages fit together, and where to read next.
+---
+
+# The SDK
+
+You are building your own interface and want the routing, the quoting, the
+transaction building, and the recovery model without learning any bridge's SDK.
+That is what these packages are.
+
+The shape in one paragraph: you describe a transfer, every rail that can carry it
+is asked at once, and you get back routes carrying the amount that lands, the fees
+behind it, the trust model, how many signatures it takes, and the unsigned
+transactions to put in front of a wallet. Rails that decline come back beside the
+routes with a reason you can show. The SDK builds transactions and never signs
+them, never submits them, and never holds a key: the last step of every
+integration is yours, and each payload arrives with a sentence, written for a
+person, saying what signing it does.
+
+## The packages
+
+Nine, all ESM with bundled types, all Apache-2.0.
+
+| Package | What it is |
+| --- | --- |
+| `@mavna/core` | The type model: assets, amounts, routes, phases, and the `BridgeAdapter` interface. Depends on none of the other Mavna packages |
+| `@mavna/routing` | Racing adapters, ranking routes, planning the steps, attaching the swap leg and integrator fee, and the circuit breaker |
+| `@mavna/stellar` | Reading Stellar behind a freshness guard, destination inspection, the sponsorship builders, reserve math, and the XLM price |
+| `@mavna/status` | One state machine for a transfer in flight, and resumption from a lookup key alone |
+| `@mavna/swap` | Swap providers on Stellar behind one interface |
+| `@mavna/adapter-cctp` | Circle CCTP as a rail. Everything Circle-specific lives here |
+| `@mavna/adapter-axelar` | Axelar's Interchain Token Service as a rail |
+| `@mavna/adapter-layerzero` | LayerZero OFT as a rail |
+| `@mavna/widget` | The React component layer, and the one package that imports React. See [the widget docs](/widget) |
+
+The layering is strict: adding a rail is one new package implementing
+[`BridgeAdapter`](/developers/reference/bridge-adapter), with no change anywhere
+else.
+
+## Reading order
+
+1. [Install](/developers/install), then the
+   [quickstart](/developers/quickstart): a real quote off the live network from
+   one runnable file.
+2. The concepts, which are short and load-bearing:
+   [assets and amounts](/developers/concepts/model),
+   [routes and rejections](/developers/concepts/routes), and
+   [signing](/developers/concepts/signing).
+3. [Rails and networks](/developers/rails) for what each rail carries on each
+   network, stated precisely.
+4. [Sponsorship](/developers/concepts/sponsorship) and the
+   [sponsor service](/developers/sponsor) when you want zero-XLM arrival.
+
+## Two properties to hold on to
+
+**Non-custodial by construction.** Every package builds transactions and hands
+them back unsigned. The only process that holds a key is the
+[sponsor service](/developers/sponsor), which is separate, self-hostable, and has
+its authority [listed endpoint by endpoint](/developers/sponsor/api). You do the
+signing, always.
+
+**Network is configuration.** Every adapter takes a network in its constructor
+and uses it to look up per-network data, not to switch code paths. Flip it and
+you get a coherent system on the other network. Where a capability differs
+between networks, the difference is a fact about a rail's own deployment, and
+[the rails pages](/developers/rails) state it rather than letting you find out at
+the point of use.

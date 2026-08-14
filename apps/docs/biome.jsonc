@@ -4,17 +4,20 @@
   "extends": "//",
   "files": {
     // A nested config replaces the root's file list rather than adding to it, so
-    // the root's exclusions are repeated here. The two additions are Astro's
-    // generated types and the reference tables this package writes from the
-    // packages' own source before every build.
+    // the root's exclusions are repeated here. The additions are Next's build
+    // output and the reference tables this package writes from the packages' own
+    // source before every build. MDX is content, not code the linter reads.
     "includes": [
       "**",
       "!dist",
-      "!.astro",
+      "!.next",
       "!.turbo",
       "!node_modules",
-      "!src/generated",
+      "!generated",
+      "!next-env.d.ts",
+      "!public/_pagefind",
       "!**/*.md",
+      "!**/*.mdx",
       "!**/*.yml",
       "!**/*.yaml"
     ]

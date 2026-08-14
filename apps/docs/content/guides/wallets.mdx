@@ -1,0 +1,36 @@
+---
+title: Wallets
+description: Which wallets work on each side of a transfer, and when you need the one on the Stellar side.
+---
+
+# Wallets
+
+A transfer has two sides: the chain your USDC is on, and Stellar. You always connect
+a wallet on the sending side, and you connect one on the Stellar side when the
+transfer needs a signature there.
+
+## The sending side
+
+Under **Source wallet**, Mavna lists every browser wallet that announces itself, by
+name. Any standard browser wallet works; there is no allowlist and nothing to
+install beyond the wallet you already have. If your wallet is on a different network
+from the chain you are sending from, you are asked to switch, and declining leaves
+everything unsent.
+
+This is the wallet that holds your USDC and signs the approval and the send.
+
+## The Stellar side
+
+Under **Stellar wallet**, Mavna connects through the Stellar Wallets Kit, which
+offers Freighter, xBull, Albedo, Lobstr, Hana, and Rabet.
+
+You need a Stellar wallet on the receiving side in two cases:
+
+- **Sending to a brand-new address**, where the receiving wallet signs to set the
+  account up and to repay the reserve. [Send to a new address](/guides/new-account)
+  walks through it.
+- **Receiving as XLM**, where the receiving wallet signs the conversion, because it
+  spends from the receiving account. [Arrive as XLM](/guides/receive-xlm) covers it.
+
+Sending USDC to an address that already holds USDC needs no Stellar wallet: the
+sending wallet does all the signing, and Mavna delivers the funds.

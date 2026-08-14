@@ -1,0 +1,51 @@
+---
+title: LayerZero OFT
+description: LayerZero OFT as a rail. The token's own verifier set attests, the owner chose it, and the adapter names it on every transaction it builds.
+---
+
+# LayerZero OFT
+
+`@mavna/adapter-layerzero`, id `layerzero`, trust model `dvn-stack`. A token that
+implements LayerZero's Omnichain Fungible Token standard moves by message, and a
+set of Decentralized Verifier Networks attests to that message. The token's owner
+chose that set, so two routes on this same rail can be verified by entirely
+different parties. It exists for one reason: it is the only route to native USDT on
+Stellar.
+
+```ts
+const layerzero = new LayerZeroAdapter({ network, rpc, baseReserveStroops });
+```
+
+## Assets and chains
+
+On mainnet, the adapter routes USDT0 from twelve candidate source chains. On the
+test network, LayerZero's OFT registry carries no obtainable token, so a team that
+has deployed its own OFT names it to the adapter and quotes over it. Each chain in
+the list is only a candidate: every quote re-derives the endpoint, the OFT, the
+peer, and the verifier set from the chain and declines when anything is missing.
+
+## Who could lie to you
+
+The verifier set is the answer to "who could lie to you," so the adapter refuses to
+route through two kinds of set. It refuses a set with no required verifier, where
+nothing would confirm the transfer, and it refuses a set nobody chose: an inherited
+network default, because LayerZero can change who verifies a token's transfers
+without the token's owner acting. Only the token owner's explicitly configured set
+is accepted, and every transaction the adapter builds names the verifiers on it.
+
+## Refusing a superseded deployment
+
+Everything about the deployment is resolved and cross-examined at quote time,
+because the recorded Stellar addresses were superseded while still live and
+answering. The decisive check asks the Stellar OFT which endpoint it is registered
+on and refuses to send if that differs from the registry's current endpoint, which
+is what stops a transfer routing into a deployment that is no longer the advertised
+one. The delivered decimals are required to be seven.
+
+## The floor is enforced on-chain
+
+Unlike a native mint, the amount received is not equal to the amount sent, because
+the token contract can take a fee in transit. The user's minimum is enforced
+on-chain through `minAmountLD`, derived from their chosen slippage, so `receivesAtLeast`
+is a real floor rather than a copy of `receives`. [Delivery](/developers/concepts/delivery)
+covers how a LayerZero arrival is proven.

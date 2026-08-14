@@ -1,0 +1,70 @@
+---
+title: Assets and amounts
+description: An asset is a chain plus an identifier, never a symbol. An amount is an integer string in base units, never a number.
+---
+
+# Assets and amounts
+
+Two rules run through every package, and both exist because the alternative loses
+money.
+
+## An asset is a chain plus an identifier
+
+```ts
+interface Asset {
+  readonly chainId: string;
+  readonly id: string;
+  readonly symbol: string;
+  readonly decimals: number;
+  readonly curatedBy: string | undefined;
+}
+```
+
+Identity is `(chainId, id)`. On Stellar, `id` is `CODE:ISSUER` or `native`; on an
+EVM chain, it is the token contract address. Anyone can issue a Stellar asset with
+the code `USDC`, so the code alone is not identity, and the issuer is part of the
+`id` for that reason. `symbol` is for display only, and nothing decides anything
+from it. `curatedBy` names who vouches for the asset appearing in a list a user
+picks from.
+
+`sameAsset(a, b)` compares `chainId` and `id`. It never compares symbols.
+
+## An amount is an integer string in base units
+
+```ts
+interface Amount {
+  readonly asset: Asset;
+  readonly baseUnits: string;
+}
+```
+
+The asset and the quantity travel together so they cannot drift apart, and
+`baseUnits` is an integer in the asset's base units, carried as a string. `25`
+USDC is `"25000000"`. Floating point on money is a defect, not a shortcut, and
+7-decimal Stellar amounts exceed what a double represents exactly.
+
+`amountOf(asset, baseUnits)` is the constructor. It throws a `TypeError` on
+anything that is not a non-negative integer, so a bad value fails where it is
+built rather than several steps later.
+
+Decimals differ across a transfer: USDC is six decimals on an EVM chain and seven
+on Stellar. The adapters convert between them in `BigInt`, never through a
+number.
+
+## Fees are itemised, and one of them is not a fee
+
+```ts
+type FeeKind = "bridge" | "swap" | "gas" | "integrator" | "account-reserve";
+```
+
+A `Fee` carries its `kind`, its `total`, the recipients, and `includedInQuote`,
+which is true when it is already deducted from the quoted output. Fees are broken
+out so a user can see who takes what, and the amount shown as arriving is always
+after all of them.
+
+`account-reserve` is a kind of its own because it is not a fee anyone takes: it is
+XLM that ends up locked in the user's own new Stellar account as its reserve and
+returns to them if they close it. [Sponsorship](/developers/concepts/sponsorship)
+explains where it goes and how it comes back.
+
+The exact declarations are in [core types](/developers/reference/core-types).

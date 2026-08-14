@@ -1,0 +1,113 @@
+---
+title: HTTP API
+description: Every endpoint the sponsor serves, with request and response shapes, status codes, and the check each one enforces.
+---
+
+# The sponsor's HTTP API
+
+Every response is JSON. Errors share one shape everywhere, so a caller never parses
+two formats:
+
+```json
+{ "error": "a sentence written for a person", "retryable": true }
+```
+
+`retryable` says whether asking again can change the answer. Nothing internal
+reaches the wire: a caller learns that it failed and whether to retry, and the
+operator reads the rest from the process log. Browser calls are limited to the
+configured origin allowlist.
+
+## `GET /health`
+
+Answers `200` with the network and the sponsor's public address:
+
+```json
+{ "ok": true, "network": "testnet", "sponsor": "G..." }
+```
+
+## `POST /prepare`
+
+Builds the account-setup transaction for the user to sign. Nothing is spent and
+nothing is signed here; the transaction returns unsigned.
+
+Request: `{ "destination": "G...", "assets": ["USDC"], "sourceChainId": "ethereum-sepolia" }`.
+`assets` is optional and defaults to `["USDC"]`; each name must be on the operator's
+curated list. `sourceChainId` feeds the volume cap's chain class.
+
+Answers:
+
+- `200` `{ "xdr": "...", "sponsor": "G..." }`
+- `400` when the destination is missing, is not an address a Stellar account can
+  use, can already receive (nothing to prepare), or names an asset outside the
+  curated list
+- `429` when a daily cap refuses, with the reason. The caps are checked here,
+  before anyone is asked for a signature
+
+## `POST /submit`
+
+Takes back the signed preparation; the sponsor countersigns, pays, and submits.
+This is where money moves, so this is where the gates are:
+
+- the transaction's source must be the sponsor itself
+- its operations must be only `beginSponsoringFutureReserves`,
+  `endSponsoringFutureReserves`, `createAccount`, `changeTrust`
+- fee-bump envelopes are refused
+- a signed settlement must already be held for the account being prepared, or the
+  answer is `409`
+
+Request: `{ "signedXdr": "..." }`. Answers `200` `{ "txHash": "...", "ledger": 123 }`,
+the `400` / `409` refusals above, or `502` when Stellar would not accept the
+submission.
+
+## `POST /settlement`
+
+Builds the settlement for the user to sign: the transaction that repays the deposit
+out of the arriving funds, sourced on one of the sponsor's channel accounts. The
+path payment buys exactly the XLM the reserve needs and spends at most twice its
+value at the live orderbook rate, so the signer's exposure is a number they can
+read.
+
+Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
+
+Answers:
+
+- `200` `{ "xdr": "...", "channel": "G..." }`
+- `400` for a missing or unusable destination, or one that needs no settling
+- `429` on a cap refusal
+- `503` when every settlement slot is in use: one channel carries one in-flight
+  settlement
+
+## `POST /settlement/commit`
+
+Holds what the user signed until their money lands. The server signs nothing here;
+what sits in memory can move nothing on its own. The envelope is refused unless its
+operations are only a strict-receive path payment and sponsorship-revocation
+operations, and fee bumps are refused.
+
+Request: `{ "destination": "G...", "signedXdr": "..." }`. Answers `200` `{ "held": true }`.
+
+## `POST /deliver`
+
+Triggers the mint for an attested burn. Idempotent;
+[retrying is always safe](/developers/concepts/delivery).
+
+Request: `{ "txHash": "0x...", "domain": 0, "destination": "G..." }`. `domain` is
+Circle's domain for the source chain and defaults to `0` (Ethereum). `destination`
+is optional: naming it lets a successful delivery submit the held settlement for
+that account in the same breath.
+
+The server fetches the attestation, simulates the delivery, and answers `200` with
+one of:
+
+```json
+{ "kind": "delivered", "txHash": "...", "ledger": 123 }
+{ "kind": "already-delivered" }
+{ "kind": "not-attested-yet" }
+```
+
+or `404` when Circle has no attested record of the transaction yet (retryable:
+nothing is wrong, ask again in a minute), or `409` with
+`{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
+receive yet, which in the designed flow is
+[the cue to prepare it](/developers/concepts/sponsorship). When a held settlement is
+submitted alongside a delivery, the response carries the settlement's result too.

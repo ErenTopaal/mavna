@@ -1,0 +1,87 @@
+---
+title: Run it
+asIndexPage: true
+description: The one process in the product that holds a key. What it is allowed to sign, every environment variable, and how to run it yourself.
+---
+
+# The sponsor service
+
+Two facts force a server into an otherwise client-side product: sponsorship needs
+a funded signer, and a funded signer cannot live in a browser. The sponsor service,
+in `services/sponsor`, is that signer's home. It is plain Node with no framework,
+self-hostable by construction, and running your own with your own key means none of
+Mavna's limits are yours.
+
+## Its entire authority
+
+The sponsor signs exactly three kinds of transaction, and each is gated:
+
+1. **Preparations it built itself.** It countersigns and pays for account-setup
+   transactions whose source is its own account and whose operations are only
+   sponsorship, account creation, and trustline changes. It refuses to submit one
+   for any account it holds no signed settlement for: the deposit is a loan, and
+   the repayment is signed before the loan is made.
+2. **Deliveries whose recipient Circle fixed.** Triggering a mint spends the
+   sponsor's fee money, and the recipient is already named inside the attested
+   message, so the sponsor cannot redirect anything.
+3. **Its half of a settlement.** The spending operation carries the user's own
+   signature; the server adds the channel and sponsor signatures at submission
+   time, so what it holds in memory can move nothing on its own.
+
+It never holds user funds, never signs a user's transfer, and never sees a user's
+key. The gates are enforced in code you can read: operation allowlists per
+endpoint, a source check on preparations, and the held-settlement requirement.
+
+## Configuration
+
+Everything is environment variables, read once at start.
+
+| Variable | Required | Default | What it is |
+| --- | --- | --- | --- |
+| `SPONSOR_SECRET_KEY` | yes | none; the process exits without it | The funded signer's secret. An operational secret: never in the repository, a client bundle, or a log line |
+| `MAVNA_NETWORK` | no | `testnet` | `testnet` or `mainnet` |
+| `STELLAR_RPC_URL` | on mainnet | the foundation's public testnet endpoint | The Stellar RPC to read and submit through. Mainnet has no public default, so the process refuses to start without one |
+| `MAVNA_IRIS_URL` | no | Circle's sandbox on testnet, production on mainnet | Circle's attestation service |
+| `MAVNA_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:4319` | Browser origins allowed to call this server, comma separated. Never `*`: this server spends money on request |
+| `PORT` | no | `8787` | Where to listen |
+
+The curated asset list, the assets this sponsor opens trustlines for, is written
+in the entry point (`services/sponsor/src/main.ts`) rather than accepted from the
+wire: clients ask by name and the issuer comes from the operator's own list,
+because a sponsor that takes issuers from callers pays to phish its own users.
+
+## Running it
+
+With the app, from a checkout:
+
+```sh
+SPONSOR_SECRET_KEY=S... docker compose up
+```
+
+Alone:
+
+```sh
+pnpm --filter @mavna/sponsor-service build
+SPONSOR_SECRET_KEY=S... node services/sponsor/dist/main.mjs
+```
+
+`GET /health` answers with the network and the sponsor's public address, which is
+the account you fund.
+
+## Capacity and caps
+
+Settlements ride on channel accounts, one in-flight settlement per channel. With no
+pool configured, the server creates and funds one channel from the sponsor on first
+use, which is a capacity of one concurrent settlement: enough to run everything
+yourself, and the pool is the knob when it is not. A full pool answers `503`.
+
+Two daily caps bound the money at risk, from the
+[sponsorship design](/developers/concepts/sponsorship): a volume cap per source-chain
+class (300 a day from chains where gas is expensive, 200 from chains where gas costs
+cents and an attack is nearly free) and 75 strandings a day, after which sponsorship
+pauses globally for the day. Cap refusals answer `429` with a user-readable reason.
+The counters live in memory by default and behind a storage interface: a cap that
+does not survive a restart is not a cap, so back it with something durable in
+production.
+
+The endpoint-by-endpoint contract is on the [HTTP API](/developers/sponsor/api) page.

@@ -1,0 +1,50 @@
+---
+title: Axelar ITS
+description: Axelar's Interchain Token Service as a rail. A validator set attests, and every address is resolved at runtime because the recorded ones were dead when checked.
+---
+
+# Axelar ITS
+
+`@mavna/adapter-axelar`, id `axelar`, trust model `validator-set`. A named set of
+validators attests to a transfer, which moves through Axelar's Interchain Token
+Service hub. It carries any token registered with the service, including USDC on
+mainnet.
+
+```ts
+const axelar = new AxelarAdapter({ network, rpc });
+```
+
+## Nothing here is a constant
+
+There is no hardcoded chain list, no contract address, and no token identifier in
+this adapter. Every one is resolved at runtime, because the addresses this
+project's specification recorded were dead when they were checked. `supportedChains`
+intersects two live sources: Axelar's chain registry, dropping deprecated chains,
+and Axelar's published deployment config, keeping only chains that have an
+Interchain Token Service and an RPC. Stellar is registered under a versioned,
+rotating id, and a stale name routes into a graveyard rather than erroring, so the
+adapter requires exactly one Stellar chain to resolve or it stops.
+
+## Both sides must agree
+
+The token the user names is resolved through the service, and both the sending
+chain's token service and Stellar's must independently agree the counterparty is
+trusted. One side saying yes is not enough: drift between them is observed, and a
+name that passes on the sending chain and is dropped afterwards would take the
+tokens and the delivery payment with it.
+
+## Fees
+
+The fee is estimated from Axelar's own estimator, gas plus the service fee, and it
+is component-based rather than a percentage. A zero estimate is treated as an
+unrecognized chain and refused, never as a free transfer, because sending against a
+zero estimate would underpay and strand the message with no automatic recovery.
+
+## Networks
+
+On mainnet, Axelar carries Interchain Token Service tokens into Stellar, USDC among
+them. On the test network its Stellar deployment currently carries very little, so
+it usually declines; the reason is on the route, in a sentence. Delivery is proven
+across both legs of the hub route, and the adapter never reads Axelar's refund flag
+as a returned transfer, because that flag is leftover gas going home, not the
+tokens.

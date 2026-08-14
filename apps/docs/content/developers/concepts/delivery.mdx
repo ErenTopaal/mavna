@@ -1,0 +1,60 @@
+---
+title: Delivery
+description: How a transfer is proven to have arrived on Stellar, per rail, and why retrying a delivery is always safe.
+---
+
+# Delivery
+
+A bridge is not done when the source chain confirms; it is done when the value is
+on Stellar. Each rail proves arrival its own way, and none of them reads a
+recipient's balance and calls it delivered, because that would report money the
+user already held as though this transfer brought it.
+
+## CCTP: attestation, then the mint
+
+Circle's attestation service witnesses the burn on the source chain and signs a
+receipt that authorises the mint on Stellar. The receipt is public and keyless.
+
+The mint into Stellar is triggered and paid for by the [sponsor
+service](/developers/sponsor), because Circle's own forwarder does not serve a
+Stellar destination that sets a destination caller, which Stellar requires. The
+recipient is fixed inside the attested message, so the sponsor cannot redirect
+anything.
+
+A transfer is proven delivered two ways:
+
+- **From the burn transaction**: the attestation must be complete, and the
+  destination's trustline balance must be at least the exact amount Circle
+  attested, converted from six decimals to seven.
+- **From the destination address alone**: Mavna reads Stellar's history and
+  requires the crediting transaction to come from Circle's forwarder, compared
+  byte for byte against the forwarder's own address. A credit from anywhere else,
+  an exchange, a friend, or an imitation asset, does not count. This is the lookup
+  Circle's own index cannot do, because it is keyed on the burn.
+
+An un-indexed burn stays `pending` and an address with no history is `idle`.
+Neither is reported as `failed`, because reporting failure without evidence is how
+a user is talked into sending a second payment.
+
+Delivery is idempotent: Circle's transmitter records a used nonce, so a second
+delivery of the same message fails rather than minting twice. That is why
+[finishing a delivery yourself](/guides/finish) is always safe.
+
+## Axelar: both legs of the hub route
+
+A transfer through Axelar's Interchain Token Service crosses a hub, so it has two
+legs. The first leg reaching "executed" only means it reached the hub. The status
+check finds the second leg from the first and requires both delivered before it
+reports arrival. It never reads Axelar's `refunded` flag as a returned transfer,
+because that flag is leftover gas going home on transfers that delivered perfectly;
+there is no field that means the tokens came back, so the adapter never claims they
+did.
+
+## LayerZero: the wire amount, not the balance
+
+A LayerZero delivery is proven from the scan indexer's status together with the
+amount decoded out of the wire payload, which is the exact figure credited after
+fees and dust. The user's minimum-received floor is enforced on-chain through
+`minAmountLD`, derived from their chosen slippage, because a token contract can take
+a fee in transit and accepting anything back would be an unbounded loss nobody
+consented to. An un-indexed message is `pending`, not `failed`.

@@ -1,0 +1,46 @@
+---
+title: What a transfer costs
+description: The lines on a quote, what each one means, and why the account reserve is not a fee at all.
+---
+
+# What a transfer costs
+
+Every quote shows what actually arrives after all costs, and the headline number is
+that arriving amount. Nothing is deducted silently. These are the lines you can
+meet.
+
+## Transfer fee
+
+What the rail charges for the crossing, already deducted from the amount shown as
+arriving. On Circle's standard path into Stellar this is zero at the time of
+writing: the quote reads Circle's live rate each time, so the number on screen is
+the current one, not a promise from this page.
+
+## Gas on the chain you send from
+
+Your wallet pays the network fee for its own transactions, in that chain's own
+currency. Your wallet shows this before you confirm, and Mavna adds nothing to it.
+
+## Account reserve, only for a brand-new address
+
+Sending to a Stellar address that does not exist yet shows one line in XLM, labelled
+**Kept in your account**: 1.5 XLM for a new account able to hold one asset. This is
+not a fee anyone keeps. A sponsor fronts it so you never need XLM to receive, a
+small slice of the arriving funds buys it back at the live rate up to a cap you
+agree to, and the XLM ends up locked in the new account as its own reserve, returned
+to you if the account is ever closed. [Send to a new
+address](/guides/new-account) and [how sponsorship
+works](/developers/concepts/sponsorship) explain it.
+
+## Conversion, only when you receive XLM
+
+Choosing to arrive as XLM converts the arrived USDC on Stellar's own exchange at the
+live rate. There is no separate conversion fee line: the rate is the market's, the
+quote shows the least you can receive, and the conversion refuses whole rather than
+deliver below that floor.
+
+## What Mavna charges
+
+Nothing. There is no Mavna fee on any route in the app. Products that
+[embed the widget](/widget) can add their own fee, and when they do it appears as
+its own line naming who receives it.

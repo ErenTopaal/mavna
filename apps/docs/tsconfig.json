@@ -1,22 +1,26 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "react-jsx",
+    "jsx": "preserve",
     "lib": ["es2023", "dom", "dom.iterable"],
-    "types": ["astro/client"],
     "noEmit": true,
-    // A site emits pages, not declarations. Leaving declaration emit on made
-    // `content.config.ts` fail on a type it cannot name from inside Starlight,
-    // which is a real constraint on a published package and nothing at all here.
+    // A site emits pages, not declarations. The base config's declaration
+    // settings exist for published packages and mean nothing here.
     "isolatedDeclarations": false,
     "declaration": false,
-    "allowJs": true
+    "allowJs": true,
+    "incremental": true,
+    "plugins": [{ "name": "next" }]
   },
   "include": [
-    ".astro/types.d.ts",
-    "src/**/*.ts",
-    "src/**/*.tsx",
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.tsx",
     "examples/**/*.ts",
-    "astro.config.mjs"
-  ]
+    "examples/**/*.tsx",
+    "mdx-components.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
 }

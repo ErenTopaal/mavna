@@ -1,5 +1,9 @@
-# Astro's generated types and build cache.
-.astro/
+# Next.js build output and types.
+.next/
+next-env.d.ts
 
 # Written by scripts/sync-reference.mjs on every build, straight from the packages.
-src/generated/
+generated/
+
+# Written by pagefind after every build, from the built pages.
+public/_pagefind/

@@ -1,0 +1,46 @@
+---
+title: Send to a new address
+description: Send to a brand-new Stellar address that holds no XLM. You are never asked to buy XLM first, and the reserve is yours.
+---
+
+# Send to a new address
+
+A Stellar address that does not exist yet, holding no XLM, can still receive your
+transfer. You do not buy XLM first, and the word "trustline" never appears as a
+task. This is the part no other Stellar product does.
+
+## Why it usually cannot be done
+
+A Stellar account has to lock a small reserve in XLM to exist and to be able to hold
+an asset, and someone arriving from another chain has no XLM to lock it with. Mavna
+completes the transfer anyway: a sponsor fronts the reserve, and the reserve repays
+itself out of the arriving funds.
+
+## What you do
+
+Paste the new `G...` address as the recipient, exactly as you would an existing one.
+The quote grows one line, **Kept in your account**, showing the reserve in XLM: 1.5
+XLM for a new account able to hold one asset. The review summary says it plainly:
+
+> You need no XLM to start. The reserve is yours, refunded if you close the account.
+
+Because it is a new account, the receiving Stellar wallet signs twice, and the page
+walks you through both:
+
+1. **Approve the repayment first**, before anything is sent. This is the transaction
+   that repays whoever fronted the reserve, out of the funds about to arrive. You
+   agree to the most it can cost up front.
+2. **Set the account up**, after the transfer is attested. This creates the account
+   and opens it to receive. It costs you nothing.
+
+The source-chain prompts happen in between, in your USDC wallet, exactly as for any
+transfer.
+
+## What it costs you
+
+Nothing beyond the transfer itself. The reserve is not a fee anyone keeps: it ends
+up locked in the new account as its own reserve, and Stellar returns it if the
+account is ever closed. A small slice of the arriving funds buys the reserve back at
+the live rate, capped at an amount you agreed to when you signed.
+[What a transfer costs](/guides/costs) breaks down every line, and [how sponsorship
+works](/developers/concepts/sponsorship) is the mechanism.
