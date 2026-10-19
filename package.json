@@ -30,8 +30,7 @@
     "publish:check": "turbo run publish:check",
     "check:exports": "node scripts/check-exports.mjs",
     "test:browser": "playwright test",
-    "size": "turbo run size",
-    "test:browser:live": "MAVNA_LIVE=1 playwright test --grep-invert '^$' tests/transfer.live.spec.ts"
+    "size": "turbo run size"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
