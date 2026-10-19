@@ -756,12 +756,37 @@ export function renderSettings(c: Flow): ReactElement {
 /**
  * The network segmented control, the design's own USDC/XLM toggle primitive,
  * shown in the header and in Settings from the same state so they stay in sync.
- * Mainnet is disabled, so only testnet is selectable today.
+ * A network the integrator does not offer is shown and cannot be chosen, with
+ * the reason on hover; choosing an offered one rebuilds the engine for it.
  */
 export function renderNetworkToggle(c: Flow): ReactElement {
   const net = c.state.network;
+  const offered = c.offeredNetworks();
   const seg = net === "mainnet" ? "64px" : "0px";
-  const testnetInk = net === "testnet" ? "var(--mv-on-light)" : "var(--mv-muted)";
+  const option = (id: "testnet" | "mainnet", label: string): ReactElement => {
+    const current = net === id;
+    const available = offered.includes(id);
+    const ink = current
+      ? "var(--mv-on-light)"
+      : available
+        ? "var(--mv-muted)"
+        : "var(--mv-faintest)";
+    return (
+      <button
+        type="button"
+        disabled={!available}
+        aria-disabled={!available}
+        aria-pressed={current}
+        title={available ? undefined : `${label.toLowerCase()} is not set up on this page`}
+        onClick={() => c.setNetwork(id)}
+        style={s(
+          `position:relative;z-index:1;width:64px;padding:5px 0;background:transparent;border:0;cursor:${available && !current ? "pointer" : "default"};font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${ink}`,
+        )}
+      >
+        {label}
+      </button>
+    );
+  };
   return (
     <div
       style={s(
@@ -773,26 +798,8 @@ export function renderNetworkToggle(c: Flow): ReactElement {
           `position:absolute;top:2px;left:2px;width:64px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${seg})`,
         )}
       />
-      <button
-        type="button"
-        onClick={() => c.setNetwork("testnet")}
-        style={s(
-          `position:relative;z-index:1;width:64px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${testnetInk}`,
-        )}
-      >
-        TESTNET
-      </button>
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        title="Mainnet is not available yet"
-        style={s(
-          "position:relative;z-index:1;width:64px;padding:5px 0;background:transparent;border:0;cursor:default;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:var(--mv-faintest)",
-        )}
-      >
-        MAINNET
-      </button>
+      {option("testnet", "TESTNET")}
+      {option("mainnet", "MAINNET")}
     </div>
   );
 }
@@ -872,7 +879,16 @@ export function renderReview(
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} USDC` },
           ...(r.newAccount && r.reserveXlm !== undefined
-            ? [{ key: "res", name: "Kept in your account", value: `${fmt(r.reserveXlm)} XLM` }]
+            ? [
+                {
+                  key: "res",
+                  name:
+                    c.state.reserveFunding === "self"
+                      ? "Reserve, from your own XLM"
+                      : "Kept in your account",
+                  value: `${fmt(r.reserveXlm)} XLM`,
+                },
+              ]
             : []),
           {
             key: "min",

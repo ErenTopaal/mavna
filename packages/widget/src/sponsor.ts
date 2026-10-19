@@ -31,12 +31,32 @@ export interface SponsorSettle {
   held?: false;
 }
 
+/**
+ * What a sponsor will and will not do, from its /health. Quoting needs both:
+ * whether an account that does not exist yet can be served at all, and the
+ * smallest Circle transfer the sponsor pays to deliver.
+ */
+export interface SponsorTerms {
+  readonly network: string;
+  /**
+   * `sponsor`: the sponsor fronts a new account's reserve and is repaid from
+   * what arrives. `self`: the account pays its own reserve from its own XLM, so
+   * an address that does not exist yet cannot be served.
+   */
+  readonly reserveFunding: "sponsor" | "self";
+  /** In USDC base units at six decimals. Zero means no minimum. */
+  readonly minDeliveryBaseUnits: bigint;
+}
+
 export interface SponsorClient {
-  /** The unsigned preparation, for the user's wallet. */
+  /**
+   * The unsigned preparation, for the user's wallet. Sponsored, it names the
+   * sponsor; self-funded, it is the account's own trustline and says so.
+   */
   requestPreparation(
     destination: string,
     sourceChainId: string,
-  ): Promise<{ xdr: string; sponsor: string }>;
+  ): Promise<{ xdr: string; sponsor?: string; selfFunded?: boolean }>;
   /** The user has signed; the sponsor countersigns, pays and submits. */
   submitPreparation(signedXdr: string): Promise<{ txHash: string; ledger: number }>;
   /** The unsigned settlement, built on a channel the sponsor runs. */
@@ -67,8 +87,8 @@ export interface SponsorClient {
    * too often) resolves `settlementRetryable: true`. Anything else rejects.
    */
   settle(destination: string): Promise<SponsorSettle>;
-  /** Whether a sponsor is reachable at all, for saying so before it matters. */
-  sponsorIsUp(): Promise<boolean>;
+  /** The sponsor's terms. Rejects when it cannot be reached or read. */
+  terms(): Promise<SponsorTerms>;
 }
 
 export function createSponsorClient(baseUrl: string): SponsorClient {
@@ -142,15 +162,33 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
       if (!answer.ok) throw failure(answer);
       return answer.body as SponsorSettle;
     },
-    async sponsorIsUp() {
-      try {
-        const response = await fetch(`${baseUrl}/health`, {
-          signal: AbortSignal.timeout(4_000),
-        });
-        return response.ok;
-      } catch {
-        return false;
+    async terms() {
+      const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) throw new Error(`The sponsor answered ${response.status}.`);
+      const body = (await response.json()) as {
+        network?: unknown;
+        reserveFunding?: unknown;
+        minDeliveryBaseUnits?: unknown;
+      };
+      // A sponsor from before these fields fronted every reserve and had no
+      // minimum, so their absence says exactly that. A value that is present
+      // and unreadable says nothing, and is refused.
+      const funding = body.reserveFunding ?? "sponsor";
+      if (funding !== "sponsor" && funding !== "self") {
+        throw new Error("The sponsor named a reserve funding this page does not know.");
       }
+      const minimum = body.minDeliveryBaseUnits ?? "0";
+      if (typeof minimum !== "string" || !/^\d+$/.test(minimum)) {
+        throw new Error("The sponsor named a minimum delivery this page cannot read.");
+      }
+      if (typeof body.network !== "string") {
+        throw new Error("The sponsor did not say which network it runs on.");
+      }
+      return {
+        network: body.network,
+        reserveFunding: funding,
+        minDeliveryBaseUnits: BigInt(minimum),
+      };
     },
   };
 }

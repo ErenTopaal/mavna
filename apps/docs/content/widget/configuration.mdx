@@ -16,13 +16,23 @@ this page.
 
 - **`integrator`** (required). A string that identifies you and attributes any
   integrator fee.
-- **`network`**. `"testnet"` or `"mainnet"`, defaulting to the test network. Mainnet
-  has no public Stellar node from the foundation, so it needs an explicit `rpcUrl`.
-- **`rpcUrl`**. The Stellar RPC endpoint. EVM reads go through the connected wallet,
-  never here.
-- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for zero-XLM arrival to
-  new accounts. It defaults to a local development sponsor, so set your own for
-  production.
+- **`network`**. `"testnet"` or `"mainnet"`, the network the widget starts on,
+  defaulting to the test network. You choose when to move.
+- **`rpcUrl`**. The Stellar RPC endpoint for `network`. EVM reads go through the
+  connected wallet, never here. The foundation runs no mainnet node, so mainnet
+  defaults to the first of the measured public nodes; set your own provider for
+  real money. An empty string is refused as a configuration error.
+- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. It
+  defaults to a local development sponsor, so set your own for production. An
+  empty string is refused.
+- **`networks`**. The networks the header's network toggle switches between,
+  `network` among them. Defaults to `[network]`, which shows the other network
+  disabled. Switching rebuilds the engine for that network and starts the form
+  over; it is refused while a transfer runs.
+- **`endpoints`**. `{ testnet?: { rpcUrl?, sponsorUrl? }, mainnet?: { ... } }`.
+  Every network in `networks` other than `network` needs its own `sponsorUrl`
+  here, because a sponsor serves one network; the widget refuses to mount without
+  it.
 
 ## Routing
 
@@ -70,8 +80,12 @@ this page.
 `onEvent` reports what the flow is doing: `routesAvailable` (with a count and how
 many declined), `routeSelected` (the source and the amount received),
 `walletConnected` (the ecosystem and address), `transferStarted`,
-`transferStepUpdated` (a step id and its phase), `transferCompleted`, and
-`transferFailed` (with a reason). Each one is backed by a real signal in the flow.
+`transferStepUpdated` (a step id and its phase), `transferCompleted`,
+`transferFailed` (with a reason), and `transferStillMoving` (with a reason). The
+last one means the widget stopped watching a transfer that is still on its way: it
+outlived the widget's patience, or the widget went away. It is not a failure; the
+transfer can be checked on and finished from Activity. Each event is backed by a
+real signal in the flow.
 
 ## The type
 

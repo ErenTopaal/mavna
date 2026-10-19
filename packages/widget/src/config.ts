@@ -50,7 +50,13 @@ export type MavnaWidgetEvent =
   | { readonly type: "transferStarted" }
   | { readonly type: "transferStepUpdated"; readonly id: string; readonly phase: string }
   | { readonly type: "transferCompleted" }
-  | { readonly type: "transferFailed"; readonly reason: string };
+  | { readonly type: "transferFailed"; readonly reason: string }
+  /**
+   * The transfer is on its way and the widget stopped watching it: it outlived
+   * the widget's patience, or the widget went away. Not a failure; the money is
+   * in flight and can be checked on or finished from Activity.
+   */
+  | { readonly type: "transferStillMoving"; readonly reason: string };
 
 /**
  * Opt out of the widget's own wallet management. Provide an already-connected EVM
@@ -76,8 +82,22 @@ export interface WidgetTheme {
 export interface MavnaWidgetConfig {
   /** Required. Identifies the integrator, and attributes an integrator fee. */
   readonly integrator: string;
-  /** Default testnet. Mainnet needs an explicit rpcUrl (no public default node). */
+  /**
+   * The network the widget starts on. Default testnet. Mainnet's default node
+   * is a public third-party one; set `rpcUrl` to your own provider.
+   */
   readonly network?: NetworkId;
+  /**
+   * The networks the network toggle switches between, `network` among them.
+   * Default only `network`. Every network besides `network` needs its own
+   * `sponsorUrl` in `endpoints`, since a sponsor serves one network.
+   */
+  readonly networks?: readonly NetworkId[];
+  /**
+   * Endpoints per network. For `network` itself, `rpcUrl` and `sponsorUrl`
+   * below work too; a value here wins.
+   */
+  readonly endpoints?: Partial<Record<NetworkId, NetworkEndpoints>>;
   readonly variant?: Variant;
   readonly appearance?: Appearance;
   readonly theme?: WidgetTheme;
@@ -128,6 +148,12 @@ export interface MavnaWidgetConfig {
   readonly onEvent?: (event: MavnaWidgetEvent) => void;
 }
 
+/** Where one network's Stellar node and sponsor live. */
+export interface NetworkEndpoints {
+  readonly rpcUrl?: string;
+  readonly sponsorUrl?: string;
+}
+
 /** One entry in the header overflow menu. */
 export interface MavnaMenuLink {
   readonly label: string;
@@ -139,6 +165,8 @@ export interface MavnaMenuLink {
 /** The config after defaults, split into what each part of the widget needs. */
 export interface ResolvedConfig {
   readonly integrator: string;
+  /** The networks the toggle offers, the active one among them. */
+  readonly networks: readonly NetworkId[];
   readonly variant: Variant;
   readonly appearance: Appearance;
   readonly theme: WidgetTheme | undefined;
@@ -160,18 +188,71 @@ export interface ResolvedConfig {
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
 
-function resolveRpcUrl(network: NetworkId, rpcUrl: string | undefined): string {
-  if (rpcUrl !== undefined) return rpcUrl;
-  // The foundation runs no public mainnet node, so the mainnet default is a third
-  // party's and an integrator is expected to set their own before real money.
-  return network === "mainnet" ? (PUBLIC_MAINNET_RPC_URLS[0] ?? "") : PUBLIC_TESTNET_RPC_URL;
+/** A configuration mistake, said at mount rather than when a user presses something. */
+function configError(message: string): Error {
+  return new Error(`Mavna widget configuration: ${message}`);
 }
 
-export function resolveConfig(config: MavnaWidgetConfig): ResolvedConfig {
-  const network: NetworkId = config.network ?? "testnet";
+/** An endpoint as configured: absent is fine, empty is a mistake. */
+function given(value: string | undefined, name: string, network: NetworkId): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.trim() === "") throw configError(`the ${network} ${name} is empty.`);
+  return value;
+}
+
+/**
+ * The node and sponsor for one network. The foundation runs no public mainnet
+ * node, so mainnet's default is a third party's, the first of the measured
+ * public list; an integrator should set their own before real money.
+ */
+function endpointsFor(
+  config: MavnaWidgetConfig,
+  network: NetworkId,
+  defaultNetwork: NetworkId,
+): { rpcUrl: string; sponsorUrl: string } {
+  const own = config.endpoints?.[network];
+  const isDefault = network === defaultNetwork;
+  const rpcUrl =
+    given(own?.rpcUrl, "rpcUrl", network) ??
+    (isDefault ? given(config.rpcUrl, "rpcUrl", network) : undefined) ??
+    (network === "mainnet" ? PUBLIC_MAINNET_RPC_URLS[0] : PUBLIC_TESTNET_RPC_URL);
+  if (rpcUrl === undefined) throw configError(`no rpcUrl is known for ${network}.`);
+  const sponsorUrl =
+    given(own?.sponsorUrl, "sponsorUrl", network) ??
+    (isDefault
+      ? (given(config.sponsorUrl, "sponsorUrl", network) ?? "http://localhost:8787")
+      : undefined);
+  if (sponsorUrl === undefined) {
+    throw configError(
+      `${network} is offered but has no sponsorUrl in endpoints. A sponsor serves one network, ` +
+        `so ${defaultNetwork}'s cannot stand in for it.`,
+    );
+  }
+  return { rpcUrl, sponsorUrl };
+}
+
+/**
+ * The config after defaults, for the network the widget is on. `active` is the
+ * network the user switched to, or the configured one when omitted.
+ */
+export function resolveConfig(config: MavnaWidgetConfig, active?: NetworkId): ResolvedConfig {
+  const defaultNetwork: NetworkId = config.network ?? "testnet";
+  const networks = config.networks ?? [defaultNetwork];
+  if (!networks.includes(defaultNetwork)) {
+    throw configError(`network is ${defaultNetwork}, which networks does not offer.`);
+  }
+  const network = active ?? defaultNetwork;
+  if (!networks.includes(network)) {
+    throw configError(`${network} is not one of the networks offered.`);
+  }
+  // Every offered network is checked now, so a missing sponsor is a mistake at
+  // mount and not a broken toggle later.
+  for (const offered of networks) endpointsFor(config, offered, defaultNetwork);
+  const endpoints = endpointsFor(config, network, defaultNetwork);
   const rails = config.rails ?? ALL_RAILS;
   return {
     integrator: config.integrator,
+    networks,
     variant: config.variant ?? "compact",
     appearance: config.appearance ?? "system",
     theme: config.theme,
@@ -190,8 +271,8 @@ export function resolveConfig(config: MavnaWidgetConfig): ResolvedConfig {
     onEvent: config.onEvent,
     engineConfig: {
       network,
-      rpcUrl: resolveRpcUrl(network, config.rpcUrl),
-      sponsorUrl: config.sponsorUrl ?? "http://localhost:8787",
+      rpcUrl: endpoints.rpcUrl,
+      sponsorUrl: endpoints.sponsorUrl,
       disabledSources: config.disabledSources,
       ranking: config.routePriority ?? "best-received",
       integratorFee: config.fee,

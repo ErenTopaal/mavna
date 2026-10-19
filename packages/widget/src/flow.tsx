@@ -59,7 +59,7 @@ import {
   renderSettings,
 } from "./screens";
 import { s } from "./style";
-import { buildSteps, type FlightRow, type FlightStep, runTransfer } from "./transfer";
+import { buildSteps, type FlightRow, type FlightStep, runTransfer, StillMoving } from "./transfer";
 import { connect, type DiscoveredWallet, switchChain, watchWallets } from "./wallet";
 
 type Screen =
@@ -109,8 +109,14 @@ interface State {
   menuOpen: boolean;
   balance: number | null;
   discovered: DiscoveredWallet[];
-  /** Mainnet is disabled, so this only ever holds "testnet" today. */
+  /** The network the engine runs on. Switching rebuilds the engine and this flow. */
   network: "testnet" | "mainnet";
+  /**
+   * Who pays a new account's reserve, as the sponsor said at the last quote.
+   * Undefined until it has answered; a route that sets an account up is only
+   * offered once it has.
+   */
+  reserveFunding: "sponsor" | "self" | undefined;
   /** The connected Stellar address, once the wallet kit has returned one. */
   stellarAddress: string | null;
   /** The uuid of a wallet mid-connect, or "stellar" for the kit, else null. */
@@ -150,6 +156,10 @@ export interface FlowProps {
   readonly walletConfig?: WalletConfig | undefined;
   /** Report flow events back to the host. */
   readonly emit?: ((event: MavnaWidgetEvent) => void) | undefined;
+  /** The networks the toggle offers. Defaults to the engine's own only. */
+  readonly networks?: readonly ("testnet" | "mainnet")[];
+  /** Asked to switch network; the host rebuilds the engine for it. */
+  readonly onNetworkChange?: ((network: "testnet" | "mainnet") => void) | undefined;
 }
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
@@ -222,6 +232,7 @@ export class Flow extends React.Component<FlowProps, State> {
     balance: null,
     discovered: [],
     network: this.engine.network,
+    reserveFunding: undefined,
     stellarAddress: null,
     connecting: null,
     walletError: null,
@@ -723,15 +734,32 @@ export class Flow extends React.Component<FlowProps, State> {
       },
       (partial) => this.applyQuote(partial, false),
       (final) => this.applyQuote(final, true),
+      (check) => {
+        // An unreachable sponsor is not dropped here: the quote turns it into
+        // declines with the reason, on every route that needs the sponsor.
+        if (!(check.terms instanceof Error)) {
+          this.setState({ reserveFunding: check.terms.reserveFunding });
+        }
+      },
     );
   }
 
   // ------------------------------------------------------------ real wallet ---
 
-  /** Mainnet is disabled, so only testnet is selectable. Kept synced everywhere. */
+  /** The networks the toggle offers, the engine's own among them. */
+  offeredNetworks(): readonly ("testnet" | "mainnet")[] {
+    return this.props.networks ?? [this.engine.network];
+  }
+
+  /**
+   * Switch network. The host owns the engine, so it is asked to rebuild one
+   * for the other network; nothing of this network's flow carries over. Not
+   * while a transfer runs, which belongs to the network it started on.
+   */
   setNetwork(network: "testnet" | "mainnet"): void {
-    if (network === "mainnet") return;
-    this.setState({ network });
+    if (network === this.engine.network || this.transferring) return;
+    if (!this.offeredNetworks().includes(network)) return;
+    this.props.onNetworkChange?.(network);
   }
 
   /** Open the Stellar Wallets Kit's own modal and remember the address it returns. */
@@ -859,7 +887,9 @@ export class Flow extends React.Component<FlowProps, State> {
     if (view === undefined) return;
     this.transferring = true;
     const chain = this.engine.sourceChainDetail(this.state.chainId);
-    const steps = buildSteps(view);
+    // Undefined only when the sponsor never answered, and then no route that
+    // sets an account up was offered, which is the only kind it changes.
+    const steps = buildSteps(view, this.state.reserveFunding);
     this.emit({ type: "transferStarted" });
     this.setState({ phase: "sending", steps }, () => {
       this.go("flight", "push");
@@ -900,8 +930,39 @@ export class Flow extends React.Component<FlowProps, State> {
       });
       this.arrive();
     } catch (e) {
-      this.failFlight(msg(e, "The transfer did not go through."));
+      this.endWith(e);
     }
+  }
+
+  /** End the flight on an error: still moving is not a failure, anything else is. */
+  endWith(error: unknown): void {
+    if (error instanceof StillMoving) {
+      this.stillMoving(error.message);
+      return;
+    }
+    this.failFlight(msg(error, "The transfer did not go through."));
+  }
+
+  /**
+   * The page stopped watching a transfer that is still on its way. The step
+   * it was on stays in progress with the reason, and the host hears that it
+   * is still moving, never that it failed.
+   */
+  stillMoving(message: string): void {
+    this.emit({ type: "transferStillMoving", reason: message });
+    this.setState(
+      (st) => {
+        const i = st.steps.findIndex((s) => s.phase === "blocked" || s.phase === "pending");
+        const steps =
+          i < 0
+            ? st.steps
+            : st.steps.map((step, j) =>
+                j === i ? { ...step, phase: "pending" as const, note: message } : step,
+              );
+        return { steps, note: message, noteKind: "quiet" as const };
+      },
+      () => this.advanceStep(),
+    );
   }
 
   failFlight(message: string): void {

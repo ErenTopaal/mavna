@@ -23,13 +23,47 @@ does not decode as a Stellar transaction answers `400`, all with `retryable: fal
 An unexpected failure inside the server, including a Stellar read that did not
 answer, is `500` with `retryable: true`: nothing was spent, and asking again is safe.
 
+Every endpoint, `/health` included, counts requests per client address over
+one-minute windows (`MAVNA_RATE_LIMIT_PER_MINUTE`). Past the limit it answers `429`
+with `retryable: true`. Preflight `OPTIONS` requests are not counted.
+
 ## `GET /health`
 
-Answers `200` with the network and the sponsor's public address:
+Answers `200` with the network, the sponsor's public address, who pays a new
+account's reserve, and the smallest Circle delivery it pays for, in USDC base units
+at six decimals:
 
 ```json
-{ "ok": true, "network": "testnet", "sponsor": "G..." }
+{
+  "ok": true,
+  "network": "testnet",
+  "sponsor": "G...",
+  "reserveFunding": "sponsor",
+  "minDeliveryBaseUnits": "1000000"
+}
 ```
+
+`reserveFunding` is `sponsor` (the sponsor fronts the reserve and is repaid from
+the arrival) or `self` (the account pays its own; see below). The widget reads both
+fields at quote time, so a route the sponsor cannot carry is declined with the
+reason before anyone signs.
+
+## Reserves funded by the account itself
+
+With `MAVNA_RESERVE_FUNDING=self` the sponsor fronts nothing. This is a temporary
+switch for running without a funded sponsor key:
+
+- `POST /prepare` for an existing account returns a `changeTrust` whose source is
+  the account itself, which signs it and pays its fee and its 0.5 XLM reserve:
+  `{ "xdr": "...", "selfFunded": true }`. It answers `400` when the account does
+  not exist (an address with nothing in it cannot pay for anything; it needs at
+  least 1 XLM to exist and 0.5 XLM more to hold USDC), or when the account cannot
+  spare the reserve and the fee above its minimum balance. The daily caps do not
+  apply, since no sponsor money is spent.
+- `POST /submit` submits that transaction exactly as the account signed it. The
+  sponsor adds no signature and needs no held settlement.
+- `POST /settlement` and `POST /settlement/commit` answer `409`: there is no loan
+  to repay.
 
 ## `POST /prepare`
 
@@ -174,6 +208,12 @@ burn's transaction on the source chain: an EVM hash, a Solana signature in base5
 or a Starknet transaction hash. `domain` is Circle's domain for the source chain
 and must be one this network routes into Stellar from. Either one malformed answers
 `400` before Circle is asked anything.
+
+A delivery costs the sponsor the same whatever it carries, so it pays for none
+smaller than `MAVNA_MIN_DELIVERY_USDC`. The minted amount (amount burned less the
+fee Circle executed, both read from the attested message) below it, or a message
+whose amount cannot be read, answers `400` with `retryable: false`, and nothing is
+submitted.
 
 Who the transfer is for is read from Circle's attested message, the one source a
 caller cannot choose. A `destination` field is accepted from older clients and

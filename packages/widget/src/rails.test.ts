@@ -433,3 +433,23 @@ describe("settleNote", () => {
     expect(settleNote({ settled: false })).toMatch(/^Delivered on Stellar\./);
   });
 });
+
+describe("stepsFor an account that pays its own reserve", () => {
+  it("asks for no repayment, and sets the account up before the send on every rail", () => {
+    for (const source of ["cctp", "layerzero"]) {
+      const ids = stepsFor(routeFor(source, { newAccount: true, approve: true }), "self").map(
+        (s) => s.id,
+      );
+      expect(ids).not.toContain("settle");
+      expect(ids.indexOf("prepare")).toBe(0);
+      expect(ids.indexOf("prepare")).toBeLessThan(ids.indexOf("burn"));
+    }
+  });
+
+  it("says where the reserve comes from", () => {
+    const prepare = stepsFor(routeFor("cctp", { newAccount: true }), "self").find(
+      (s) => s.id === "prepare",
+    );
+    expect(prepare?.note).toMatch(/own XLM/);
+  });
+});

@@ -78,3 +78,45 @@ describe("settle", () => {
     await expect(client.settle("G")).rejects.toThrow("The sponsor answered 502.");
   });
 });
+
+describe("terms", () => {
+  it("reads who funds reserves and the smallest delivery from /health", async () => {
+    answer(
+      200,
+      JSON.stringify({
+        ok: true,
+        network: "mainnet",
+        reserveFunding: "self",
+        minDeliveryBaseUnits: "2500000",
+      }),
+    );
+    expect(await client.terms()).toEqual({
+      network: "mainnet",
+      reserveFunding: "self",
+      minDeliveryBaseUnits: 2_500_000n,
+    });
+  });
+
+  it("reads a sponsor from before the switch as what it is: one that fronts reserves, with no minimum", async () => {
+    answer(200, JSON.stringify({ ok: true, network: "testnet", sponsor: "G..." }));
+    expect(await client.terms()).toEqual({
+      network: "testnet",
+      reserveFunding: "sponsor",
+      minDeliveryBaseUnits: 0n,
+    });
+  });
+
+  it("rejects an answer it cannot read rather than guessing", async () => {
+    answer(200, JSON.stringify({ ok: true, network: "testnet", reserveFunding: "maybe" }));
+    await expect(client.terms()).rejects.toThrow(/reserve/);
+    answer(200, JSON.stringify({ ok: true, network: "testnet", minDeliveryBaseUnits: "1.5" }));
+    await expect(client.terms()).rejects.toThrow(/minimum/);
+    answer(200, JSON.stringify({ ok: true }));
+    await expect(client.terms()).rejects.toThrow(/network/);
+  });
+
+  it("rejects when the sponsor does not answer", async () => {
+    answer(503, "down");
+    await expect(client.terms()).rejects.toThrow(/503/);
+  });
+});

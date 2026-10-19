@@ -146,3 +146,43 @@ describe("channel pool", () => {
     expect(() => new ChannelPool({ channels: [] })).toThrow();
   });
 });
+
+describe("a channel pool written down and read back", () => {
+  it("keeps every key and every lease, so a restart cannot hand out a live sequence", () => {
+    const keys = [Keypair.random(), Keypair.random()];
+    const pool = new ChannelPool({ channels: keys });
+    const held = pool.acquire("held", NOW + DAY, NOW);
+
+    const restored = ChannelPool.fromSnapshot(pool.snapshot(), NOW);
+    expect(restored.leasedCount).toBe(1);
+    expect(restored.availableCount).toBe(1);
+    expect(restored.keypairFor("held", held?.address ?? "")?.secret()).toBe(
+      keys.find((k) => k.publicKey() === held?.address)?.secret(),
+    );
+    expect(restored.acquire("next", NOW + DAY, NOW)?.address).not.toBe(held?.address);
+  });
+
+  it("drops a lease that lapsed while the process was down", () => {
+    const pool = poolOf(1);
+    pool.acquire("old", NOW + 60, NOW);
+    const restored = ChannelPool.fromSnapshot(pool.snapshot(), NOW + DAY);
+    expect(restored.acquire("new", NOW + DAY + DAY, NOW + DAY)).toBeDefined();
+  });
+
+  it("restores leases onto a pool it was given, for the channels that pool has", () => {
+    const key = Keypair.random();
+    const before = new ChannelPool({ channels: [key] });
+    before.acquire("held", NOW + DAY, NOW);
+    const given = new ChannelPool({ channels: [key] });
+    given.restoreLeases(before.snapshot().leases, NOW);
+    expect(given.acquire("other", NOW + DAY, NOW)).toBeUndefined();
+  });
+
+  it("ignores a lease on a channel the given pool does not have", () => {
+    const before = poolOf(1);
+    before.acquire("held", NOW + DAY, NOW);
+    const given = poolOf(1);
+    given.restoreLeases(before.snapshot().leases, NOW);
+    expect(given.acquire("other", NOW + DAY, NOW)).toBeDefined();
+  });
+});
