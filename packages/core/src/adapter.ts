@@ -100,6 +100,19 @@ export interface UnsignedTransaction {
 }
 
 /**
+ * What a caller can tell a rail at build time that a quote never knows.
+ *
+ * Optional, and most rails need none of it. A rail whose service has to be told
+ * where a refund goes before it will hand out a deposit address cannot use the
+ * sender stand-in, because the address leaves in a request rather than in a
+ * payload the wallet fills in.
+ */
+export interface BuildContext {
+  /** The connected source wallet, when the caller knows it. */
+  readonly sender: string | undefined;
+}
+
+/**
  * Where a transfer can be found again.
  *
  * All three are first-class lookup keys, which is the largest single
@@ -140,7 +153,7 @@ export interface BridgeAdapter {
   quote(request: QuoteRequest): Promise<Route | RouteRejection>;
 
   /** Build, never sign, never submit. */
-  buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]>;
+  buildTransactions(route: Route, context?: BuildContext): Promise<readonly UnsignedTransaction[]>;
 
   /** Where this transfer stands now. */
   status(handle: TransferHandle): Promise<StepPhase>;

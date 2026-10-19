@@ -546,6 +546,21 @@ importers:
         specifier: 2.55.13
         version: 2.55.13(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)(zod@4.4.3)
 
+  packages/adapters/near-intents:
+    dependencies:
+      '@mavna/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@mavna/routing':
+        specifier: workspace:*
+        version: link:../../routing
+      '@mavna/stellar':
+        specifier: workspace:*
+        version: link:../../stellar
+      '@stellar/stellar-sdk':
+        specifier: 16.2.0
+        version: 16.2.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+
   packages/core:
     dependencies:
       dnum:

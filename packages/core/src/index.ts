@@ -1,6 +1,7 @@
 export type {
   AllowanceCheck,
   BridgeAdapter,
+  BuildContext,
   QuoteRequest,
   TransactionFormat,
   TransferHandle,
