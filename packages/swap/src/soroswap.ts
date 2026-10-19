@@ -6,7 +6,13 @@ import {
   positiveBaseUnits,
   stellarAddress,
 } from "@mavna/core";
-import { type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  Address,
+  scValToNative,
+  type Transaction,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { z } from "zod";
 import {
   applySlippage,
@@ -341,8 +347,165 @@ export class SoroswapProvider implements SwapProvider {
         retryable: false,
       });
     }
+    // and it has to be the swap that was quoted, read from the transaction
+    // itself rather than from what the quote said it would be
+    const why = soroswapBuildMismatch(tx, {
+      network: this.network,
+      platform: quote.data.platform,
+      owner,
+      assetIn: toContractId(request.quote.assetIn, this.network),
+      assetOut: toContractId(request.quote.assetOut, this.network),
+      amountIn: request.quote.amountIn,
+      amountOutMinimum: request.quote.amountOutMinimum,
+    });
+    if (why !== undefined) {
+      throw new MavnaError(`Soroswap built ${why}, not the swap that was quoted.`, {
+        retryable: false,
+      });
+    }
     return tx;
   }
+}
+
+/**
+ * The contracts a Soroswap build may call, by network.
+ *
+ * Mainnet: aggregator v3, which the API has built every Soroban swap against
+ * since 2026-09-24 (docs.soroswap.finance, aggregator v3 reference), and the
+ * Soroswap router (soroswap/core public/mainnet.contracts.json; its deployed
+ * wasm hash 4c3db3eb... matches that file). There is no v3 on testnet.
+ */
+export const SOROSWAP_CONTRACTS: Readonly<
+  Record<NetworkId, { readonly aggregator?: string; readonly router: string }>
+> = {
+  mainnet: {
+    aggregator: "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4",
+    router: "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
+  },
+  testnet: { router: "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD" },
+};
+
+export interface SoroswapExpected {
+  readonly network: NetworkId;
+  readonly platform: "router" | "aggregator" | "sdex";
+  readonly owner: string;
+  /** Contract ids, as quoted. */
+  readonly assetIn: string;
+  readonly assetOut: string;
+  readonly amountIn: string;
+  /** Our floor, which the built minimum may not undercut. */
+  readonly amountOutMinimum: string;
+}
+
+const STROOPS_PER_UNIT = 10_000_000n;
+
+/** A classic amount ("56.2468868") in base units. */
+function classicUnits(amount: string): bigint {
+  const [whole = "0", fraction = ""] = amount.split(".");
+  return BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0").slice(0, 7));
+}
+
+/**
+ * Why a built transaction is not the quoted swap, or undefined when it is.
+ *
+ * One operation, sourced by the owner, and for each platform the call it must
+ * be: aggregator v3 `swap_exact_in` (user, token_in, amount_in, token_out,
+ * min_out, routes, partner), which pays `user`; the router's
+ * `swap_exact_tokens_for_tokens` (amount_in, amount_out_min, path, to,
+ * deadline); or a classic strict-send path payment to the owner. In every case
+ * exactly the quoted input, the quoted tokens at both ends, and a minimum at or
+ * above ours.
+ */
+export function soroswapBuildMismatch(
+  tx: Transaction,
+  expected: SoroswapExpected,
+): string | undefined {
+  if (tx.operations.length !== 1) return `${tx.operations.length} operations`;
+  const [op] = tx.operations;
+  if (op === undefined) return "nothing";
+  if (op.source !== undefined && op.source !== expected.owner) {
+    return "an operation for another account";
+  }
+  const floor = BigInt(expected.amountOutMinimum);
+  const amountIn = BigInt(expected.amountIn);
+
+  if (expected.platform === "sdex") {
+    if (op.type !== "pathPaymentStrictSend") return `a ${op.type} operation`;
+    const passphrase = PASSPHRASE[expected.network];
+    if (op.destination !== expected.owner) return "a payment to another account";
+    if (op.sendAsset.contractId(passphrase) !== expected.assetIn)
+      return "a payment of another asset";
+    if (op.destAsset.contractId(passphrase) !== expected.assetOut)
+      return "a payment into another asset";
+    if (classicUnits(op.sendAmount) !== amountIn) return "a payment of another amount";
+    if (classicUnits(op.destMin) < floor) return "a payment with a lower minimum";
+    return undefined;
+  }
+
+  if (op.type !== "invokeHostFunction") return `a ${op.type} operation`;
+  const fn = op.func;
+  if (fn.switch() !== xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
+    return "something other than a contract call";
+  }
+  const call = fn.invokeContract();
+  const contract = Address.fromScAddress(call.contractAddress()).toString();
+  const name = call.functionName().toString();
+  let args: unknown[];
+  try {
+    args = call.args().map((arg) => scValToNative(arg) as unknown);
+  } catch {
+    return "a call with arguments that cannot be read";
+  }
+  const known = SOROSWAP_CONTRACTS[expected.network];
+
+  if (expected.platform === "aggregator") {
+    if (known.aggregator === undefined || contract !== known.aggregator)
+      return "a call to another contract";
+    if (name !== "swap_exact_in" || args.length !== 7) return `a call to ${name}`;
+    const [user, tokenIn, gross, tokenOut, minOut, routes] = args;
+    if (user !== expected.owner) return "a swap paying another account";
+    if (tokenIn !== expected.assetIn || tokenOut !== expected.assetOut)
+      return "a swap of other tokens";
+    if (typeof gross !== "bigint" || gross !== amountIn) return "a swap of another amount";
+    if (typeof minOut !== "bigint" || minOut < floor) return "a swap with a lower minimum";
+    if (!Array.isArray(routes) || routes.length === 0) return "a swap with no route";
+    for (const route of routes) {
+      const ends = routeEnds(route);
+      if (ends === undefined || ends[0] !== expected.assetIn || ends[1] !== expected.assetOut) {
+        return "a route between other tokens";
+      }
+    }
+    return undefined;
+  }
+
+  if (contract !== known.router) return "a call to another contract";
+  if (name !== "swap_exact_tokens_for_tokens" || args.length !== 5) return `a call to ${name}`;
+  const [gross, minOut, path, to] = args;
+  if (to !== expected.owner) return "a swap paying another account";
+  if (typeof gross !== "bigint" || gross !== amountIn) return "a swap of another amount";
+  if (typeof minOut !== "bigint" || minOut < floor) return "a swap with a lower minimum";
+  if (!Array.isArray(path) || path[0] !== expected.assetIn || path.at(-1) !== expected.assetOut) {
+    return "a swap between other tokens";
+  }
+  return undefined;
+}
+
+/** The token a v3 route starts from and the one it ends in. */
+function routeEnds(route: unknown): [unknown, unknown] | undefined {
+  if (typeof route !== "object" || route === null) return undefined;
+  const hops = (route as { hops?: unknown }).hops;
+  if (!Array.isArray(hops) || hops.length === 0) return undefined;
+  const body = (hop: unknown): Record<string, unknown> | undefined =>
+    Array.isArray(hop) && typeof hop[1] === "object" && hop[1] !== null
+      ? (hop[1] as Record<string, unknown>)
+      : undefined;
+  const first = body(hops[0]);
+  const last = body(hops.at(-1));
+  if (first === undefined || last === undefined) return undefined;
+  // an Aquarius hop names what it produces in its last step, the others directly
+  const steps = last.steps;
+  const out = Array.isArray(steps) ? (steps.at(-1) as unknown[] | undefined)?.[2] : last.token_out;
+  return [first.token_in, out];
 }
 
 /**

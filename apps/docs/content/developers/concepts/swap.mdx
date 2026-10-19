@@ -28,6 +28,12 @@ can quote the pair:
    key, which must never reach a browser, so `SoroswapProvider` calls the sponsor
    service's [Soroswap proxy](/developers/sponsor/api#soroswap-proxy) and holds no
    key itself. A sponsor run without a key has no proxy, and the leg moves on.
+   Soroswap builds the transaction, so before the user signs it the provider reads
+   it back: one operation from the user's account, either aggregator v3's
+   `swap_exact_in`, the Soroswap router's `swap_exact_tokens_for_tokens`, or a
+   classic strict-send path payment, with exactly the quoted input, the quoted
+   tokens at both ends, the user as the one paid, and a minimum no lower than the
+   floor the user agreed to. Anything else is refused unsigned.
 2. **SushiSwap**, for pairs with USDT0 on mainnet. `SushiSwapProvider` prices by
    simulating Sushi's router over its concentrated-liquidity pools, direct or
    through USDC or XLM, and builds `swap_exact_input_hints` with fresh oracle hints.

@@ -3,10 +3,13 @@ import {
   Account,
   Asset,
   BASE_FEE,
+  Contract,
   Keypair,
   Networks,
+  nativeToScVal,
   Operation,
   TransactionBuilder,
+  xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bodyOf, json, routedFetch } from "./__fixtures__/network.js";
@@ -48,6 +51,75 @@ function unsignedFor(source: string): string {
     .setTimeout(60)
     .build()
     .toXDR();
+}
+
+const V3 = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4";
+const ROUTER = "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH";
+const PAIR = "CC7CDFY2VGDODJ7WPO3JIK2MXLOAXL4LRQCC43UJDBAIJ4SVFO3HNPOC";
+
+const address = (id: string) => nativeToScVal(id, { type: "address" });
+const i128 = (n: string) => nativeToScVal(BigInt(n), { type: "i128" });
+const struct = (fields: Record<string, xdr.ScVal>) =>
+  xdr.ScVal.scvMap(
+    Object.keys(fields)
+      .sort()
+      .map(
+        (key) =>
+          new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val: fields[key] as xdr.ScVal }),
+      ),
+  );
+
+/** One operation from `source`, wrapped the way Soroswap's build returns it. */
+function envelope(source: string, op: xdr.Operation): string {
+  return new TransactionBuilder(new Account(source, "41"), {
+    fee: BASE_FEE,
+    networkPassphrase: Networks.PUBLIC,
+  })
+    .addOperation(op)
+    .setTimeout(60)
+    .build()
+    .toXDR();
+}
+
+/**
+ * Aggregator v3's swap_exact_in, shaped like the mainnet transactions it ran on
+ * 2026-10-19 (e.g. c162ecfc...): gross amount in, min out, routes, partner.
+ */
+function v3Swap(
+  options: {
+    contract?: string;
+    user?: string;
+    tokenIn?: string;
+    amountIn?: string;
+    tokenOut?: string;
+    minOut?: string;
+    hopOut?: string;
+    fn?: string;
+  } = {},
+): string {
+  const user = options.user ?? owner;
+  const hop = xdr.ScVal.scvVec([
+    xdr.ScVal.scvSymbol("Soroswap"),
+    struct({
+      pair: address(PAIR),
+      token_in: address(options.tokenIn ?? USDC),
+      token_out: address(options.hopOut ?? options.tokenOut ?? XLM),
+    }),
+  ]);
+  const route = struct({ amount_in: i128("99900000"), hops: xdr.ScVal.scvVec([hop]) });
+  return envelope(
+    owner,
+    new Contract(options.contract ?? V3).call(
+      options.fn ?? "swap_exact_in",
+      address(user),
+      address(options.tokenIn ?? USDC),
+      i128(options.amountIn ?? "100000000"),
+      address(options.tokenOut ?? XLM),
+      i128(options.minOut ?? "562468867"),
+      xdr.ScVal.scvVec([route]),
+      xdr.ScVal.scvVoid(),
+    ),
+  );
 }
 
 afterEach(() => {
@@ -198,10 +270,10 @@ describe("soroswap through the proxy", () => {
   });
 
   it("builds through the proxy, returning the transaction for the owner", async () => {
-    const xdr = unsignedFor(owner);
+    const built = v3Swap();
     const net = routedFetch({
       [`${PROXY}/swap/soroswap/quote`]: () => json(quoteBody),
-      [`${PROXY}/swap/soroswap/build`]: () => json({ xdr }),
+      [`${PROXY}/swap/soroswap/build`]: () => json({ xdr: built }),
     });
     vi.stubGlobal("fetch", net.fetch);
     const provider = new SoroswapProvider({ network: "mainnet", proxyUrl: PROXY });
@@ -252,5 +324,119 @@ describe("soroswap through the proxy", () => {
       })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
+  });
+});
+
+describe("what Soroswap built, checked before the user signs it", () => {
+  async function built(xdrOf: string, quoted: Record<string, unknown> = quoteBody) {
+    const net = routedFetch({
+      [`${PROXY}/swap/soroswap/quote`]: () => json(quoted),
+      [`${PROXY}/swap/soroswap/build`]: () => json({ xdr: xdrOf }),
+    });
+    vi.stubGlobal("fetch", net.fetch);
+    const provider = new SoroswapProvider({ network: "mainnet", proxyUrl: PROXY });
+    const quote = await provider.quote(request);
+    return provider.build({ quote, account: new Account(owner, "41") }).catch((e: unknown) => e);
+  }
+
+  it("accepts aggregator v3 swapping exactly what was quoted, to the owner, at our floor or above", async () => {
+    // our floor: 565295344 less 50 bps, rounded down
+    const tx = await built(v3Swap({ minOut: "562468867" }));
+    expect(tx).not.toBeInstanceOf(Error);
+  });
+
+  it.each([
+    ["another contract", { contract: ROUTER }],
+    ["another function", { fn: "swap_exact_out" }],
+    ["another user", { user: Keypair.random().publicKey() }],
+    ["another input token", { tokenIn: XLM }],
+    ["another output token", { tokenOut: USDC, hopOut: USDC }],
+    ["more input than quoted", { amountIn: "100000001" }],
+    ["a floor below ours", { minOut: "562468866" }],
+  ])("refuses one that names %s", async (_what, change) => {
+    const error = await built(v3Swap(change));
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/not the swap that was quoted/);
+    expect((error as MavnaError).retryable).toBe(false);
+  });
+
+  it("refuses a route that ends in a token other than the one asked for", async () => {
+    const error = await built(v3Swap({ hopOut: USDC }));
+    expect((error as MavnaError).message).toMatch(/not the swap that was quoted/);
+  });
+
+  it("refuses anything with a second operation, or a payment instead of a swap", async () => {
+    expect(await built(unsignedFor(owner))).toBeInstanceOf(MavnaError);
+    const two = new TransactionBuilder(new Account(owner, "41"), {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.PUBLIC,
+    })
+      .addOperation(
+        Operation.pathPaymentStrictSend({
+          sendAsset: new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"),
+          sendAmount: "10",
+          destination: owner,
+          destAsset: Asset.native(),
+          destMin: "57",
+          path: [],
+        }),
+      )
+      .addOperation(
+        Operation.payment({
+          destination: Keypair.random().publicKey(),
+          asset: Asset.native(),
+          amount: "1",
+        }),
+      )
+      .setTimeout(60)
+      .build()
+      .toXDR();
+    expect(await built(two, { ...quoteBody, platform: "sdex" })).toBeInstanceOf(MavnaError);
+  });
+
+  it("accepts the router's swap for a router quote, and checks its path and recipient", async () => {
+    const routerSwap = (to: string, last: string, min = "562468867") =>
+      envelope(
+        owner,
+        new Contract(ROUTER).call(
+          "swap_exact_tokens_for_tokens",
+          i128("100000000"),
+          i128(min),
+          xdr.ScVal.scvVec([address(USDC), address(last)]),
+          address(to),
+          nativeToScVal(1_900_000_000n, { type: "u64" }),
+        ),
+      );
+    const asRouter = { ...quoteBody, platform: "router" };
+    expect(await built(routerSwap(owner, XLM), asRouter)).not.toBeInstanceOf(Error);
+    expect(await built(routerSwap(Keypair.random().publicKey(), XLM), asRouter)).toBeInstanceOf(
+      MavnaError,
+    );
+    expect(await built(routerSwap(owner, USDC), asRouter)).toBeInstanceOf(MavnaError);
+    expect(await built(routerSwap(owner, XLM, "1"), asRouter)).toBeInstanceOf(MavnaError);
+    // a router swap for an aggregator quote is not what was quoted either
+    expect(await built(routerSwap(owner, XLM))).toBeInstanceOf(MavnaError);
+  });
+
+  it("accepts a classic path payment for an orderbook quote, to the owner, at our floor", async () => {
+    const pathPayment = (destination: string, destMin: string, sendAmount = "10") =>
+      envelope(
+        owner,
+        Operation.pathPaymentStrictSend({
+          sendAsset: new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"),
+          sendAmount,
+          destination,
+          destAsset: Asset.native(),
+          destMin,
+          path: [],
+        }),
+      );
+    const asSdex = { ...quoteBody, platform: "sdex" };
+    expect(await built(pathPayment(owner, "56.2468867"), asSdex)).not.toBeInstanceOf(Error);
+    expect(await built(pathPayment(owner, "56.2468866"), asSdex)).toBeInstanceOf(MavnaError);
+    expect(
+      await built(pathPayment(Keypair.random().publicKey(), "56.2468867"), asSdex),
+    ).toBeInstanceOf(MavnaError);
+    expect(await built(pathPayment(owner, "56.2468867", "11"), asSdex)).toBeInstanceOf(MavnaError);
   });
 });
