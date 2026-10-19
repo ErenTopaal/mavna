@@ -769,6 +769,31 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return origin !== undefined && options.allowedOrigins.includes(origin) ? origin : undefined;
   };
 
+  // A node on another network would make every transaction this sponsor builds
+  // fail with no clear reason, so start-up refuses one. A node that cannot be
+  // asked right now is said, not taken as agreeing or disagreeing.
+  let agreed: Promise<void> | undefined;
+  function networkAgreed(): Promise<void> {
+    agreed ??= options.rpc.server.getNetwork().then(
+      (node) => {
+        if (node.passphrase !== options.network.passphrase) {
+          throw new Error(
+            `The Stellar node this sponsor uses serves ${node.passphrase}, and the sponsor is ` +
+              `set up for ${options.network.passphrase} (MAVNA_NETWORK and STELLAR_RPC_URL ` +
+              "disagree).",
+          );
+        }
+      },
+      (cause: unknown) => {
+        console.error(
+          "[sponsor] could not ask the Stellar node which network it serves:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      },
+    );
+    return agreed;
+  }
+
   // Started here, once everything it fills in exists. A failure is kept for
   // ready() and for every request, and logged now so it is never silent.
   const loaded = load();
@@ -799,7 +824,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   server.on("close", () => {
     void stopSweep();
   });
-  return Object.assign(server, { startSweep, stopSweep, ready: () => loaded });
+  return Object.assign(server, {
+    startSweep,
+    stopSweep,
+    ready: () => Promise.all([loaded, networkAgreed()]).then(() => undefined),
+  });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = corsOrigin(req);

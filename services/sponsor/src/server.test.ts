@@ -25,6 +25,7 @@ import {
   Asset,
   type FeeBumpTransaction,
   Keypair,
+  Networks,
   Operation,
   rpc,
   StrKey,
@@ -142,6 +143,8 @@ class RecordingRpc extends RpcClient {
       }
       return this.send(tx);
     };
+    this.server.getNetwork = async () =>
+      ({ passphrase: this.networkPassphrase, protocolVersion: 23 }) as never;
     this.server.getTransaction = async (hash) =>
       this.landed.get(hash) ?? {
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
@@ -152,6 +155,9 @@ class RecordingRpc extends RpcClient {
         oldestLedgerCloseTime: 0,
       };
   }
+
+  /** The network the node says it serves. */
+  networkPassphrase: string = Networks.TESTNET;
 
   /** Compose slots LayerZero's endpoint holds, by guid hex: the message hash in each. */
   readonly queuedComposes = new Map<string, Buffer>();
@@ -2465,6 +2471,18 @@ describe("the sponsor funds its own channel once", () => {
     expect(retried.status).toBe(200);
     expect(funded()).toBe(2);
     logged.mockRestore();
+  });
+});
+
+describe("the sponsor and its node agree on the network", () => {
+  it("will not start against a node that serves another network", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { server } = await startServer();
+    expect(await server.ready()).toBeUndefined();
+    const other = await startServer();
+    other.rpc.networkPassphrase = Networks.PUBLIC;
+    await expect(other.server.ready()).rejects.toThrow(/serves Public Global Stellar Network/);
+    errors.mockRestore();
   });
 });
 
