@@ -35,6 +35,7 @@ import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
+import { DocumentCapStore, MemoryDocumentStore } from "./state.js";
 
 /**
  * The sponsor's endpoints, driven over real HTTP against a real server.
@@ -81,6 +82,8 @@ class RecordingRpc extends RpcClient {
 
   /** USDC trustline balances in stroops, by account. */
   readonly trustlines = new Map<string, bigint>();
+  /** XLM balances in stroops, by account; ten XLM when not set. */
+  readonly nativeBalances = new Map<string, bigint>();
 
   private readonly landed = new Map<string, rpc.Api.GetSuccessfulTransactionResponse>();
   private readonly pending = new Map<string, Transaction | FeeBumpTransaction>();
@@ -129,7 +132,12 @@ class RecordingRpc extends RpcClient {
       return xdr.LedgerEntryData.account(
         new xdr.AccountEntry({
           accountId,
-          balance: xdr.Int64.fromString("100000000"),
+          balance: xdr.Int64.fromString(
+            (
+              this.nativeBalances.get(StrKey.encodeEd25519PublicKey(accountId.ed25519())) ??
+              100_000_000n
+            ).toString(),
+          ),
           seqNum: xdr.Int64.fromString(sequence.toString()),
           numSubEntries: 1,
           inflationDest: null,
@@ -342,14 +350,27 @@ function stubIris(answer: (url: URL) => Response | Promise<Response>): URL[] {
 
 async function startServer(
   overrides: Partial<SponsorServerOptions> = {},
-  /** Leave out the harness's channel, so the server funds its own on first use. */
-  { fundsOwnChannel = false }: { fundsOwnChannel?: boolean } = {},
+  {
+    fundsOwnChannel = false,
+    restartOf,
+  }: {
+    /** Leave out the harness's channel, so the server funds its own on first use. */
+    fundsOwnChannel?: boolean;
+    /**
+     * Start as the same deployment after a restart: same network, sponsor key
+     * and channel key, nothing carried over in memory. Pass the same `state`
+     * to carry over what was written down.
+     */
+    restartOf?: TestServer;
+  } = {},
 ): Promise<TestServer> {
-  const sponsor = Keypair.random();
-  const channel = Keypair.random();
-  const recording = new RecordingRpc();
-  recording.accounts.set(sponsor.publicKey(), 100n);
-  recording.accounts.set(channel.publicKey(), 200n);
+  const sponsor = restartOf?.sponsor ?? Keypair.random();
+  const channel = restartOf?.channel ?? Keypair.random();
+  const recording = restartOf?.rpc ?? new RecordingRpc();
+  if (restartOf === undefined) {
+    recording.accounts.set(sponsor.publicKey(), 100n);
+    recording.accounts.set(channel.publicKey(), 200n);
+  }
 
   const options: SponsorServerOptions = {
     rpc: recording,
@@ -848,6 +869,8 @@ interface MessageOverrides {
   readonly headerRecipient?: string;
   readonly destinationCaller?: string;
   readonly mintRecipient?: string;
+  readonly amount?: bigint;
+  readonly feeExecuted?: bigint;
 }
 
 /**
@@ -890,8 +913,9 @@ function cctpMessage(recipient: string, overrides: MessageOverrides = {}): strin
   body.writeUInt32BE(1, 0);
   word(burnToken).copy(body, 4);
   word(overrides.mintRecipient ?? mintRecipient).copy(body, 36);
-  word(amount.toString(16)).copy(body, 68);
+  word((overrides.amount ?? amount).toString(16)).copy(body, 68);
   word(maxFee.toString(16)).copy(body, 132);
+  word((overrides.feeExecuted ?? 0n).toString(16)).copy(body, 164);
 
   return `0x${Buffer.concat([header, body, Buffer.from(hookData.slice(2), "hex")]).toString("hex")}`;
 }
@@ -2406,5 +2430,419 @@ describe("the sponsor funds its own channel once", () => {
     expect(retried.status).toBe(200);
     expect(funded()).toBe(2);
     logged.mockRestore();
+  });
+});
+
+describe("what the sponsor holds survives a restart", () => {
+  it("still holds a settlement committed before the restart", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+
+    const second = await startServer({ state }, { restartOf: first });
+    const submitted = await second.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(200);
+  });
+
+  it("settles a prepared settlement after the restart once the money arrives", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(first, user);
+
+    const second = await startServer({ state }, { restartOf: first });
+    second.rpc.holding(user, PLENTY);
+    const settled = await second.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    expect(second.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("still remembers a repayment that landed before the restart", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(first, user);
+    first.rpc.holding(user, PLENTY);
+    expect((await first.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+
+    const second = await startServer({ state }, { restartOf: first });
+    const asked = await second.post("/settle", { destination: user.publicKey() });
+    expect(asked.status).toBe(200);
+    expect(asked.body.settled).toBe(true);
+  });
+
+  it("does not hand a channel held before the restart to someone else", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    await holdSettlementFor(first, Keypair.random());
+
+    const second = await startServer({ state }, { restartOf: first });
+    const other = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+  });
+
+  it("keeps counting toward the daily caps across the restart", async () => {
+    const state = new MemoryDocumentStore();
+    const caps = (): CapLedger =>
+      new CapLedger(new DocumentCapStore(state), {
+        ...DEFAULT_CAPS,
+        volumeCapPerDay: { "expensive-gas": 1, "cheap-gas": 1 },
+      });
+    const first = await startServer({ state, caps: caps() });
+    await preparedWithSettlementHeld(first, Keypair.random());
+
+    const second = await startServer({ state, caps: caps() }, { restartOf: first });
+    const refused = await second.post("/prepare", {
+      destination: Keypair.random().publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(refused.status).toBe(429);
+  });
+
+  it("counts toward the caps in its own store when none is given", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ state });
+    await preparedWithSettlementHeld(server, Keypair.random());
+    const counted = (await state.read("caps")) as Record<string, CapUsage>;
+    expect(Object.values(counted)[0]?.started["expensive-gas"]).toBe(1);
+  });
+
+  it("keeps the channel it funded itself, rather than funding another", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state }, { fundsOwnChannel: true });
+    const user = Keypair.random();
+    const before = await first.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(before.status).toBe(200);
+
+    const second = await startServer({ state }, { fundsOwnChannel: true, restartOf: first });
+    const after = await second.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(after.status).toBe(200);
+    expect(after.body.channel).toBe(before.body.channel);
+    expect(second.rpc.submissions.filter((s) => s.label === "channel funding")).toHaveLength(1);
+  });
+
+  it("writes a channel's key down before funding it, and funds that same key on the retry", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ state }, { fundsOwnChannel: true });
+    server.rpc.rejectNext = new MavnaError("the network refused it", { retryable: true });
+    const user = Keypair.random();
+    const failed = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(failed.status).toBe(500);
+    const written = (await state.read("channels")) as { pending?: string };
+    expect(written.pending).toBeDefined();
+
+    const second = await startServer({ state }, { fundsOwnChannel: true, restartOf: server });
+    const retried = await second.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.body.channel).toBe(Keypair.fromSecret(written.pending ?? "").publicKey());
+  });
+
+  it("does not fund again a key whose funding landed before the process died", async () => {
+    const state = new MemoryDocumentStore();
+    const pending = Keypair.random();
+    const server = await startServer({ state }, { fundsOwnChannel: true });
+    // the funding landed, and the process died before it wrote that down
+    server.rpc.accounts.set(pending.publicKey(), 300n);
+    await state.write("channels", { secrets: [], leases: [], pending: pending.secret() });
+
+    const second = await startServer({ state }, { fundsOwnChannel: true, restartOf: server });
+    const built = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+    expect(built.body.channel).toBe(pending.publicKey());
+    expect(second.rpc.submissions.filter((s) => s.label === "channel funding")).toHaveLength(0);
+  });
+
+  it("finds out whether a preparation in flight when the process died landed", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const stalled = first.rpc.stallNext("sponsored preparation");
+    const inFlight = first.post("/submit", { signedXdr: await preparedAndSigned(first, user) });
+    await stalled.reached;
+
+    // the process is gone from here on; its submission still reaches the network
+    const second = await startServer({ state }, { restartOf: first });
+    stalled.release();
+    expect((await inFlight).status).toBe(200);
+
+    second.rpc.holding(user, PLENTY);
+    const settled = await second.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+  });
+
+  it("will not take another preparation while one from before the restart may still land", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const stalled = first.rpc.stallNext("sponsored preparation");
+    void first.post("/submit", { signedXdr: await preparedAndSigned(first, user) });
+    await stalled.reached;
+
+    const second = await startServer({ state }, { restartOf: first });
+    const again = await second.post("/submit", {
+      signedXdr: await preparedAndSigned(second, user),
+    });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already been submitted/);
+  });
+
+  it("takes a new preparation once the lost one can no longer land", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const stalled = first.rpc.stallNext("sponsored preparation");
+    void first.post("/submit", { signedXdr: await preparedAndSigned(first, user) });
+    await stalled.reached;
+
+    const second = await startServer({ state }, { restartOf: first });
+    // past the preparation's five-minute bound, well inside the settlement's day
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    const again = await second.post("/submit", {
+      signedXdr: await preparedAndSigned(second, user),
+    });
+    expect(again.status).toBe(200);
+  });
+});
+
+describe("with reserve funding set to self, the account pays its own reserve", () => {
+  async function selfFunded(): Promise<TestServer> {
+    return await startServer({ reserveFunding: "self" });
+  }
+
+  it("says which funding it runs on at /health", async () => {
+    const sponsorFunded = await startServer();
+    const own = await selfFunded();
+    const ask = async (server: TestServer) =>
+      (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect((await ask(sponsorFunded)).reserveFunding).toBe("sponsor");
+    expect((await ask(own)).reserveFunding).toBe("self");
+  });
+
+  it("declines an address that does not exist yet, with what it needs", async () => {
+    const server = await selfFunded();
+    const response = await server.post("/prepare", {
+      destination: Keypair.random().publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/does not exist/);
+    expect(response.body.error).toMatch(/1 XLM/);
+  });
+
+  it("builds a trustline the account opens and pays for itself, with no sponsorship in it", async () => {
+    const server = await selfFunded();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const response = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(response.status).toBe(200);
+    const tx = TransactionBuilder.fromXDR(
+      response.body.xdr as string,
+      network.passphrase,
+    ) as Transaction;
+    expect(tx.source).toBe(user.publicKey());
+    expect(tx.sequence).toBe("51");
+    expect(tx.operations.map((op) => op.type)).toEqual(["changeTrust"]);
+    const [op] = tx.operations as Operation.ChangeTrust[];
+    expect(op?.line.toString()).toBe(USDC.toString());
+  });
+
+  it("submits it as the user signed it, without a settlement and without the sponsor's signature", async () => {
+    const server = await selfFunded();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    const submitted = await server.post("/submit", {
+      signedXdr: signXdr(built.body.xdr as string, user),
+    });
+    expect(submitted.status).toBe(200);
+    const [sent] = server.rpc.submissions;
+    expect(sent?.label).toBe("self-funded preparation");
+    expect(signedBy(sent?.tx as Transaction, server.sponsor.publicKey())).toBe(false);
+  });
+
+  it("refuses one the account has not signed", async () => {
+    const server = await selfFunded();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    const submitted = await server.post("/submit", {
+      signedXdr: signXdr(built.body.xdr as string, Keypair.random()),
+    });
+    expect(submitted.status).toBe(400);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("declines before anyone signs when the account cannot spare the reserve", async () => {
+    const server = await selfFunded();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    // one subentry already: a minimum balance of 1.5 XLM, so 1.6 leaves 0.1 spare
+    server.rpc.nativeBalances.set(user.publicKey(), 16_000_000n);
+    const response = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/0\.5 XLM/);
+  });
+
+  it("does not take on a loan, so it builds no settlement", async () => {
+    const server = await selfFunded();
+    const response = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatch(/does not front/);
+  });
+
+  it("is not held to the daily caps, which bound the sponsor's money and none is spent", async () => {
+    const server = await startServer({
+      reserveFunding: "self",
+      caps: new CapLedger(new InMemoryCapStore(), {
+        strandingCapPerDay: 0,
+        volumeCapPerDay: { "expensive-gas": 0, "cheap-gas": 0 },
+      }),
+    });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const response = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("the sponsor pays for no delivery smaller than its minimum", () => {
+  const BURN = `0x${"cd".repeat(32)}`;
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+
+  function irisReturns(messageHex: string): void {
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ message: messageHex, attestation: ATTESTATION, status: "complete" }],
+          }),
+          { status: 200 },
+        ),
+    );
+  }
+
+  it("refuses to deliver a burn that mints less than the minimum, and pays nothing", async () => {
+    const server = await startServer({ buildDelivery, minDeliveryBaseUnits: 2_000_000n });
+    irisReturns(cctpMessage(Keypair.random().publicKey(), { amount: 1_999_999n }));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(400);
+    expect(response.body.retryable).toBe(false);
+    expect(response.body.error).toMatch(/2 USDC/);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("delivers one that mints exactly the minimum", async () => {
+    const server = await startServer({ buildDelivery, minDeliveryBaseUnits: 2_000_000n });
+    irisReturns(cctpMessage(Keypair.random().publicKey(), { amount: 2_000_000n }));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(200);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+
+  it("counts what is minted after Circle's fee, not what was burned", async () => {
+    const server = await startServer({ buildDelivery, minDeliveryBaseUnits: 2_000_000n });
+    irisReturns(cctpMessage(Keypair.random().publicKey(), { amount: 2_000_000n, feeExecuted: 1n }));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(400);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("refuses a message whose amount it cannot read", async () => {
+    const server = await startServer({ buildDelivery });
+    irisReturns(cctpMessage(Keypair.random().publicKey()).slice(0, 2 + 2 * 200));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(400);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("says its minimum at /health, in USDC base units", async () => {
+    const server = await startServer({ minDeliveryBaseUnits: 2_500_000n });
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect(health.minDeliveryBaseUnits).toBe("2500000");
+  });
+});
+
+describe("the sponsor limits how often one address may ask", () => {
+  it("answers 429 past the per-minute limit", async () => {
+    const server = await startServer({ rateLimitPerMinute: 3 });
+    const statuses: number[] = [];
+    for (let n = 0; n < 4; n += 1) statuses.push((await fetch(`${server.url}/health`)).status);
+    expect(statuses).toEqual([200, 200, 200, 429]);
+  });
+
+  it("limits every endpoint, not only the ones that spend", async () => {
+    const server = await startServer({ rateLimitPerMinute: 1 });
+    await fetch(`${server.url}/health`);
+    const response = await server.post("/settle", { destination: Keypair.random().publicKey() });
+    expect(response.status).toBe(429);
+    expect(response.body.retryable).toBe(true);
+  });
+
+  it("counts addresses behind a trusted proxy apart", async () => {
+    const server = await startServer({ rateLimitPerMinute: 1, trustProxy: true });
+    const from = (address: string) =>
+      fetch(`${server.url}/health`, { headers: { "x-forwarded-for": address } });
+    expect((await from("203.0.113.1")).status).toBe(200);
+    expect((await from("203.0.113.2")).status).toBe(200);
+    expect((await from("203.0.113.1")).status).toBe(429);
+  });
+
+  it("ignores the forwarded header when no proxy is trusted", async () => {
+    const server = await startServer({ rateLimitPerMinute: 1 });
+    const from = (address: string) =>
+      fetch(`${server.url}/health`, { headers: { "x-forwarded-for": address } });
+    expect((await from("203.0.113.1")).status).toBe(200);
+    expect((await from("203.0.113.2")).status).toBe(429);
   });
 });

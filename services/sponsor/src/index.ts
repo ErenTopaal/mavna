@@ -31,5 +31,6 @@ export type {
 export { HorizonSponsorshipView, reconcile } from "./reconcile.js";
 export type { SponsorServer, SponsorServerOptions } from "./server.js";
 export { createSponsorServer } from "./server.js";
+export { readAccountEntry, spareStroops } from "./spare.js";
 export type { DocumentStore } from "./state.js";
 export { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";

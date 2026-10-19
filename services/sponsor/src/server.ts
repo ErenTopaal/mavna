@@ -20,9 +20,11 @@ import {
   classifyAddress,
   inspectDestination,
   SubmitRejected,
+  stroopsToXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
 import {
+  Account,
   type Asset,
   Keypair,
   Operation,
@@ -30,14 +32,13 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
-import {
-  CapLedger,
-  classifySourceChain,
-  DEFAULT_CHEAP_GAS_CHAINS,
-  InMemoryCapStore,
-} from "./caps.js";
-import { ChannelPool } from "./channels.js";
+import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
+import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
+import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
+import { clientAddress, RequestLimiter } from "./ratelimit.js";
+import { readAccountEntry, spareStroops } from "./spare.js";
+import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
  * The small server the specification says must exist, and what it may not do.
@@ -99,10 +100,30 @@ export interface SponsorServerOptions {
    * otherwise leave the reserve unpaid until the settlement's time bound.
    */
   readonly settleSweepSeconds?: number;
+  /**
+   * Where held settlements, built transactions, channel keys and leases, and
+   * (unless `caps` is given) the cap counts are kept. In memory when omitted,
+   * which loses all of it on a restart; a deployment gives it a directory.
+   */
+  readonly state?: DocumentStore;
+  /** Who pays an arriving account's reserve. Defaults to the sponsor. */
+  readonly reserveFunding?: ReserveFunding;
+  /**
+   * The smallest CCTP mint, in USDC base units, this sponsor pays to deliver.
+   * Delivery is permissionless and costs the payer a fee whatever the amount,
+   * so without a floor a stream of dust burns spends the sponsor's XLM.
+   */
+  readonly minDeliveryBaseUnits?: bigint;
+  /** Requests per client address per minute. Zero or omitted means no limit. */
+  readonly rateLimitPerMinute?: number;
+  /** Take the client address from the last X-Forwarded-For entry. */
+  readonly trustProxy?: boolean;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
 export interface SponsorServer extends Server {
+  /** Resolves once stored state is loaded; rejects if it cannot be read. */
+  ready(): Promise<void>;
   /** Start sweeping on the configured interval. Does nothing when it is zero. */
   startSweep(): void;
   /** Stop sweeping. Resolves once a sweep already under way has finished. */
@@ -110,6 +131,16 @@ export interface SponsorServer extends Server {
 }
 
 const DEFAULT_SETTLE_SWEEP_SECONDS = 120;
+
+/** One USDC at Circle's six decimals. */
+const DEFAULT_MIN_DELIVERY_BASE_UNITS = 1_000_000n;
+
+/**
+ * The fee on a trustline an account opens for itself, in stroops. It pays it,
+ * so it is kept small; ten times the network minimum leaves room for ordinary
+ * surge pricing.
+ */
+const SELF_FUNDED_FEE_STROOPS = 1_000;
 
 /**
  * How long the sweep waits on one account. A settlement normally lands in a few
@@ -152,6 +183,53 @@ interface SettlementCommitBody {
   readonly signedXdr?: string;
 }
 
+/** A settlement the user signed, held until their money lands. */
+interface HeldSettlement {
+  xdr: string;
+  createdAtUnix: number;
+  sourceChainId: string;
+  channel: string | undefined;
+  maxTimeUnix: number;
+  /** What this settlement repays, which the preparation must match exactly. */
+  repays: Repayment;
+  /**
+   * Whether the preparation this settlement repays has landed. Until it
+   * has, the revokes have nothing to revoke and the settlement can only
+   * fail, which would count as a stranding and drop it.
+   */
+  prepared: boolean;
+  /**
+   * Whether a preparation against this settlement is being submitted by
+   * this process. It is matched to what this settlement repays before it
+   * goes out, so the settlement cannot be swapped while it is on its way.
+   */
+  preparing: boolean;
+  /**
+   * The preparation sent against this settlement whose outcome is not yet
+   * known, written down before it is sent. After a restart it is looked up
+   * by hash before anything else is prepared or settled for the account.
+   */
+  preparation: { hash: string; expiresAtUnix: number } | undefined;
+}
+
+/** Held settlements and recent repayments, as written to the state store. */
+interface HeldDocument {
+  readonly held: Record<string, Omit<HeldSettlement, "preparing">>;
+  readonly settled: Record<string, { txHash: string; untilUnix: number }>;
+}
+
+/** The channel pool as written down, with a key whose funding is unconfirmed. */
+interface ChannelDocument extends ChannelPoolSnapshot {
+  readonly pending?: string;
+}
+
+/**
+ * How long past a preparation's time bound before it is taken as never
+ * landing. The bound is inclusive on the network and this clock is not the
+ * ledger's.
+ */
+const PREPARATION_GRACE_SECONDS = 30;
+
 /** One JSON answer shape, so callers never parse two formats. */
 const reply = (
   res: ServerResponse,
@@ -175,7 +253,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     );
   }
   const keypair = Keypair.fromSecret(options.sponsorSecret);
-  const caps = options.caps ?? new CapLedger(new InMemoryCapStore());
+  const state = options.state ?? new MemoryDocumentStore();
+  const caps = options.caps ?? new CapLedger(new DocumentCapStore(state));
+  const reserveFunding: ReserveFunding = options.reserveFunding ?? "sponsor";
+  const minDelivery = options.minDeliveryBaseUnits ?? DEFAULT_MIN_DELIVERY_BASE_UNITS;
+  if (minDelivery < 0n) {
+    throw new Error(`The minimum delivery cannot be negative; got ${minDelivery}.`);
+  }
+  const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
   const deliverer = new Deliverer({
     rpc: options.rpc,
     network: options.network,
@@ -186,36 +271,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
   /**
    * Settlements collected before any capital moved, waiting for delivery.
-   *
-   * Held in memory, which is the honest scope of this deployment: a settlement
-   * that dies with the process leaves the user's funds untouched and the
-   * sponsor still sponsoring, which is the recoverable direction. The doc's
-   * §6.1 loss needs the bridge to fail, not us.
+   * Written to the state store on every change, so a restart neither forgets
+   * a loan it is owed nor lets a second preparation in against one.
    */
-  const heldSettlements = new Map<
-    string,
-    {
-      xdr: string;
-      createdAtUnix: number;
-      sourceChainId: string;
-      channel: string | undefined;
-      maxTimeUnix: number;
-      /** What this settlement repays, which the preparation must match exactly. */
-      repays: Repayment;
-      /**
-       * Whether the preparation this settlement repays has landed. Until it
-       * has, the revokes have nothing to revoke and the settlement can only
-       * fail, which would count as a stranding and drop it.
-       */
-      prepared: boolean;
-      /**
-       * Whether a preparation against this settlement is being submitted. It
-       * is matched to what this settlement repays before it goes out, so the
-       * settlement cannot be swapped while it is on its way.
-       */
-      preparing: boolean;
-    }
-  >();
+  const heldSettlements = new Map<string, HeldSettlement>();
 
   /**
    * When each account last had a settlement asked for through /settle. Entries
@@ -263,22 +322,109 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * reserve went out and nothing will repay it. That is also the cheapest way
    * to cause one, by preparing and never sending, so the brake must see it.
    */
-  async function liveSettlement(destination: string) {
+  async function liveSettlement(destination: string): Promise<HeldSettlement | undefined> {
     const held = heldSettlements.get(destination);
     if (held === undefined) return undefined;
+    if (held.preparation !== undefined && !held.preparing) {
+      await resolvePreparation(destination, held);
+    }
+    if (heldSettlements.get(destination) !== held) return heldSettlements.get(destination);
     if (held.maxTimeUnix <= nowUnix()) {
       heldSettlements.delete(destination);
+      await persist();
       if (held.prepared) await caps.recordStranded();
       return undefined;
     }
     return held;
+  }
+
+  /**
+   * Settle what became of a preparation sent before a restart, or whose answer
+   * never came. Landed means prepared. Gone for good, either failed or past its
+   * own time bound, means another may be sent. Anything else stays marked, so
+   * nothing is prepared against the settlement twice. A lookup that fails
+   * leaves it marked as well; the next touch asks again.
+   */
+  async function resolvePreparation(destination: string, held: HeldSettlement): Promise<void> {
+    const sent = held.preparation;
+    if (sent === undefined) return;
+    let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+    try {
+      found = await options.rpc.findTransaction(sent.hash);
+    } catch (cause) {
+      console.error(
+        `[sponsor] could not look up the preparation sent for ${destination}:`,
+        cause instanceof Error ? cause.message : cause,
+      );
+      return;
+    }
+    if (heldSettlements.get(destination) !== held || held.preparation !== sent) return;
+    if (found.status === "SUCCESS") {
+      held.prepared = true;
+      held.preparation = undefined;
+      await persist();
+      return;
+    }
+    if (found.status === "FAILED" || sent.expiresAtUnix + PREPARATION_GRACE_SECONDS < nowUnix()) {
+      held.preparation = undefined;
+      await persist();
+    }
+  }
+
+  /** What is written down, read back. Runs once, before the first request. */
+  async function load(): Promise<void> {
+    const now = nowUnix();
+    const builtDocument = (await state.read("built")) as readonly BuiltRecord[] | undefined;
+    if (builtDocument !== undefined) built = BuiltLedger.fromSnapshot(builtDocument, now);
+
+    const heldDocument = (await state.read("held")) as HeldDocument | undefined;
+    for (const [destination, held] of Object.entries(heldDocument?.held ?? {})) {
+      heldSettlements.set(destination, { ...held, preparing: false });
+    }
+    for (const [destination, record] of Object.entries(heldDocument?.settled ?? {})) {
+      recentlySettled.set(destination, record);
+    }
+
+    const channelDocument = (await state.read("channels")) as ChannelDocument | undefined;
+    if (channelDocument === undefined) return;
+    if (channels !== undefined) {
+      channels.restoreLeases(channelDocument.leases, now);
+    } else if (channelDocument.secrets.length > 0) {
+      channels = ChannelPool.fromSnapshot(channelDocument, now);
+    }
+    if (channels === undefined && channelDocument.pending !== undefined) {
+      pendingChannel = Keypair.fromSecret(channelDocument.pending);
+    }
+  }
+
+  /**
+   * Write everything a restart must not lose. Called before any answer that
+   * depends on it and before any submission whose outcome it must survive.
+   */
+  function persist(): Promise<void> {
+    pruneSettled();
+    const held: Record<string, Omit<HeldSettlement, "preparing">> = {};
+    for (const [destination, { preparing: _transient, ...kept }] of heldSettlements) {
+      held[destination] = kept;
+    }
+    const pool: ChannelPoolSnapshot = channels?.snapshot() ?? { secrets: [], leases: [] };
+    const channelDocument: ChannelDocument =
+      pendingChannel === undefined ? pool : { ...pool, pending: pendingChannel.secret() };
+    return Promise.all([
+      state.write("built", built.snapshot()),
+      state.write("held", {
+        held,
+        settled: Object.fromEntries(recentlySettled),
+      } satisfies HeldDocument),
+      state.write("channels", channelDocument),
+    ]).then(() => undefined);
   }
   /**
    * What this server built and has not yet seen signed. The funded key signs
    * nothing whose hash is not in here, because a signature check on a body the
    * caller chose proves only that the caller can sign.
    */
-  const built = new BuiltLedger();
+  let built = new BuiltLedger();
   const expected = expectedMessageFields(options.networkId);
   /** Circle domains this network routes into Stellar from, and nothing else. */
   const sourceDomains = new Set(
@@ -288,6 +434,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     ].map((chain) => chain.domain),
   );
   let channels = options.channels;
+  /** A channel key written down whose funding has not been seen to land. */
+  let pendingChannel: Keypair | undefined;
   const prices =
     options.prices ??
     new XlmPriceSource({
@@ -323,7 +471,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   async function fundChannel(): Promise<ChannelPool> {
-    const channel = Keypair.random();
+    // Written down before any XLM goes to it, so a crash mid-funding leaves a
+    // key that is funded again, or found funded, rather than an account
+    // nobody can sign for.
+    const channel = pendingChannel ?? Keypair.random();
+    pendingChannel = channel;
+    await persist();
+    if (!(await accountExists(options.rpc, channel.publicKey()))) {
+      await submitChannelFunding(channel);
+    }
+    const pool = new ChannelPool({ channels: [channel] });
+    channels = pool;
+    pendingChannel = undefined;
+    await persist();
+    return pool;
+  }
+
+  async function submitChannelFunding(channel: Keypair): Promise<void> {
     const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
     const create = new TransactionBuilder(sponsorAccount, {
       fee: "1000000",
@@ -336,7 +500,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       .build();
     create.sign(keypair);
     await options.rpc.submit("channel funding", async () => create);
-    return new ChannelPool({ channels: [channel] });
   }
 
   /**
@@ -345,16 +508,39 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * a settlement held a moment later makes the same body acceptable, and a
    * stranger who replays someone's transaction should not be able to burn it.
    */
-  function refuse(
+  async function refuse(
     record: BuiltRecord,
     res: ServerResponse,
     origin: string | undefined,
     status: number,
     error: string,
     retryable = false,
-  ): void {
+  ): Promise<void> {
     built.record(record, nowUnix());
-    reply(res, status, { error, retryable }, origin);
+    await answer(res, status, { error, retryable }, origin);
+  }
+
+  /**
+   * Answer once what the answer depends on is written down. A write that
+   * fails is the operator's to hear about, not the caller's: what happened on
+   * the network happened, and saying otherwise invites a retry of something
+   * that worked.
+   */
+  async function answer(
+    res: ServerResponse,
+    status: number,
+    body: Record<string, unknown>,
+    origin: string | undefined,
+  ): Promise<void> {
+    try {
+      await persist();
+    } catch (cause) {
+      console.error(
+        "[sponsor] could not write state before answering:",
+        cause instanceof Error ? cause.message : cause,
+      );
+    }
+    reply(res, status, body, origin);
   }
 
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
@@ -414,6 +600,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return origin !== undefined && options.allowedOrigins.includes(origin) ? origin : undefined;
   };
 
+  // Started here, once everything it fills in exists. A failure is kept for
+  // ready() and for every request, and logged now so it is never silent.
+  const loaded = load();
+  loaded.catch((cause: unknown) => {
+    console.error(
+      "[sponsor] could not read stored state:",
+      cause instanceof Error ? cause.message : cause,
+    );
+  });
+
   const server = createServer((req, res) => {
     void handle(req, res).catch((cause: unknown) => {
       if (cause instanceof RequestError) {
@@ -434,7 +630,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   server.on("close", () => {
     void stopSweep();
   });
-  return Object.assign(server, { startSweep, stopSweep });
+  return Object.assign(server, { startSweep, stopSweep, ready: () => loaded });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = corsOrigin(req);
@@ -450,11 +646,36 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
+    const client = clientAddress(
+      req.socket.remoteAddress,
+      req.headers["x-forwarded-for"],
+      options.trustProxy === true,
+    );
+    if (!limiter.allow(client, Date.now())) {
+      reply(
+        res,
+        429,
+        { error: "Too many requests from this address. Try again in a minute.", retryable: true },
+        origin,
+      );
+      return;
+    }
+
+    await loaded;
+
     if (req.method === "GET" && url.pathname === "/health") {
       reply(
         res,
         200,
-        { ok: true, network: options.networkId, sponsor: keypair.publicKey() },
+        {
+          ok: true,
+          network: options.networkId,
+          sponsor: keypair.publicKey(),
+          // What a client needs to quote honestly: whether a new account can
+          // be served at all, and the smallest Circle transfer delivered.
+          reserveFunding,
+          minDeliveryBaseUnits: minDelivery.toString(),
+        },
         origin,
       );
       return;
@@ -502,16 +723,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     origin: string | undefined,
   ): Promise<void> {
     if (body.destination === undefined) {
-      reply(res, 400, { error: "Say which account to prepare.", retryable: false }, origin);
+      await answer(res, 400, { error: "Say which account to prepare.", retryable: false }, origin);
       return;
     }
 
-    const decision = await caps.check(
-      classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
-    );
-    if (!decision.allowed) {
-      reply(res, 429, { error: decision.reason, retryable: true }, origin);
-      return;
+    // The caps bound the sponsor's money, and an account paying for itself
+    // spends none of it.
+    if (reserveFunding === "sponsor") {
+      const decision = await caps.check(
+        classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
+      );
+      if (!decision.allowed) {
+        await answer(res, 429, { error: decision.reason, retryable: true }, origin);
+        return;
+      }
     }
 
     const names = body.assets ?? ["USDC"];
@@ -519,7 +744,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (assets.some((asset) => asset === undefined)) {
       // By name from the curated list, never by issuer from the wire: sponsoring
       // a trustline to an imitation asset is paying to phish our own users.
-      reply(
+      await answer(
         res,
         400,
         { error: "This sponsor only prepares accounts for assets it curates.", retryable: false },
@@ -530,7 +755,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The settlement repays one USDC trustline, so any other set is a
     // preparation /submit would refuse after the user had already signed it.
     if (names.length !== 1 || names[0] !== "USDC") {
-      reply(
+      await answer(
         res,
         400,
         {
@@ -546,7 +771,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     try {
       classified = classifyAddress(body.destination);
     } catch {
-      reply(
+      await answer(
         res,
         400,
         { error: "That is not an address a Stellar account can use.", retryable: false },
@@ -555,12 +780,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     if (!classified.needsTrustline) {
-      reply(
+      await answer(
         res,
         400,
         { error: "That address can already receive; nothing to prepare.", retryable: false },
         origin,
       );
+      return;
+    }
+    if (reserveFunding === "self") {
+      await prepareSelfFunded(body.destination, body.sourceChainId, assets as Asset[], res, origin);
       return;
     }
     const created = !(await accountExists(
@@ -588,7 +817,159 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       nowUnix(),
     );
 
-    reply(res, 200, { xdr: transaction.toXDR(), sponsor: keypair.publicKey() }, origin);
+    await answer(res, 200, { xdr: transaction.toXDR(), sponsor: keypair.publicKey() }, origin);
+  }
+
+  /**
+   * The preparation for an account that pays its own reserve: a trustline it
+   * opens from its own XLM, sourced to it and paid by it, with nothing of the
+   * sponsor's in it. There is no loan, so there is no settlement.
+   *
+   * Refused before anyone signs when it cannot work: an account that does not
+   * exist cannot pay for anything, and one without the spare XLM would sign a
+   * transaction the network then refuses.
+   */
+  async function prepareSelfFunded(
+    destination: string,
+    sourceChainId: string | undefined,
+    assets: readonly Asset[],
+    res: ServerResponse,
+    origin: string | undefined,
+  ): Promise<void> {
+    const holder = signerFor(destination);
+    const base = BigInt(options.network.baseReserveStroops);
+    const entry = await readAccountEntry(options.rpc, holder);
+    if (entry === undefined) {
+      await answer(
+        res,
+        400,
+        {
+          error:
+            "That Stellar account does not exist yet, and this service does not front " +
+            `reserves. It needs at least ${stroopsToXlm(2n * base)} XLM sent to it to exist, ` +
+            `and ${stroopsToXlm(base)} XLM more to hold USDC, before it can receive this.`,
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
+    const needed = base * BigInt(assets.length) + BigInt(SELF_FUNDED_FEE_STROOPS);
+    const spare = spareStroops(entry, options.network.baseReserveStroops);
+    if (spare < needed) {
+      await answer(
+        res,
+        400,
+        {
+          error:
+            `Holding USDC locks ${stroopsToXlm(base * BigInt(assets.length))} XLM in this ` +
+            `account, plus a fee of ${stroopsToXlm(BigInt(SELF_FUNDED_FEE_STROOPS))} XLM, and it ` +
+            `has ${stroopsToXlm(spare > 0n ? spare : 0n)} XLM to spare. Add XLM to it, then try again.`,
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
+
+    const builder = new TransactionBuilder(new Account(holder, entry.seqNum().toString()), {
+      fee: String(SELF_FUNDED_FEE_STROOPS),
+      networkPassphrase: options.network.passphrase,
+    });
+    for (const asset of assets) builder.addOperation(Operation.changeTrust({ asset }));
+    const transaction = builder.setTimeout(300).build();
+    built.record(
+      {
+        hash: transaction.hash().toString("hex"),
+        kind: "preparation",
+        destination,
+        signer: holder,
+        sourceChainId: sourceChainId ?? "unknown",
+        expiresAtUnix: expiryOf(transaction),
+        selfFunded: true,
+      },
+      nowUnix(),
+    );
+    await answer(res, 200, { xdr: transaction.toXDR(), selfFunded: true }, origin);
+  }
+
+  /**
+   * Submit a trustline the account signed and pays for. Nothing here signs:
+   * the sponsor only checks it is the transaction it built and passes it on.
+   */
+  async function submitSelfFunded(
+    transaction: Transaction,
+    res: ServerResponse,
+    origin: string | undefined,
+  ): Promise<void> {
+    if (transaction.operations.some((op) => op.type !== "changeTrust")) {
+      await answer(
+        res,
+        400,
+        { error: "That transaction does more than open a trustline.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    const record = built.take(transaction.hash().toString("hex"), "preparation", nowUnix());
+    if (record === undefined || record.selfFunded !== true) {
+      if (record !== undefined) built.record(record, nowUnix());
+      await answer(
+        res,
+        409,
+        {
+          error: "That preparation was not built here, or has expired. Ask for a new one.",
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
+    if (transaction.source !== record.signer || !signedBy(transaction, record.signer)) {
+      await refuse(
+        record,
+        res,
+        origin,
+        400,
+        "That preparation is not signed by the account it is for.",
+      );
+      return;
+    }
+    let result: Awaited<ReturnType<RpcClient["submit"]>>;
+    try {
+      result = await options.rpc.submit("self-funded preparation", async () => transaction, {
+        presigned: true,
+      });
+    } catch (cause) {
+      const retryable = cause instanceof MavnaError ? cause.retryable : true;
+      console.error(
+        "[sponsor] a self-funded preparation was not accepted:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      await answer(
+        res,
+        502,
+        { error: "The preparation could not be submitted.", retryable },
+        origin,
+      );
+      return;
+    }
+    await answer(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
+  }
+
+  /** Refuse the settlement endpoints when there is no loan to settle. */
+  async function noLoans(res: ServerResponse, origin: string | undefined): Promise<void> {
+    await answer(
+      res,
+      409,
+      {
+        error:
+          "This sponsor does not front reserves right now: an account pays its own, so " +
+          "there is no repayment to sign.",
+        retryable: false,
+      },
+      origin,
+    );
   }
 
   /**
@@ -606,14 +987,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     origin: string | undefined,
   ): Promise<void> {
     if (body.destination === undefined) {
-      reply(res, 400, { error: "Say which account will settle.", retryable: false }, origin);
+      await answer(res, 400, { error: "Say which account will settle.", retryable: false }, origin);
+      return;
+    }
+    if (reserveFunding === "self") {
+      await noLoans(res, origin);
       return;
     }
     // A settlement being submitted may already have spent its channel's
     // sequence. Building now would put this one on the next sequence, which is
     // the next user's once the channel is released.
     if (settling.has(body.destination)) {
-      reply(
+      await answer(
         res,
         409,
         {
@@ -628,13 +1013,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
     );
     if (!decision.allowed) {
-      reply(res, 429, { error: decision.reason, retryable: true }, origin);
+      await answer(res, 429, { error: decision.reason, retryable: true }, origin);
       return;
     }
 
     const usdc = options.curatedAssets.USDC;
     if (usdc === undefined) {
-      reply(
+      await answer(
         res,
         500,
         { error: "This sponsor curates no settling asset.", retryable: false },
@@ -647,11 +1032,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     try {
       classified = classifyAddress(body.destination);
     } catch {
-      reply(res, 400, { error: "That is not a usable Stellar address.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "That is not a usable Stellar address.", retryable: false },
+        origin,
+      );
       return;
     }
     if (!classified.needsTrustline) {
-      reply(res, 400, { error: "That address needs no settling.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "That address needs no settling.", retryable: false },
+        origin,
+      );
       return;
     }
     const createdAccount = !(await accountExists(
@@ -666,7 +1061,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // and a day-long lease per request would let one caller take every slot.
     const channel = pool.acquire(body.destination, now + PROVISIONAL_LEASE_SECONDS, now);
     if (channel === undefined) {
-      reply(
+      await answer(
         res,
         503,
         { error: "Every settlement slot is in use. Try again shortly.", retryable: true },
@@ -711,7 +1106,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       nowUnix(),
     );
 
-    reply(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
+    await answer(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
   }
 
   /**
@@ -729,12 +1124,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     origin: string | undefined,
   ): Promise<void> {
     if (body.signedXdr === undefined) {
-      reply(res, 400, { error: "Send the signed settlement.", retryable: false }, origin);
+      await answer(res, 400, { error: "Send the signed settlement.", retryable: false }, origin);
+      return;
+    }
+    if (reserveFunding === "self") {
+      await noLoans(res, origin);
       return;
     }
     const transaction = parseTransaction(body.signedXdr, options.network.passphrase);
     if ("innerTransaction" in transaction) {
-      reply(res, 400, { error: "Fee bumps are not accepted here.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "Fee bumps are not accepted here.", retryable: false },
+        origin,
+      );
       return;
     }
     const allowed = new Set([
@@ -744,7 +1148,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       "revokeSponsorship",
     ]);
     if (transaction.operations.some((op) => !allowed.has(op.type))) {
-      reply(
+      await answer(
         res,
         400,
         { error: "That transaction does more than settle.", retryable: false },
@@ -755,7 +1159,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     const record = built.take(transaction.hash().toString("hex"), "settlement", nowUnix());
     if (record === undefined) {
-      reply(
+      await answer(
         res,
         409,
         {
@@ -767,11 +1171,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     if (body.destination !== undefined && body.destination !== record.destination) {
-      refuse(record, res, origin, 400, "That settlement was built for a different account.");
+      await refuse(record, res, origin, 400, "That settlement was built for a different account.");
       return;
     }
     if (!signedBy(transaction, record.signer)) {
-      refuse(record, res, origin, 400, "That settlement is not signed by the account it is for.");
+      await refuse(
+        record,
+        res,
+        origin,
+        400,
+        "That settlement is not signed by the account it is for.",
+      );
       return;
     }
 
@@ -779,7 +1189,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // repaid by a cheaper settlement than the one it was made against.
     const current = await liveSettlement(record.destination);
     if (current?.prepared === true) {
-      refuse(
+      await refuse(
         record,
         res,
         origin,
@@ -788,8 +1198,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    if (current?.preparing === true) {
-      refuse(
+    if (current !== undefined && (current.preparing || current.preparation !== undefined)) {
+      await refuse(
         record,
         res,
         origin,
@@ -812,7 +1222,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       record.channel === undefined ||
       !pool.extend(record.destination, record.channel, record.expiresAtUnix, nowUnix())
     ) {
-      reply(
+      await answer(
         res,
         409,
         {
@@ -833,8 +1243,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       repays: record.repays,
       prepared: false,
       preparing: false,
+      preparation: undefined,
     });
-    reply(res, 200, { held: true }, origin);
+    await answer(res, 200, { held: true }, origin);
   }
 
   /**
@@ -857,7 +1268,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const release = (): void => {
       if (settling.get(destination) === claim) settling.delete(destination);
     };
-    const work = settleHeld(destination).finally(release);
+    // Written down as soon as it is known, because the sweep has no answer to
+    // write it before and a landed repayment must not be retried after a restart.
+    const work = settleHeld(destination)
+      .then(async (outcome) => {
+        try {
+          await persist();
+        } catch (cause) {
+          console.error(
+            `[sponsor] could not write state after settling for ${destination}:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+        }
+        return outcome;
+      })
+      .finally(release);
     if (deadlineMs === undefined) return work;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1028,19 +1453,33 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     origin: string | undefined,
   ): Promise<void> {
     if (body.signedXdr === undefined) {
-      reply(res, 400, { error: "Send the signed transaction back.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "Send the signed transaction back.", retryable: false },
+        origin,
+      );
       return;
     }
 
     const transaction = parseTransaction(body.signedXdr, options.network.passphrase);
     if ("innerTransaction" in transaction) {
-      reply(res, 400, { error: "Fee bumps are not accepted here.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "Fee bumps are not accepted here.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    if (reserveFunding === "self") {
+      await submitSelfFunded(transaction, res, origin);
       return;
     }
     // Defence in depth only. The ledger below is what decides: a body the
     // sponsor did not build is refused however plausible its operations look.
     if (transaction.source !== keypair.publicKey()) {
-      reply(
+      await answer(
         res,
         400,
         { error: "That is not a transaction this sponsor built.", retryable: false },
@@ -1055,7 +1494,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       "changeTrust",
     ]);
     if (transaction.operations.some((op) => !allowed.has(op.type))) {
-      reply(
+      await answer(
         res,
         400,
         { error: "That transaction does more than prepare an account.", retryable: false },
@@ -1068,7 +1507,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // a second signature.
     const record = built.take(transaction.hash().toString("hex"), "preparation", nowUnix());
     if (record === undefined) {
-      reply(
+      await answer(
         res,
         409,
         {
@@ -1083,7 +1522,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // Before the held check, so a body anyone could copy cannot be used to ask
     // whether a given account is mid-transfer.
     if (!signedBy(transaction, record.signer)) {
-      refuse(record, res, origin, 400, "That preparation is not signed by the account it is for.");
+      await refuse(
+        record,
+        res,
+        origin,
+        400,
+        "That preparation is not signed by the account it is for.",
+      );
       return;
     }
 
@@ -1092,7 +1537,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // the model the cost decision explicitly rejected.
     const held = await liveSettlement(record.destination);
     if (held === undefined) {
-      refuse(
+      await refuse(
         record,
         res,
         origin,
@@ -1106,7 +1551,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // change in between, so the preparation is held to what the settlement
     // revokes rather than to what was true when each was built.
     if (!sameRepayment(sponsoredBy(transaction), held.repays)) {
-      refuse(
+      await refuse(
         record,
         res,
         origin,
@@ -1118,8 +1563,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // One settlement repays one preparation. A second in flight would clear the
     // mark below when it fails while the first is still out, and a second after
     // the first landed has nothing left to repay it.
-    if (held.preparing || held.prepared) {
-      refuse(
+    if (held.preparing || held.preparation !== undefined || held.prepared) {
+      await refuse(
         record,
         res,
         origin,
@@ -1136,16 +1581,34 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     try {
       const decision = await caps.check(source);
       if (!decision.allowed) {
-        refuse(record, res, origin, 429, decision.reason, true);
+        await refuse(record, res, origin, 429, decision.reason, true);
         return;
       }
 
       transaction.sign(keypair);
+      // Written down before it is sent, so a restart mid-flight looks this
+      // preparation up by hash instead of letting another in beside it.
+      const sent = { hash: record.hash, expiresAtUnix: record.expiresAtUnix };
+      held.preparation = sent;
+      try {
+        await persist();
+      } catch (cause) {
+        held.preparation = undefined;
+        throw cause;
+      }
       try {
         result = await options.rpc.submit("sponsored preparation", async () => transaction);
       } catch (cause) {
         const retryable = cause instanceof MavnaError ? cause.retryable : true;
-        reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
+        // A refusal is final. Anything else (a timeout, an answer that never
+        // came) may still land, so the mark stays and the next touch looks it up.
+        if (!retryable && held.preparation === sent) held.preparation = undefined;
+        await answer(
+          res,
+          502,
+          { error: "The preparation could not be submitted.", retryable },
+          origin,
+        );
         return;
       }
     } finally {
@@ -1153,6 +1616,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (heldSettlements.get(record.destination) === held) {
       held.prepared = true;
+      held.preparation = undefined;
     } else {
       // Dropped as expired while the preparation was out, before it was marked
       // prepared, so nothing counted it. The reserve is out and unrepaid.
@@ -1179,7 +1643,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         cause instanceof Error ? cause.message : cause,
       );
     }
-    reply(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
+    await answer(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
   }
 
   /**
@@ -1198,7 +1662,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   ): Promise<void> {
     const destination = body.destination;
     if (typeof destination !== "string" || !settlesOnStellar(destination)) {
-      reply(res, 400, { error: "That is not a usable Stellar address.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "That is not a usable Stellar address.", retryable: false },
+        origin,
+      );
       return;
     }
 
@@ -1207,10 +1676,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if ((await liveSettlement(destination)) === undefined) {
       const settledHash = settledRecently(destination);
       if (settledHash !== undefined) {
-        reply(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
+        await answer(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
         return;
       }
-      reply(
+      await answer(
         res,
         404,
         { error: "No settlement is held for that account.", retryable: false },
@@ -1224,7 +1693,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       if (at + SETTLE_INTERVAL_SECONDS <= now) lastSettleCall.delete(account);
     }
     if (lastSettleCall.has(destination)) {
-      reply(
+      await answer(
         res,
         429,
         { error: "That account was asked about moments ago. Try again shortly.", retryable: true },
@@ -1234,7 +1703,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     lastSettleCall.set(destination, now);
 
-    reply(res, 200, await settleIfHeld(destination), origin);
+    await answer(res, 200, await settleIfHeld(destination), origin);
   }
 
   /** Trigger the mint for an attested burn. Idempotent; retrying is always safe. */
@@ -1247,12 +1716,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       typeof body.txHash !== "string" ||
       !TX_HASH.some((form) => form.test(body.txHash as string))
     ) {
-      reply(res, 400, { error: "Say which transaction to deliver.", retryable: false }, origin);
+      await answer(
+        res,
+        400,
+        { error: "Say which transaction to deliver.", retryable: false },
+        origin,
+      );
       return;
     }
     const domain = body.domain;
     if (typeof domain !== "number" || !sourceDomains.has(domain)) {
-      reply(
+      await answer(
         res,
         400,
         { error: "That is not a chain this sponsor delivers from.", retryable: false },
@@ -1261,8 +1735,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const unavailable = (): void =>
-      reply(
+    const unavailable = (): Promise<void> =>
+      answer(
         res,
         502,
         { error: "Circle's attestation service did not answer usefully.", retryable: true },
@@ -1279,11 +1753,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         "[sponsor] iris could not be reached:",
         cause instanceof Error ? cause.message : cause,
       );
-      unavailable();
+      await unavailable();
       return;
     }
     if (iris.status === 404) {
-      reply(
+      await answer(
         res,
         404,
         { error: "Circle has no attested record of that transaction yet.", retryable: true },
@@ -1293,7 +1767,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (!iris.ok) {
       console.error("[sponsor] iris answered", iris.status);
-      unavailable();
+      await unavailable();
       return;
     }
     let parsed: { messages?: readonly { message?: string; attestation?: string }[] };
@@ -1301,18 +1775,42 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       parsed = (await iris.json()) as typeof parsed;
     } catch (cause) {
       console.error("[sponsor] iris answered with something that is not JSON", cause);
-      unavailable();
+      await unavailable();
       return;
     }
     const message = parsed?.messages?.[0];
     if (typeof message?.message !== "string" || typeof message.attestation !== "string") {
-      reply(
+      await answer(
         res,
         404,
         { error: "Circle has no attested record of that transaction yet.", retryable: true },
         origin,
       );
       return;
+    }
+
+    // Paying to deliver dust is how a stream of tiny burns spends the
+    // sponsor's XLM, so below the floor nothing is paid. An attested message
+    // whose amount cannot be read is refused the same way: this is the one
+    // place the sponsor spends on a stranger's say-so.
+    if (message.attestation !== "PENDING") {
+      const minted = mintedAmount(message.message);
+      if (minted === undefined || minted < minDelivery) {
+        await answer(
+          res,
+          400,
+          {
+            error:
+              minted === undefined
+                ? "Circle's record of that transfer has no amount this sponsor can read, so it will not pay to deliver it."
+                : `This sponsor delivers Circle transfers of at least ${usdcText(minDelivery)} USDC, ` +
+                  `and this one mints ${usdcText(minted)} USDC.`,
+            retryable: false,
+          },
+          origin,
+        );
+        return;
+      }
     }
 
     const outcome: DeliveryOutcome = await deliverer.deliver({
@@ -1332,7 +1830,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         ? await settleIfHeld(recipient)
         : {};
 
-    reply(
+    await answer(
       res,
       outcome.kind === "recipient-not-ready" ? 409 : 200,
       { ...outcome, ...settled },
@@ -1513,6 +2011,37 @@ function attestedRecipient(
     );
     return undefined;
   }
+}
+
+/** Where the amount and the fee Circle took sit in a v2 burn body. */
+const BURN_AMOUNT_INDEX = 68;
+const BURN_FEE_EXECUTED_INDEX = 164;
+
+/**
+ * What a burn mints on Stellar, in the source token's base units: the amount
+ * burned less the fee Circle executed, both from the attested burn body.
+ * Undefined when the message is too short to be a v2 burn or the fee exceeds
+ * the amount.
+ */
+function mintedAmount(messageHex: string): bigint | undefined {
+  let message: Uint8Array;
+  try {
+    message = fromHex(messageHex);
+  } catch {
+    return undefined;
+  }
+  if (message.length < MESSAGE_BODY_INDEX + HOOK_DATA_INDEX) return undefined;
+  const uint = (at: number): bigint =>
+    BigInt(`0x${Buffer.from(message.subarray(at, at + 32)).toString("hex")}`);
+  const amount = uint(MESSAGE_BODY_INDEX + BURN_AMOUNT_INDEX);
+  const fee = uint(MESSAGE_BODY_INDEX + BURN_FEE_EXECUTED_INDEX);
+  return fee > amount ? undefined : amount - fee;
+}
+
+/** USDC base units at six decimals, as a person reads them. */
+function usdcText(baseUnits: bigint): string {
+  const fraction = (baseUnits % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return fraction === "" ? `${baseUnits / 1_000_000n}` : `${baseUnits / 1_000_000n}.${fraction}`;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
