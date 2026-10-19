@@ -37,7 +37,7 @@ const KIND_ACCOUNT = 0;
 const KIND_CONTRACT = 1;
 
 /** What the endpoint leaves in a compose slot once it has been run. */
-export const COMPOSE_RECEIVED = `0x${"00".repeat(31)}01`;
+export const COMPOSE_RECEIVED: `0x${string}` = `0x${"00".repeat(31)}01`;
 
 const hex = (bytes: Uint8Array): `0x${string}` => `0x${Buffer.from(bytes).toString("hex")}`;
 

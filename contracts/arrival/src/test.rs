@@ -233,6 +233,15 @@ fn open_account(env: &Env, address: &Address) {
 }
 
 fn trust(env: &Env, address: &Address, asset: &xdr::Asset) {
+    trust_with(
+        env,
+        address,
+        asset,
+        xdr::TrustLineFlags::AuthorizedFlag as u32,
+    );
+}
+
+fn trust_with(env: &Env, address: &Address, asset: &xdr::Asset, flags: u32) {
     let id = account_id(address);
     let asset = match asset.clone() {
         xdr::Asset::Native => xdr::TrustLineAsset::Native,
@@ -250,7 +259,7 @@ fn trust(env: &Env, address: &Address, asset: &xdr::Asset) {
             asset,
             balance: 0,
             limit: i64::MAX,
-            flags: xdr::TrustLineFlags::AuthorizedFlag as u32,
+            flags,
             ext: xdr::TrustLineEntryExt::V0,
         }),
     );
@@ -578,6 +587,25 @@ fn delivers_as_it_came_when_the_venue_refuses_after_an_estimate_that_cleared_the
 
     assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
     assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.token(&w.usdt0).balance(&w.venue), 0);
+    assert_eq!(w.held(), (0, 0));
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+}
+
+#[test]
+fn delivers_as_it_came_when_the_issuer_has_not_authorised_the_recipient() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    // the trustline exists, so a balance read works, but a transfer into it fails
+    trust_with(&w.env, &recipient, &w.usdc_asset, 0);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
     assert_eq!(w.token(&w.usdt0).balance(&w.venue), 0);
     assert_eq!(w.held(), (0, 0));
     assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));

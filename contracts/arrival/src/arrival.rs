@@ -4,7 +4,11 @@
 //! came from and what the user signed, then hands over an `Arrival`. Another rail
 //! can be added later as another entry point without touching anything here.
 
-use soroban_sdk::{panic_with_error, token::TokenClient, Address, BytesN, Env, Symbol};
+use soroban_sdk::{
+    panic_with_error,
+    token::{StellarAssetClient, TokenClient},
+    Address, BytesN, Env, Symbol,
+};
 
 use crate::{
     codec::{Conversion, Instructions},
@@ -96,9 +100,17 @@ pub fn fee_of(out: i128, fee_bps: u32) -> i128 {
 }
 
 /// Can `who` receive `asset` right now. A classic account without a trustline
-/// makes the asset contract's balance read fail, which is the question asked here.
+/// makes the asset contract's balance read fail. One whose trustline the issuer
+/// has not authorised reads fine and still refuses a transfer, so a Stellar
+/// asset contract is asked that too; a token that is not one has no such call.
 fn can_hold(env: &Env, asset: &Address, who: &Address) -> bool {
-    matches!(TokenClient::new(env, asset).try_balance(who), Ok(Ok(_)))
+    if !matches!(TokenClient::new(env, asset).try_balance(who), Ok(Ok(_))) {
+        return false;
+    }
+    !matches!(
+        StellarAssetClient::new(env, asset).try_authorized(who),
+        Ok(Ok(false))
+    )
 }
 
 fn path_is_sound(arriving: &Address, conversion: &Conversion) -> bool {
