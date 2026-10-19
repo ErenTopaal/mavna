@@ -455,23 +455,17 @@ describe("two ways this adapter could lie", () => {
 });
 
 describe("finding a transfer from nothing but the address it went to", () => {
-  it("points at the real delivery without calling any transfer done", async () => {
-    // The prior art refuses a destination address as a lookup key outright.
-    // An address alone cannot say which transfer arrived, so this finds the
-    // delivery that actually happened and offers it, while only a burn hash
-    // can prove a particular transfer is done.
+  it("stays idle for an address that did receive a real delivery", async () => {
+    // FUNDED received two real deliveries in August. An address alone cannot
+    // say whether either is the transfer being asked about, so it reports
+    // nothing rather than a delivery that may belong to someone else's story.
     const phase = await adapter.status({
       sourceTxHash: undefined,
       sourceChainId: undefined,
       depositAddress: undefined,
       destinationAddress: FUNDED,
     });
-
-    expect(phase.phase).toBe("pending");
-    if (phase.phase !== "pending") return;
-    expect(phase.ref.txHash).toBe(
-      "1d7a7e152bf95193d2933971deb712de682e862da15beb8631e89a5c96a17174",
-    );
+    expect(phase).toEqual({ phase: "idle" });
   });
 
   it("does not mistake USDC from elsewhere for a delivery", async () => {

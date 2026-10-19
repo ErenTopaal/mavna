@@ -69,21 +69,12 @@ describe("status from a burn proves delivery from the chain, not a balance", () 
 });
 
 describe("status from a destination address alone", () => {
-  it("does not call a transfer done because the address once received a delivery", async () => {
-    const adapter = adapterWith({ captured: old, horizon: old.operations });
+  it("is idle, because an address cannot identify a transfer", async () => {
+    // This account did receive a real delivery, which says nothing about the
+    // transfer someone is asking after. Nothing is fetched at all.
+    const adapter = adapterWith({ captured: old });
     const phase = await adapter.status(handleFor(undefined, old.recipient));
-
-    expect(phase.phase).toBe("pending");
-    if (phase.phase !== "pending") return;
-    // The latest forwarder delivery, so the person can see what did arrive.
-    expect(phase.ref.txHash).toBe(
-      "1d7a7e152bf95193d2933971deb712de682e862da15beb8631e89a5c96a17174",
-    );
-  });
-
-  it("surfaces a failing Horizon rather than reporting that nothing arrived", async () => {
-    const adapter = adapterWith({ captured: old, horizonStatus: 503 });
-    await expect(adapter.status(handleFor(undefined, old.recipient))).rejects.toThrow(/503/);
+    expect(phase).toEqual({ phase: "idle" });
   });
 });
 

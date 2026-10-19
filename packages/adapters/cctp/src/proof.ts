@@ -146,26 +146,6 @@ export function deliveredByOperation(
 }
 
 /**
- * The most recent forwarder delivery to this account among its operations.
- *
- * Only ever informational. Without the message there is no telling which
- * transfer it was, so it must not be read as the delivery of any particular one.
- */
-export function latestDeliveryTo(
-  operations: readonly HorizonOperation[],
-  account: string,
-  network: NetworkId,
-): Delivery | undefined {
-  for (const operation of operations) {
-    const call = forwarderCall(operation, network);
-    // The account's history also lists deliveries it paid for on someone
-    // else's behalf, which are not arrivals.
-    if (call !== undefined && call.delivery.recipient === account) return call.delivery;
-  }
-  return undefined;
-}
-
-/**
  * The classic account whose Horizon history shows a delivery to this address.
  * Undefined for a contract, which Horizon does not keep an account history for.
  */

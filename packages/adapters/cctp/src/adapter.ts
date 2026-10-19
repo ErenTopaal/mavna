@@ -34,7 +34,7 @@ import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
 import { fromHex, parseForwarderHookData } from "./hook.js";
 import { nonEvmChainFor, nonEvmChainsFor, nonEvmExplorerTxUrl } from "./nonevm.js";
-import { DeliveryProof, horizonAccountFor, horizonOperations, latestDeliveryTo } from "./proof.js";
+import { DeliveryProof } from "./proof.js";
 
 /**
  * CCTP as a rail the routing engine can race.
@@ -507,14 +507,10 @@ export class CctpAdapter implements BridgeAdapter {
    */
   async status(handle: TransferHandle): Promise<StepPhase> {
     if (handle.sourceTxHash === undefined) {
-      // A destination address alone is a first-class lookup key, which is the
-      // largest differentiator this product claims. Circle's index cannot
-      // answer it, because their API is keyed on the burn. Stellar's history
-      // can say what the forwarder delivered there, though not for which
-      // transfer.
-      if (handle.destinationAddress !== undefined) {
-        return this.arrivalAt(handle.destinationAddress);
-      }
+      // Circle's index is keyed on the burn, so an address alone cannot name a
+      // transfer. The forwarder's past deliveries to it may belong to any
+      // transfer at all, so reporting one of them, as done or in flight, would
+      // describe a transfer nobody asked about. Only the burn hash can prove one.
       return { phase: "idle" };
     }
 
@@ -620,45 +616,6 @@ export class CctpAdapter implements BridgeAdapter {
     } catch {
       return undefined;
     }
-  }
-
-  /**
-   * What an address alone can say about a transfer: very little.
-   *
-   * Circle's index is keyed on the burn, so with only the destination there is
-   * no knowing which transfer is being asked about. The most recent delivery
-   * Circle's forwarder made to the address may be this person's transfer or an
-   * older one, so it is offered as a reference while the phase stays pending.
-   * Only a burn hash can prove a particular transfer arrived.
-   *
-   * Says `idle` when the forwarder has never delivered here: with only an
-   * address there is no evidence a transfer was even started, and "not found"
-   * must never be dressed up as "failed".
-   */
-  private async arrivalAt(destination: string): Promise<StepPhase> {
-    const account = horizonAccountFor(destination);
-    if (account === undefined) return { phase: "idle" };
-
-    const page = await horizonOperations(
-      `${this.horizonUrl}/accounts/${account}/operations?order=desc&limit=200`,
-    );
-    const latest =
-      page === undefined
-        ? undefined
-        : latestDeliveryTo(page._embedded?.records ?? [], account, this.network);
-    if (latest === undefined) return { phase: "idle" };
-
-    return {
-      phase: "pending",
-      ref: {
-        chainId: stellarChainId(this.network),
-        txHash: latest.txHash,
-        explorerUrl: `https://stellar.expert/explorer/${
-          this.network === "mainnet" ? "public" : "testnet"
-        }/tx/${latest.txHash}`,
-      },
-      expectedByUnix: 0,
-    };
   }
 
   private stellarUsdcAsset(): Asset {
