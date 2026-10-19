@@ -168,14 +168,15 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
   /**
    * The held settlement for an account, if it can still land. One past its
    * time bound never will, so sponsoring against it would be the gift the
-   * ordering exists to prevent; it is dropped and its channel freed.
+   * ordering exists to prevent, and it is dropped. Its channel is not released
+   * here: the lease ends on its own at the same bound, and by now the account
+   * may hold a newer lease on the same channel for a settlement still live.
    */
   function liveSettlement(destination: string) {
     const held = heldSettlements.get(destination);
     if (held === undefined) return undefined;
     if (held.maxTimeUnix <= nowUnix()) {
       heldSettlements.delete(destination);
-      channels?.release(destination);
       return undefined;
     }
     return held;
@@ -614,7 +615,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       transaction.sign(keypair);
       const result = await options.rpc.submit("settlement", async () => transaction);
       heldSettlements.delete(destination);
-      pool.release(destination);
+      pool.release(destination, transaction.source);
       return { settled: true, settlementTxHash: result.txHash };
     } catch (cause) {
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
@@ -623,7 +624,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
         // released is now the §6.1 loss, counted where the brake can see it.
         await caps.recordStranded();
         heldSettlements.delete(destination);
-        pool.release(destination);
+        pool.release(destination, transaction.source);
       }
       return { settled: false, settlementRetryable: retryable };
     }

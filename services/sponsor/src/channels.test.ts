@@ -40,14 +40,14 @@ describe("channel pool", () => {
     const first = pool.acquire("first", NOW + DAY, NOW);
     expect(pool.acquire("second", NOW + DAY, NOW)).toBeUndefined();
 
-    pool.release("first");
+    pool.release("first", first?.address ?? "");
     const reused = pool.acquire("second", NOW + DAY, NOW);
     expect(reused?.address).toBe(first?.address);
   });
 
   it("ignores a release for something it never leased", () => {
     const pool = poolOf(1);
-    pool.release("never-existed");
+    pool.release("never-existed", "GNOTHING");
     expect(pool.availableCount).toBe(1);
   });
 
@@ -71,6 +71,17 @@ describe("channel pool", () => {
     pool.acquire("owner", NOW + 10, NOW);
     pool.acquire("owner", NOW + DAY, NOW);
     expect(pool.acquire("next", NOW + 2 * DAY, NOW + 10)).toBeUndefined();
+  });
+
+  it("releases only the channel it is told the settlement was on", () => {
+    const pool = poolOf(2);
+    const leased = pool.acquire("owner", NOW + DAY, NOW);
+    const other = poolOf(1).acquire("elsewhere", NOW + DAY, NOW);
+
+    pool.release("owner", other?.address ?? "");
+    expect(pool.leasedCount).toBe(1);
+    pool.release("owner", leased?.address ?? "");
+    expect(pool.leasedCount).toBe(0);
   });
 
   it("refuses to exist with no channels at all", () => {

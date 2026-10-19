@@ -924,6 +924,39 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
     expect(next.status).toBe(200);
   });
 
+  it("does not free a newer settlement's channel when dropping an expired one", async () => {
+    const server = await startServer();
+    const a = Keypair.random();
+    const b = Keypair.random();
+    await holdSettlementFor(server, a);
+
+    // A's first settlement expires unsettled, and A asks for a new one, which
+    // takes the channel again under a new lease.
+    skipPastSettlementWindow();
+    const second = await server.post("/settlement", {
+      destination: a.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(second.status).toBe(200);
+
+    // Anything that looks at A's held settlement now finds the expired one.
+    const prepared = await preparedAndSigned(server, a);
+    expect((await server.post("/submit", { signedXdr: prepared })).body.error).toBe(NO_SETTLEMENT);
+
+    // The channel still carries A's second settlement, so B must not get it.
+    const forB = await server.post("/settlement", {
+      destination: b.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(forB.status).toBe(503);
+
+    const committed = await server.post("/settlement/commit", {
+      destination: a.publicKey(),
+      signedXdr: signXdr(second.body.xdr as string, a),
+    });
+    expect(committed.status).toBe(200);
+  });
+
   it("does not submit an expired settlement when the delivery lands", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();

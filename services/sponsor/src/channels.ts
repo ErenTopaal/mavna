@@ -60,7 +60,7 @@ export class ChannelPool {
    */
   acquire(transferId: string, untilUnix: number, nowUnix: number): Channel | undefined {
     for (const [owner, lease] of this.leased) {
-      if (lease.untilUnix <= nowUnix) this.release(owner);
+      if (lease.untilUnix <= nowUnix) this.free(owner);
     }
     const existing = this.leased.get(transferId);
     if (existing !== undefined) {
@@ -77,11 +77,6 @@ export class ChannelPool {
   }
 
   /**
-   * Return a channel once its settlement has landed or its window has closed.
-   * Releasing early would let a second ladder be built on sequence numbers the
-   * first ladder still occupies.
-   */
-  /**
    * The key for a channel this pool owns, by address.
    *
    * Exists so a settlement stored as XDR can be signed at submission time: the
@@ -93,7 +88,19 @@ export class ChannelPool {
     return this.available.find((c) => c.address === address)?.keypair;
   }
 
-  release(transferId: string): void {
+  /**
+   * Return a channel once its settlement has landed or its window has closed.
+   * Releasing early would let a second ladder be built on sequence numbers the
+   * first ladder still occupies. Named by channel as well as owner, because the
+   * owner may already hold a newer lease, and freeing that one hands a live
+   * sequence to someone else.
+   */
+  release(transferId: string, channelAddress: string): void {
+    if (this.leased.get(transferId)?.channel.address !== channelAddress) return;
+    this.free(transferId);
+  }
+
+  private free(transferId: string): void {
     const lease = this.leased.get(transferId);
     if (lease === undefined) return;
     this.leased.delete(transferId);
