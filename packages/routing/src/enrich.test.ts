@@ -42,6 +42,7 @@ const route: Route = {
   sends: { asset: { ...usdc, chainId: "ethereum-sepolia", decimals: 6 }, baseUnits: "5000000" },
   receives: { asset: usdc, baseUnits: "50000000" },
   receivesAtLeast: { asset: usdc, baseUnits: "50000000" },
+  deliveredAtLeast: { asset: usdc, baseUnits: "49000000" },
   fees: [],
   estimatedSeconds: 300,
   steps: [
@@ -99,6 +100,23 @@ describe("attaching the conversion leg", () => {
     expect(out.reason).toBe("no-liquidity");
     expect(out.retryable).toBe(true);
     expect(out.explanation).toContain("XLM");
+  });
+});
+
+describe("the bridge floor", () => {
+  it("is untouched by the swap leg", async () => {
+    const out = await attachSwapLeg(route, attachment(quoter("31000000000", "30845000000")), 50);
+    if ("reason" in out) throw new Error(out.explanation);
+    expect(JSON.stringify(out.deliveredAtLeast)).toBe(JSON.stringify(route.deliveredAtLeast));
+  });
+
+  it("is untouched by the integrator's cut", () => {
+    const out = applyIntegratorFee(route, {
+      bps: 30,
+      recipient: "GINTEGRATOR",
+      recipientName: "Example Wallet",
+    });
+    expect(JSON.stringify(out.deliveredAtLeast)).toBe(JSON.stringify(route.deliveredAtLeast));
   });
 });
 

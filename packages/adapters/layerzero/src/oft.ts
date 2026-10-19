@@ -1,8 +1,9 @@
+import type { Route } from "@mavna/core";
 import { MavnaError } from "@mavna/core";
 import { classifyAddress } from "@mavna/stellar";
 import { StrKey } from "@stellar/stellar-sdk";
 import { encodePacked } from "viem";
-import { readableAmount } from "./config.js";
+import { readableAmount, STELLAR_DECIMALS } from "./config.js";
 
 /**
  * The OFT call, on the EVM side of a transfer into Stellar.
@@ -230,6 +231,23 @@ export interface SendParamInputs {
    * stand. Never invented: the caller passes what discovery read off the chain.
    */
   readonly extraOptions: `0x${string}`;
+}
+
+/**
+ * The floor the contract enforces, taken from what the rail delivers rather
+ * than from the headline quote. Enrichment restates `receivesAtLeast` in
+ * another asset, so reading it here would use an XLM amount as a token floor.
+ */
+export function minAmountFor(
+  route: Pick<Route, "deliveredAtLeast">,
+  resolved: { readonly tokenDecimals: number; readonly sharedDecimals: number },
+): bigint {
+  return stellarToLocal(
+    BigInt(route.deliveredAtLeast.baseUnits),
+    resolved.tokenDecimals,
+    resolved.sharedDecimals,
+    STELLAR_DECIMALS,
+  );
 }
 
 export function buildSendParam(inputs: SendParamInputs): SendParam {

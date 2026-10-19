@@ -66,6 +66,11 @@ export interface Route {
   readonly receives: Amount;
   /** Worst case the user has agreed to, so exposure is bounded by their choice. */
   readonly receivesAtLeast: Amount;
+  /**
+   * The floor of what the rail itself delivers, in the bridged asset, which
+   * enrichment never changes and which builders enforce on-chain.
+   */
+  readonly deliveredAtLeast: Amount;
   readonly fees: readonly Fee[];
   readonly estimatedSeconds: number;
   readonly steps: readonly Step[];

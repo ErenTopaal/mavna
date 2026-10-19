@@ -12,7 +12,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable } from "@mavna/core";
+import { MavnaError, rejectionIsRetryable, SENDER_ADDRESS } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -46,10 +46,10 @@ import {
   ERC20_ABI,
   executorLzReceiveOption,
   localToStellar,
+  minAmountFor,
   OFT_ABI,
   sharedToStellar,
   stellarRecipientToBytes32,
-  stellarToLocal,
 } from "./oft.js";
 import { classifyScanStatus, remedyForStatus, ScanService, scanMessageUrl } from "./scan.js";
 
@@ -374,6 +374,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
       // contract can take a fee between quoting and sending, so the honest floor
       // is the minimum the send itself will enforce.
       receivesAtLeast: { asset: request.to, baseUnits: guaranteed.toString() },
+      deliveredAtLeast: { asset: request.to, baseUnits: guaranteed.toString() },
       fees: [
         {
           kind: "gas",
@@ -446,16 +447,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
     const resolved = await this.discovery.routeFrom(route.fromChain.id);
     const sends = BigInt(route.sends.baseUnits);
-    // The floor the user was shown, carried back into the units the contract
-    // enforces it in. Rebuilding it from the route rather than recomputing it
-    // from a slippage figure means the transaction cannot promise less than the
-    // quote did.
-    const minAmount = stellarToLocal(
-      BigInt(route.receivesAtLeast.baseUnits),
-      resolved.tokenDecimals,
-      resolved.sharedDecimals,
-      STELLAR_DECIMALS,
-    );
+    const minAmount = minAmountFor(route, resolved);
 
     const sendParam = buildSendParam({
       dstEid: STELLAR_SIDE[this.network].eid,
@@ -494,7 +486,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
           { nativeFee: fee.nativeFee.toString(), lzTokenFee: fee.lzTokenFee.toString() },
           // Refunded to the sender. Anything left of the fee comes back to the
           // wallet that paid it, which is the only address we are entitled to name.
-          "SENDER",
+          SENDER_ADDRESS,
         ],
         // `send` is payable and the fee rides on the call itself. A caller that
         // ignored this would have the transaction revert having spent gas.

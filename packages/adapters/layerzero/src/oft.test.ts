@@ -7,6 +7,7 @@ import {
   executorLzReceiveOption,
   isZeroBytes32,
   localToStellar,
+  minAmountFor,
   sharedToStellar,
   stellarRecipientToBytes32,
   stellarToLocal,
@@ -243,5 +244,19 @@ describe("the approval", () => {
         symbol: "USDT",
       }),
     ).toThrow(/non-positive/);
+  });
+});
+
+describe("the on-chain floor", () => {
+  const usdt = { chainId: "stellar-testnet", symbol: "USDT", decimals: 7 } as never;
+  const xlm = { chainId: "stellar-testnet", symbol: "XLM", decimals: 7 } as never;
+  const route = {
+    deliveredAtLeast: { asset: usdt, baseUnits: "9950000" },
+    // an enriched route restates this in the swap's output asset
+    receivesAtLeast: { asset: xlm, baseUnits: "123456789000" },
+  };
+
+  it("derives from deliveredAtLeast and ignores the enriched quote", () => {
+    expect(minAmountFor(route, { tokenDecimals: 6, sharedDecimals: 6 })).toBe(995_000n);
   });
 });

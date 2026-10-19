@@ -227,6 +227,7 @@ export class AxelarAdapter implements BridgeAdapter {
       // arrives is the amount that left, rescaled. Promising less would hedge
       // against a risk this rail does not have.
       receivesAtLeast: receives,
+      deliveredAtLeast: receives,
       fees: [
         {
           // Charged in the sending chain's own currency and paid alongside the

@@ -3,6 +3,13 @@ import type { Amount, Asset } from "./money.js";
 import type { Route, RouteRejection, TrustModel } from "./route.js";
 
 /**
+ * Stands in for the sending wallet's address in a payload that has to name it,
+ * such as a refund recipient. The wallet substitutes the connected address
+ * before signing, because the SDK is never told it.
+ */
+export const SENDER_ADDRESS = "mavna:sender" as const;
+
+/**
  * What a rail must provide.
  *
  * Adding a rail must require zero changes outside its own package. That is the

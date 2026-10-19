@@ -258,6 +258,7 @@ export class CctpAdapter implements BridgeAdapter {
       // and no slippage to allow for, so promising less than this would be a
       // hedge against a risk that does not exist on this rail.
       receivesAtLeast: receives,
+      deliveredAtLeast: receives,
       fees: [
         {
           kind: "bridge",
