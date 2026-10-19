@@ -200,6 +200,12 @@ export class DeliveryProof {
    * Circle's attestation carries no timestamp, so there is no ledger to start
    * from: RPC is searched across its whole retention window, and Horizon, keyed
    * on the recipient, covers whatever is older.
+   *
+   * Known limits, all of which leave a transfer pending and none of which can
+   * make one falsely done. Without a recipient (no hook data in the attestation)
+   * Horizon is skipped. A contract recipient has no Horizon account history, so
+   * it is skipped too. In both cases a delivery older than RPC retention is not
+   * found. So is one past the last Horizon page searched.
    */
   async find(messageHex: string, recipient: string | undefined): Promise<Delivery | undefined> {
     const message = identifyMessage(messageHex);
