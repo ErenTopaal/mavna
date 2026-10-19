@@ -54,10 +54,10 @@
     "react-dom": "19.2.8",
     "size-limit": "13.0.3"
   },
+  "//size-limit": "Self-contained: the widget bundles the routing engine, the three rail adapters, the Stellar SDK, viem and the wallet kit, like the LI.FI widget it is modelled on. This is the gzipped budget for all of that, not a thin presentational component.",
   "size-limit": [
     {
       "path": "dist/index.mjs",
-      "//": "Self-contained: the widget bundles the routing engine, the three rail adapters, the Stellar SDK, viem and the wallet kit, like the LI.FI widget it is modelled on. This is the gzipped budget for all of that, not a thin presentational component.",
       "limit": "400 kB",
       "ignore": [
         "react"
