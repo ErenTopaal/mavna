@@ -7,7 +7,7 @@ import {
   soroswapQuote,
   soroswapQuoteRequest,
 } from "@mavna/swap";
-import { z } from "zod";
+import * as z from "zod";
 import { RequestLimiter } from "./ratelimit.js";
 
 /**

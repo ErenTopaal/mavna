@@ -1,7 +1,7 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import type { Account, Transaction } from "@stellar/stellar-sdk";
 import { Asset, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
-import { z } from "zod";
+import * as z from "zod";
 import {
   applySlippage,
   type SwapBuildRequest,

@@ -8,7 +8,7 @@ import {
   type Transaction,
   xdr,
 } from "@stellar/stellar-sdk";
-import { z } from "zod";
+import * as z from "zod";
 import {
   applySlippage,
   type SwapBuildRequest,

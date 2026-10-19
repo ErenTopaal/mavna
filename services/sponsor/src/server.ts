@@ -33,7 +33,7 @@ import {
   type Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
-import { z } from "zod";
+import * as z from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
 import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";

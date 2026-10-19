@@ -1,7 +1,7 @@
 import { type ComposeHop, MavnaError, type NetworkId } from "@mavna/core";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
 import { Address, nativeToScVal, scValToNative, type Transaction, xdr } from "@stellar/stellar-sdk";
-import { z } from "zod";
+import * as z from "zod";
 import {
   applySlippage,
   type SwapBuildRequest,

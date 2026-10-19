@@ -1,6 +1,6 @@
 import { MavnaError, type NetworkId, parseFrom } from "@mavna/core";
 import { Asset, Networks } from "@stellar/stellar-sdk";
-import type { z } from "zod";
+import type * as z from "zod";
 
 /**
  * What every venue does at its network boundary, written once.
