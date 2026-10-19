@@ -13,7 +13,13 @@ import {
 } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
-import { buildPreparation, buildSettlement, classifyAddress, XlmPriceSource } from "@mavna/stellar";
+import {
+  buildPreparation,
+  buildSettlement,
+  classifyAddress,
+  inspectDestination,
+  XlmPriceSource,
+} from "@mavna/stellar";
 import {
   type Asset,
   Keypair,
@@ -587,6 +593,22 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     const channelKeypair = pool.keypairFor(transaction.source);
     if (channelKeypair === undefined) return { settled: false };
 
+    // A delivery landing proves Circle minted something, not that it was this
+    // user's transfer or enough of it. Submitting before the money is there
+    // fails on-chain, burns the channel's sequence, and counts as a stranding,
+    // so a dust burn naming someone would spend their settlement for them.
+    let covered: boolean;
+    try {
+      covered = await holdsEnoughToSettle(destination, transaction);
+    } catch (cause) {
+      console.error(
+        "[sponsor] could not read the recipient's balance before settling:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      return { settled: false, settlementRetryable: true };
+    }
+    if (!covered) return { settled: false, settlementRetryable: true };
+
     try {
       transaction.sign(channelKeypair);
       transaction.sign(keypair);
@@ -605,6 +627,25 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       }
       return { settled: false, settlementRetryable: retryable };
     }
+  }
+
+  /**
+   * Whether the recipient's trustline already holds the most the settlement's
+   * path payment may spend. A settlement without exactly one such payment is
+   * not one this server built, and is never treated as covered.
+   */
+  async function holdsEnoughToSettle(
+    destination: string,
+    transaction: Transaction,
+  ): Promise<boolean> {
+    const payments = transaction.operations.filter(
+      (op): op is Operation.PathPaymentStrictReceive => op.type === "pathPaymentStrictReceive",
+    );
+    const payment = payments[0];
+    if (payments.length !== 1 || payment === undefined) return false;
+    const state = await inspectDestination(options.rpc, destination, payment.sendAsset);
+    if (state.trustline === undefined || !state.trustline.authorized) return false;
+    return BigInt(state.trustline.balanceStroops) >= decimalToStroops(payment.sendMax);
   }
 
   /** Countersign what the user signed, and submit it. This is where money moves. */
@@ -1021,6 +1062,15 @@ function expiryOf(transaction: Transaction): number {
     throw new MavnaError("A built transaction has no time bound.", { retryable: false });
   }
   return maxTime;
+}
+
+/** Horizon's decimal form to stroops, integer arithmetic only. */
+function decimalToStroops(amount: string): bigint {
+  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(amount);
+  if (match === null) {
+    throw new MavnaError(`Not a Stellar amount: ${amount}`, { retryable: false });
+  }
+  return BigInt(match[1] ?? "0") * 10_000_000n + BigInt((match[2] ?? "").padEnd(7, "0"));
 }
 
 /** Stroops to Horizon's decimal form, integer arithmetic only. */

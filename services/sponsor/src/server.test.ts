@@ -24,6 +24,7 @@ import {
   Keypair,
   Operation,
   rpc,
+  StrKey,
   type Transaction,
   TransactionBuilder,
   xdr,
@@ -57,6 +58,9 @@ const NOWHERE = "https://127.0.0.1:9";
 /** Where the server is told Circle's attestation service lives. Only the fetch double answers it. */
 const IRIS = "https://iris.invalid";
 
+/** A thousand USDC in stroops: far more than any settlement here spends. */
+const PLENTY = 10_000_000_000n;
+
 /** Accounts known to exist, and every transaction handed over for submission. */
 class RecordingRpc extends RpcClient {
   readonly accounts = new Map<string, bigint>();
@@ -64,8 +68,67 @@ class RecordingRpc extends RpcClient {
   /** Set to make the next submission fail the way a network rejection does. */
   rejectNext: MavnaError | undefined;
 
+  /** USDC trustline balances in stroops, by account. */
+  readonly trustlines = new Map<string, bigint>();
+
   constructor() {
     super({ url: NOWHERE });
+    // The ledger read every balance check goes through, answered from the maps
+    // above instead of a node.
+    this.server.getLedgerEntries = async (...keys: xdr.LedgerKey[]) => ({
+      latestLedger: 1,
+      entries: keys.flatMap((key) => {
+        const val = this.entryFor(key);
+        return val === undefined ? [] : [{ key, val, lastModifiedLedgerSeq: 1 }];
+      }),
+    });
+  }
+
+  private entryFor(key: xdr.LedgerKey): xdr.LedgerEntryData | undefined {
+    if (key.switch().name === "account") {
+      const accountId = key.account().accountId();
+      const sequence = this.accounts.get(StrKey.encodeEd25519PublicKey(accountId.ed25519()));
+      if (sequence === undefined) return undefined;
+      return xdr.LedgerEntryData.account(
+        new xdr.AccountEntry({
+          accountId,
+          balance: xdr.Int64.fromString("100000000"),
+          seqNum: xdr.Int64.fromString(sequence.toString()),
+          numSubEntries: 1,
+          inflationDest: null,
+          flags: 0,
+          homeDomain: "",
+          thresholds: Buffer.from([1, 0, 0, 0]),
+          signers: [],
+          ext: new xdr.AccountEntryExt(0),
+        }),
+      );
+    }
+    if (key.switch().name === "trustline") {
+      const line = key.trustLine();
+      if (line.asset().toXDR("hex") !== USDC.toTrustLineXDRObject().toXDR("hex")) return undefined;
+      const balance = this.trustlines.get(
+        StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
+      );
+      if (balance === undefined) return undefined;
+      return xdr.LedgerEntryData.trustline(
+        new xdr.TrustLineEntry({
+          accountId: line.accountId(),
+          asset: line.asset(),
+          balance: xdr.Int64.fromString(balance.toString()),
+          limit: xdr.Int64.fromString("9223372036854775807"),
+          flags: 1,
+          ext: new xdr.TrustLineEntryExt(0),
+        }),
+      );
+    }
+    return undefined;
+  }
+
+  /** The user's account after the preparation landed and a delivery arrived. */
+  holding(user: Keypair, usdcStroops: bigint): void {
+    this.accounts.set(user.publicKey(), 1n);
+    this.trustlines.set(user.publicKey(), usdcStroops);
   }
 
   override async loadAccount(address: string): Promise<Account> {
@@ -709,6 +772,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
+    server.rpc.holding(user, PLENTY);
     irisReturns(cctpMessage(user.publicKey()));
 
     const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
@@ -722,6 +786,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     const server = await startServer({ buildDelivery });
     const victim = Keypair.random();
     await holdSettlementFor(server, victim);
+    server.rpc.holding(victim, PLENTY);
     irisReturns(cctpMessage(Keypair.random().publicKey()));
 
     const response = await server.post("/deliver", {
@@ -747,6 +812,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
 
     // One channel in the harness, so one held settlement at a time.
     await holdSettlementFor(server, solanaUser);
+    server.rpc.holding(solanaUser, PLENTY);
     irisReturns(
       cctpMessage(solanaUser.publicKey(), {
         sourceDomain: 5,
@@ -761,6 +827,8 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(fromSolana.body.settled).toBe(true);
 
     await holdSettlementFor(server, starknetUser);
+
+    server.rpc.holding(starknetUser, PLENTY);
     irisReturns(
       cctpMessage(starknetUser.publicKey(), {
         sourceDomain: 25,
@@ -789,6 +857,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
       const server = await startServer({ buildDelivery });
       const user = Keypair.random();
       await holdSettlementFor(server, user);
+      server.rpc.holding(user, PLENTY);
       irisReturns(cctpMessage(user.publicKey(), overrides));
 
       const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
@@ -799,10 +868,33 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     });
   }
 
+  it("does not settle until the recipient holds what the settlement spends", async () => {
+    // An honest message for a dust amount: Circle attests it and the delivery
+    // lands, but the user's settlement would fail on-chain and strand.
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    server.rpc.holding(user, 1n);
+    irisReturns(cctpMessage(user.publicKey()));
+
+    const dust = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(dust.status).toBe(200);
+    expect(dust.body.kind).toBe("delivered");
+    expect(dust.body.settled).toBe(false);
+    expect(dust.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+
+    // Still held, and settled once the real transfer has arrived.
+    server.rpc.holding(user, PLENTY);
+    const arrived = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(arrived.body.settled).toBe(true);
+  });
+
   it("settles nothing on a message not bound for Stellar", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
+    server.rpc.holding(user, PLENTY);
     irisReturns(cctpMessage(user.publicKey(), { destinationDomain: 6 }));
 
     const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
@@ -836,6 +928,7 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
+    server.rpc.holding(user, PLENTY);
 
     skipPastSettlementWindow();
     stubIris(
