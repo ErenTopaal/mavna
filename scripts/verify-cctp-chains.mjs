@@ -557,7 +557,7 @@ for (const network of ["testnet", "mainnet"]) {
         id: chain.id,
         reason: String(outcome.reason?.message ?? outcome.reason),
       });
-      console.log(`  ✗ ${network}/${chain.id} — ${outcome.reason?.message ?? outcome.reason}`);
+      console.log(`  ✗ ${network}/${chain.id}: ${outcome.reason?.message ?? outcome.reason}`);
     }
   });
 }

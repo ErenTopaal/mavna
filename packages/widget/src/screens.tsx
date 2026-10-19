@@ -918,8 +918,8 @@ export function renderReview(
   d: { r: RouteView | undefined; chain: { id: string; name: string }; sym: string },
 ): ReactElement {
   const { r, chain, sym } = d;
-  const reviewSend = r === undefined ? "—" : `${fmt(c.amountNumber())} ${c.state.send}`;
-  const reviewGet = r === undefined ? "—" : `${fmt(r.receives)} ${sym}`;
+  const reviewSend = r === undefined ? "-" : `${fmt(c.amountNumber())} ${c.state.send}`;
+  const reviewGet = r === undefined ? "-" : `${fmt(r.receives)} ${sym}`;
   const reviewGetOn = r === undefined ? "Stellar" : `Stellar · ${r.source}`;
   const reviewRows =
     r === undefined
@@ -1058,7 +1058,7 @@ export function renderFlight(
 ): ReactElement {
   const { r, chain, sym, arrived } = d;
   const flightEyebrow = arrived ? "Arrived on Stellar" : "Arriving on Stellar";
-  const flightFigure = r === undefined ? "—" : fmt(r.receives);
+  const flightFigure = r === undefined ? "-" : fmt(r.receives);
   const flightMeta =
     r === undefined
       ? []

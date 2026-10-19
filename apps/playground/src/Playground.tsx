@@ -415,7 +415,7 @@ export function Playground(): ReactElement {
                 <div className="pg-log">
                   {log.length === 0 ? (
                     <span className="pg-log-empty">
-                      Interact with the widget — enter an amount, connect, transfer — and the events
+                      Interact with the widget (enter an amount, connect, transfer) and the events
                       it emits land here.
                     </span>
                   ) : (

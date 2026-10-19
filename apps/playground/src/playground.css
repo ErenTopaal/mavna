@@ -1,9 +1,9 @@
 /*
  * The playground's chrome around the live widget.
  *
- * It inherits the Mavna product's identity on purpose — the same dark neutral
+ * It inherits the Mavna product's identity on purpose: the same dark neutral
  * ground, Instrument Sans, and the Azeret Mono uppercase eyebrows that the widget
- * itself uses for labels — so the tool reads as part of the product rather than a
+ * itself uses for labels, so the tool reads as part of the product rather than a
  * separate thing. The one flourish is the spotlight: a soft glow that lifts the
  * live widget onto a plinth so the eye lands on it first. Everything is prefixed
  * `pg-`; nothing reaches inside the widget's own `.mv-root`.
