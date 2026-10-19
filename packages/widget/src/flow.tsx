@@ -256,6 +256,8 @@ export class Flow extends React.Component<FlowProps, State> {
   EASE = EASE;
 
   private currentQuote: QuoteRun | undefined;
+  /** True from the press that starts a transfer until that transfer has ended. */
+  private transferring = false;
   /**
    * Aborted on unmount so a relayed delivery stops being polled for a page that
    * is gone. Replaced on mount, because a remount reuses the instance.
@@ -850,8 +852,12 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   start(): void {
+    // Set here and not through setState, which only lands on the next render:
+    // a second press before then would otherwise start a second transfer.
+    if (this.transferring) return;
     const view = this.chosen();
     if (view === undefined) return;
+    this.transferring = true;
     const chain = this.engine.sourceChainDetail(this.state.chainId);
     const steps = buildSteps(view);
     this.emit({ type: "transferStarted" });
@@ -862,6 +868,14 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   async runTransfer(view: RouteView, chain: SourceDetail): Promise<void> {
+    try {
+      await this.runTransferOnce(view, chain);
+    } finally {
+      this.transferring = false;
+    }
+  }
+
+  private async runTransferOnce(view: RouteView, chain: SourceDetail): Promise<void> {
     if (chain.kind !== "evm") {
       this.failFlight(`Sending from ${chain.name} needs a ${chain.family} wallet.`);
       return;
