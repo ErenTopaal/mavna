@@ -68,6 +68,36 @@ const attested = {
 };
 /** The assets each /prepare asked for. */
 let askedAssets: string[][];
+/** The settlement the sponsor builds for a new account it fronts. */
+let settlementXdr: string;
+/** What happens on Stellar as the sponsor delivers a Circle transfer. */
+let onDeliver: (() => void) | undefined;
+
+/** A held settlement as the sponsor builds it: the arrival may buy back the reserve. */
+function settlementSpending(sendMax: string): string {
+  const [code, issuer] = STELLAR_USDC.id.split(":");
+  return new TransactionBuilder(new Account(SENDER_STELLAR, "1"), {
+    fee: "1000000",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(
+      Operation.pathPaymentStrictReceive({
+        source: DESTINATION,
+        sendAsset: new Asset(code ?? "", issuer),
+        sendMax,
+        destination: DESTINATION,
+        destAsset: Asset.native(),
+        destAmount: "1.5",
+        path: [],
+      }),
+    )
+    .addOperation(
+      Operation.revokeAccountSponsorship({ account: DESTINATION, source: SENDER_STELLAR }),
+    )
+    .setTimeout(86_400)
+    .build()
+    .toXDR();
+}
 
 const STELLAR_USDT0 = {
   ...STELLAR_USDC,
@@ -92,6 +122,8 @@ beforeEach(() => {
   usdcHeld = 0n;
   conversionAmounts = [];
   askedAssets = [];
+  settlementXdr = "SETTLEMENT";
+  onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
   settleReplies = [
@@ -126,11 +158,11 @@ beforeEach(() => {
           minDeliveryBaseUnits: "1000000",
         });
       case "/settlement":
-        return reply(200, { xdr: "SETTLEMENT", channel: "GCHANNEL" });
+        return reply(200, { xdr: settlementXdr, channel: "GCHANNEL" });
       case "/settlement/commit":
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
-          signedXdr: "signed SETTLEMENT",
+          signedXdr: `signed ${settlementXdr}`,
         });
         return reply(200, { held: true });
       case "/prepare": {
@@ -162,6 +194,7 @@ beforeEach(() => {
         });
         return reply(200, { txHash: "9e9", ledger: 1 });
       case "/deliver": {
+        onDeliver?.();
         const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
         if (next === undefined) throw new Error("no deliver reply scripted");
         return reply(next[0], next[1]);
@@ -335,6 +368,10 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
       sign: async (xdr: string) => {
         if (xdr === preparation) {
           log.push("stellar sign PREPARATION");
+          return `signed ${xdr}`;
+        }
+        if (xdr === settlementXdr) {
+          log.push("stellar sign SETTLEMENT");
           return `signed ${xdr}`;
         }
         if (xdr.startsWith("AAAA")) {
@@ -643,6 +680,46 @@ describe("runTransfer over Circle", () => {
         note: "Delivered, and the deposit repaid itself from the arrival.",
       },
     });
+  });
+});
+
+describe("a Circle conversion on an account whose reserve the sponsor fronted", () => {
+  const fronted = () => {
+    const base = routeFor("cctp", { newAccount: true, swap: true });
+    return {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "44000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "20000000" },
+            }
+          : step,
+      ),
+    };
+  };
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+
+  it("leaves the repayment aside when it did not go with the mint", async () => {
+    settlementXdr = settlementSpending("0.6");
+    deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
+    onDeliver = () => {
+      usdcHeld = 50_000_000n;
+    };
+    await run(cctp(), fronted(), patches().patch).catch(() => undefined);
+    expect(conversionAmounts).toEqual(["44000000"]);
+  });
+
+  it("converts the whole measured arrival when the repayment went with the mint", async () => {
+    settlementXdr = settlementSpending("0.6");
+    deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9, settled: true }]];
+    onDeliver = () => {
+      usdcHeld = 44_800_000n;
+    };
+    await run(cctp(), fronted(), patches().patch).catch(() => undefined);
+    expect(conversionAmounts).toEqual(["44800000"]);
   });
 });
 
@@ -1015,6 +1092,70 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(adapter, route, patches().patch).catch(() => undefined);
     expect(conversionAmounts).toContain("49500000");
     expect(conversionAmounts).not.toContain("149500000");
+  });
+
+  describe("a conversion on an account whose reserve the sponsor fronted", () => {
+    // 5 USDC arrive; the held settlement may spend up to 0.6 of them buying back the reserve
+    const fronted = () => {
+      const base = routeFor("layerzero", { newAccount: true, swap: true });
+      return {
+        ...base,
+        steps: base.steps.map((step) =>
+          step.kind === "swap"
+            ? {
+                ...step,
+                from: { asset: STELLAR_USDC, baseUnits: "44000000" },
+                to: { asset: STELLAR_XLM, baseUnits: "20000000" },
+              }
+            : step,
+        ),
+      };
+    };
+
+    it("leaves the repayment's most aside while the settlement has not been taken", async () => {
+      settlementXdr = settlementSpending("0.6");
+      settleReplies = [[200, { settled: false, settlementRetryable: true }]];
+      const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+        transactions: [layerZeroSend("777")],
+        onStatus: () => {
+          usdcHeld = 50_000_000n;
+        },
+      });
+      await run(adapter, fronted(), patches().patch).catch(() => undefined);
+      expect(conversionAmounts).toEqual(["44000000"]);
+    });
+
+    it("converts the whole measured arrival once the repayment has already been taken from it", async () => {
+      settlementXdr = settlementSpending("0.6");
+      settleReplies = [[200, { settled: true, settlementTxHash: "5e771e" }]];
+      const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+        transactions: [layerZeroSend("777")],
+        // what is left once the settlement spent 0.52 of the 5
+        onStatus: () => {
+          usdcHeld = 44_800_000n;
+        },
+      });
+      await run(adapter, fronted(), patches().patch).catch(() => undefined);
+      expect(conversionAmounts).toEqual(["44800000"]);
+    });
+
+    it("skips the conversion and says the funds stay as they arrived when nothing would be left", async () => {
+      settlementXdr = settlementSpending("6");
+      settleReplies = [[200, { settled: false, settlementRetryable: true }]];
+      const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+        transactions: [layerZeroSend("777")],
+        onStatus: () => {
+          usdcHeld = 50_000_000n;
+        },
+      });
+      const { seen, patch } = patches();
+      await run(adapter, fronted(), patch);
+      expect(conversionAmounts).toEqual([]);
+      expect(seen.filter((p) => p.id === "swap").at(-1)?.patch).toMatchObject({
+        phase: "done",
+        note: expect.stringMatching(/stays in USDC/),
+      });
+    });
   });
 
   it("still refuses a USDT0 trustline the sponsor would have to front", async () => {

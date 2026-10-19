@@ -13,9 +13,10 @@
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import { inspectDestination, stroopsToXlm, xlmToStroops } from "@mavna/stellar";
 import {
   FeeBumpTransaction,
+  type Operation,
   Asset as StellarAsset,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
@@ -185,7 +186,7 @@ async function collectSettlement(
   engine: TransferEngine,
   route: Route,
   chainId: string,
-): Promise<string> {
+): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
     throw new Error(
@@ -194,9 +195,32 @@ async function collectSettlement(
     );
   }
   const built = await engine.sponsor.requestSettlement(route.destination, chainId);
+  // a conversion has to leave the repayment its share, so it reads what the
+  // settlement may spend before the user signs it
+  const repaysAtMost = route.steps.some((s) => s.kind === "swap")
+    ? settlementSpend(built.xdr, engine.stellarNetwork.passphrase)
+    : 0n;
   const signed = await engine.stellar.sign(built.xdr, address);
   await engine.sponsor.commitSettlement(route.destination, signed);
-  return address;
+  return { owner: address, repaysAtMost };
+}
+
+/** The most the held settlement may spend of the arrival: its strict-receive's sendMax. */
+function settlementSpend(built: string, passphrase: string): bigint {
+  const tx = TransactionBuilder.fromXDR(built, passphrase);
+  const buys =
+    "operations" in tx
+      ? tx.operations.find(
+          (op): op is Operation.PathPaymentStrictReceive => op.type === "pathPaymentStrictReceive",
+        )
+      : undefined;
+  if (buys === undefined) {
+    throw new Error(
+      "The sponsor's repayment does not say how much of the arrival it may spend, so the " +
+        "conversion cannot leave that aside. Nothing has been sent.",
+    );
+  }
+  return xlmToStroops(buys.sendMax);
 }
 
 /**
@@ -309,7 +333,7 @@ export async function convertOnStellar(
    * spends exactly this, so money the account already held is never touched.
    */
   arrived: string,
-): Promise<void> {
+): Promise<"converted" | "too-small"> {
   const swapStep = route.steps.find((s) => s.kind === "swap");
   // what the rail delivered and what the user asked to hold: USDC into XLM, or
   // the USDT0 LayerZero delivers into USDC or XLM
@@ -337,10 +361,19 @@ export async function convertOnStellar(
     maxSlippageBps: 50,
     destinationKind: "account",
   });
+  // too little for the venue to give anything back: left as it arrived
+  if (BigInt(quote.amountOutMinimum) <= 0n) return "too-small";
   // The route showed the user a least amount of what they wanted; a quote
-  // taken now that cannot promise it is not what they agreed to.
+  // taken now that cannot promise it is not what they agreed to. Converting
+  // less than was priced, because a repayment took its share first, holds the
+  // conversion to the same rate rather than to the whole amount's floor.
   const shown = route.receivesAtLeast;
-  if (shown.asset.id === wanted.id && BigInt(quote.amountOutMinimum) < BigInt(shown.baseUnits)) {
+  const priced = BigInt(swapStep?.from.baseUnits ?? arrived);
+  const floor =
+    BigInt(arrived) < priced
+      ? (BigInt(shown.baseUnits) * BigInt(arrived)) / priced
+      : BigInt(shown.baseUnits);
+  if (shown.asset.id === wanted.id && BigInt(quote.amountOutMinimum) < floor) {
     throw new Error(
       "The price moved since this transfer was quoted, and converting now could give less " +
         `${wanted.symbol} than you were shown. The ${asset.symbol} has arrived and is yours; ` +
@@ -352,6 +385,7 @@ export async function convertOnStellar(
   const signed = await engine.stellar.sign(unsigned.toXDR(), account);
   const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
   await engine.rpc.submit("conversion", async () => parsed as never);
+  return "converted";
 }
 
 /**
@@ -387,7 +421,7 @@ async function deliverToStellar(
   alreadyPrepared: boolean,
   /** The account pays for its own delivery: `owner` signs it, the sponsor is not asked. */
   ownDelivery: boolean,
-): Promise<void> {
+): Promise<{ readonly repaid: boolean }> {
   // an account that pays for its own delivery is the one that signs it; asking
   // the sponsor instead would quietly spend the money self mode exists to save
   if (ownDelivery && owner === undefined) {
@@ -421,7 +455,7 @@ async function deliverToStellar(
         deliverPatch.note = "Delivered, and the deposit repaid itself from the arrival.";
       }
       patch("deliver", deliverPatch);
-      return;
+      return { repaid: "settled" in outcome && outcome.settled === true };
     }
     if (outcome.kind === "recipient-not-ready") {
       if (owner !== undefined && !prepared) {
@@ -576,12 +610,16 @@ async function assertSponsorable(engine: TransferEngine, route: Route): Promise<
  * already be able to hold what arrives, so the account is prepared before the
  * send. The sponsor submits the held repayment once the funds have landed.
  */
-async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<string | undefined> {
+async function runRelayed(
+  deps: TransferDeps,
+  adapter: BridgeAdapter,
+): Promise<{ readonly owner: string | undefined; readonly unrepaid: bigint }> {
   const { engine, view, chainId, patch } = deps;
   const route = view.route;
   const wait = deps.wait ?? sleep;
   let owner: string | undefined;
   let selfFunded = false;
+  let repaysAtMost = 0n;
 
   const unready = await destinationBlocker(engine.rpc, route);
   if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
@@ -619,7 +657,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
       selfFunded = true;
     } else {
       patch("settle", { phase: "blocked" });
-      owner = await collectSettlement(engine, route, chainId);
+      ({ owner, repaysAtMost } = await collectSettlement(engine, route, chainId));
       patch("settle", { phase: "done" });
       patch("prepare", { phase: "blocked" });
       await prepareNow(engine, route, chainId, owner);
@@ -637,7 +675,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   }
 
   const sendHash = await send(deps, adapter, route);
-  if (sendHash === undefined) return owner;
+  if (sendHash === undefined) return { owner, unrepaid: repaysAtMost };
 
   const handle: TransferHandle = {
     sourceTxHash: sendHash,
@@ -667,12 +705,16 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));
 
+  let unrepaid = repaysAtMost;
   if (owner !== undefined && !selfFunded) {
     // The funds are on Stellar whatever the sponsor says next, so nothing here
     // can fail the transfer; it can only change what the deliver step says.
     let note: string;
     try {
-      note = settleNote(await pollSettlement(engine.sponsor, route.destination, { wait }));
+      const settled = await pollSettlement(engine.sponsor, route.destination, { wait });
+      // taken already, or never to be taken: either way the balance read next is the user's
+      if (settled.settled || settled.held === false) unrepaid = 0n;
+      note = settleNote(settled);
     } catch (cause) {
       note =
         "Delivered on Stellar. Asking the sponsor to take the deposit repayment failed: " +
@@ -680,7 +722,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
     }
     patch("deliver", { note });
   }
-  return owner;
+  return { owner, unrepaid };
 }
 
 /**
@@ -693,6 +735,8 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   const route = view.route;
   const adapter = adapterFor(engine, route);
   let owner: string | undefined;
+  // what a repayment still to come may take from the arrival
+  let unrepaid = 0n;
   // a conversion on Stellar spends what this transfer adds, so the balance is
   // read before anything moves
   const swapFrom = route.steps.find((s) => s.kind === "swap")?.from.asset;
@@ -717,25 +761,55 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
       prepared = true;
     } else if (view.newAccount) {
       patch("settle", { phase: "blocked" });
-      owner = await collectSettlement(engine, route, chainId);
+      ({ owner, repaysAtMost: unrepaid } = await collectSettlement(engine, route, chainId));
       patch("settle", { phase: "done" });
     } else if (ownDelivery) {
       owner = await ownWallet(engine, route);
     }
     const burnHash = await send(deps, adapter, route);
     if (burnHash !== undefined) {
-      await deliverToStellar(engine, burnHash, owner, route, chainId, patch, prepared, ownDelivery);
+      const { repaid } = await deliverToStellar(
+        engine,
+        burnHash,
+        owner,
+        route,
+        chainId,
+        patch,
+        prepared,
+        ownDelivery,
+      );
+      if (repaid) unrepaid = 0n;
     }
   } else {
-    owner = await runRelayed(deps, adapter);
+    ({ owner, unrepaid } = await runRelayed(deps, adapter));
   }
 
   if (swapFrom !== undefined && heldBefore !== undefined) {
     patch("swap", { phase: "blocked" });
     // exactly what this transfer brought in, so nothing the account held before is spent
     const heldAfter = await balanceOf(engine, route.destination, swapFrom);
-    await convertOnStellar(engine, route, owner, (heldAfter - heldBefore).toString());
-    patch("swap", { phase: "done" });
+    // the sponsor's repayment, if it has not been taken yet, keeps its share
+    const convertible = heldAfter - heldBefore - unrepaid;
+    const stays = `so it stays in ${swapFrom.symbol}, in your account.`;
+    if (convertible <= 0n) {
+      patch("swap", {
+        phase: "done",
+        note:
+          `Not converted: after what repaying the sponsor's reserve may take, nothing that ` +
+          `arrived is left to convert, ${stays}`,
+      });
+      return;
+    }
+    const converted = await convertOnStellar(engine, route, owner, convertible.toString());
+    patch(
+      "swap",
+      converted === "converted"
+        ? { phase: "done" }
+        : {
+            phase: "done",
+            note: `Not converted: what is left to convert is below what the exchange can take, ${stays}`,
+          },
+    );
   }
 }
 

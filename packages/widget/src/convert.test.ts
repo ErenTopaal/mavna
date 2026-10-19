@@ -8,7 +8,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESTINATION, routeFor, STELLAR_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
 import { convertOnStellar, type TransferEngine } from "./transfer";
 
@@ -53,6 +53,12 @@ function usdcIntoXlm() {
   };
 }
 
+/** What Aquarius quotes for an input; a flat 26 XLM unless a test prices by size. */
+let quoteOut: (amountIn: number) => number;
+beforeEach(() => {
+  quoteOut = () => 26_000_000;
+});
+
 describe("converting on Stellar", () => {
   /** The network doubles and a real venue chain; what crossed the boundary is returned. */
   function setUp() {
@@ -85,7 +91,7 @@ describe("converting on Stellar", () => {
           ]).toXDR("base64"),
           pools: ["CD3LFMMLBQ6RBJUD3Z2LFDFE6544WDRMWHEZYPI5YDVESYRSO2TT32BX"],
           tokens_addresses: [tokenIn, tokenOut],
-          amount: 26_000_000,
+          amount: quoteOut(Number((asked as { amount?: unknown }).amount)),
         });
       }
       if (url.startsWith(RPC)) {
@@ -218,5 +224,22 @@ describe("converting on Stellar", () => {
       convertOnStellar(moved.engine, shown("25870001"), DESTINATION, "50000000"),
     ).rejects.toThrow(/price moved.*USDC has arrived/);
     expect(moved.signed).toEqual([]);
+  });
+
+  it("holds a smaller conversion to the rate the user was shown, not to the whole amount's floor", async () => {
+    // the sponsor's repayment left 40 of the 50 priced, at the same 0.52 XLM per USDC
+    quoteOut = (amountIn) => Math.floor((amountIn * 26) / 50);
+    const run = setUp();
+    expect(await convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "40000000")).toBe(
+      "converted",
+    );
+    expect(run.sent).toHaveLength(1);
+  });
+
+  it("leaves an amount the venue would turn into nothing as it arrived", async () => {
+    quoteOut = () => 0;
+    const run = setUp();
+    expect(await convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "1")).toBe("too-small");
+    expect(run.signed).toEqual([]);
   });
 });
