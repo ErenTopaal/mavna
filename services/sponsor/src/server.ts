@@ -701,6 +701,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
+    // The settlement sits on its channel's next sequence, which is only this
+    // account's while it holds the lease. A lease that lapsed or moved on means
+    // that sequence now belongs to someone else's settlement, and holding this
+    // one would let it spend theirs. Held, the lease runs to the settlement's
+    // own bound.
+    const pool = await ensureChannels();
+    if (
+      record.channel === undefined ||
+      !pool.extend(record.destination, record.channel, record.expiresAtUnix, nowUnix())
+    ) {
+      reply(
+        res,
+        409,
+        {
+          error: "That settlement's slot has passed to someone else. Ask for a new one.",
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
+
     heldSettlements.set(record.destination, {
       xdr: body.signedXdr,
       createdAtUnix: nowUnix(),

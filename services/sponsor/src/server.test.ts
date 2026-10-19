@@ -192,7 +192,9 @@ class RecordingRpc extends RpcClient {
   private send(tx: Transaction | FeeBumpTransaction): rpc.Api.SendTransactionResponse {
     const hash = tx.hash().toString("hex");
     const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
-    if (this.pending.has(hash) || this.landed.has(hash)) return { ...base, status: "DUPLICATE" };
+    // Only a queued transaction is a duplicate. One that landed has spent its
+    // sequence, and the network answers a resend of it with txBadSeq.
+    if (this.pending.has(hash)) return { ...base, status: "DUPLICATE" };
     const inner = "innerTransaction" in tx ? tx.innerTransaction : tx;
     const current = this.accounts.get(inner.source);
     if (current === undefined) return this.refused(base, "txNoAccount");
@@ -1609,5 +1611,77 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     for (const settleSweepSeconds of [-1, 1.5, Number.NaN]) {
       await expect(startServer({ settleSweepSeconds })).rejects.toThrow(/sweep/);
     }
+  });
+});
+
+describe("a channel's sequence belongs to whoever holds its lease", () => {
+  const SWEEP_MS = 120_000;
+
+  /**
+   * Hold back the server's view of a settlement that has already landed, the
+   * way a slow confirmation does. Returns the release.
+   */
+  function confirmLate(server: TestServer): () => void {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, options) => {
+      const result = await submit(label, build, options);
+      if (label === "settlement") await gate;
+      return result;
+    };
+    return release;
+  }
+
+  it("will not hold a settlement built on a channel that has since gone to someone else", async () => {
+    const server = await startServer();
+    const owner = Keypair.random();
+    const next = Keypair.random();
+    await preparedWithSettlementHeld(server, owner);
+    server.rpc.holding(owner, PLENTY);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // The sweep submits, the settlement lands, and the confirmation outlasts
+    // the sweep's deadline, so the account is no longer marked as settling.
+    const confirmed = confirmLate(server);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await server.server.stopSweep();
+    vi.useRealTimers();
+
+    // The owner builds on the channel's next sequence in that window...
+    const extra = await server.post("/settlement", {
+      destination: owner.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(extra.status).toBe(200);
+
+    // ...the first settlement's confirmation arrives and frees the channel...
+    confirmed();
+    await vi.waitFor(() =>
+      expect(logged.mock.calls.flat().join(" ")).toMatch(/landed after the sweep moved on/),
+    );
+
+    // ...and the next user's settlement is built on that same sequence.
+    await preparedWithSettlementHeld(server, next);
+
+    const committed = await server.post("/settlement/commit", {
+      destination: owner.publicKey(),
+      signedXdr: signXdr(extra.body.xdr as string, owner),
+    });
+    expect(committed.status).toBe(409);
+
+    server.rpc.holding(next, PLENTY);
+    const settled = await server.post("/settle", { destination: next.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    const landed = server.rpc.submissions.map((s) => s.tx as Transaction);
+    expect(landed).toHaveLength(1);
+    expect(signedBy(landed[0] as Transaction, next.publicKey())).toBe(true);
+    logged.mockRestore();
   });
 });
