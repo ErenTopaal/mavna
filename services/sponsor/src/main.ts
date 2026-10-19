@@ -57,6 +57,25 @@ if (
   process.exit(2);
 }
 
+/**
+ * Finishing conversions on arrival, when configured. The executor key is its
+ * own secret: it signs only lz_compose authorizations and holds only its
+ * minimum balance, so a token named in a message never reaches sponsor funds.
+ */
+function arrival(): { arrivalContract?: string; arrivalExecutorSecret?: string } {
+  const contract = env("MAVNA_ARRIVAL_CONTRACT");
+  if (contract === undefined) return {};
+  const executor = env("MAVNA_ARRIVAL_EXECUTOR_SECRET");
+  if (executor === undefined) {
+    console.error(
+      "MAVNA_ARRIVAL_CONTRACT is set but MAVNA_ARRIVAL_EXECUTOR_SECRET is not. Finishing " +
+        "conversions needs its own executor key, separate from the sponsor key.",
+    );
+    process.exit(2);
+  }
+  return { arrivalContract: contract, arrivalExecutorSecret: executor };
+}
+
 const server = createSponsorServer({
   rpc: new RpcClient({ url: network.rpcUrl }),
   network,
@@ -74,9 +93,7 @@ const server = createSponsorServer({
     .map((origin) => origin.trim())
     .filter((origin) => origin !== ""),
   ...(settleSweepSeconds === undefined ? {} : { settleSweepSeconds }),
-  ...(env("MAVNA_ARRIVAL_CONTRACT") === undefined
-    ? {}
-    : { arrivalContract: env("MAVNA_ARRIVAL_CONTRACT") as string }),
+  ...arrival(),
 });
 
 const port = Number(env("PORT") ?? 8787);

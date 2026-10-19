@@ -105,6 +105,11 @@ export interface SponsorServerOptions {
    * Absent means /compose answers that it finishes none.
    */
   readonly arrivalContract?: string;
+  /**
+   * The key named as `lz_compose`'s executor, separate from the sponsor key and
+   * holding only its minimum balance. Required with `arrivalContract`.
+   */
+  readonly arrivalExecutorSecret?: string;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -196,14 +201,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     payerSecret: options.sponsorSecret,
     buildDelivery: options.buildDelivery,
   });
+  if (options.arrivalContract !== undefined && options.arrivalExecutorSecret === undefined) {
+    throw new Error(
+      "Finishing conversions needs its own executor key (arrivalExecutorSecret), separate " +
+        "from the sponsor key.",
+    );
+  }
   const composer =
-    options.arrivalContract === undefined
+    options.arrivalContract === undefined || options.arrivalExecutorSecret === undefined
       ? undefined
       : new Composer({
           rpc: options.rpc,
           network: options.network,
           contract: options.arrivalContract,
           payerSecret: options.sponsorSecret,
+          executorSecret: options.arrivalExecutorSecret,
         });
   // one finish per message at a time; the chain refuses a second anyway, this
   // only keeps a double click from costing two simulations and two fees

@@ -2410,13 +2410,17 @@ describe("the sponsor funds its own channel once", () => {
 });
 
 describe("finishing a conversion on arrival", () => {
-  const ARRIVAL = "CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252";
+  const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
   const good = {
     from: "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB",
     guid: "ab".repeat(32),
     index: 0,
     message: "0x01",
   };
+
+  it("refuses to start finishing conversions without its own executor key", async () => {
+    await expect(startServer({ arrivalContract: ARRIVAL })).rejects.toThrow(/executor key/);
+  });
 
   it("says so when this sponsor finishes none", async () => {
     const server = await startServer();
@@ -2426,7 +2430,10 @@ describe("finishing a conversion on arrival", () => {
   });
 
   it("refuses malformed input before reading anything", async () => {
-    const server = await startServer({ arrivalContract: ARRIVAL });
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
     for (const body of [
       { ...good, from: "not an address" },
       { ...good, guid: "abc" },
