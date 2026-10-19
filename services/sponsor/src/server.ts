@@ -1113,6 +1113,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    // One settlement repays one preparation. A second in flight would clear the
+    // mark below when it fails while the first is still out, and a second after
+    // the first landed has nothing left to repay it.
+    if (held.preparing || held.prepared) {
+      refuse(
+        record,
+        res,
+        origin,
+        409,
+        "A preparation has already been submitted against this account's settlement.",
+      );
+      return;
+    }
     // Marked before the first await, so the settlement just matched cannot be
     // swapped for a cheaper one while this preparation is on its way.
     held.preparing = true;

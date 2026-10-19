@@ -2102,6 +2102,72 @@ describe("the held settlement stays put while a preparation lands against it", (
     logged.mockRestore();
   });
 
+  const ALREADY = "A preparation has already been submitted against this account's settlement.";
+
+  /** Two matching preparations with different hashes, built a few seconds apart. */
+  async function twoPreparations(server: TestServer, user: Keypair): Promise<[string, string]> {
+    const first = await preparedAndSigned(server, user);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5_000);
+    const second = await preparedAndSigned(server, user);
+    vi.useRealTimers();
+    return [first, second];
+  }
+
+  it("refuses a second preparation while the first is being submitted", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    const cheap = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(cheap.status).toBe(200);
+    server.rpc.accounts.delete(user.publicKey());
+    await holdSettlementFor(server, user);
+    const [first, second] = await twoPreparations(server, user);
+
+    const stall = server.rpc.stallNext("sponsored preparation");
+    const submitting = server.post("/submit", { signedXdr: first });
+    await stall.reached;
+    // Were the second to reach the network, it would fail there.
+    server.rpc.rejectNext = new MavnaError("sponsored preparation was rejected: txBadSeq", {
+      retryable: false,
+    });
+    const again = await server.post("/submit", { signedXdr: second });
+    server.rpc.rejectNext = undefined;
+    const swapped = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(cheap.body.xdr as string, user),
+    });
+    stall.release();
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe(ALREADY);
+    expect(again.body.retryable).toBe(false);
+    expect(swapped.status).toBe(409);
+    expect((await submitting).status).toBe(200);
+
+    server.rpc.submissions.splice(0);
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(landed.operations.map((op) => op.type)).toContain("revokeAccountSponsorship");
+  });
+
+  it("refuses a second preparation once the first has landed", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const [first, second] = await twoPreparations(server, user);
+
+    expect((await server.post("/submit", { signedXdr: first })).status).toBe(200);
+    const again = await server.post("/submit", { signedXdr: second });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe(ALREADY);
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
   it("does not let a settlement that lands late drop the newer one held after it", async () => {
     const server = await startServer();
     const user = Keypair.random();
