@@ -80,3 +80,35 @@ describe("what this browser remembers", () => {
     expect(readHistory()).toEqual([]);
   });
 });
+
+describe("history from before it was kept per network", () => {
+  // only testnet was served before v2, so everything under the old key is testnet's
+  const legacy = (key: string, records: TransferRecord[]) =>
+    window.localStorage.setItem(key, JSON.stringify(records));
+
+  it("moves into the testnet history on first read, and the old key goes away", () => {
+    legacy("mavna.transfers.v1", [record({ sourceTxHash: "0xold", startedAtUnix: 1 })]);
+    remember(record({ sourceTxHash: "0xnew", startedAtUnix: 2 }), "mavna.transfers.v1.testnet");
+
+    const seen = readHistory("mavna.transfers.v1.testnet");
+    expect(seen.map((r) => r.sourceTxHash)).toEqual(["0xnew", "0xold"]);
+    expect(window.localStorage.getItem("mavna.transfers.v1")).toBeNull();
+    expect(readHistory("mavna.transfers.v1.testnet")).toEqual(seen);
+  });
+
+  it("goes to testnet even when mainnet is read first, and never shows on mainnet", () => {
+    legacy("mavna.transfers.v1", [record({ sourceTxHash: "0xold" })]);
+    expect(readHistory("mavna.transfers.v1.mainnet")).toEqual([]);
+    expect(window.localStorage.getItem("mavna.transfers.v1")).toBeNull();
+    expect(readHistory("mavna.transfers.v1.testnet").map((r) => r.sourceTxHash)).toEqual(["0xold"]);
+  });
+
+  it("keeps an integrator's prefix, and does not count a transfer twice", () => {
+    legacy("acme:mavna.transfers.v1", [record({ sourceTxHash: "0xsame" })]);
+    remember(record({ sourceTxHash: "0xsame" }), "acme:mavna.transfers.v1.testnet");
+    expect(readHistory("acme:mavna.transfers.v1.testnet").map((r) => r.sourceTxHash)).toEqual([
+      "0xsame",
+    ]);
+    expect(window.localStorage.getItem("acme:mavna.transfers.v1")).toBeNull();
+  });
+});

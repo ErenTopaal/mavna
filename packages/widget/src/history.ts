@@ -36,6 +36,44 @@ export interface TransferRecord {
 
 /** Reads what is there, and treats anything unreadable as nothing. */
 export function readHistory(key: string = KEY): readonly TransferRecord[] {
+  migrateUnnetworked(key);
+  return readStored(key);
+}
+
+const NETWORKED = /\.(testnet|mainnet)$/;
+
+/**
+ * History used to be one list for every network, under the key without the
+ * network suffix. Only testnet was served then, so that list is testnet's: it
+ * is folded into the testnet list, newest first and without repeats, and the
+ * old key removed. Done on any read, so it never shows on mainnet first.
+ */
+function migrateUnnetworked(key: string): void {
+  if (!NETWORKED.test(key)) return;
+  const old = key.replace(NETWORKED, "");
+  let present: boolean;
+  try {
+    present = window.localStorage.getItem(old) !== null;
+  } catch {
+    return;
+  }
+  if (!present) return;
+  const testnet = `${old}.testnet`;
+  const kept = readStored(testnet);
+  const seen = new Set(kept.map((r) => r.sourceTxHash));
+  const moved = readStored(old).filter((r) => !seen.has(r.sourceTxHash));
+  const merged = [...kept, ...moved]
+    .sort((a, b) => b.startedAtUnix - a.startedAtUnix)
+    .slice(0, KEEP);
+  try {
+    window.localStorage.setItem(testnet, JSON.stringify(merged));
+    window.localStorage.removeItem(old);
+  } catch {
+    // storage refused: the old list stays where it was and is tried again next read
+  }
+}
+
+function readStored(key: string): readonly TransferRecord[] {
   try {
     const raw = window.localStorage.getItem(key);
     if (raw === null) return [];
