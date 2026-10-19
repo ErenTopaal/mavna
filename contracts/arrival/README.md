@@ -40,25 +40,31 @@ the asset it wants. For any recipient it can decode, the contract converts or de
 
 ## Build
 
-The toolchain is pinned in `contracts/rust-toolchain.toml` (Rust 1.97.1, `wasm32v1-none`).
-soroban-sdk 29 needs stellar-cli 25.2 or later; the hashes below were produced with stellar-cli
-28.1.0.
+Reproducing the deployed bytes needs the exact toolchain, because the wasm records both:
+
+- Rust 1.97.1 with the `wasm32v1-none` target, pinned in `contracts/rust-toolchain.toml`;
+- stellar-cli 28.1.0 (commit `c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd`), which writes its own
+  version into the wasm's `cliver` metadata, so any other version gives a different hash. Install it
+  with `cargo install --locked stellar-cli --version 28.1.0`.
 
 ```sh
-cd contracts
-stellar contract build
-shasum -a 256 target/wasm32v1-none/release/mavna_arrival.wasm
+contracts/build.sh            # refuses any other stellar-cli; set STELLAR=/path/to/stellar if needed
 ```
 
-Building the same commit from a different directory gives the same hash, and
-`stellar contract fetch --id <contract> --network testnet` returns the deployed bytes to compare
-against.
+To check a deployment against the source:
+
+```sh
+stellar contract fetch --id <contract> --network testnet -o deployed.wasm
+shasum -a 256 deployed.wasm   # equals the hash build.sh prints for the same commit
+```
+
+The same commit built from a clean `git archive` in another directory gives the same hash.
 
 ## Deployments
 
-| Network | Contract                                                   | Wasm sha256                                                        | Allowlist                                     |
-| ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------- |
-| testnet | `CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252` | `56e2acc5c2bfe41ff931f00df2e6092ff658e8933c1e313537faa26a1296e35f` | test sender `GBNCXZUV...N2NB` with native XLM |
+| Network | Contract                                                   | Wasm sha256                                                        | Allowlist                                                                                                  |
+| ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| testnet | `CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A` | `688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its allowlisted sender is
 a key that queues compose messages on the real testnet endpoint itself. It proves the endpoint
@@ -69,4 +75,6 @@ Earlier testnet instances hold nothing and are not used. `CACZ7BVN...65MH` (`9d7
 swapped without estimating first, and its fallback failed on-chain whenever the swap reverted,
 because a rolled-back swap still costs ledger writes that simulation does not predict.
 `CB4B235W...JS7F` (`47921dcd...d714`) did not treat a trustline the issuer has not authorised as
-unable to hold the wanted asset.
+unable to hold the wanted asset. `CBSWBSEL...6252` (`56e2acc5...e35f`) called any wanted asset or
+path token the message named, which let a hostile token spend an executor's authorization; it had no
+lists of what it may convert into and route through.
