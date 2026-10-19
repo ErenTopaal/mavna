@@ -915,6 +915,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       transaction.sign(keypair);
       const result = await options.rpc.submit("settlement", async () => transaction, {
         presigned: true,
+        waitSeconds: SETTLEMENT_WAIT_SECONDS,
       });
       return settled(result.txHash);
     } catch (cause) {
@@ -1443,6 +1444,14 @@ const TX_HASH: readonly RegExp[] = [
   /^[1-9A-HJ-NP-Za-km-z]{64,90}$/,
   /^0x[0-9a-fA-F]{1,64}$/,
 ];
+
+/**
+ * How long one attempt waits to see a settlement included. Its time bound is
+ * a day away, and waiting that long would hold the account's claim and a
+ * request open for nothing: the next sweep or /settle sends it again, and the
+ * network answers that as a duplicate or, once it landed, a spent sequence.
+ */
+const SETTLEMENT_WAIT_SECONDS = 120;
 
 /** How often one account's held settlement may be asked for through /settle. */
 const SETTLE_INTERVAL_SECONDS = 30;

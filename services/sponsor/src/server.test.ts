@@ -1191,6 +1191,41 @@ describe("any rail can trigger a held settlement", () => {
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
   });
 
+  it("stops waiting on a slow confirmation after two minutes, and settles it on the next call", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    // Accepted into the queue and not included; every poll costs ten seconds.
+    server.rpc.holdInclusion = true;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const lookup = server.rpc.server.getTransaction.bind(server.rpc.server);
+    server.rpc.server.getTransaction = async (hash) => {
+      vi.setSystemTime(Date.now() + 10_000);
+      return lookup(hash);
+    };
+
+    const started = Date.now();
+    const waited = await server.post("/settle", { destination: user.publicKey() });
+    expect(waited.status).toBe(200);
+    expect(waited.body.settled).toBe(false);
+    expect(waited.body.settlementRetryable).toBe(true);
+    const seconds = (Date.now() - started) / 1000;
+    expect(seconds).toBeGreaterThanOrEqual(120);
+    expect(seconds).toBeLessThan(150);
+
+    // It lands meanwhile. The next call's resend finds the sequence spent and
+    // the ledger says it was this settlement.
+    server.rpc.includePending();
+    server.rpc.holdInclusion = false;
+    vi.setSystemTime(Date.now() + 31_000);
+    const later = await server.post("/settle", { destination: user.publicKey() });
+    expect(later.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(later.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+  });
+
   it("limits only accounts with a settlement to submit", async () => {
     const server = await startServer();
     const stranger = Keypair.random();
