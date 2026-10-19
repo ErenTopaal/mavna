@@ -97,11 +97,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
         // Nothing was sent, and saying so is the point: a user who is unsure
         // whether their money moved will try again, and trying again is how one
         // payment becomes two.
-        throw new Error(
-          index === 0
-            ? "You did not approve, so nothing was sent."
-            : "You did not confirm the transfer. The approval went through, but no funds moved.",
-        );
+        throw new Error(declinedMessage(index, transactions.length));
       }
       throw cause;
     }
@@ -110,7 +106,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     const receipt = await connection.reader.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
       throw new Error(
-        `The ${index === 0 ? "approval" : "transfer"} was rejected by the network. ` +
+        `The ${index === transactions.length - 1 ? "transfer" : "approval"} was rejected by the network. ` +
           "Your funds have not moved.",
       );
     }
@@ -120,6 +116,17 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
   }
 
   return hashes;
+}
+
+/**
+ * What a declined signature means, said by position: the send is always last,
+ * and a rail whose token needs no allowance builds nothing before it.
+ */
+function declinedMessage(index: number, count: number): string {
+  if (index < count - 1) return "You did not approve, so nothing was sent.";
+  return index === 0
+    ? "You did not confirm the transfer, so nothing was sent."
+    : "You did not confirm the transfer. The approval went through, but no funds moved.";
 }
 
 /**

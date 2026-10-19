@@ -12,8 +12,7 @@
  * the design's own methods, unchanged.
  */
 import { ERC20_ABI } from "@mavna/adapter-cctp";
-import type { StepPhase } from "@mavna/core";
-import { escalateIfOverdue, type LookupKey, parseLookupKey, toHandle } from "@mavna/status";
+import { escalateIfOverdue, parseLookupKey, toHandle } from "@mavna/status";
 import React, { type ReactNode } from "react";
 import type { Address } from "viem";
 import type {
@@ -37,10 +36,12 @@ import {
   type RouteRejection,
   type RouteSet,
   type RouteView,
+  railDisplay,
   runQuote as realQuote,
   toRouteView,
   type Wanted,
 } from "./quote";
+import { lookupAcross } from "./rails";
 import {
   onPrimary,
   onPrimaryCompact,
@@ -845,7 +846,7 @@ export class Flow extends React.Component<FlowProps, State> {
     const view = this.chosen();
     if (view === undefined) return;
     const chain = this.engine.sourceChainDetail(this.state.chainId);
-    const steps = buildSteps(view, chain.name, this.state.amount, this.state.wanted);
+    const steps = buildSteps(view);
     this.emit({ type: "transferStarted" });
     this.setState({ phase: "sending", steps }, () => {
       this.go("flight", "push");
@@ -979,9 +980,11 @@ export class Flow extends React.Component<FlowProps, State> {
     }
     this.setState({ lookupNote: null, finishTries: 0 });
     try {
-      const handle = toHandle(key);
-      let phase = await this.engine.cctp.status(handle);
       const rec = this.state.history.find((h) => h.sourceTxHash.toLowerCase() === v.toLowerCase());
+      // The chain is known only for a transfer this browser sent. Without it
+      // every rail is asked, which is slower and still finds it.
+      const answer = await lookupAcross(this.engine.adapters, toHandle(key, rec?.sourceChainId));
+      let phase = answer.phase;
       if (rec !== undefined && phase.phase === "pending") {
         phase = escalateIfOverdue(
           {
@@ -999,14 +1002,21 @@ export class Flow extends React.Component<FlowProps, State> {
           }),
         ).phase;
       }
-      this.setFound(phase, key.kind);
+      this.setState({
+        found: foundFor(phase, key.kind, answer.rails),
+        // A rail that could not be asked is said, so its silence is not read as
+        // the transfer not being there.
+        lookupNote:
+          answer.errors.length === 0
+            ? null
+            : `Not every rail answered: ${answer.errors
+                .map((e) => `${railDisplay(e.source)} (${e.message})`)
+                .join(", ")}.`,
+        lookupNoteKind: "quiet",
+      });
     } catch (e) {
       this.setState({ found: null, lookupNote: msg(e), lookupNoteKind: "fault" });
     }
-  }
-
-  setFound(phase: StepPhase, keyKind: LookupKey["kind"]): void {
-    this.setState({ found: foundFor(phase, keyKind) });
   }
 
   async onFinish(): Promise<void> {

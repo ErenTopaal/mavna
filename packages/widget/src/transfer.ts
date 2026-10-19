@@ -11,15 +11,23 @@
  * than as module singletons, so the same runner serves the app (env config) and
  * the widget (an integrator's config).
  */
-import { explorerTxUrl } from "@mavna/adapter-cctp";
-import type { NetworkId, Route } from "@mavna/core";
+import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { buildPathPayment } from "@mavna/swap";
 import { TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute } from "./execute";
-import { fmt } from "./format";
 import { remember } from "./history";
-import type { RouteView, Wanted } from "./quote";
+import { type RouteView, settlementBlocker, type Wanted } from "./quote";
+import {
+  adapterFor,
+  endedNote,
+  pollSettlement,
+  STILL_MOVING,
+  settleNote,
+  sleep,
+  stepsFor,
+  trackDelivery,
+} from "./rails";
 import type { Connection } from "./wallet";
 
 export type StepPhase = "idle" | "blocked" | "pending" | "done" | "failed";
@@ -55,7 +63,7 @@ export interface FlightStep {
   readonly note?: string;
   /** True when this step waits on the user's wallet. */
   readonly user: boolean;
-  /** Who acts on this step: the user's wallet, Circle, or Mavna. A real fact. */
+  /** Who acts on this step: the user's wallet, the rail, or Mavna. A real fact. */
   readonly actor: string;
   readonly ref?: string;
   readonly refUrl?: string;
@@ -79,90 +87,33 @@ function shortHash(hash: string): string {
 /**
  * The steps a transfer will take, built from the real chosen route.
  *
- * Mirrors the design's `buildSteps` order (settle → approve → burn → attest →
- * prepare → deliver → swap), but the settle/prepare steps appear only when the
- * route actually carries a `prepare-account` step, and the swap step only when it
- * carries a `swap` step. Nothing is padded in.
+ * The settle and prepare steps appear only when the route carries a
+ * `prepare-account` step, and the swap step only when it carries a `swap` step.
+ * Which steps sit between them depends on the rail; see `stepsFor`.
  */
-export function buildSteps(
-  view: RouteView,
-  chainName: string,
-  amountText: string,
-  wanted: Wanted,
-): FlightStep[] {
-  const newAccount = view.newAccount;
-  const amount = fmt(Number.parseFloat(amountText.replace(/[^0-9.]/g, "")) || 0);
-  const out: FlightStep[] = [];
-  if (newAccount) {
-    out.push({
-      id: "settle",
-      label: "Approve the repayment first",
-      note: "Repays whoever fronted the account reserve.",
-      user: true,
-      actor: "Your wallet",
-      phase: "idle",
-    });
-  }
-  out.push({
-    id: "approve",
-    label: "Allow Circle to move your USDC",
-    note: `Confirm in your wallet: approve ${amount} USDC on ${chainName}.`,
-    user: true,
-    actor: "Your wallet",
-    phase: "idle",
-  });
-  out.push({
-    id: "burn",
-    label: `Send from ${chainName}`,
-    note: "Waiting for inclusion.",
-    user: true,
-    actor: "Your wallet",
-    phase: "idle",
-  });
-  out.push({
-    id: "attest",
-    label: "Circle attests the transfer",
-    note: "A few minutes. Safe to close this page.",
-    user: false,
-    actor: "Circle",
-    phase: "idle",
-  });
-  if (newAccount) {
-    out.push({
-      id: "prepare",
-      label: "Set the account up",
-      note: "Approve in your Stellar wallet. Costs you nothing.",
-      user: true,
-      actor: "Your wallet",
-      phase: "idle",
-    });
-  }
-  out.push({
-    id: "deliver",
-    label: "Deliver on Stellar",
-    note: "Delivered on Stellar.",
-    user: false,
-    actor: "Mavna",
-    phase: "idle",
-  });
-  if (wanted === "XLM") {
-    out.push({
-      id: "swap",
-      label: "Convert to XLM on Stellar's exchange",
-      note: "Approve the conversion in your Stellar wallet.",
-      user: true,
-      actor: "Your wallet",
-      phase: "idle",
-    });
-  }
-  return out;
+export function buildSteps(view: RouteView): FlightStep[] {
+  return stepsFor(view.route).map((step) => ({ ...step, phase: "idle" }));
 }
 
 /** How the runner reports progress back to the flight screen. */
 export type Patch = (id: string, patch: Partial<FlightStep>) => void;
 
+/** The parts of an engine a transfer touches. */
+export type TransferEngine = Pick<
+  Engine,
+  | "network"
+  | "adapters"
+  | "sponsor"
+  | "stellar"
+  | "historyKey"
+  | "sourceDomain"
+  | "sdex"
+  | "rpc"
+  | "usdcOnStellar"
+>;
+
 export interface TransferDeps {
-  readonly engine: Engine;
+  readonly engine: TransferEngine;
   readonly view: RouteView;
   readonly chainId: string;
   readonly chainName: string;
@@ -172,13 +123,19 @@ export interface TransferDeps {
   readonly wanted: Wanted;
   readonly patch: Patch;
   readonly onEvmEvent: (event: ExecutionEvent) => void;
+  /** How the runner waits between polls. A test passes one that does not. */
+  readonly wait?: (ms: number) => Promise<void>;
 }
 
 /**
  * Prove control of the destination and sign the settlement before anything
  * burns, exactly as the cost decision requires.
  */
-async function collectSettlement(engine: Engine, route: Route, chainId: string): Promise<string> {
+async function collectSettlement(
+  engine: TransferEngine,
+  route: Route,
+  chainId: string,
+): Promise<string> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
     throw new Error(
@@ -194,7 +151,7 @@ async function collectSettlement(engine: Engine, route: Route, chainId: string):
 
 /** Prepare the account, only once the attestation exists. */
 async function prepareNow(
-  engine: Engine,
+  engine: TransferEngine,
   route: Route,
   chainId: string,
   address: string,
@@ -206,7 +163,7 @@ async function prepareNow(
 
 /** Convert the arrived USDC into XLM on Stellar's own exchange. */
 async function convertOnStellar(
-  engine: Engine,
+  engine: TransferEngine,
   route: Route,
   owner: string | undefined,
 ): Promise<void> {
@@ -236,9 +193,12 @@ async function convertOnStellar(
   await engine.rpc.submit("conversion", async () => parsed as never);
 }
 
-/** Map the EVM approval/burn stream onto the approve and burn steps. */
-function mapEvm(event: ExecutionEvent, patch: Patch): void {
-  const id = event.index === 0 ? "approve" : "burn";
+/**
+ * Map the EVM stream onto the approve and send steps. The send is always the
+ * last transaction; a rail whose token needs no allowance builds only that one.
+ */
+function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
+  const id = event.index === count - 1 ? "burn" : "approve";
   switch (event.kind) {
     case "skipped":
       patch(id, { phase: "done", note: event.why });
@@ -257,7 +217,7 @@ function mapEvm(event: ExecutionEvent, patch: Patch): void {
 
 /** Trigger the mint, preparing the account at the last moment if it is new. */
 async function deliverToStellar(
-  engine: Engine,
+  engine: TransferEngine,
   burnHash: string,
   owner: string | undefined,
   route: Route,
@@ -304,47 +264,34 @@ async function deliverToStellar(
   );
 }
 
-/**
- * Run the whole transfer. Resolves when the funds are on Stellar. The flight
- * screen renders whatever phase each step is in; on a thrown error the caller
- * marks the active step failed and shows the message.
- */
-export async function runTransfer(deps: TransferDeps): Promise<void> {
-  const { engine, view, chainId, chainName, connection, patch } = deps;
-  const route = view.route;
-  let owner: string | undefined;
-
-  if (view.newAccount) {
-    if (!(await engine.sponsor.sponsorIsUp())) {
-      throw new Error(
-        "Setting up a new Stellar account needs the sponsor service, which is not " +
-          "reachable right now. Nothing has been sent.",
-      );
-    }
-    patch("settle", { phase: "blocked" });
-    owner = await collectSettlement(engine, route, chainId);
-    patch("settle", { phase: "done" });
-  }
-
-  const transactions = await engine.cctp.buildTransactions(route);
+/** Sign the source chain's transactions and keep the send's hash in history. */
+async function send(
+  deps: TransferDeps,
+  adapter: BridgeAdapter,
+  route: Route,
+): Promise<string | undefined> {
+  const { engine, chainId, chainName, patch } = deps;
+  const transactions = await adapter.buildTransactions(route);
   const hashes = await execute({
-    connection,
+    connection: deps.connection,
     route,
     transactions,
     chainName,
     evmChainId: deps.evmChainId,
     nativeCurrency: deps.nativeCurrency,
     onEvent: (event) => {
-      mapEvm(event, patch);
+      mapEvm(event, transactions.length, patch);
       deps.onEvmEvent(event);
     },
   });
 
-  const burnHash = hashes.at(-1);
-  if (burnHash !== undefined) {
+  const sendHash = hashes.at(-1);
+  if (sendHash !== undefined) {
+    // Written before anything waits on the rail, so a closed tab never loses
+    // the one thing that finds this transfer again.
     remember(
       {
-        sourceTxHash: burnHash,
+        sourceTxHash: sendHash,
         sourceChainId: chainId,
         sourceChainName: chainName,
         destination: route.destination,
@@ -352,15 +299,110 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
         symbol: route.sends.asset.symbol,
         decimals: route.sends.asset.decimals,
         startedAtUnix: Math.floor(Date.now() / 1000),
-        explorerUrl: explorerTxUrl(engine.network, chainId, burnHash),
+        explorerUrl: route.fromChain.explorerTxUrl(sendHash),
       },
       engine.historyKey,
     );
     patch("burn", {
-      ref: shortHash(burnHash),
-      refUrl: explorerTxUrl(engine.network, chainId, burnHash),
+      ref: shortHash(sendHash),
+      refUrl: route.fromChain.explorerTxUrl(sendHash),
     });
-    await deliverToStellar(engine, burnHash, owner, route, chainId, patch);
+  }
+  return sendHash;
+}
+
+/** Refuse a new account the sponsor cannot reach or cannot be repaid for. */
+async function assertSponsorable(engine: TransferEngine, route: Route): Promise<void> {
+  const blocked = settlementBlocker(route, engine.usdcOnStellar.id);
+  if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
+  if (!(await engine.sponsor.sponsorIsUp())) {
+    throw new Error(
+      "Setting up a new Stellar account needs the sponsor service, which is not " +
+        "reachable right now. Nothing has been sent.",
+    );
+  }
+}
+
+/**
+ * LayerZero and Axelar: the rail delivers by itself, to an account that must
+ * already be able to hold what arrives, so the account is prepared before the
+ * send. The sponsor submits the held repayment once the funds have landed.
+ */
+async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<string | undefined> {
+  const { engine, view, chainId, patch } = deps;
+  const route = view.route;
+  const wait = deps.wait ?? sleep;
+  let owner: string | undefined;
+
+  if (view.newAccount) {
+    await assertSponsorable(engine, route);
+    patch("settle", { phase: "blocked" });
+    owner = await collectSettlement(engine, route, chainId);
+    patch("settle", { phase: "done" });
+    patch("prepare", { phase: "blocked" });
+    await prepareNow(engine, route, chainId, owner);
+    patch("prepare", { phase: "done" });
+  }
+
+  const sendHash = await send(deps, adapter, route);
+  if (sendHash === undefined) return owner;
+
+  const handle: TransferHandle = {
+    sourceTxHash: sendHash,
+    depositAddress: undefined,
+    destinationAddress: route.destination,
+    sourceChainId: chainId,
+  };
+  const tracked = await trackDelivery(adapter, handle, patch, { wait });
+  if (tracked.outcome === "timed-out") {
+    throw new Error(
+      tracked.error === undefined
+        ? STILL_MOVING
+        : `${STILL_MOVING} The last check failed: ${tracked.error}`,
+    );
+  }
+  if (tracked.phase.phase !== "done") throw new Error(endedNote(tracked.phase));
+
+  if (owner !== undefined) {
+    // The funds are on Stellar whatever the sponsor says next, so nothing here
+    // can fail the transfer; it can only change what the deliver step says.
+    let note: string;
+    try {
+      note = settleNote(await pollSettlement(engine.sponsor, route.destination, { wait }));
+    } catch (cause) {
+      note =
+        "Delivered on Stellar. Asking the sponsor to take the deposit repayment failed: " +
+        (cause instanceof Error ? cause.message : String(cause));
+    }
+    patch("deliver", { note });
+  }
+  return owner;
+}
+
+/**
+ * Run the whole transfer. Resolves when the funds are on Stellar. The flight
+ * screen renders whatever phase each step is in; on a thrown error the caller
+ * marks the active step failed and shows the message.
+ */
+export async function runTransfer(deps: TransferDeps): Promise<void> {
+  const { engine, view, chainId, patch } = deps;
+  const route = view.route;
+  const adapter = adapterFor(engine, route);
+  let owner: string | undefined;
+
+  if (adapter.id === "cctp") {
+    if (view.newAccount) {
+      await assertSponsorable(engine, route);
+      patch("settle", { phase: "blocked" });
+      owner = await collectSettlement(engine, route, chainId);
+      patch("settle", { phase: "done" });
+    }
+    const burnHash = await send(deps, adapter, route);
+    if (burnHash !== undefined) {
+      await deliverToStellar(engine, burnHash, owner, route, chainId, patch);
+    }
+  } else {
+    owner = await runRelayed(deps, adapter);
   }
 
   if (route.steps.some((s) => s.kind === "swap")) {

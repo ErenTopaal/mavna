@@ -76,10 +76,12 @@ export interface Engine {
   readonly network: NetworkId;
   readonly rpc: RpcClient;
   readonly breaker: CircuitBreaker;
-  /** cctp, axelar, layerzero, raced together. */
+  /**
+   * cctp, axelar, layerzero, raced together. A route is built, tracked and
+   * looked up through the adapter that quoted it (see `adapterFor`), never
+   * through a named one, so there is no Circle handle here to reach for.
+   */
   readonly adapters: readonly BridgeAdapter[];
-  /** Kept named as well, for the status lookup and delivery domain. */
-  readonly cctp: CctpAdapter;
   readonly sdex: SdexProvider;
   readonly usdcOnStellar: MavnaAsset;
   readonly xlmOnStellar: MavnaAsset;
@@ -198,7 +200,6 @@ export function createEngine(config: EngineConfig): Engine {
     rpc,
     breaker,
     adapters,
-    cctp,
     sdex,
     usdcOnStellar,
     xlmOnStellar,

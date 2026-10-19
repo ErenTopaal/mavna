@@ -1,6 +1,19 @@
-import type { StepPhase } from "@mavna/core";
+import type { Remedy, StepPhase } from "@mavna/core";
 import type { LookupKey } from "@mavna/status";
 import { amountValue, fmt, short } from "./format";
+import { railDisplay } from "./quote";
+
+/** A remedy as a sentence a person can act on, with where to act when it has one. */
+export function remedyNote(remedy: Remedy): string {
+  switch (remedy.kind) {
+    case "claim":
+      return `${remedy.because} ${remedy.at}`;
+    case "contact":
+      return `${remedy.because} Reference: ${remedy.reference}.`;
+    default:
+      return remedy.because;
+  }
+}
 
 /** How a looked-up transfer ended, in the design's found-panel language. */
 export type FoundTone = "ok" | "wait" | "bad";
@@ -23,8 +36,17 @@ export interface FoundState {
  * The key matters for idle. Looked up by address, idle means the address could
  * not name a transfer, not that nothing arrived: an address may well have had
  * deliveries, and saying otherwise would be false.
+ *
+ * `rails` are the adapters the answer speaks for. Finishing a delivery is the
+ * sponsor's Circle mint, so it is offered only when Circle is among them; the
+ * other rails deliver on their own and their remedies say what is left to do.
  */
-export function foundFor(phase: StepPhase, keyKind: LookupKey["kind"]): FoundState {
+export function foundFor(
+  phase: StepPhase,
+  keyKind: LookupKey["kind"],
+  rails: readonly string[],
+): FoundState {
+  const circle = rails.includes("cctp");
   switch (phase.phase) {
     case "done":
       return {
@@ -41,29 +63,39 @@ export function foundFor(phase: StepPhase, keyKind: LookupKey["kind"]): FoundSta
     case "partial":
       return {
         tone: "bad",
-        note: `Part of this arrived. ${fmt(amountValue(phase.received))} of ${fmt(amountValue(phase.expected))} ${phase.expected.asset.symbol}. Finishing the delivery is safe to try.`,
-        canFinish: true,
+        note: `Part of this arrived. ${fmt(amountValue(phase.received))} of ${fmt(amountValue(phase.expected))} ${phase.expected.asset.symbol}. ${circle ? "Finishing the delivery is safe to try." : remedyNote(phase.remedy)}`,
+        canFinish: circle,
       };
     case "failed":
-      return { tone: "bad", note: phase.cause, canFinish: true };
+      return { tone: "bad", note: phase.cause, canFinish: circle };
     case "stalled":
       return {
         tone: "wait",
-        note: "Taking longer than usual. Finishing the delivery is safe to try.",
-        canFinish: true,
+        note: `Taking longer than usual. ${circle ? "Finishing the delivery is safe to try." : remedyNote(phase.remedy)}`,
+        canFinish: circle,
       };
     case "pending":
-      return { tone: "wait", note: "On its way to Stellar.", canFinish: true };
+      return { tone: "wait", note: "On its way to Stellar.", canFinish: circle };
     case "blocked":
-      return { tone: "wait", note: "Waiting on a signature to continue.", canFinish: true };
-    default:
+      return { tone: "wait", note: "Waiting on a signature to continue.", canFinish: circle };
+    default: {
       if (keyKind !== "source-tx") {
+        const name = rails.length === 1 ? railDisplay(rails[0] ?? "") : undefined;
+        const which =
+          name === undefined
+            ? "a transfer"
+            : `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name} transfer`;
         return {
           tone: "wait",
-          note: "An address alone cannot identify a Circle transfer. Paste the source transaction hash to check one.",
+          note: `An address alone cannot identify ${which}. Paste the source transaction hash to check one.`,
           canFinish: false,
         };
       }
-      return { tone: "wait", note: "Nothing has reached this address yet.", canFinish: true };
+      return {
+        tone: "wait",
+        note: "Nothing has been found for this transaction yet.",
+        canFinish: circle,
+      };
+    }
   }
 }

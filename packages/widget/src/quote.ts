@@ -8,7 +8,14 @@
  */
 
 import { sourceUsdcFor } from "@mavna/adapter-cctp";
-import type { Asset, Route, RouteRejection, RouteSet, TrustModel } from "@mavna/core";
+import {
+  type Asset,
+  type Route,
+  type RouteRejection,
+  type RouteSet,
+  rejectionIsRetryable,
+  type TrustModel,
+} from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import type { Engine } from "./engine";
 import { amountValue, fromBaseUnits, toBaseUnits } from "./format";
@@ -165,6 +172,44 @@ export function buildAssets(
   return { from, to: wanted === "XLM" ? engine.xlmOnStellar : engine.usdcOnStellar };
 }
 
+/**
+ * Why a route cannot set up a new account, or undefined when it can.
+ *
+ * The sponsor fronts the reserve and is repaid out of what arrives, and the
+ * repayment it holds spends USDC: the only asset it curates. A rail that lands
+ * anything else leaves that repayment with nothing to spend, so the sponsor
+ * would be out the reserve for good.
+ */
+export function settlementBlocker(route: Route, usdcId: string): string | undefined {
+  if (!route.steps.some((s) => s.kind === "prepare-account")) return undefined;
+  const delivers = route.deliveredAtLeast.asset;
+  if (delivers.id === usdcId) return undefined;
+  return (
+    "A new Stellar account can only be set up on a route that delivers USDC, because its " +
+    `deposit is repaid in USDC from what arrives, and this route delivers ${delivers.symbol}.`
+  );
+}
+
+/** Move the routes no sponsor could settle into the declines, with the reason. */
+export function declineUnsettleable(set: RouteSet, usdcId: string): RouteSet {
+  const routes: Route[] = [];
+  const rejected: RouteRejection[] = [...set.rejected];
+  for (const route of set.routes) {
+    const why = settlementBlocker(route, usdcId);
+    if (why === undefined) {
+      routes.push(route);
+      continue;
+    }
+    rejected.push({
+      source: route.source,
+      reason: "destination-unsupported",
+      explanation: why,
+      retryable: rejectionIsRetryable("destination-unsupported"),
+    });
+  }
+  return { routes, rejected, complete: set.complete };
+}
+
 export interface QuoteRun {
   cancel(): void;
 }
@@ -175,7 +220,16 @@ export interface QuoteRun {
  * later callback a no-op, so a superseded quote never writes stale routes.
  */
 export function runQuote(
-  engine: Engine,
+  engine: Pick<
+    Engine,
+    | "network"
+    | "usdcOnStellar"
+    | "xlmOnStellar"
+    | "adapters"
+    | "breaker"
+    | "xlmSwap"
+    | "integratorFee"
+  >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,
   onDone: (set: RouteSet) => void,
@@ -193,8 +247,36 @@ export function runQuote(
     };
   }
 
-  const { from, to } = buildAssets(engine, inputs.chainId, inputs.wanted);
   const adapters = enabledAdapters(engine.adapters, inputs.rails);
+  const handle: QuoteRun = {
+    cancel: () => {
+      live = false;
+    },
+  };
+
+  let assets: { from: Asset; to: Asset };
+  try {
+    assets = buildAssets(engine, inputs.chainId, inputs.wanted);
+  } catch (cause) {
+    // Nothing can be asked without the source token, and every enabled rail is
+    // owed the reason rather than a picker that quietly shows nothing.
+    const explanation = cause instanceof Error ? cause.message : String(cause);
+    const declined: RouteSet = {
+      routes: [],
+      rejected: adapters.map((a) => ({
+        source: a.id,
+        reason: "asset-unsupported" as const,
+        explanation,
+        retryable: rejectionIsRetryable("asset-unsupported"),
+      })),
+      complete: true,
+    };
+    onUpdate(declined);
+    onDone(declined);
+    return handle;
+  }
+  const { from, to } = assets;
+  const usdc = engine.usdcOnStellar.id;
 
   void raceAdapters(
     adapters,
@@ -207,7 +289,7 @@ export function runQuote(
     },
     {
       onUpdate: (partial) => {
-        if (live) onUpdate(partial);
+        if (live) onUpdate(declineUnsettleable(partial, usdc));
       },
       breaker: engine.breaker,
       swap: inputs.wanted === "XLM" ? engine.xlmSwap : undefined,
@@ -221,7 +303,7 @@ export function runQuote(
     },
   ).then(
     (final) => {
-      if (live) onDone(final);
+      if (live) onDone(declineUnsettleable(final, usdc));
     },
     () => {
       // A total failure still resolves to a complete, empty set for the UI.
@@ -229,11 +311,7 @@ export function runQuote(
     },
   );
 
-  return {
-    cancel: () => {
-      live = false;
-    },
-  };
+  return handle;
 }
 
 export type { Route, RouteRejection, RouteSet, TrustModel };
