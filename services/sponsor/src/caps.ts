@@ -155,8 +155,33 @@ export function classifySourceChain(
   if (chain.length === 0) {
     throw new MavnaError("Source chain is required to apply a cap.", { retryable: false });
   }
-  return cheapGasChains.has(chain) ? "cheap-gas" : "expensive-gas";
+  const counterpart = Object.hasOwn(TESTNET_COUNTERPART, chain)
+    ? (TESTNET_COUNTERPART[chain] as string)
+    : chain;
+  return cheapGasChains.has(counterpart) ? "cheap-gas" : "expensive-gas";
 }
+
+/**
+ * Testnet chains, by the ids the CCTP adapter gives them, against the mainnet
+ * chain they stand in for. Testnet gas is free everywhere, so the class has to
+ * come from the chain being rehearsed. Several land on mainnet ids that are not
+ * in the cheap set, which classes them expensive exactly as on mainnet.
+ */
+export const TESTNET_COUNTERPART: Readonly<Record<string, string>> = {
+  "base-sepolia": "base",
+  "arbitrum-sepolia": "arbitrum",
+  "optimism-sepolia": "optimism",
+  "polygon-amoy": "polygon",
+  "avalanche-fuji": "avalanche",
+  "unichain-sepolia": "unichain",
+  "linea-sepolia": "linea",
+  "world-chain-sepolia": "world-chain",
+  "ink-sepolia": "ink",
+  "x-layer-sepolia": "x-layer",
+  "ethereum-sepolia": "ethereum",
+  "solana-devnet": "solana",
+  "starknet-sepolia": "starknet",
+};
 
 /**
  * Chains where gas is cents rather than dollars, so the gas cost of an attack is

@@ -1,9 +1,11 @@
+import { EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
 import { describe, expect, it } from "vitest";
 import {
   CapLedger,
   classifySourceChain,
   DEFAULT_CHEAP_GAS_CHAINS,
   InMemoryCapStore,
+  TESTNET_COUNTERPART,
 } from "./caps.js";
 
 const tinyCaps = {
@@ -84,6 +86,41 @@ describe("source chain classification", () => {
     expect(classifySourceChain("arbitrum", DEFAULT_CHEAP_GAS_CHAINS)).toBe("cheap-gas");
     // Gas of a dollar or more makes an attack cost more than it destroys.
     expect(classifySourceChain("ethereum", DEFAULT_CHEAP_GAS_CHAINS)).toBe("expensive-gas");
+  });
+
+  it("classes a testnet chain as its mainnet counterpart", () => {
+    // What the app sends on testnet. Classing these all as expensive would give
+    // testnet a looser cap than the mainnet it rehearses.
+    for (const id of [
+      "base-sepolia",
+      "arbitrum-sepolia",
+      "optimism-sepolia",
+      "polygon-amoy",
+      "unichain-sepolia",
+      "linea-sepolia",
+      "solana-devnet",
+    ]) {
+      expect(classifySourceChain(id, DEFAULT_CHEAP_GAS_CHAINS), id).toBe("cheap-gas");
+    }
+    for (const id of ["ethereum-sepolia", "avalanche-fuji", "starknet-sepolia"]) {
+      expect(classifySourceChain(id, DEFAULT_CHEAP_GAS_CHAINS), id).toBe("expensive-gas");
+    }
+  });
+
+  it("maps only real testnet ids onto real mainnet ids", () => {
+    const testnet = new Set([
+      ...Object.keys(EVM_DEPLOYMENTS.testnet),
+      ...Object.keys(NON_EVM_CHAINS.testnet),
+    ]);
+    const mainnet = new Set([
+      ...Object.keys(EVM_DEPLOYMENTS.mainnet),
+      ...Object.keys(NON_EVM_CHAINS.mainnet),
+    ]);
+    for (const [from, to] of Object.entries(TESTNET_COUNTERPART)) {
+      expect(testnet.has(from), from).toBe(true);
+      expect(mainnet.has(to), to).toBe(true);
+    }
+    for (const id of DEFAULT_CHEAP_GAS_CHAINS) expect(mainnet.has(id), id).toBe(true);
   });
 
   it("refuses to classify an unnamed chain rather than defaulting", () => {
