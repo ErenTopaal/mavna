@@ -785,7 +785,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         res,
         409,
         {
-          error: "That settlement's slot has passed to someone else. Ask for a new one.",
+          error: "That settlement's slot has lapsed or passed to someone else. Ask for a new one.",
           retryable: false,
         },
         origin,
