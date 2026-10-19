@@ -1110,6 +1110,8 @@ export class Flow extends React.Component<FlowProps, State> {
   // ------------------------------------------------------------ real lookup ---
 
   async onFind(): Promise<void> {
+    // whatever was priced belonged to the transfer shown before this lookup
+    this.pricedFinish = undefined;
     const v = this.state.lookup.trim();
     let key: ReturnType<typeof parseLookupKey>;
     try {
@@ -1161,7 +1163,10 @@ export class Flow extends React.Component<FlowProps, State> {
 
   /** A finish the user was shown the price of, waiting for their second press. */
   private pricedFinish:
-    | (() => ReturnType<Extract<FinishAnswer, { kind: "priced" }>["finish"]>)
+    | {
+        readonly guid: string;
+        readonly run: Extract<FinishAnswer, { kind: "priced" }>["finish"];
+      }
     | undefined;
 
   async onFinish(): Promise<void> {
@@ -1170,12 +1175,13 @@ export class Flow extends React.Component<FlowProps, State> {
       try {
         // A run the user already saw priced is signed now; otherwise the sponsor
         // runs it, or, with self-funded reserves, it is priced for the user first.
-        const pending = this.pricedFinish;
+        // only a run priced for this very message is signed
+        const pending = this.pricedFinish?.guid === compose.guid ? this.pricedFinish : undefined;
         this.pricedFinish = undefined;
         const outcome =
-          pending === undefined ? await finishCompose(this.engine, compose) : await pending();
+          pending === undefined ? await finishCompose(this.engine, compose) : await pending.run();
         if (outcome.kind === "priced") {
-          this.pricedFinish = outcome.finish;
+          this.pricedFinish = { guid: compose.guid, run: outcome.finish };
           this.setState({
             lookupNote:
               `Finishing it costs up to ${stroopsToXlm(outcome.feeStroops)} XLM from this ` +
