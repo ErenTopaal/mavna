@@ -28,6 +28,7 @@ import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { box, DUR, EASE, mo } from "./motion";
+import { finishCompose } from "./own-compose";
 import { pseudo } from "./pseudo";
 import {
   type Priority,
@@ -1161,7 +1162,8 @@ export class Flow extends React.Component<FlowProps, State> {
     const compose = this.state.found?.compose;
     if (compose !== undefined) {
       try {
-        const outcome = await this.engine.sponsor.requestCompose(compose);
+        // the sponsor runs it, or with self-funded reserves the user's own wallet does
+        const outcome = await finishCompose(this.engine, compose);
         if (outcome.kind === "not-queued") {
           this.setState({
             lookupNote: "Stellar holds nothing waiting for this transfer yet. Try again shortly.",

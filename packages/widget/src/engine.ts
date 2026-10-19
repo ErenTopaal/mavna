@@ -105,6 +105,8 @@ export interface Engine {
   readonly baseReserveStroops: number;
   /** The Stellar network this engine runs on, for building what an account signs itself. */
   readonly stellarNetwork: NetworkConfig;
+  /** The Arrival Contract this network converts through, if it has one. */
+  readonly arrivalContract: string | undefined;
   readonly sourceChains: ReadonlyArray<{ id: string; name: string }>;
   readonly stellarChainId: string;
   readonly defaultSourceChain: string;
@@ -267,6 +269,7 @@ export function createEngine(config: EngineConfig): Engine {
     usdcIssuer,
     baseReserveStroops: netConfig.baseReserveStroops,
     stellarNetwork: netConfig,
+    arrivalContract: config.arrivalContract,
     sourceChains,
     stellarChainId,
     defaultSourceChain,
