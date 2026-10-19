@@ -2,7 +2,14 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { buildPreparation, buildSettlement, classifyAddress, XlmPriceSource } from "@mavna/stellar";
-import { type Asset, Keypair, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  type Asset,
+  Keypair,
+  Operation,
+  type Transaction,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
+import { BuiltLedger, type BuiltRecord, signedBy } from "./built.js";
 import {
   CapLedger,
   classifySourceChain,
@@ -130,7 +137,16 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * sponsor still sponsoring, which is the recoverable direction. The doc's
    * §6.1 loss needs the bridge to fail, not us.
    */
-  const heldSettlements = new Map<string, { xdr: string; createdAtUnix: number }>();
+  const heldSettlements = new Map<
+    string,
+    { xdr: string; createdAtUnix: number; sourceChainId: string; channel: string | undefined }
+  >();
+  /**
+   * What this server built and has not yet seen signed. The funded key signs
+   * nothing whose hash is not in here, because a signature check on a body the
+   * caller chose proves only that the caller can sign.
+   */
+  const built = new BuiltLedger();
   let channels = options.channels;
   const prices =
     options.prices ??
@@ -164,6 +180,24 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     await options.rpc.submit("channel funding", async () => create);
     channels = new ChannelPool({ channels: [channel] });
     return channels;
+  }
+
+  /**
+   * Turn down a transaction the server did build, and put its record back. The
+   * refusal is about this request, not the transaction: the right signature or
+   * a settlement held a moment later makes the same body acceptable, and a
+   * stranger who replays someone's transaction should not be able to burn it.
+   */
+  function refuse(
+    record: BuiltRecord,
+    res: ServerResponse,
+    origin: string | undefined,
+    status: number,
+    error: string,
+    retryable = false,
+  ): void {
+    built.record(record);
+    reply(res, status, { error, retryable }, origin);
   }
 
   const corsOrigin = (req: IncomingMessage): string | undefined => {
@@ -303,6 +337,14 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       createAccount: created,
       assets: assets as Asset[],
     });
+    built.record({
+      hash: transaction.hash().toString("hex"),
+      kind: "preparation",
+      destination: body.destination,
+      signer: signerFor(body.destination),
+      sourceChainId: body.sourceChainId ?? "unknown",
+      expiresAtUnix: expiryOf(transaction),
+    });
 
     reply(res, 200, { xdr: transaction.toXDR(), sponsor: keypair.publicKey() }, origin);
   }
@@ -393,6 +435,15 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       assets: [usdc],
       createdAccount,
     });
+    built.record({
+      hash: transaction.hash().toString("hex"),
+      kind: "settlement",
+      destination: body.destination,
+      signer: signerFor(body.destination),
+      sourceChainId: body.sourceChainId ?? "unknown",
+      expiresAtUnix: expiryOf(transaction),
+      channel: channel.address,
+    });
 
     reply(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
   }
@@ -402,19 +453,17 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    *
    * Nothing is signed by the server here: the channel and sponsor signatures go
    * on at submission time, so what sits in memory can move nothing on its own.
+   * That makes what gets held the whole question, so only a settlement this
+   * server built, signed by the account it was built for, is held, and only
+   * under that account.
    */
   async function settlementCommit(
     body: SettlementCommitBody,
     res: ServerResponse,
     origin: string | undefined,
   ): Promise<void> {
-    if (body.destination === undefined || body.signedXdr === undefined) {
-      reply(
-        res,
-        400,
-        { error: "Send the destination and the signed settlement.", retryable: false },
-        origin,
-      );
+    if (body.signedXdr === undefined) {
+      reply(res, 400, { error: "Send the signed settlement.", retryable: false }, origin);
       return;
     }
     const transaction = TransactionBuilder.fromXDR(body.signedXdr, options.network.passphrase);
@@ -437,12 +486,36 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       );
       return;
     }
-    heldSettlements.set(body.destination, {
+
+    const record = built.take(transaction.hash().toString("hex"), "settlement", nowUnix());
+    if (record === undefined) {
+      reply(
+        res,
+        409,
+        {
+          error: "That settlement was not built here, or has expired. Ask for a new one.",
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
+    if (body.destination !== undefined && body.destination !== record.destination) {
+      refuse(record, res, origin, 400, "That settlement was built for a different account.");
+      return;
+    }
+    if (!signedBy(transaction, record.signer)) {
+      refuse(record, res, origin, 400, "That settlement is not signed by the account it is for.");
+      return;
+    }
+
+    heldSettlements.set(record.destination, {
       xdr: body.signedXdr,
-      createdAtUnix: Math.floor(Date.now() / 1000),
+      createdAtUnix: nowUnix(),
+      sourceChainId: record.sourceChainId,
+      channel: record.channel,
     });
     reply(res, 200, { held: true }, origin);
-    return Promise.resolve();
   }
 
   /**
@@ -499,9 +572,8 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       reply(res, 400, { error: "Fee bumps are not accepted here.", retryable: false }, origin);
       return;
     }
-    // The sponsor signs only transactions it built: its own account as source,
-    // and nothing but sponsorship operations inside. Anything else is someone
-    // trying to get a free signature out of a funded key.
+    // Defence in depth only. The ledger below is what decides: a body the
+    // sponsor did not build is refused however plausible its operations look.
     if (transaction.source !== keypair.publicKey()) {
       reply(
         res,
@@ -527,26 +599,15 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       return;
     }
 
-    // The governing order: no capital commits until the settlement that releases
-    // it is already signed and held. Without this the deposit is a gift, which is
-    // the model the cost decision explicitly rejected.
-    const beneficiary = transaction.operations
-      .map((op) =>
-        op.type === "createAccount"
-          ? op.destination
-          : op.type === "changeTrust"
-            ? (op.source ?? undefined)
-            : undefined,
-      )
-      .find((address) => address !== undefined);
-    if (beneficiary === undefined || !heldSettlements.has(beneficiary)) {
+    // Taken, not read: once countersigned, the same signed body must never earn
+    // a second signature.
+    const record = built.take(transaction.hash().toString("hex"), "preparation", nowUnix());
+    if (record === undefined) {
       reply(
         res,
         409,
         {
-          error:
-            "No settlement is held for this account. The deposit is a loan, and the " +
-            "repayment is signed before the loan is made, not after.",
+          error: "That preparation was not built here, or has expired. Ask for a new one.",
           retryable: false,
         },
         origin,
@@ -554,10 +615,35 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       return;
     }
 
+    // The governing order: no capital commits until the settlement that releases
+    // it is already signed and held. Without this the deposit is a gift, which is
+    // the model the cost decision explicitly rejected.
+    if (!heldSettlements.has(record.destination)) {
+      refuse(
+        record,
+        res,
+        origin,
+        409,
+        "No settlement is held for this account. The deposit is a loan, and the " +
+          "repayment is signed before the loan is made, not after.",
+      );
+      return;
+    }
+    if (!signedBy(transaction, record.signer)) {
+      refuse(record, res, origin, 400, "That preparation is not signed by the account it is for.");
+      return;
+    }
+    const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);
+    const decision = await caps.check(source);
+    if (!decision.allowed) {
+      refuse(record, res, origin, 429, decision.reason, true);
+      return;
+    }
+
     transaction.sign(keypair);
     try {
       const result = await options.rpc.submit("sponsored preparation", async () => transaction);
-      await caps.recordStarted(classifySourceChain("unknown", DEFAULT_CHEAP_GAS_CHAINS));
+      await caps.recordStarted(source);
       reply(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
     } catch (cause) {
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
@@ -628,6 +714,29 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch {
     throw new MavnaError("The request body is not JSON.", { retryable: false });
   }
+}
+
+const nowUnix = (): number => Math.floor(Date.now() / 1000);
+
+/**
+ * The account whose signature a built transaction still needs. A muxed address
+ * is signed for by the account it wraps, and an account about to be created
+ * signs too, because it owns the trustline being opened.
+ */
+function signerFor(destination: string): string {
+  return classifyAddress(destination).trustlineHolder ?? destination;
+}
+
+/**
+ * When the server stops honouring what it built. Both builders set a time
+ * bound; one without would sit in the ledger forever, so that is refused.
+ */
+function expiryOf(transaction: Transaction): number {
+  const maxTime = Number(transaction.timeBounds?.maxTime ?? 0);
+  if (!(maxTime > 0)) {
+    throw new MavnaError("A built transaction has no time bound.", { retryable: false });
+  }
+  return maxTime;
 }
 
 /** Stroops to Horizon's decimal form, integer arithmetic only. */
