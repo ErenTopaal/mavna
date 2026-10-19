@@ -52,6 +52,11 @@ pub struct Config {
     /// (OFT, the token that OFT credits). The OFT is what LayerZero names as the
     /// compose sender; the token is what this contract moves.
     pub ofts: Vec<(Address, Address)>,
+    /// Assets the contract will convert into. Anything else is delivered as it came.
+    pub wanted: Vec<Address>,
+    /// Further tokens a conversion may route through, besides the arriving token
+    /// and the wanted assets. A path touching anything else is not attempted.
+    pub path_tokens: Vec<Address>,
 }
 
 #[contracttype]
@@ -74,8 +79,10 @@ impl ArrivalContract {
         endpoint: Address,
         router: Address,
         ofts: Vec<(Address, Address)>,
+        wanted: Vec<Address>,
+        path_tokens: Vec<Address>,
     ) {
-        if ofts.is_empty() {
+        if ofts.is_empty() || wanted.is_empty() {
             panic_with_error!(&env, Error::BadAllowlist);
         }
         for (i, (oft, _)) in ofts.iter().enumerate() {
@@ -91,6 +98,8 @@ impl ArrivalContract {
                 endpoint,
                 router,
                 ofts,
+                wanted,
+                path_tokens,
             },
         );
     }
@@ -153,7 +162,11 @@ impl ArrivalContract {
 
         arrival::arrive(
             &env,
-            &config.router,
+            &arrival::Venue {
+                router: config.router,
+                wanted: config.wanted,
+                path_tokens: config.path_tokens,
+            },
             arrival::Arrival {
                 identity: arrival::Identity {
                     rail: Symbol::new(&env, "layerzero"),

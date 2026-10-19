@@ -7,7 +7,7 @@
 use soroban_sdk::{
     panic_with_error,
     token::{StellarAssetClient, TokenClient},
-    Address, BytesN, Env, Symbol,
+    Address, BytesN, Env, Symbol, Vec,
 };
 
 use crate::{
@@ -18,6 +18,15 @@ use crate::{
 };
 
 pub const BPS: i128 = 10_000;
+
+/// What this contract may convert into and route through, fixed at construction.
+/// Nothing outside these lists is ever called: a sender cannot make the contract
+/// run code of their choosing inside an executor's transaction.
+pub struct Venue {
+    pub router: Address,
+    pub wanted: Vec<Address>,
+    pub path_tokens: Vec<Address>,
+}
 
 /// Where the funds came from, for the event. Each rail fills in what it has.
 pub struct Identity {
@@ -42,10 +51,10 @@ pub enum Outcome {
     AsCame,
 }
 
-pub fn arrive(env: &Env, router: &Address, arrival: Arrival) -> Outcome {
+pub fn arrive(env: &Env, venue: &Venue, arrival: Arrival) -> Outcome {
     let recipient = arrival.instructions.recipient.clone();
     let converted = match &arrival.instructions.conversion {
-        Some(conversion) if arrival.amount > 0 => convert(env, router, &arrival, conversion),
+        Some(conversion) if arrival.amount > 0 => convert(env, venue, &arrival, conversion),
         _ => None,
     };
     match converted {
@@ -131,19 +140,37 @@ fn path_is_sound(arriving: &Address, conversion: &Conversion) -> bool {
     holding == conversion.wanted
 }
 
+/// Whether every contract the conversion would touch was fixed at construction.
+fn on_lists(venue: &Venue, arriving: &Address, conversion: &Conversion) -> bool {
+    if !venue.wanted.contains(&conversion.wanted) {
+        return false;
+    }
+    let allowed =
+        |t: &Address| t == arriving || venue.wanted.contains(t) || venue.path_tokens.contains(t);
+    conversion
+        .path
+        .iter()
+        .all(|(tokens, _, out)| allowed(&out) && tokens.iter().all(|t| allowed(&t)))
+}
+
 /// Attempts the conversion. None means nothing moved and the arrival is to be
 /// delivered as it came.
 fn convert(
     env: &Env,
-    router: &Address,
+    venue: &Venue,
     arrival: &Arrival,
     conversion: &Conversion,
 ) -> Option<Delivery> {
+    let router = &venue.router;
     let recipient = &arrival.instructions.recipient;
     if conversion.min_out <= 0 || conversion.fee_bps as i128 >= BPS {
         return None;
     }
     if conversion.wanted == arrival.token || !path_is_sound(&arrival.token, conversion) {
+        return None;
+    }
+    // checked before anything is called on the wanted asset or a path token
+    if !on_lists(venue, &arrival.token, conversion) {
         return None;
     }
     let charges_fee = conversion.fee_bps > 0;

@@ -14,6 +14,6 @@ pub enum Error {
     BadValue = 4,
     /// The venue reported success but left less than the floor. Never expected.
     VenueOutsideFloor = 5,
-    /// The constructor was given an empty or duplicated allowlist.
+    /// The constructor was given no OFT, a duplicated OFT, or no wanted asset.
     BadAllowlist = 6,
 }

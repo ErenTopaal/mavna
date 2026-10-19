@@ -165,6 +165,8 @@ fn setup() -> World {
             endpoint.clone(),
             venue.clone(),
             vec![&env, (oft.clone(), usdt0.clone())],
+            vec![&env, usdc.clone()],
+            Vec::<Address>::new(&env),
         ),
     );
     let executor = Address::generate(&env);
@@ -913,7 +915,16 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
     let token = Address::generate(&env);
     let empty: Vec<(Address, Address)> = Vec::new(&env);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        env.register(ArrivalContract, (endpoint.clone(), router.clone(), empty));
+        env.register(
+            ArrivalContract,
+            (
+                endpoint.clone(),
+                router.clone(),
+                empty,
+                vec![&env, token.clone()],
+                Vec::<Address>::new(&env),
+            ),
+        );
     }));
     assert!(r.is_err());
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -927,6 +938,21 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                     (oft.clone(), token.clone()),
                     (oft.clone(), token.clone()),
                 ],
+                vec![&env, token.clone()],
+                Vec::<Address>::new(&env),
+            ),
+        );
+    }));
+    assert!(r.is_err());
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        env.register(
+            ArrivalContract,
+            (
+                endpoint.clone(),
+                router.clone(),
+                vec![&env, (oft.clone(), token.clone())],
+                Vec::<Address>::new(&env),
+                Vec::<Address>::new(&env),
             ),
         );
     }));
@@ -1037,4 +1063,142 @@ fn a_message_the_sdk_writes_decodes_to_what_it_says() {
     );
     assert_eq!(index, BytesN::from_array(&env, &[7u8; 32]));
     assert_eq!(out, usdc);
+}
+
+// ---------------------------------------------------------------- review findings
+
+#[test]
+fn a_stranger_cannot_clear_the_arrival_contracts_compose() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    // no auth mocked: someone tries to burn the slot on the endpoint directly
+    let r = endpoint::Client::new(&w.env, &w.endpoint)
+        .try_clear_compose(&w.arrival, &w.oft, &guid, &0, &message);
+    assert!(r.is_err());
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+}
+
+#[test]
+fn an_oft_that_overstates_amount_ld_is_paid_from_other_pending_arrivals() {
+    // not a defence, a recorded trust assumption: the contract pays the amount the
+    // allowlisted OFT's message states, so an OFT (or an upgrade of one) that
+    // overstates it spends another arrival still waiting in the contract
+    let mut w = setup();
+    let a = Address::generate(&w.env);
+    let b = Address::generate(&w.env);
+    let mut ask_a = w.ask(&a);
+    ask_a.min_out = 1;
+    let (ga, ma) = w.arrive(1_000_000, &encode(&w.env, &ask_a));
+    w.nonce += 1;
+    let gb = BytesN::random(&w.env);
+    let mut ask_b = w.ask(&b);
+    ask_b.min_out = 1;
+    let mb = envelope(&w.env, w.nonce, 1_500_000, &encode(&w.env, &ask_b));
+    w.env.mock_all_auths();
+    StellarAssetClient::new(&w.env, &w.usdt0).mint(&w.arrival, &500_000);
+    endpoint::Client::new(&w.env, &w.endpoint).send_compose(&w.oft, &w.arrival, &gb, &0, &mb);
+    w.env.set_auths(&[]);
+    w.compose(&gb, &mb).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&b), 1_500_000);
+    assert!(w.compose(&ga, &ma).is_err());
+}
+
+#[contracttype]
+enum MalKey {
+    Victim,
+    Native,
+    Thief,
+}
+
+/// A token whose balance() spends whatever auth the caller's transaction carries.
+#[contract]
+struct Mal;
+
+#[contractimpl]
+impl Mal {
+    pub fn arm(env: Env, victim: Address, native: Address, thief: Address) {
+        env.storage().instance().set(&MalKey::Victim, &victim);
+        env.storage().instance().set(&MalKey::Native, &native);
+        env.storage().instance().set(&MalKey::Thief, &thief);
+    }
+
+    pub fn balance(env: Env, _id: Address) -> i128 {
+        let victim: Address = env.storage().instance().get(&MalKey::Victim).unwrap();
+        let native: Address = env.storage().instance().get(&MalKey::Native).unwrap();
+        let thief: Address = env.storage().instance().get(&MalKey::Thief).unwrap();
+        let all = TokenClient::new(&env, &native).balance(&victim);
+        TokenClient::new(&env, &native).transfer(&victim, &thief, &all);
+        0
+    }
+}
+
+#[test]
+fn a_wanted_token_off_the_list_is_never_called_and_cannot_spend_the_executors_auth() {
+    let mut w = setup();
+    let native = endpoint::Client::new(&w.env, &w.endpoint).native_token();
+    let executor = w.executor.clone();
+    let thief = Address::generate(&w.env);
+    let mal = w.env.register(Mal, ());
+    MalClient::new(&w.env, &mal).arm(&executor, &native, &thief);
+    w.env.mock_all_auths();
+    StellarAssetClient::new(&w.env, &native).mint(&executor, &777_000);
+    w.env.set_auths(&[]);
+
+    let recipient = Address::generate(&w.env);
+    let mut ask = w.ask(&recipient);
+    ask.wanted = mal.clone();
+    ask.min_out = 1;
+    ask.path = std::vec![(
+        std::vec![w.usdt0.clone(), mal.clone()],
+        [7u8; 32],
+        mal.clone()
+    )];
+    let (guid, message) = w.arrive(1_000_000, &encode(&w.env, &ask));
+
+    // recording mode, which is what a simulation hands an executor to sign
+    w.env.mock_all_auths();
+    w.client().lz_compose(
+        &executor,
+        &w.oft,
+        &guid,
+        &0,
+        &message,
+        &Bytes::new(&w.env),
+        &0,
+    );
+    let auths = w.env.auths();
+    let events = w.read_events();
+    assert_eq!(auths.len(), 1);
+    assert!(auths[0].1.sub_invocations.is_empty());
+    assert_eq!(events[0].outcome, w.sym("as_came"));
+    assert_eq!(w.token(&native).balance(&executor), 777_000);
+    assert_eq!(w.token(&native).balance(&thief), 0);
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+}
+
+#[test]
+fn a_path_through_a_token_off_the_list_is_not_attempted() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let (stranger, _) = sac(&w.env);
+    let mut ask = w.ask(&recipient);
+    ask.path = std::vec![
+        (
+            std::vec![w.usdt0.clone(), stranger.clone()],
+            [7u8; 32],
+            stranger.clone()
+        ),
+        (
+            std::vec![stranger.clone(), w.usdc.clone()],
+            [8u8; 32],
+            w.usdc.clone()
+        ),
+    ];
+    let (guid, message) = w.arrive(1_000_000, &encode(&w.env, &ask));
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
 }
