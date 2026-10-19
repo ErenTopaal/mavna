@@ -23,6 +23,14 @@ export type SponsorDelivery =
   | { kind: "recipient-not-ready"; detail: string }
   | { kind: "not-attested-yet" };
 
+export interface SponsorSettle {
+  settled: boolean;
+  settlementTxHash?: string;
+  settlementRetryable?: boolean;
+  /** Present, and false, only when the sponsor holds no settlement for the account. */
+  held?: false;
+}
+
 export interface SponsorClient {
   /** The unsigned preparation, for the user's wallet. */
   requestPreparation(
@@ -44,23 +52,57 @@ export interface SponsorClient {
     domain: number,
     destination?: string,
   ): Promise<SponsorDelivery & { settled?: boolean; settlementTxHash?: string }>;
+  /**
+   * Ask the sponsor to submit the settlement it holds for an account, which it
+   * does only once the money the settlement spends from has arrived.
+   *
+   * Polled after funds land, so the server's two ordinary refusals are answers
+   * and not failures: 404 (nothing held) resolves `held: false`, and 429 (asked
+   * too often) resolves `settlementRetryable: true`. Anything else rejects.
+   */
+  settle(destination: string): Promise<SponsorSettle>;
   /** Whether a sponsor is reachable at all, for saying so before it matters. */
   sponsorIsUp(): Promise<boolean>;
 }
 
 export function createSponsorClient(baseUrl: string): SponsorClient {
-  async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  interface Answer {
+    status: number;
+    ok: boolean;
+    body: unknown;
+  }
+
+  /**
+   * One round trip, with the body read as text first. A proxy or gateway can
+   * answer with HTML, and that must surface as the status, not as a JSON parse
+   * error nobody can act on.
+   */
+  async function send(path: string, body: Record<string, unknown>): Promise<Answer> {
     const response = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const parsed = (await response.json()) as T | SponsorError;
-    if (!response.ok) {
-      // The server writes its errors for people, so they pass through as said.
-      throw new Error((parsed as SponsorError).error ?? "The sponsor did not answer.");
+    const text = await response.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`The sponsor answered ${response.status}.`);
     }
-    return parsed as T;
+    return { status: response.status, ok: response.ok, body: parsed };
+  }
+
+  function failure(answer: Answer): Error {
+    // The server writes its errors for people, so they pass through as said.
+    const said = (answer.body as Partial<SponsorError> | null)?.error;
+    return new Error(said ?? `The sponsor answered ${answer.status}.`);
+  }
+
+  async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    const answer = await send(path, body);
+    if (!answer.ok) throw failure(answer);
+    return answer.body as T;
   }
 
   return {
@@ -76,8 +118,23 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
     commitSettlement(destination, signedXdr) {
       return post("/settlement/commit", { destination, signedXdr });
     },
-    requestDelivery(txHash, domain, destination) {
-      return post("/deliver", { txHash, domain, destination });
+    async requestDelivery(txHash, domain, destination) {
+      const answer = await send("/deliver", { txHash, domain, destination });
+      // Not attested yet (404) and recipient not ready (409) are the polling
+      // loop's ordinary answers, so they come back as outcomes, not errors.
+      if (answer.status === 404) return { kind: "not-attested-yet" };
+      if (answer.status === 409 && (answer.body as { kind?: unknown } | null)?.kind) {
+        return answer.body as SponsorDelivery;
+      }
+      if (!answer.ok) throw failure(answer);
+      return answer.body as SponsorDelivery;
+    },
+    async settle(destination) {
+      const answer = await send("/settle", { destination });
+      if (answer.status === 404) return { settled: false, held: false };
+      if (answer.status === 429) return { settled: false, settlementRetryable: true };
+      if (!answer.ok) throw failure(answer);
+      return answer.body as SponsorSettle;
     },
     async sponsorIsUp() {
       try {
