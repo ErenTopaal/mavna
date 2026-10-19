@@ -264,7 +264,9 @@ Soroswap's own error text is never relayed.
 
 Because every call spends the operator's key, these endpoints are stricter than the
 rest. A request whose `Origin` is not on the allowlist answers `403` without reaching
-Soroswap. Each client may make 30 calls a minute and all clients together 300; past
+Soroswap. That keeps other web pages off the quota, and nothing more: a client that is
+not a browser can send any `Origin` it likes, so it is not access control, and the
+limits are what bound the spend. Each client may make 30 calls a minute and all clients together 300; past
 either, `429` with `retryable: true`. The client is counted the same way as for
 every other endpoint: behind a reverse proxy, set `MAVNA_TRUST_PROXY=true` so it is the
 last `X-Forwarded-For` hop.

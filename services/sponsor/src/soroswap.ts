@@ -17,8 +17,10 @@ import { RequestLimiter } from "./ratelimit.js";
  * The browser's `SoroswapProvider` therefore calls these endpoints instead, and
  * this adds the key on the way out. Because every call spends our key's quota,
  * it is stricter than the sponsor's other endpoints: an origin outside the
- * allowed list is refused outright rather than merely denied CORS, and calls
- * are limited per client and in total.
+ * allowed list is refused rather than merely denied CORS, and calls are
+ * limited per client and in total. The origin check only keeps other web pages
+ * off the quota; anything that is not a browser can send any Origin it likes,
+ * so the limits, not the origin, are what bound the spend.
  *
  * What goes back to the browser is either a Soroswap answer that passed the same
  * schema the browser checks, or one of our own messages. Upstream error text is
