@@ -605,7 +605,11 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
         );
       }
       owner ??= await ownWallet(engine, route, `the trustline it converts into`);
+      patch("hold", { phase: "blocked" });
       await openOwnTrustline(engine, route, chainId, owner, "Nothing has been sent.", convertsTo);
+      patch("hold", { phase: "done" });
+    } else {
+      patch("hold", { phase: "done", note: `It can already hold ${convertsTo.symbol}.` });
     }
   }
 
