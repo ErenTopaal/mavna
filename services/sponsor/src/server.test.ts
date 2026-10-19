@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { buildBurn, buildDelivery } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
@@ -612,5 +613,107 @@ describe("the sponsor only asks Circle about well-formed deliveries", () => {
     const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
     expect(response.status).toBe(502);
     expect(response.body.retryable).toBe(true);
+  });
+});
+
+/**
+ * A CCTP v2 message as Iris returns it, laid out per Circle's MessageV2 and
+ * BurnMessageV2 (header body at byte 148, hook data at byte 228 of the body),
+ * carrying the fields this repository's own burn builder produces.
+ */
+function cctpMessage(recipient: string, destinationDomain = 27): string {
+  const burn = buildBurn({
+    amount: 1_000_000n,
+    stellarRecipient: recipient,
+    network: "testnet",
+    sourceChainId: "ethereum-sepolia",
+    maxFee: 100n,
+  });
+  const [amount, , mintRecipient, burnToken, destinationCaller, maxFee, finality, hookData] =
+    burn.args;
+  const word = (hex: string): Buffer =>
+    Buffer.from(hex.replace(/^0x/, "").padStart(64, "0"), "hex");
+
+  const header = Buffer.alloc(148);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(0, 4);
+  header.writeUInt32BE(destinationDomain, 8);
+  Buffer.from(Keypair.random().rawPublicKey()).copy(header, 12);
+  word(burn.contract).copy(header, 44);
+  word(mintRecipient).copy(header, 76);
+  word(destinationCaller).copy(header, 108);
+  header.writeUInt32BE(finality, 140);
+  header.writeUInt32BE(finality, 144);
+
+  const body = Buffer.alloc(228);
+  body.writeUInt32BE(1, 0);
+  word(burnToken).copy(body, 4);
+  word(mintRecipient).copy(body, 36);
+  word(amount.toString(16)).copy(body, 68);
+  word(maxFee.toString(16)).copy(body, 132);
+
+  return `0x${Buffer.concat([header, body, Buffer.from(hookData.slice(2), "hex")]).toString("hex")}`;
+}
+
+describe("the sponsor settles only for the recipient Circle attested", () => {
+  const BURN = `0x${"cd".repeat(32)}`;
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+
+  function irisReturns(messageHex: string): void {
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ message: messageHex, attestation: ATTESTATION, status: "complete" }],
+          }),
+          { status: 200 },
+        ),
+    );
+  }
+
+  it("settles for the recipient named inside the attested message", async () => {
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    irisReturns(cctpMessage(user.publicKey()));
+
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(200);
+    expect(response.body.kind).toBe("delivered");
+    expect(response.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
+  });
+
+  it("delivers but settles nothing for a destination the message does not name", async () => {
+    const server = await startServer({ buildDelivery });
+    const victim = Keypair.random();
+    await holdSettlementFor(server, victim);
+    irisReturns(cctpMessage(Keypair.random().publicKey()));
+
+    const response = await server.post("/deliver", {
+      txHash: BURN,
+      domain: 0,
+      destination: victim.publicKey(),
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.kind).toBe("delivered");
+    expect(response.body.settled).not.toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+
+    // The victim's settlement is still held for their own delivery.
+    irisReturns(cctpMessage(victim.publicKey()));
+    const own = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(own.body.settled).toBe(true);
+  });
+
+  it("settles nothing on a message not bound for Stellar", async () => {
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    irisReturns(cctpMessage(user.publicKey(), 6));
+
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.body.settled).not.toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
   });
 });

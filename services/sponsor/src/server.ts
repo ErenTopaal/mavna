@@ -1,5 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
+import {
+  EVM_DEPLOYMENTS,
+  fromHex,
+  NON_EVM_CHAINS,
+  parseForwarderHookData,
+  stellarDomainFor,
+} from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { buildPreparation, buildSettlement, classifyAddress, XlmPriceSource } from "@mavna/stellar";
@@ -88,11 +94,10 @@ interface DeliverBody {
   readonly txHash?: unknown;
   readonly domain?: unknown;
   /**
-   * Who the transfer is for, so a held settlement can be submitted the moment
-   * the delivery lands. Optional: a delivery without it still mints, and the
-   * settlement waits for the next call that names the account.
+   * Accepted from older clients and never acted on. Who the transfer is for is
+   * read from Circle's attested message, the one source a caller cannot choose.
    */
-  readonly destination?: string;
+  readonly destination?: unknown;
 }
 
 interface SettlementBody {
@@ -746,11 +751,14 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
 
     // The lateness rule's payoff: the settlement was signed before anything
     // moved, and the moment the delivery lands it is submitted, releasing the
-    // sponsor's capital in the same breath.
+    // sponsor's capital in the same breath. Only for the account Circle
+    // attested: a destination named in the request is the caller's claim, and
+    // settling on it would spend a stranger's arrival on someone else's loan.
+    const recipient = attestedRecipient(message.message, stellarDomainFor(options.networkId));
     const settled =
       (outcome.kind === "delivered" || outcome.kind === "already-delivered") &&
-      body.destination !== undefined
-        ? await settleIfHeld(body.destination)
+      recipient !== undefined
+        ? await settleIfHeld(recipient)
         : {};
 
     reply(
@@ -838,6 +846,36 @@ function parseTransaction(
 }
 
 const nowUnix = (): number => Math.floor(Date.now() / 1000);
+
+/** Where the body starts in a CCTP v2 message, per Circle's MessageV2. */
+const MESSAGE_BODY_INDEX = 148;
+/** Where the hook data starts in a v2 burn body, per Circle's BurnMessageV2. */
+const HOOK_DATA_INDEX = 228;
+
+/**
+ * The Stellar recipient Circle attested to, read from the hook data at the end
+ * of the burn body. Undefined for anything that is not a burn into Stellar with
+ * forwarder hook data, which settles nothing; delivery does not depend on this.
+ */
+function attestedRecipient(messageHex: string, stellarDomain: number): string | undefined {
+  try {
+    const message = fromHex(messageHex);
+    if (message.length < MESSAGE_BODY_INDEX + HOOK_DATA_INDEX) return undefined;
+    const destinationDomain = new DataView(
+      message.buffer,
+      message.byteOffset,
+      message.byteLength,
+    ).getUint32(8, false);
+    if (destinationDomain !== stellarDomain) return undefined;
+    return parseForwarderHookData(message.subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX)).recipient;
+  } catch (cause) {
+    console.error(
+      "[sponsor] attested message has no readable recipient:",
+      cause instanceof Error ? cause.message : cause,
+    );
+    return undefined;
+  }
+}
 
 /**
  * The source transaction id forms CCTP chains use: an EVM hash, a Solana
