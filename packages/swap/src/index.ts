@@ -1,8 +1,32 @@
+export type { AquariusOptions } from "./aquarius.js";
 export { AquariusProvider } from "./aquarius.js";
-export type { SwapProvider, SwapQuote, SwapQuoteRequest } from "./provider.js";
+export type { SwapBuildRequest, SwapProvider, SwapQuote, SwapQuoteRequest } from "./provider.js";
 export { applySlippage } from "./provider.js";
 export type { PathPaymentInputs } from "./sdex.js";
 export { buildPathPayment, SdexProvider } from "./sdex.js";
 export { selectSwapProvider } from "./select.js";
-export type { SoroswapOptions, SoroswapProtocol } from "./soroswap.js";
-export { protocolsFor, SoroswapProvider } from "./soroswap.js";
+export type { Simulated } from "./soroban.js";
+export { buildContractCall, readContract, rpcHealthy, simulate } from "./soroban.js";
+export type {
+  SoroswapBuildRequest,
+  SoroswapOptions,
+  SoroswapProtocol,
+  SoroswapQuote,
+  SoroswapQuoteRequest,
+} from "./soroswap.js";
+export {
+  protocolsFor,
+  SOROSWAP_PROTOCOLS,
+  SoroswapProvider,
+  soroswapBuildRequest,
+  soroswapBuilt,
+  soroswapFeeBps,
+  soroswapHealth,
+  soroswapQuote,
+  soroswapQuoteRequest,
+} from "./soroswap.js";
+export type { SushiSwapOptions } from "./sushiswap.js";
+export { SushiSwapProvider } from "./sushiswap.js";
+export type { SwapVenueOptions, Venue } from "./venues.js";
+export { createSwapVenues, STELLAR_USDT0, SwapVenues, swapVenuesFor } from "./venues.js";
+export { fetchOrThrow, PASSPHRASE, readValidated, toContractId, validated } from "./wire.js";

@@ -1,12 +1,15 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import type { Account, Transaction } from "@stellar/stellar-sdk";
 import { Asset, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
+import { z } from "zod";
 import {
   applySlippage,
+  type SwapBuildRequest,
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
 } from "./provider.js";
+import { fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
 
 /**
  * Stellar's own exchange, as a swap provider.
@@ -17,23 +20,34 @@ import {
  * exists (every candidate RPC method answers "method not found"; the owner
  * lifted the Horizon prohibition for exactly this).
  *
- * It is also the only venue executable on testnet today. Soroswap indexes no
- * testnet markets at all, and Aquarius quotes through Soroban pools whose router
- * calldata is its own integration. The orderbook makes "receive an asset other
- * than the bridge delivers" real now rather than pending.
+ * v2 does not list it as a venue of its own: the widget's chain is Soroswap,
+ * SushiSwap and Aquarius, and the orderbook is reached through Soroswap's
+ * aggregator when the money goes to an account. It stays exported for
+ * integrators who want the orderbook directly.
  *
  * The known limit is stated by the type: a classic path payment cannot deliver
  * to a contract address, and `isClassicPathPayment: true` is how callers know.
  */
 
-interface HorizonPathRecord {
-  readonly destination_amount?: string;
-  readonly path?: readonly {
-    readonly asset_type: string;
-    readonly asset_code?: string;
-    readonly asset_issuer?: string;
-  }[];
-}
+/** Horizon's decimal amount form, seven places at most. */
+const horizonAmount = z.string().regex(/^[0-9]+(\.[0-9]{1,7})?$/, "not a Horizon amount");
+
+const pathRecord = z.object({
+  destination_amount: horizonAmount,
+  path: z.array(
+    z.object({
+      asset_type: z.string(),
+      asset_code: z.string().optional(),
+      asset_issuer: z.string().optional(),
+    }),
+  ),
+});
+
+type HorizonPathRecord = z.infer<typeof pathRecord>;
+
+const pathsResponse = z.object({
+  _embedded: z.object({ records: z.array(pathRecord) }),
+});
 
 /** `CODE:ISSUER`, or `native` for XLM. The identity form, never a bare code. */
 function parseAsset(id: string): Asset {
@@ -121,21 +135,21 @@ export class SdexProvider implements SwapProvider {
       params.set("source_asset_issuer", sendAsset.getIssuer() ?? "");
     }
 
-    const response = await fetch(`${this.horizonUrl}/paths/strict-send?${params.toString()}`, {
-      signal: AbortSignal.timeout(15_000),
-    });
+    const response = await fetchOrThrow(
+      "Stellar's exchange",
+      `${this.horizonUrl}/paths/strict-send?${params.toString()}`,
+      { signal: AbortSignal.timeout(15_000) },
+    );
     if (!response.ok) {
       throw new MavnaError(`Stellar's exchange could not be read (HTTP ${response.status}).`, {
         retryable: response.status >= 500,
       });
     }
 
-    const body = (await response.json()) as {
-      _embedded?: { records?: readonly HorizonPathRecord[] };
-    };
+    const body = await readValidated("Stellar's exchange", response, pathsResponse);
     // Horizon returns candidates best-first; the head is the best executable path.
-    const best = body._embedded?.records?.[0];
-    if (best?.destination_amount === undefined) {
+    const best = body._embedded.records[0];
+    if (best === undefined) {
       throw new MavnaError("Stellar's exchange has no path between these assets right now.", {
         retryable: true,
       });
@@ -153,6 +167,19 @@ export class SdexProvider implements SwapProvider {
       isClassicPathPayment: true,
       raw: best,
     };
+  }
+
+  async build(request: SwapBuildRequest): Promise<Transaction> {
+    if (request.quote.provider !== this.id) {
+      throw new MavnaError("This quote came from another venue; build it there.", {
+        retryable: false,
+      });
+    }
+    return buildPathPayment({
+      networkPassphrase: PASSPHRASE[this.network],
+      account: request.account,
+      quote: request.quote,
+    });
   }
 }
 
@@ -182,8 +209,8 @@ export function buildPathPayment(inputs: PathPaymentInputs): Transaction {
     );
   }
 
-  const record = quote.raw as HorizonPathRecord;
-  const path = (record.path ?? []).map((hop) =>
+  const record: HorizonPathRecord = validated("Stellar's exchange", pathRecord, quote.raw);
+  const path = record.path.map((hop) =>
     hop.asset_type === "native"
       ? Asset.native()
       : new Asset(hop.asset_code ?? "", hop.asset_issuer ?? ""),

@@ -39,6 +39,7 @@ import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
 import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
+import type { SoroswapProxy } from "./soroswap.js";
 import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -119,6 +120,17 @@ export interface SponsorServerOptions {
   readonly rateLimitPerMinute?: number;
   /** Take the client address from the last X-Forwarded-For entry. */
   readonly trustProxy?: boolean;
+  /**
+   * The Soroswap proxy, present only when this deployment holds a Soroswap key.
+   * Without one its endpoints do not exist, and the browser falls to the next
+   * venue.
+   */
+  readonly soroswap?: SoroswapProxy;
+  /**
+   * Whether X-Forwarded-For names the client, for per-client limits. True only
+   * behind a reverse proxy that sets it; otherwise any caller can forge it.
+   */
+  readonly trustForwardedFor?: boolean;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -704,6 +716,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
       await deliver((await readJson(req)) as DeliverBody, res, origin);
+      return;
+    }
+
+    if (options.soroswap?.owns(url.pathname) === true) {
+      const answer = await options.soroswap.handle({
+        method: req.method ?? "",
+        path: url.pathname,
+        originAllowed: origin !== undefined,
+        client: clientAddress(
+          req.socket.remoteAddress,
+          req.headers["x-forwarded-for"],
+          options.trustForwardedFor === true,
+        ),
+        // An origin that will be refused costs nothing to read.
+        body: req.method === "POST" && origin !== undefined ? await readJson(req) : undefined,
+      });
+      reply(res, answer.status, answer.body, origin);
       return;
     }
 

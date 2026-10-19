@@ -1,7 +1,7 @@
 import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
-import { SdexProvider } from "@mavna/swap";
+import { createSwapVenues, SdexProvider } from "@mavna/swap";
 import {
   Account,
   Asset,
@@ -278,7 +278,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     },
     historyKey: HISTORY_KEY,
     sourceDomain: () => 3,
-    sdex: new SdexProvider("testnet"),
+    swapVenues: createSwapVenues({ network: "testnet" }),
     rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
     stellarNetwork: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),

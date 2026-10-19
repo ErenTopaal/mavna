@@ -52,6 +52,8 @@ Everything is environment variables, read once at start.
 | `MAVNA_MIN_DELIVERY_USDC` | no | `1` | The smallest Circle mint, in USDC (up to six decimals), the sponsor pays to deliver. `0` delivers any amount |
 | `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. `0` turns it off |
 | `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
+| `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
+| `MAVNA_TRUST_FORWARDED_FOR` | no | off | `1` when a reverse proxy in front sets `X-Forwarded-For`, so the Soroswap proxy's per-client limit counts clients rather than the reverse proxy. Leave it off otherwise: without a proxy in front, the header is whatever a caller sends |
 | `PORT` | no | `8787` | Where to listen |
 
 The curated asset list, the assets this sponsor opens trustlines for, is written

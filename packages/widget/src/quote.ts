@@ -129,6 +129,7 @@ const VENUE_LABEL: Readonly<Record<string, string>> = {
   sdex: "SDEX",
   aquarius: "Aquarius",
   soroswap: "Soroswap",
+  sushiswap: "SushiSwap",
 };
 
 function venueLabel(id: string): string {

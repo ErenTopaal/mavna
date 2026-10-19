@@ -2,6 +2,7 @@ import { MavnaError } from "@mavna/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AquariusProvider } from "./aquarius.js";
 import { SoroswapProvider } from "./soroswap.js";
+import { SushiSwapProvider } from "./sushiswap.js";
 
 /**
  * A fetch that only ever finishes by being aborted, which is what a hung
@@ -19,8 +20,8 @@ function hangingFetch(): typeof fetch {
 }
 
 const request = {
-  assetIn: "CA",
-  assetOut: "CB",
+  assetIn: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+  assetOut: "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
   amountIn: "1000",
   maxSlippageBps: 50,
   destinationKind: "account" as const,
@@ -41,8 +42,30 @@ describe("provider request timeouts", () => {
 
   it("soroswap surfaces an aborted request as a retryable MavnaError", async () => {
     vi.stubGlobal("fetch", hangingFetch());
-    const provider = new SoroswapProvider({ network: "mainnet", apiKey: "k", timeoutMs: 20 });
+    const provider = new SoroswapProvider({
+      network: "mainnet",
+      proxyUrl: "https://sponsor.example",
+      timeoutMs: 20,
+    });
     const error = await provider.quote(request).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).retryable).toBe(true);
+  });
+
+  it("sushiswap surfaces an aborted simulation as a retryable MavnaError", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    const provider = new SushiSwapProvider({
+      network: "mainnet",
+      rpcUrl: "https://rpc.example",
+      timeoutMs: 20,
+    });
+    const error = await provider
+      .quote({
+        ...request,
+        assetIn: "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF",
+        assetOut: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      })
+      .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(true);
   });

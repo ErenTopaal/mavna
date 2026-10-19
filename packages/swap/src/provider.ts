@@ -1,4 +1,5 @@
 import type { NetworkId } from "@mavna/core";
+import type { Account, Transaction } from "@stellar/stellar-sdk";
 
 /**
  * The exchange layer, behind one interface with two implementations.
@@ -57,6 +58,15 @@ export interface SwapQuote {
   readonly raw: unknown;
 }
 
+export interface SwapBuildRequest {
+  readonly quote: SwapQuote;
+  /**
+   * The account converting its own money, loaded for its sequence by the
+   * caller, which is the one place that knows how fresh that read has to be.
+   */
+  readonly account: Account;
+}
+
 export interface SwapProvider {
   readonly id: string;
   readonly network: NetworkId;
@@ -70,6 +80,14 @@ export interface SwapProvider {
   isUsable(): Promise<boolean>;
 
   quote(request: SwapQuoteRequest): Promise<SwapQuote>;
+
+  /**
+   * Turn one of this provider's own quotes into the unsigned transaction that
+   * executes it, from and to the owner's account. The floor in the transaction
+   * is the quote's `amountOutMinimum`, so the user's slippage choice is what
+   * the network enforces, not what a venue promised.
+   */
+  build(request: SwapBuildRequest): Promise<Transaction>;
 
   /**
    * Whether an integrator fee can be collected without deploying a contract.

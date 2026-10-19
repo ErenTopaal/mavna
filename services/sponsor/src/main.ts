@@ -3,7 +3,9 @@ import { createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { curatedAssetsFor } from "./assets.js";
 import { CapLedger } from "./caps.js";
 import { readSponsorConfig, SponsorConfigError } from "./config.js";
+import { env } from "./env.js";
 import { createSponsorServer } from "./server.js";
+import { createSoroswapProxy } from "./soroswap.js";
 import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -40,6 +42,14 @@ const state =
 
 const network = createNetworkConfig({ id: config.networkId, rpcUrl: config.rpcUrl });
 
+// Optional. Without a key there is no Soroswap proxy, and browsers converting
+// through this sponsor use the next venue instead.
+const soroswapApiKey = env("SOROSWAP_API_KEY");
+const soroswap =
+  soroswapApiKey === undefined
+    ? undefined
+    : createSoroswapProxy({ apiKey: soroswapApiKey, network: config.networkId });
+
 const server = createSponsorServer({
   rpc: new RpcClient({ url: network.rpcUrl }),
   network,
@@ -58,6 +68,8 @@ const server = createSponsorServer({
   ...(config.settleSweepSeconds === undefined
     ? {}
     : { settleSweepSeconds: config.settleSweepSeconds }),
+  ...(soroswap === undefined ? {} : { soroswap }),
+  trustForwardedFor: env("MAVNA_TRUST_FORWARDED_FOR") === "1",
 });
 
 try {

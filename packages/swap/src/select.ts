@@ -1,47 +1,21 @@
-import { MavnaError, type NetworkId } from "@mavna/core";
-import { AquariusProvider } from "./aquarius.js";
+import { MavnaError } from "@mavna/core";
 import type { SwapProvider } from "./provider.js";
-import { SoroswapProvider } from "./soroswap.js";
-
-export interface SwapSelection {
-  readonly network: NetworkId;
-  /** Server-side only. Absent means Soroswap cannot be used. */
-  readonly soroswapApiKey?: string;
-  readonly soroswapBaseUrl?: string;
-  readonly aquariusBaseUrl?: string;
-  readonly feeBps?: number;
-}
+import { type SwapVenueOptions, swapVenuesFor } from "./venues.js";
 
 /**
- * Pick the exchange for a network.
+ * Pick the single exchange for a network, from the same ordered venue list the
+ * widget's chain walks (see `swapVenuesFor`): the first that is usable for any
+ * pair. Venues limited to some pairs, like SushiSwap for USDT0, are skipped,
+ * because a caller asking for one provider for everything cannot respect that.
  *
- * Selection is configuration, not a code path: no component in this codebase is
- * meaningful on only one network, and there is no "testnet mode" concept anywhere.
- * What differs is which provider can actually serve, and that is a fact about the
- * providers rather than a branch in our logic.
- *
- * Soroswap is preferred where it works, because it is the only one of the two
- * that can collect an integrator fee without deploying a contract. It simply
- * cannot serve testnet, so Aquarius does.
+ * Selection is configuration, not a code path: what differs by network is which
+ * provider can actually serve, and that is a fact about the providers rather
+ * than a branch in our logic.
  */
-export async function selectSwapProvider(selection: SwapSelection): Promise<SwapProvider> {
-  const candidates: SwapProvider[] = [];
-
-  if (selection.soroswapApiKey !== undefined && selection.soroswapApiKey.length > 0) {
-    candidates.push(
-      new SoroswapProvider({
-        network: selection.network,
-        apiKey: selection.soroswapApiKey,
-        ...(selection.soroswapBaseUrl === undefined ? {} : { baseUrl: selection.soroswapBaseUrl }),
-        ...(selection.feeBps === undefined ? {} : { feeBps: selection.feeBps }),
-      }),
-    );
-  }
-
-  candidates.push(new AquariusProvider(selection.network, selection.aquariusBaseUrl));
-
-  for (const candidate of candidates) {
-    if (await candidate.isUsable()) return candidate;
+export async function selectSwapProvider(selection: SwapVenueOptions): Promise<SwapProvider> {
+  for (const venue of swapVenuesFor(selection)) {
+    if (venue.serves !== undefined) continue;
+    if (await venue.provider.isUsable()) return venue.provider;
   }
 
   throw new MavnaError(

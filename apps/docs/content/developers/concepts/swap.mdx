@@ -1,6 +1,6 @@
 ---
 title: Arriving as another asset
-description: Convert what a bridge delivers into the asset the user asked for, on Stellar's own exchange, as one step in the same flow.
+description: Convert what a bridge delivers into the asset the user asked for, through Stellar's swap venues in a fixed order, as one step in the same flow.
 ---
 
 # Arriving as another asset
@@ -10,35 +10,59 @@ holding XLM, or any asset other than the one bridged, a swap leg converts it on
 Stellar, and the conversion is one step in the same flow rather than a bridge
 followed by a manual trade.
 
-## The mechanism
+## The venues
 
-`@mavna/swap` puts swap providers behind one `SwapProvider` interface. The one
-that executes on the test network is the Stellar DEX: a classic path payment is a
-single operation the network itself routes, and it needs no extra contract.
+`@mavna/swap` puts every venue behind one `SwapProvider` interface: `quote` prices
+a conversion and `build` turns that quote into the unsigned transaction that runs
+it, from and to the user's own account, with the minimum after slippage as a hard
+floor. If the market has moved past that floor the swap fails whole, and the user
+keeps the asset that arrived. That is the safe direction to fail. Slippage is
+applied by rounding the minimum down with integer math, never through a float.
 
-`SdexProvider.quote` asks Horizon for a strict-send path and returns the amount
-out, the minimum out after slippage, and the venue. `buildPathPayment` builds the
-`pathPaymentStrictSend` operation with the user's own account as both source and
-destination, spending the arrived asset and receiving the wanted one, with the
-minimum as a hard floor. If the market has moved past that floor the operation
-fails whole, and the user keeps the asset that arrived. That is the safe direction
-to fail. Slippage is applied by rounding the minimum down with integer math, never
-through a float.
+The swap leg walks the venues in this order and uses the first that is usable and
+can quote the pair:
 
-Two more providers exist for mainnet, where more venues are available:
-`SoroswapProvider` (which needs a server-side API key) and `AquariusProvider`
-(which routes through Soroban pools and can deliver to a contract).
-`selectSwapProvider` prefers Soroswap when a usable key is present and falls back
-to Aquarius otherwise.
+1. **Soroswap**, wherever it serves. It aggregates Soroswap, Phoenix, Aquarius,
+   SushiSwap and Comet pools, and Stellar's own orderbook when the money goes to an
+   account, and it is the venue that can carry an integrator fee. Its API needs a
+   key, which must never reach a browser, so `SoroswapProvider` calls the sponsor
+   service's [Soroswap proxy](/developers/sponsor/api#soroswap-proxy) and holds no
+   key itself. A sponsor run without a key has no proxy, and the leg moves on.
+2. **SushiSwap**, for pairs with USDT0 on mainnet. `SushiSwapProvider` prices by
+   simulating Sushi's router over its concentrated-liquidity pools, direct or
+   through USDC or XLM, and builds `swap_exact_input_hints` with fresh oracle hints.
+   Sushi has no deployment on the test network.
+3. **Aquarius**, on both networks. `AquariusProvider` finds a path with Aquarius's
+   API and builds `swap_chained` on its router. It routes through Soroban pools, so
+   it can deliver to a contract address.
+
+`createSwapVenues` builds that chain for a network, and the chain is itself a
+`SwapProvider`: its quote names the venue that gave it, and `build` goes back to
+that venue. The order is a preference, not a price race.
+
+Stellar's orderbook is not a venue of its own in the chain. It is reached through
+Soroswap for account destinations, and `SdexProvider` with `buildPathPayment`
+stays exported for anyone who wants the orderbook directly. A classic path payment
+cannot deliver to a contract address, so it is never offered for one.
+
+Stellar Broker is not integrated. Its quote endpoint is public, but a swap runs as
+a WebSocket session with a partner key in which the server streams transactions for
+the client to sign in the background, which is not one conversion the user signs.
+
+`selectSwapProvider` remains for callers that want a single provider for every
+pair: the first usable venue in the same order that is not limited to some pairs.
 
 ## How it attaches to a route
 
 In `@mavna/routing`, `attachSwapLeg` runs after a rail quotes. It prices the
 conversion, rewrites the route's `receives` and `receivesAtLeast` to the wanted
 asset, appends a `swap` step, adds its time to the estimate, and adds one to the
-signature count, because the user signs the conversion themselves. If the exchange
-cannot quote the conversion, the whole route comes back as a `no-liquidity`
-rejection with a reason, rather than a route that cannot complete.
+signature count, because the user signs the conversion themselves. If no venue
+can quote the conversion, the whole route comes back as a `no-liquidity`
+rejection with each venue's reason, rather than a route that cannot complete.
+
+When the transfer reaches the swap step, the widget quotes again through the same
+chain, builds with the venue that answered, and asks the user to sign.
 
 To the user, "send USDC, receive XLM" is one quote and one flow.
 [As a user, arriving as XLM](/guides/receive-xlm) is a single toggle.

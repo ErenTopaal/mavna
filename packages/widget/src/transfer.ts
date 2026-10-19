@@ -13,7 +13,6 @@
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { stroopsToXlm } from "@mavna/stellar";
-import { buildPathPayment } from "@mavna/swap";
 import {
   FeeBumpTransaction,
   Asset as StellarAsset,
@@ -91,12 +90,6 @@ export interface FlightStep {
   readonly phase: StepPhase;
 }
 
-function passphrase(network: NetworkId): string {
-  return network === "mainnet"
-    ? "Public Global Stellar Network ; September 2015"
-    : "Test SDF Network ; September 2015";
-}
-
 function stellarExplorer(network: NetworkId, hash: string): string {
   return `https://stellar.expert/explorer/${network === "mainnet" ? "public" : "testnet"}/tx/${hash}`;
 }
@@ -131,7 +124,7 @@ export type TransferEngine = Pick<
   | "stellar"
   | "historyKey"
   | "sourceDomain"
-  | "sdex"
+  | "swapVenues"
   | "rpc"
   | "usdcOnStellar"
   | "sponsorTerms"
@@ -205,7 +198,7 @@ async function prepareOwn(engine: TransferEngine, route: Route, chainId: string)
   // The account pays for this one, and the sponsor names the issuer by its own
   // list, so it is checked against what the rail will deliver before the user
   // is asked to sign: a trustline to anything else lets the delivery fail.
-  if (!opensOnly(preparation.xdr, engine.network, route.destination, holds.id)) {
+  if (!opensOnly(preparation.xdr, engine.stellarNetwork.passphrase, route.destination, holds.id)) {
     throw new Error(
       `The sponsor's preparation is not the trustline this transfer needs (${holds.symbol} ` +
         "for the receiving account), so it was not signed. Nothing has been sent.",
@@ -217,10 +210,10 @@ async function prepareOwn(engine: TransferEngine, route: Route, chainId: string)
 }
 
 /** Whether a transaction does nothing but open `assetId` for `account`, from it. */
-function opensOnly(xdr: string, network: NetworkId, account: string, assetId: string): boolean {
+function opensOnly(xdr: string, passphrase: string, account: string, assetId: string): boolean {
   let parsed: ReturnType<typeof TransactionBuilder.fromXDR>;
   try {
-    parsed = TransactionBuilder.fromXDR(xdr, passphrase(network));
+    parsed = TransactionBuilder.fromXDR(xdr, passphrase);
   } catch {
     // unreadable is answered as "not that trustline" by the caller
     return false;
@@ -250,9 +243,9 @@ async function prepareNow(
   await engine.sponsor.submitPreparation(signed);
 }
 
-/** Convert the arrived USDC into XLM on Stellar's own exchange. */
-async function convertOnStellar(
-  engine: TransferEngine,
+/** Convert the arrived USDC into XLM through the first venue that serves the pair. */
+export async function convertOnStellar(
+  engine: Pick<TransferEngine, "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar">,
   route: Route,
   owner: string | undefined,
 ): Promise<void> {
@@ -264,7 +257,9 @@ async function convertOnStellar(
     );
   }
   const swapStep = route.steps.find((s) => s.kind === "swap");
-  const quote = await engine.sdex.quote({
+  // Quoted again now rather than reused from the route: the route's quote is as
+  // old as the bridge leg, and the venue that serves now is the one that builds.
+  const quote = await engine.swapVenues.quote({
     assetIn: engine.usdcOnStellar.id,
     assetOut: "native",
     amountIn: swapStep?.from.baseUnits ?? route.sends.baseUnits,
@@ -272,11 +267,7 @@ async function convertOnStellar(
     destinationKind: "account",
   });
   const stellarAccount = await engine.rpc.loadAccount(account);
-  const unsigned = buildPathPayment({
-    networkPassphrase: passphrase(engine.network),
-    account: stellarAccount,
-    quote,
-  });
+  const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
   const signed = await engine.stellar.sign(unsigned.toXDR(), account);
   const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
   await engine.rpc.submit("conversion", async () => parsed as never);
