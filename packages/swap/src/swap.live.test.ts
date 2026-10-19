@@ -182,3 +182,28 @@ describe("SushiSwap, live", () => {
     expect(tx.signatures).toHaveLength(0);
   });
 });
+
+describe("Aquarius's own pools, between listed tokens only", () => {
+  it("prices testnet XLM into Circle's USDC through nothing but the testnet Arrival Contract's list", async () => {
+    // the testnet Arrival Contract's lists: converts into USDC, may pass through AQUA or USDT
+    const XLM = Asset.native().contractId(Networks.TESTNET);
+    const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+    const listed = [
+      "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE",
+      "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN",
+    ];
+    const provider = new AquariusProvider("testnet", undefined, { rpcUrl: PUBLIC_TESTNET_RPC_URL });
+    const quote = await provider.quotePath({
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 20,
+      via: listed,
+    });
+    expect(BigInt(quote.amountOut)).toBeGreaterThan(0n);
+    expect(quote.path.at(-1)?.tokenOut).toBe(USDC);
+    const allowed = new Set([XLM, USDC, ...listed]);
+    for (const hop of quote.path)
+      for (const token of hop.tokens) expect(allowed.has(token)).toBe(true);
+  }, 60_000);
+});

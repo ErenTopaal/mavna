@@ -400,6 +400,29 @@ describe("building a compose send", () => {
   });
 });
 
+describe("the conversion path a compose route asks for", () => {
+  it("is built only through the tokens the contract lists, never whatever the quoting service picks", async () => {
+    const asked: Array<readonly string[] | undefined> = [];
+    const { ctx } = context({
+      venue: {
+        id: "aquarius",
+        quotePath: async (q) => {
+          asked.push(q.via);
+          return {
+            provider: "aquarius",
+            amountOut: "1000000",
+            amountOutMinimum: "998000",
+            path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
+          };
+        },
+      },
+    });
+    await quoteComposeRoute(ctx, request());
+    // the testnet contract's path tokens, read from its storage
+    expect(asked).toEqual([[AQUA, "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN"]]);
+  });
+});
+
 describe("the Arrival Contract each network has", () => {
   it("names the testnet deployment with the lists it was built with", () => {
     expect(ARRIVAL_CONTRACTS.testnet).toEqual({

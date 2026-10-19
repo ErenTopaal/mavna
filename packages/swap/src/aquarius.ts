@@ -9,7 +9,7 @@ import {
   type SwapQuote,
   type SwapQuoteRequest,
 } from "./provider.js";
-import { buildContractCall } from "./soroban.js";
+import { buildContractCall, readContract } from "./soroban.js";
 import { fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
 
 /**
@@ -200,7 +200,17 @@ export class AquariusProvider implements SwapProvider {
    * itself (the Arrival Contract). The hops are checked to start from what is
    * sold and end in what is bought, so a chain for some other pair is refused.
    */
-  async quotePath(request: Omit<SwapQuoteRequest, "destinationKind">): Promise<PathQuote> {
+  async quotePath(
+    request: Omit<SwapQuoteRequest, "destinationKind"> & {
+      /**
+       * The only tokens the path may pass through. Given, the path is built from
+       * the router's own pools between these, not from Aquarius's quoting
+       * service, which routes through whatever token prices best.
+       */
+      readonly via?: readonly string[];
+    },
+  ): Promise<PathQuote> {
+    if (request.via !== undefined) return this.listedPath({ ...request, via: request.via });
     const quote = await this.quote({ ...request, destinationKind: "contract" });
     // quote() has already walked this chain from the asked token to the asked one
     const raw = validated("Aquarius", aquariusRaw, quote.raw);
@@ -224,6 +234,116 @@ export class AquariusProvider implements SwapProvider {
       amountOut: quote.amountOut,
       amountOutMinimum: quote.amountOutMinimum,
       path,
+    };
+  }
+
+  /**
+   * The best path from `assetIn` to `assetOut` that touches only listed
+   * tokens: straight, or one hop through each token in `via`. Pools come from
+   * the router's `get_pools` and each hop is priced by its `estimate_swap`, so
+   * the path is one the router itself would run, between tokens the Arrival
+   * Contract will call.
+   */
+  private async listedPath(request: {
+    readonly assetIn: string;
+    readonly assetOut: string;
+    readonly amountIn: string;
+    readonly maxSlippageBps: number;
+    readonly via: readonly string[];
+  }): Promise<PathQuote> {
+    const router = ROUTER[this.network];
+    const read = (method: string, args: xdr.ScVal[]) =>
+      readContract(this.rpcUrl, this.network, router, method, args, this.timeoutMs, "Aquarius");
+    // the router keys a pool by its tokens in address byte order, not string order
+    const ordered = (tokens: readonly string[]): string[] =>
+      [...tokens].sort((a, b) =>
+        Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+      );
+    const vecOf = (tokens: readonly string[]) =>
+      xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal()));
+
+    const pools = new Map<string, readonly Buffer[]>();
+    const poolsOf = async (tokens: readonly string[]): Promise<readonly Buffer[]> => {
+      const key = tokens.join(",");
+      const known = pools.get(key);
+      if (known !== undefined) return known;
+      let found: Buffer[] = [];
+      try {
+        const answer = await read("get_pools", [vecOf(tokens)]);
+        found = (answer.map() ?? []).map((entry) => Buffer.from(entry.key().bytes()));
+      } catch (cause) {
+        // a node that did not answer is not a pair with no pools
+        if (cause instanceof MavnaError && cause.retryable) throw cause;
+        found = [];
+      }
+      pools.set(key, found);
+      return found;
+    };
+
+    const bestHop = async (
+      from: string,
+      to: string,
+      amount: bigint,
+    ): Promise<{ out: bigint; hop: ComposeHop } | undefined> => {
+      const tokens = ordered([from, to]);
+      let best: { out: bigint; hop: ComposeHop } | undefined;
+      for (const index of await poolsOf(tokens)) {
+        let out: bigint;
+        try {
+          const estimate = await read("estimate_swap", [
+            vecOf(tokens),
+            new Address(from).toScVal(),
+            new Address(to).toScVal(),
+            xdr.ScVal.scvBytes(index),
+            nativeToScVal(amount, { type: "u128" }),
+          ]);
+          out = BigInt(scValToNative(estimate) as bigint);
+        } catch (cause) {
+          if (cause instanceof MavnaError && cause.retryable) throw cause;
+          continue;
+        }
+        if (best === undefined || out > best.out) {
+          best = { out, hop: { tokens, poolIndex: index.toString("hex"), tokenOut: to } };
+        }
+      }
+      return best;
+    };
+
+    const routes: string[][] = [
+      [request.assetIn, request.assetOut],
+      ...request.via
+        .filter((t) => t !== request.assetIn && t !== request.assetOut)
+        .map((t) => [request.assetIn, t, request.assetOut]),
+    ];
+    let best: { out: bigint; path: ComposeHop[] } | undefined;
+    for (const route of routes) {
+      let amount = BigInt(request.amountIn);
+      const path: ComposeHop[] = [];
+      for (let i = 0; i + 1 < route.length; i++) {
+        const hop = await bestHop(route[i] as string, route[i + 1] as string, amount);
+        if (hop === undefined || hop.out <= 0n) {
+          path.length = 0;
+          break;
+        }
+        path.push(hop.hop);
+        amount = hop.out;
+      }
+      if (path.length === route.length - 1 && (best === undefined || amount > best.out)) {
+        best = { out: amount, path };
+      }
+    }
+    if (best === undefined) {
+      throw new MavnaError(
+        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses.",
+        { retryable: false },
+      );
+    }
+    const amountOut = best.out.toString();
+    return {
+      provider: this.id,
+      amountOut,
+      amountOutMinimum: applySlippage(amountOut, request.maxSlippageBps),
+      path: best.path,
     };
   }
 

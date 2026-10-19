@@ -57,6 +57,8 @@ export interface PathVenue {
     readonly assetOut: string;
     readonly amountIn: string;
     readonly maxSlippageBps: number;
+    /** The only tokens a path may pass through: the contract's own list. */
+    readonly via?: readonly string[];
   }): Promise<{
     readonly provider: string;
     readonly amountOut: string;
@@ -312,6 +314,9 @@ export async function quoteComposeRoute(
       assetOut: request.wantedContract,
       amountIn: plain.receives.baseUnits,
       maxSlippageBps: Math.min(request.maxSlippageBps, COMPOSE_MAX_SLIPPAGE_BPS),
+      // a path through anything else would be delivered as it came, so it is
+      // built from the router's pools between listed tokens only
+      via: config.pathTokens,
     });
   } catch (cause) {
     return ctx.decline(

@@ -1,5 +1,13 @@
 import { MavnaError } from "@mavna/core";
-import { Account, Address, Keypair, Networks, scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Address,
+  Keypair,
+  Networks,
+  nativeToScVal,
+  scValToNative,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import findPath from "./__fixtures__/aquarius-find-path-testnet.json" with { type: "json" };
 import {
@@ -261,5 +269,98 @@ describe("Aquarius's swap chain as router hops", () => {
         maxSlippageBps: 100,
       }),
     ).rejects.toThrow(/another asset|connect|different question/);
+  });
+});
+
+describe("a conversion path built from the router's own pools between listed tokens", () => {
+  // Aquarius's testnet AQUA and USDT contracts, the testnet contract's path tokens
+  const AQUA = "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE";
+  const USDT = "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN";
+  const index = (n: number) => Buffer.alloc(32, n);
+  /** The router's order for a pool's tokens: by the address bytes, not the string. */
+  const byBytes = (tokens: string[]) =>
+    [...tokens].sort((a, b) =>
+      Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+    );
+  const key = (tokens: string[]) => byBytes(tokens).join(",");
+
+  function router(
+    pools: Record<string, Array<[number, (amountIn: bigint) => bigint]>>,
+    asked: string[],
+  ) {
+    return sorobanNode((call) => {
+      const tokens = (scValToNative(call.args[0] as xdr.ScVal) as string[]).map(String);
+      // the router only knows a pool by its tokens in its own order
+      if (tokens.join(",") !== key(tokens)) return { error: "HostError: tokens not sorted" };
+      const known = pools[tokens.join(",")] ?? [];
+      if (call.method === "get_pools") {
+        asked.push(`get_pools ${tokens.length}`);
+        return xdr.ScVal.scvMap(
+          known.map(
+            ([n]) =>
+              new xdr.ScMapEntry({
+                key: xdr.ScVal.scvBytes(index(n)),
+                val: new Address(POOL).toScVal(),
+              }),
+          ),
+        );
+      }
+      if (call.method === "estimate_swap") {
+        const poolIndex = Buffer.from((call.args[3] as xdr.ScVal).bytes()).readUInt8(0);
+        const amount = BigInt(scValToNative(call.args[4] as xdr.ScVal) as bigint);
+        const pool = known.find(([n]) => n === poolIndex);
+        if (pool === undefined) return { error: "HostError: no such pool" };
+        return nativeToScVal(pool[1](amount), { type: "u128" });
+      }
+      return { error: `unexpected ${call.method}` };
+    }, Networks.TESTNET);
+  }
+
+  it("takes the best of the direct pools and one hop through a listed token, and never asks the API", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [RPC]: router(
+          {
+            [key([XLM, USDC])]: [
+              [1, (a) => a / 20n],
+              [2, (a) => a / 25n],
+            ],
+            [key([XLM, AQUA])]: [[3, (a) => a * 10n]],
+            [key([AQUA, USDC])]: [[4, (a) => a / 150n]],
+          },
+          asked,
+        ),
+      }).fetch,
+    );
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quotePath({
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 20,
+      via: [AQUA, USDT],
+    });
+    // direct: 5,000,000 at best; through AQUA: 1e9 then 6,666,666
+    expect(quote.amountOut).toBe("6666666");
+    expect(quote.amountOutMinimum).toBe("6653332");
+    expect(quote.path).toEqual([
+      { tokens: byBytes([XLM, AQUA]), poolIndex: index(3).toString("hex"), tokenOut: AQUA },
+      { tokens: byBytes([AQUA, USDC]), poolIndex: index(4).toString("hex"), tokenOut: USDC },
+    ]);
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it("refuses plainly when no pools connect the pair through listed tokens", async () => {
+    vi.stubGlobal("fetch", routedFetch({ [RPC]: router({}, []) }).fetch);
+    await expect(
+      new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quotePath({
+        assetIn: XLM,
+        assetOut: USDC,
+        amountIn: "100000000",
+        maxSlippageBps: 20,
+        via: [AQUA],
+      }),
+    ).rejects.toThrow(/no pools that connect/);
   });
 });
