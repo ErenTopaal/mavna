@@ -118,11 +118,23 @@ export function createSoroswapProxy(options: SoroswapProxyOptions): SoroswapProx
       let json: unknown;
       try {
         json = await response.json();
-      } catch {
+      } catch (cause) {
+        // the schema check that follows refuses it; this says why to the operator
+        console.error(
+          `[sponsor] Soroswap answered ${path} (HTTP ${response.status}) with something that is not JSON:`,
+          cause instanceof Error ? cause.message : cause,
+        );
         json = undefined;
       }
       return { status: response.status, json };
-    } catch {
+    } catch (cause) {
+      // a wrong base URL, DNS or TLS fault looks the same to the caller, so the
+      // operator is told which it was; the key is in a header, never in this
+      const reason = cause instanceof Error ? cause : new Error(String(cause));
+      const detail = reason.cause instanceof Error ? ` (${reason.cause.message})` : "";
+      console.error(
+        `[sponsor] Soroswap could not be reached for ${path}: ${reason.message}${detail}`,
+      );
       return "unreachable";
     }
   }
@@ -161,13 +173,19 @@ export function createSoroswapProxy(options: SoroswapProxyOptions): SoroswapProx
   async function healthNow(): Promise<ProxyAnswer> {
     if (health !== undefined && now() - health.at < healthCacheMs) return health.answer;
     const result = await upstream("/health", { method: "GET" });
-    if (result === "unreachable" || result.status !== 200) {
-      return { status: 200, body: { network: options.network, usable: false, protocols: [] } };
-    }
+    // an unusable answer is kept as long as a usable one, so a Soroswap that is
+    // down is not asked again on every call
+    const unusable = (): ProxyAnswer => {
+      const answer: ProxyAnswer = {
+        status: 200,
+        body: { network: options.network, usable: false, protocols: [] },
+      };
+      health = { at: now(), answer };
+      return answer;
+    };
+    if (result === "unreachable" || result.status !== 200) return unusable();
     const parsed = upstreamHealth.safeParse(result.json);
-    if (!parsed.success) {
-      return { status: 200, body: { network: options.network, usable: false, protocols: [] } };
-    }
+    if (!parsed.success) return unusable();
     const protocols = parsed.data.status.indexer[options.network] ?? [];
     const aggregator = options.network === "mainnet" ? parsed.data.aggregator?.mainnet : undefined;
     const aggregatorUp =

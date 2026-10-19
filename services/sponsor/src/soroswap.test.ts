@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSoroswapProxy, type ProxyRequest, type SoroswapProxyOptions } from "./soroswap.js";
 
 /**
@@ -202,6 +202,32 @@ describe("the soroswap proxy", () => {
     expect(gone).toMatchObject({ status: 502, body: { retryable: true } });
   });
 
+  it("tells the operator why Soroswap could not be reached, without the key", async () => {
+    const logged: string[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    await proxyFor("http://127.0.0.1:1").handle(quoteRequest());
+    errors.mockRestore();
+    expect(logged.some((line) => /Soroswap.*\/quote.*(ECONNREFUSED|fetch failed)/.test(line))).toBe(
+      true,
+    );
+    expect(logged.some((line) => line.includes(KEY))).toBe(false);
+  });
+
+  it("says when Soroswap answers with something that is not JSON", async () => {
+    const soroswap = await fakeSoroswap({
+      "POST /quote": () => ({ status: 200, body: undefined }),
+    });
+    const logged: string[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    await proxyFor(soroswap.url).handle(quoteRequest());
+    errors.mockRestore();
+    expect(logged.some((line) => /Soroswap.*\/quote.*not JSON/.test(line))).toBe(true);
+  });
+
   it("refuses a quote that fails the schema", async () => {
     const soroswap = await fakeSoroswap({
       "POST /quote": () => ({ status: 201, body: { ...quoteBody, amountOut: "-5" } }),
@@ -259,6 +285,23 @@ describe("the soroswap proxy", () => {
     });
     expect(soroswap.seen).toHaveLength(1);
     expect(soroswap.seen[0]?.authorization).toBeUndefined();
+  });
+
+  it("keeps an unusable answer for the same while, so a down Soroswap is not asked on every call", async () => {
+    const soroswap = await fakeSoroswap({ "GET /health": () => ({ status: 503, body: {} }) });
+    const proxy = proxyFor(soroswap.url);
+    const health = {
+      method: "GET",
+      path: "/swap/soroswap/health",
+      originAllowed: true,
+      body: undefined,
+    };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = await proxy.handle({ ...health, client: "a" });
+    await proxy.handle({ ...health, client: "b" });
+    errors.mockRestore();
+    expect(first.body).toMatchObject({ usable: false });
+    expect(soroswap.seen).toHaveLength(1);
   });
 
   it("is unusable while the mainnet aggregator is paused", async () => {
