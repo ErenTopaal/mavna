@@ -615,6 +615,13 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       return;
     }
 
+    // Before the held check, so a body anyone could copy cannot be used to ask
+    // whether a given account is mid-transfer.
+    if (!signedBy(transaction, record.signer)) {
+      refuse(record, res, origin, 400, "That preparation is not signed by the account it is for.");
+      return;
+    }
+
     // The governing order: no capital commits until the settlement that releases
     // it is already signed and held. Without this the deposit is a gift, which is
     // the model the cost decision explicitly rejected.
@@ -627,10 +634,6 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
         "No settlement is held for this account. The deposit is a loan, and the " +
           "repayment is signed before the loan is made, not after.",
       );
-      return;
-    }
-    if (!signedBy(transaction, record.signer)) {
-      refuse(record, res, origin, 400, "That preparation is not signed by the account it is for.");
       return;
     }
     const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);

@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
   PUBLIC_TESTNET_RPC_URL,
@@ -18,6 +19,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { signedBy } from "./built.js";
+import { CapLedger, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServerOptions } from "./server.js";
 
@@ -31,6 +33,10 @@ import { createSponsorServer, type SponsorServerOptions } from "./server.js";
 
 const network = createNetworkConfig({ id: "testnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });
 
+const NO_SETTLEMENT =
+  "No settlement is held for this account. The deposit is a loan, and the " +
+  "repayment is signed before the loan is made, not after.";
+
 const USDC = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
 
 // Unroutable on purpose: a method this double does not override fails at once
@@ -41,6 +47,8 @@ const NOWHERE = "https://127.0.0.1:9";
 class RecordingRpc extends RpcClient {
   readonly accounts = new Map<string, bigint>();
   readonly submissions: { label: string; tx: Transaction | FeeBumpTransaction }[] = [];
+  /** Set to make the next submission fail the way a network rejection does. */
+  rejectNext: MavnaError | undefined;
 
   constructor() {
     super({ url: NOWHERE });
@@ -57,6 +65,11 @@ class RecordingRpc extends RpcClient {
     build: () => Promise<Transaction | FeeBumpTransaction>,
   ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
     const tx = await build();
+    const rejection = this.rejectNext;
+    if (rejection !== undefined) {
+      this.rejectNext = undefined;
+      throw rejection;
+    }
     this.submissions.push({ label, tx });
     const now = Math.floor(Date.now() / 1000);
     return {
@@ -262,6 +275,7 @@ describe("the sponsor only countersigns what it built", () => {
     const prepared = await preparedAndSigned(server, victim);
     const submitted = await server.post("/submit", { signedXdr: prepared });
     expect(submitted.status).toBe(409);
+    expect(submitted.body.error).toBe(NO_SETTLEMENT);
     expect(server.rpc.submissions).toHaveLength(0);
   });
 
@@ -285,6 +299,7 @@ describe("the sponsor only countersigns what it built", () => {
     const prepared = await preparedAndSigned(server, victim);
     const submitted = await server.post("/submit", { signedXdr: prepared });
     expect(submitted.status).toBe(409);
+    expect(submitted.body.error).toBe(NO_SETTLEMENT);
     expect(server.rpc.submissions).toHaveLength(0);
   });
 
@@ -336,6 +351,119 @@ describe("the sponsor only countersigns what it built", () => {
     const prepared = await preparedAndSigned(server, user);
     const submitted = await server.post("/submit", { signedXdr: prepared });
     expect(submitted.status).toBe(409);
+    expect(submitted.body.error).toBe(NO_SETTLEMENT);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+  it("holds the same settlement once it comes back signed", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+
+    const built = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    const unsigned = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: built.body.xdr as string,
+    });
+    expect(unsigned.status).toBe(400);
+
+    const signed = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(built.body.xdr as string, user),
+    });
+    expect(signed.status).toBe(200);
+  });
+
+  it("submits a preparation that arrived before its settlement, once the settlement is held", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+
+    const prepared = await preparedAndSigned(server, user);
+    const early = await server.post("/submit", { signedXdr: prepared });
+    expect(early.status).toBe(409);
+    expect(early.body.error).toBe(NO_SETTLEMENT);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    await holdSettlementFor(server, user);
+    const later = await server.post("/submit", { signedXdr: prepared });
+    expect(later.status).toBe(200);
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("re-checks the cap at submission, and submits once the cap allows it", async () => {
+    let day = "2026-10-19";
+    const caps = new CapLedger(
+      new InMemoryCapStore(),
+      { strandingCapPerDay: 75, volumeCapPerDay: { "expensive-gas": 1, "cheap-gas": 1 } },
+      () => day,
+    );
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    // Another transfer from the same class of chain takes today's last slot
+    // between this user's preparation and their signature coming back.
+    await caps.recordStarted("expensive-gas");
+
+    const refused = await server.post("/submit", { signedXdr: prepared });
+    expect(refused.status).toBe(429);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    day = "2026-10-20";
+    const allowed = await server.post("/submit", { signedXdr: prepared });
+    expect(allowed.status).toBe(200);
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("refuses a preparation the user has not signed", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+
+    await holdSettlementFor(server, user);
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    const response = await server.post("/submit", { signedXdr: built.body.xdr as string });
+    expect(response.status).toBe(400);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("does not tell an unsigned probe whether a settlement is held", async () => {
+    const server = await startServer();
+    const victim = Keypair.random();
+
+    // No settlement is held for the victim. The answer must be the same 400 an
+    // unsigned body gets when one is, or the status leaks which accounts are
+    // mid-transfer.
+    const built = await server.post("/prepare", {
+      destination: victim.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    const response = await server.post("/submit", { signedXdr: built.body.xdr as string });
+    expect(response.status).toBe(400);
+    expect(response.body.error).not.toBe(NO_SETTLEMENT);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("does not offer a preparation again after the network refused it", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    server.rpc.rejectNext = new MavnaError("sponsored preparation was rejected: txBadSeq", {
+      retryable: false,
+    });
+    const failed = await server.post("/submit", { signedXdr: prepared });
+    expect(failed.status).toBe(502);
+
+    const again = await server.post("/submit", { signedXdr: prepared });
+    expect(again.status).toBe(409);
     expect(server.rpc.submissions).toHaveLength(0);
   });
 });
