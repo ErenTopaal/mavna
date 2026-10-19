@@ -1,3 +1,4 @@
+import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
@@ -66,17 +67,6 @@ export interface DelivererOptions {
     readonly attestationHex: string;
   }) => import("@stellar/stellar-sdk").Transaction;
 }
-
-/**
- * Circle's contract error for a recipient with no USDC trustline.
- *
- * Reproduced directly rather than read from documentation: a USDC transfer to a
- * trustline-less account fails with `Error(Contract, #13)`, diagnostic
- * "trustline entry is missing for account". Matching on it is what lets a
- * delivery say "they are not ready" instead of "it failed", which are different
- * things to a user and lead to different actions.
- */
-const RECIPIENT_NOT_READY = /#13|trustline entry is missing/i;
 
 /** Circle marks an unfinished attestation with this rather than omitting it. */
 const NOT_YET_SIGNED = "PENDING";
@@ -170,7 +160,10 @@ export class Deliverer {
 function classify(cause: unknown): DeliveryOutcome {
   const text = cause instanceof Error ? `${cause.message}` : String(cause);
 
-  if (RECIPIENT_NOT_READY.test(text)) {
+  // Telling "not ready" from "failed" is what keeps a user who only needs a
+  // trustline from being told their transfer failed and paying twice.
+  const failure = deliveryFailureOf(text);
+  if (failure === "recipient-not-ready") {
     return {
       kind: "recipient-not-ready",
       detail:
@@ -178,15 +171,7 @@ function classify(cause: unknown): DeliveryOutcome {
         "are still deliverable once their account is ready.",
     };
   }
-  // Circle's transmitter refuses a nonce it has already used, which is exactly
-  // what a duplicate delivery looks like and is a success from the user's side.
-  // 6908 is `NonceAlreadyUsed` in the transmitter's own error enum, read from
-  // `message-transmitter-v2/src/lib.rs` rather than guessed: the first guess
-  // here matched prose that never appears, and a retried delivery of an
-  // already-landed transfer reported an error instead of the truth.
-  if (/#\s*6908\b|nonce already used/i.test(text)) {
-    return { kind: "already-delivered" };
-  }
+  if (failure === "already-delivered") return { kind: "already-delivered" };
 
   throw cause instanceof MavnaError
     ? cause

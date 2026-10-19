@@ -33,6 +33,7 @@ export type { DeliveryInputs } from "./delivery.js";
 export {
   buildDelivery,
   canonicalToLocal,
+  deliveryFailureOf,
   localToCanonical,
   MAX_FEE_IS_IN_LOCAL_DECIMALS,
 } from "./delivery.js";

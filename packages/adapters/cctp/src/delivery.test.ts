@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalToLocal, localToCanonical } from "./delivery.js";
+import { canonicalToLocal, deliveryFailureOf, localToCanonical } from "./delivery.js";
 
 /**
  * The decimal boundary.
@@ -53,5 +53,22 @@ describe("local to canonical", () => {
       const { canonical, dust } = localToCanonical(local);
       expect(BigInt(canonical) * 10n + BigInt(dust)).toBe(BigInt(local));
     }
+  });
+});
+
+describe("what a failed delivery means", () => {
+  it("reads a recipient with no USDC trustline as not ready, not failed", () => {
+    expect(deliveryFailureOf("HostError: Error(Contract, #13)")).toBe("recipient-not-ready");
+    expect(deliveryFailureOf("trustline entry is missing for account")).toBe("recipient-not-ready");
+  });
+
+  it("reads a used nonce as a delivery that already landed", () => {
+    expect(deliveryFailureOf("HostError: Error(Contract, #6908)")).toBe("already-delivered");
+    expect(deliveryFailureOf("nonce already used")).toBe("already-delivered");
+  });
+
+  it("names nothing else", () => {
+    expect(deliveryFailureOf("txInsufficientBalance")).toBeUndefined();
+    expect(deliveryFailureOf("Error(Contract, #69080)")).toBeUndefined();
   });
 });

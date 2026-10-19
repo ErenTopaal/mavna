@@ -72,6 +72,27 @@ export function buildDelivery(inputs: DeliveryInputs): Transaction {
 }
 
 /**
+ * What a refused delivery means, read from the simulation or submission error,
+ * or undefined when it is an ordinary failure.
+ *
+ * `recipient-not-ready`: Circle's contract error for a recipient with no USDC
+ * trustline, `Error(Contract, #13)` with diagnostic "trustline entry is missing
+ * for account", reproduced on testnet. The whole invocation reverts with its
+ * replay record, so the message stays deliverable.
+ *
+ * `already-delivered`: 6908 is `NonceAlreadyUsed` in the transmitter's own error
+ * enum (`message-transmitter-v2/src/lib.rs`), which is what delivering a landed
+ * message again looks like.
+ */
+export function deliveryFailureOf(
+  text: string,
+): "recipient-not-ready" | "already-delivered" | undefined {
+  if (/#13\b|trustline entry is missing/i.test(text)) return "recipient-not-ready";
+  if (/#\s*6908\b|nonce already used/i.test(text)) return "already-delivered";
+  return undefined;
+}
+
+/**
  * Convert an amount between Circle's canonical six decimals and Stellar's seven.
  *
  * CCTP message amounts are ALWAYS in six-decimal units regardless of direction,
