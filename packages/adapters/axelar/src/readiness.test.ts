@@ -354,6 +354,20 @@ describe("the asset an Axelar route says it delivers", () => {
     expect((result as RouteRejection).explanation).toContain(INTERCHAIN_TOKEN);
   });
 
+  it("does not take a Soroban token's word that it is Circle's USDC", async () => {
+    // Anyone can deploy a contract whose name() answers CODE:ISSUER. Only the
+    // ledger's executable decides, so this is labelled by its own contract id.
+    interchainToken({ name: USDC_ID });
+
+    const asked = await adapter().quote(ask({ to: stellarUsdc }));
+    expect(isRoute(asked)).toBe(false);
+    expect((asked as RouteRejection).reason).toBe("asset-unsupported");
+    expect((asked as RouteRejection).explanation).toContain(INTERCHAIN_TOKEN);
+
+    const route = routeOf(await adapter().quote(ask({ to: stellarInterchain })));
+    expect(route.deliveredAtLeast.asset.id).toBe(INTERCHAIN_TOKEN);
+  });
+
   it("refuses a Stellar asset contract whose name does not derive to its own address", async () => {
     classicUsdc({ name: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" });
     const result = await adapter().quote(ask());
