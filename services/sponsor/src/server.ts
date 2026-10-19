@@ -1956,6 +1956,25 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         );
         return;
       }
+    }
+    // Only a message the endpoint really holds is worth a place in the minute's
+    // cap: invented guids would otherwise fill it and turn real finishes away.
+    let slot: Awaited<ReturnType<Composer["slot"]>>;
+    try {
+      slot = await composer.slot(request);
+    } catch (cause) {
+      if (cause instanceof ComposeRefused) {
+        reply(res, 400, { error: cause.message, retryable: false }, origin);
+        return;
+      }
+      throw cause;
+    }
+    if (slot !== "queued") {
+      reply(res, slot === "not-queued" ? 404 : 200, { kind: slot }, origin);
+      return;
+    }
+    {
+      const now = nowUnix();
       if (recentComposes.length >= COMPOSES_PER_MINUTE) {
         reply(
           res,

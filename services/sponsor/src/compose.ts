@@ -216,15 +216,17 @@ export class Composer {
     return { txHash: result.txHash, ledger: result.ledger };
   }
 
-  async finish(request: ComposeRequest): Promise<ComposeOutcome> {
+  /**
+   * Whether the endpoint holds exactly this message, waiting. Two reads and no
+   * spending, so it is asked before a finish counts against any limit.
+   */
+  async slot(request: ComposeRequest): Promise<"queued" | "not-queued" | "already-composed"> {
     const { from, guid, index, message } = parseComposeRequest(request);
     const { rpc, network, contract } = this.options;
-
     const config = await readArrivalConfig(rpc, contract);
     if (!config.ofts.some(([oft]) => oft === from)) {
       throw new ComposeRefused("That token is not one the Arrival Contract accepts.");
     }
-
     const slot = await readComposeQueue(rpc, network.passphrase, {
       endpoint: config.endpoint,
       from,
@@ -232,11 +234,20 @@ export class Composer {
       guid,
       index,
     });
-    if (slot === undefined) return { kind: "not-queued" };
-    if (slot === COMPOSE_RECEIVED) return { kind: "already-composed" };
+    if (slot === undefined) return "not-queued";
+    if (slot === COMPOSE_RECEIVED) return "already-composed";
     if (slot !== composeMessageHash(message)) {
       throw new ComposeRefused("That is not the message waiting for this transfer.");
     }
+    return "queued";
+  }
+
+  async finish(request: ComposeRequest): Promise<ComposeOutcome> {
+    const { from, guid, index, message } = parseComposeRequest(request);
+    const { rpc, network, contract } = this.options;
+
+    const slot = await this.slot(request);
+    if (slot !== "queued") return { kind: slot };
 
     await this.ensureExecutor();
     const executor = this.#executor.publicKey();

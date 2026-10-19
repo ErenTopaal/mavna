@@ -358,6 +358,8 @@ or `404` with `{ "kind": "not-queued" }` when the endpoint holds nothing for tha
 message yet, and `429` when the same message was asked about in the last 30
 seconds, when one client address has asked for three finishes in the last minute
 (counted like every other limit, so behind a proxy it needs `MAVNA_TRUST_PROXY=true`),
-or when ten finishes have been tried in the last minute in all. With
+or when ten finishes of messages the endpoint really holds have been tried in the last
+minute in all (a guid with nothing queued answers `not-queued` and takes no place in
+that count). With
 `MAVNA_RESERVE_FUNDING=self` it answers `409` before anything else: the account's own
 wallet finishes the conversion, and the sponsor pays for none.

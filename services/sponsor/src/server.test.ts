@@ -11,6 +11,7 @@ import {
   solanaAddressToBytes32,
   toHex,
 } from "@mavna/adapter-cctp";
+import { composeMessageHash } from "@mavna/adapter-layerzero";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
@@ -32,6 +33,9 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import arrivalEntries from "../../../packages/adapters/layerzero/src/__fixtures__/testnet-ledger-entries.json" with {
+  type: "json",
+};
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
@@ -70,6 +74,12 @@ const PLENTY = 10_000_000_000n;
  * sequence numbers: a transaction lands only on its source's next sequence and
  * advances it, so a spent sequence is refused the way the network refuses it.
  */
+const RECORDED_CONTRACT_ENTRIES = new Map<string, string>(
+  Object.values(arrivalEntries).flatMap((recorded) =>
+    recorded.entries.map((e) => [e.key, e.xdr] as const),
+  ),
+);
+
 class RecordingRpc extends RpcClient {
   readonly accounts = new Map<string, bigint>();
   /** Every transaction the network accepted, in order. */
@@ -106,6 +116,23 @@ class RecordingRpc extends RpcClient {
         return val === undefined ? [] : [{ key, val, lastModifiedLedgerSeq: 1 }];
       }),
     });
+    // the endpoint's compose_queue, the one contract read the compose path makes
+    this.server.simulateTransaction = (async (tx: Transaction) => {
+      const op = tx.operations[0] as Operation.InvokeHostFunction | undefined;
+      const call = op?.func.invokeContract();
+      if (call?.functionName().toString() !== "compose_queue") {
+        return { error: "this node only answers compose_queue", latestLedger: 1 };
+      }
+      const guid = Buffer.from(call.args()[2]?.bytes() ?? Buffer.alloc(0)).toString("hex");
+      const slot = this.queuedComposes.get(guid);
+      return {
+        latestLedger: 1,
+        result: {
+          retval: slot === undefined ? xdr.ScVal.scvVoid() : xdr.ScVal.scvBytes(slot),
+          auth: [],
+        },
+      };
+    }) as never;
     this.server.sendTransaction = async (tx) => {
       const label = this.labels.get(tx.hash().toString("hex"));
       const stall = label === undefined ? undefined : this.stalls.get(label);
@@ -126,7 +153,13 @@ class RecordingRpc extends RpcClient {
       };
   }
 
+  /** Compose slots LayerZero's endpoint holds, by guid hex: the message hash in each. */
+  readonly queuedComposes = new Map<string, Buffer>();
+
   private entryFor(key: xdr.LedgerKey): xdr.LedgerEntryData | undefined {
+    // the Arrival Contract's own storage, replayed from a testnet recording
+    const recorded = RECORDED_CONTRACT_ENTRIES.get(key.toXDR("base64"));
+    if (recorded !== undefined) return xdr.LedgerEntryData.fromXDR(recorded, "base64");
     if (key.switch().name === "account") {
       const accountId = key.account().accountId();
       const sequence = this.accounts.get(StrKey.encodeEd25519PublicKey(accountId.ed25519()));
@@ -3072,6 +3105,8 @@ describe("finishing a conversion on arrival", () => {
     index: 0,
     message: "0x01",
   };
+  // what the endpoint holds for a queued message: its keccak hash
+  const queuedHash = Buffer.from(composeMessageHash("0x01").slice(2), "hex");
 
   it("refuses to start finishing conversions without its own executor key", async () => {
     await expect(startServer({ arrivalContract: ARRIVAL })).rejects.toThrow(/executor key/);
@@ -3089,6 +3124,7 @@ describe("finishing a conversion on arrival", () => {
       arrivalContract: ARRIVAL,
       arrivalExecutorSecret: Keypair.random().secret(),
     });
+    server.rpc.queuedComposes.set(good.guid, queuedHash);
     await server.post("/compose", good);
     const again = await server.post("/compose", { ...good, guid: `0x${good.guid.toUpperCase()}` });
     expect(again.status).toBe(429);
@@ -3130,6 +3166,30 @@ describe("finishing a conversion on arrival", () => {
     expect(await ask("198.51.100.8", 9)).not.toBe(429);
   });
 
+  it("counts only messages the endpoint really holds against the minute's cap", async () => {
+    const server = await startServer({
+      trustProxy: true,
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    const ask = async (guid: string, client: string) =>
+      (
+        await fetch(`${server.url}/compose`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-forwarded-for": client },
+          body: JSON.stringify({ ...good, guid }),
+        })
+      ).status;
+    // invented guids from many addresses: nothing is queued for any of them
+    for (let i = 0; i < 12; i++) {
+      expect(await ask(i.toString(16).padStart(64, "0"), `203.0.113.${i}`)).toBe(404);
+    }
+    // a real one is still finished rather than turned away by the cap
+    const real = "ef".repeat(32);
+    server.rpc.queuedComposes.set(real, queuedHash);
+    expect(await ask(real, "198.51.100.200")).not.toBe(429);
+  });
+
   it("caps how many finishes it will try a minute, across every client", async () => {
     const server = await startServer({
       trustProxy: true,
@@ -3139,6 +3199,7 @@ describe("finishing a conversion on arrival", () => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
       const guid = i.toString(16).padStart(64, "0");
+      server.rpc.queuedComposes.set(guid, queuedHash);
       // a different address each time, so only the overall cap can refuse
       const response = await fetch(`${server.url}/compose`, {
         method: "POST",
