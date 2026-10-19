@@ -11,7 +11,7 @@ Service hub. It carries any token registered with the service, including USDC on
 mainnet.
 
 ```ts
-const axelar = new AxelarAdapter({ network, rpc });
+const axelar = new AxelarAdapter({ network, rpc, baseReserveStroops });
 ```
 
 ## Nothing here is a constant
@@ -32,6 +32,18 @@ chain's token service and Stellar's must independently agree the counterparty is
 trusted. One side saying yes is not enough: drift between them is observed, and a
 name that passes on the sending chain and is dropped afterwards would take the
 tokens and the delivery payment with it.
+
+## What lands, and where
+
+The route names what arrives by what the Stellar token actually is, read off the
+ledger. A token linked to an existing Stellar asset arrives through that asset's
+built-in contract and is named `CODE:ISSUER`; the destination needs a trustline, so
+an account without one, or no account at all, gets a prepare-account step and the
+reserve floor, exactly as on the CCTP rail. A token the service deployed itself is a
+Soroban contract named by its contract id. It needs no trustline, so an existing
+account is ready as it is, and an account that does not exist yet is declined: the
+balance would be credited but could not be moved, and the sponsor is repaid in the
+asset it curates, which this is not.
 
 ## Fees
 

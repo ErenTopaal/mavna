@@ -5,6 +5,7 @@ import {
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
 } from "@mavna/stellar";
+import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { AxelarAdapter } from "./adapter.js";
 import { chainConfig, evmTokenService, loadChains } from "./deployments.js";
@@ -26,7 +27,11 @@ import { chainsTrustEachOther, resolveItsToken, TOKEN_MANAGER } from "./token.js
 
 const network = createNetworkConfig({ id: "testnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });
 const rpc = new RpcClient({ url: network.rpcUrl });
-const adapter = new AxelarAdapter({ network: "testnet", rpc });
+const adapter = new AxelarAdapter({
+  network: "testnet",
+  rpc,
+  baseReserveStroops: network.baseReserveStroops,
+});
 
 /**
  * The one pair that actually moves on testnet today.
@@ -296,6 +301,19 @@ describe("quoting", () => {
 
     // One signature, because this token needs no approval.
     expect(result.signaturesRequired).toBe(1);
+
+    // IXE lands as Axelar's own Soroban token, read off the ledger as a Wasm
+    // contract, so it is named by its contract id and needs no trustline.
+    expect(result.deliveredAtLeast.asset.id).toBe(stellarIxe.id);
+    expect(result.steps.map((step) => step.kind)).toEqual(["bridge"]);
+  });
+
+  it("declines an account that does not exist for a token that lands as a contract", async () => {
+    // A fresh key, so the account is certainly not on the ledger.
+    const result = await adapter.quote(ask({ destination: Keypair.random().publicKey() }));
+    expect(isRoute(result)).toBe(false);
+    if (isRoute(result)) return;
+    expect(result.reason).toBe("destination-unsupported");
   });
 
   it("declines a token that cannot reach Stellar, in words with no jargon in them", async () => {

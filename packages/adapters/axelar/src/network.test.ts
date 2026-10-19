@@ -115,6 +115,7 @@ function adapter(): AxelarAdapter {
   return new AxelarAdapter({
     network: "testnet",
     rpc: new RpcClient({ url: "https://soroban-testnet.stellar.org" }),
+    baseReserveStroops: 5_000_000,
   });
 }
 

@@ -126,7 +126,11 @@ export function createEngine(config: EngineConfig): Engine {
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
   });
-  const axelar = new AxelarAdapter({ network, rpc });
+  const axelar = new AxelarAdapter({
+    network,
+    rpc,
+    baseReserveStroops: netConfig.baseReserveStroops,
+  });
   const layerzero = new LayerZeroAdapter({
     network,
     rpc,

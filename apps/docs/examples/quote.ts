@@ -46,7 +46,11 @@ const cctp = new CctpAdapter({
   baseReserveStroops: config.baseReserveStroops,
 });
 
-const axelar = new AxelarAdapter({ network: NETWORK, rpc });
+const axelar = new AxelarAdapter({
+  network: NETWORK,
+  rpc,
+  baseReserveStroops: config.baseReserveStroops,
+});
 
 const layerzero = new LayerZeroAdapter({
   network: NETWORK,

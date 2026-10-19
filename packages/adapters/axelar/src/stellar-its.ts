@@ -2,11 +2,13 @@ import { MavnaError } from "@mavna/core";
 import type { RpcClient } from "@mavna/stellar";
 import {
   Account,
+  Address,
   Contract,
   Keypair,
   Networks,
   nativeToScVal,
   rpc,
+  Asset as StellarAsset,
   scValToNative,
   TransactionBuilder,
   xdr,
@@ -97,6 +99,59 @@ export class StellarItsReader {
     return Number(value);
   }
 
+  /**
+   * What a Stellar token contract the service names actually is.
+   *
+   * Two kinds come back from the service and they land differently. A token the
+   * service deployed is its own Soroban contract that keeps balances in contract
+   * storage, so a recipient needs no trustline. A token linked to an existing
+   * Stellar asset is that asset's built-in contract, which moves a classic
+   * balance and so needs the recipient to hold a trustline for it. Which one it
+   * is comes from the contract's executable on the ledger, not from its name.
+   */
+  async deliveredAs(token: string): Promise<DeliveredToken> {
+    const key = xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: new Address(token).toScAddress(),
+        key: xdr.ScVal.scvLedgerKeyContractInstance(),
+        durability: xdr.ContractDataDurability.persistent(),
+      }),
+    );
+    const entry = await this.client.read(`token contract ${token}`, async () => {
+      const response = await this.client.server.getLedgerEntries(key);
+      return { value: response.entries[0], ledger: response.latestLedger };
+    });
+    if (entry === undefined) {
+      throw new MavnaError(
+        `Stellar's token service names ${token} for this token, and no such contract exists.`,
+        { retryable: false },
+      );
+    }
+
+    const executable = entry.val.contractData().val().instance().executable();
+    if (executable.switch().name !== "contractExecutableStellarAsset") {
+      return { kind: "contract", id: token };
+    }
+
+    // The built-in contract answers its name as CODE:ISSUER, or "native" for XLM.
+    // Taken only once it derives back to this exact address, so a name alone
+    // can never relabel what lands.
+    const name = await this.simulateOn(token, "name");
+    const asset = typeof name === "string" ? classicAssetNamed(name) : undefined;
+    if (asset === undefined || asset.contractId(this.passphrase) !== token) {
+      throw new MavnaError(
+        `The Stellar asset contract ${token} does not name the asset it wraps in a way ` +
+          "that derives back to it. Refusing to say what it delivers.",
+        { retryable: false },
+      );
+    }
+    return {
+      kind: "classic",
+      id: asset.isNative() ? "native" : `${asset.getCode()}:${asset.getIssuer()}`,
+      asset,
+    };
+  }
+
   private simulate(method: string, ...args: xdr.ScVal[]): Promise<unknown> {
     return this.simulateOn(this.service, method, ...args);
   }
@@ -129,6 +184,25 @@ export class StellarItsReader {
       });
     }
     return scValToNative(returned);
+  }
+}
+
+/**
+ * What lands on Stellar, in the form the core asset model names it: CODE:ISSUER
+ * or "native" for a classic asset, the contract id for a Soroban token.
+ */
+export type DeliveredToken =
+  | { readonly kind: "classic"; readonly id: string; readonly asset: StellarAsset }
+  | { readonly kind: "contract"; readonly id: string };
+
+function classicAssetNamed(name: string): StellarAsset | undefined {
+  if (name === "native") return StellarAsset.native();
+  const [code, issuer, ...rest] = name.split(":");
+  if (code === undefined || issuer === undefined || rest.length > 0) return undefined;
+  try {
+    return new StellarAsset(code, issuer);
+  } catch {
+    return undefined;
   }
 }
 

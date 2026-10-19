@@ -13,13 +13,26 @@ import type {
   UnsignedTransaction,
 } from "@mavna/core";
 import { MavnaError, rejectionIsRetryable } from "@mavna/core";
-import { classifyAddress, type RpcClient } from "@mavna/stellar";
+import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
+import {
+  type ArrivingValue,
+  belowFloorGuidance,
+  classifyAddress,
+  type DestinationLane,
+  inspectDestination,
+  meetsFloor,
+  quoteReserve,
+  type RpcClient,
+  valueInXlm,
+  XlmPriceSource,
+} from "@mavna/stellar";
+import { Address, xdr } from "@stellar/stellar-sdk";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
 import { priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
-import { StellarItsReader } from "./stellar-its.js";
+import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
 import {
   buildApproval,
@@ -46,6 +59,15 @@ export interface AxelarAdapterOptions {
   readonly network: NetworkId;
   /** Reads the Stellar side, which is half of every check that matters. */
   readonly rpc: RpcClient;
+  /**
+   * The network's base reserve, read from a ledger header rather than assumed.
+   * It is a network parameter and has changed before.
+   */
+  readonly baseReserveStroops: number;
+  /** Prices the arriving asset in XLM, so the sponsorship floor can be compared. */
+  readonly prices?: XlmPriceSource;
+  /** Where the order book is read from. Defaults per network. */
+  readonly horizonUrl?: string;
   /** How EVM reads reach a node. Injectable so tests can hold one still. */
   readonly ethCall?: EthCall;
 }
@@ -66,6 +88,8 @@ export class AxelarAdapter implements BridgeAdapter {
 
   private readonly network: NetworkId;
   private readonly rpc: RpcClient;
+  private readonly baseReserveStroops: number;
+  private readonly prices: XlmPriceSource;
   private readonly ethCall: EthCall;
   private readonly gmp: GmpApi;
   private readonly registry: ChainRegistry;
@@ -73,6 +97,16 @@ export class AxelarAdapter implements BridgeAdapter {
   constructor(options: AxelarAdapterOptions) {
     this.network = options.network;
     this.rpc = options.rpc;
+    this.baseReserveStroops = options.baseReserveStroops;
+    this.prices =
+      options.prices ??
+      new XlmPriceSource({
+        horizonUrl:
+          options.horizonUrl ??
+          (options.network === "mainnet"
+            ? "https://horizon.stellar.org"
+            : "https://horizon-testnet.stellar.org"),
+      });
     this.ethCall = options.ethCall ?? fetchEthCall;
     this.gmp = new GmpApi(options.network);
     this.registry = new ChainRegistry(options.network);
@@ -184,6 +218,32 @@ export class AxelarAdapter implements BridgeAdapter {
       return this.decline("asset-unsupported", "That is not a token this route can move.");
     }
 
+    // What actually lands, read off the ledger, and the same check on the far
+    // side: a route quoted as one Stellar asset and crediting another is not the
+    // route that was asked for.
+    let delivered: DeliveredToken;
+    try {
+      delivered = await stellarIts.deliveredAs(token.stellarToken);
+    } catch (cause) {
+      return this.declineFrom(
+        cause,
+        "asset-unsupported",
+        cause instanceof MavnaError
+          ? cause.message
+          : "What this token arrives as on Stellar could not be established.",
+      );
+    }
+    if (delivered.id !== request.to.id) {
+      return this.decline(
+        "asset-unsupported",
+        `This route delivers ${request.from.symbol} as ${delivered.id} on Stellar, which is ` +
+          `not ${request.to.id}.`,
+      );
+    }
+
+    const lane = await this.laneFor(request.destination, delivered);
+    if ("source" in lane) return lane;
+
     let deliveryFee: bigint;
     let stellarDecimals: number;
     try {
@@ -201,8 +261,8 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
-    const delivered = scaleAcrossDecimals(sends, token.sourceDecimals, stellarDecimals);
-    if (delivered <= 0n) {
+    const arriving = scaleAcrossDecimals(sends, token.sourceDecimals, stellarDecimals);
+    if (arriving <= 0n) {
       return this.decline(
         "amount-too-small",
         "That amount is too small to survive the change in precision between the two " +
@@ -210,11 +270,57 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
+    const reserve = quoteReserve({
+      lane,
+      // The rail delivers the asset that was asked for, checked above, so there
+      // is never a second trustline to pay for here.
+      destinationAssetDiffers: false,
+      baseReserveStroops: this.baseReserveStroops,
+    });
+
+    // Only a lane that borrows a reserve has a floor, and only a classic asset
+    // can be in one, so the market is asked only then.
+    if (reserve.slots > 0 && delivered.kind === "classic") {
+      let value: ArrivingValue;
+      try {
+        value = valueInXlm(
+          arriving,
+          stellarDecimals,
+          await this.prices.xlmStroopsPerUnit(delivered.asset),
+        );
+      } catch (cause) {
+        return this.decline(
+          "temporarily-unavailable",
+          cause instanceof MavnaError
+            ? cause.message
+            : "Stellar's market is not answering, so the smallest workable transfer " +
+                "cannot be worked out right now.",
+        );
+      }
+      if (!meetsFloor(reserve, value)) {
+        return this.decline("amount-too-small", belowFloorGuidance(reserve));
+      }
+    }
+
+    const steps = planTransfer({
+      destination: readinessOf(lane),
+      bridgeDelivers: delivered.id,
+      userWants: request.to.id,
+      // A token is arriving, not XLM, so nothing about the account pays for itself.
+      arrivingXlmCoversReserve: false,
+      // Told upfront, and it depends on the token: only the kinds the service
+      // has to pull with an allowance cost a signature of their own.
+      sourceNeedsApproval: token.approvalSpender !== undefined,
+    });
+
     const receivesAsset: Asset = {
-      ...request.to,
+      chainId: stellarChainId(this.network),
+      id: delivered.id,
+      symbol: request.to.symbol,
       decimals: stellarDecimals,
+      curatedBy: request.to.curatedBy,
     };
-    const receives: Amount = { asset: receivesAsset, baseUnits: delivered.toString() };
+    const receives: Amount = { asset: receivesAsset, baseUnits: arriving.toString() };
 
     return {
       id: `axelar-${source.chain.id}-stellar`,
@@ -252,37 +358,110 @@ export class AxelarAdapter implements BridgeAdapter {
           ],
           includedInQuote: false,
         },
-      ],
-      estimatedSeconds: 120,
-      steps: [
-        ...(token.approvalSpender === undefined
+        ...(reserve.slots === 0
           ? []
           : [
               {
-                id: "approve-source-0",
-                kind: "approve-source" as const,
-                source: this.id,
-                from: request.sends,
-                to: request.sends,
-                estimatedSeconds: 30,
-                execution: undefined,
+                kind: "account-reserve" as const,
+                total: { asset: xlmAsset(this.network), baseUnits: reserve.stroops.toString() },
+                recipients: [],
+                includedInQuote: true,
               },
             ]),
-        {
-          id: "bridge-0",
-          kind: "bridge" as const,
-          source: this.id,
-          from: request.sends,
-          to: receives,
-          estimatedSeconds: 120,
-          execution: undefined,
-        },
       ],
-      // Told upfront, and it depends on the token: only the kinds the service
-      // has to pull with an allowance cost a second signature.
-      signaturesRequired: token.approvalSpender === undefined ? 1 : 2,
+      estimatedSeconds: 120,
+      steps: steps.map((step: PlannedStep, index: number) => ({
+        id: `${step.kind}-${index}`,
+        kind: step.kind,
+        source: this.id,
+        from: request.sends,
+        to: receives,
+        estimatedSeconds: step.kind === "bridge" ? 120 : 30,
+        execution: undefined,
+      })),
+      signaturesRequired: signatureCount(steps),
       expiresAtUnix: Math.floor(Date.now() / 1000) + 120,
     };
+  }
+
+  /**
+   * What the destination needs before this token can land in it.
+   *
+   * A classic asset is the usual question: an account, and a trustline for it.
+   * A token the service deployed keeps its own balances and needs no trustline,
+   * so only the account matters, and a missing one is declined rather than
+   * prepared. The token would be credited to the address anyway, but nothing can
+   * move it until the account exists, and the sponsor's preparation is repaid in
+   * the asset it curates, which this is not. XLM through its own contract is the
+   * same shape: no trustline, and it cannot be sent to an account that is not
+   * there.
+   */
+  private async laneFor(
+    destination: string,
+    delivered: DeliveredToken,
+  ): Promise<DestinationLane | RouteRejection> {
+    if (delivered.kind === "classic" && !delivered.asset.isNative()) {
+      let lane: DestinationLane;
+      try {
+        lane = (await inspectDestination(this.rpc, destination, delivered.asset)).lane;
+      } catch (cause) {
+        return this.unreadDestination(cause);
+      }
+      if (lane.kind === "unusable") return this.decline("destination-unsupported", lane.reason);
+      return lane;
+    }
+
+    // Muxed and unusable forms were refused before anything was read, so this
+    // is an account or a contract.
+    if (classifyAddress(destination).kind === "contract") {
+      return { kind: "contract-ready", slotsNeeded: 0 };
+    }
+
+    let exists: boolean;
+    try {
+      exists = await this.accountExists(destination);
+    } catch (cause) {
+      return this.unreadDestination(cause);
+    }
+    if (!exists) {
+      return this.decline(
+        "destination-unsupported",
+        "That Stellar account does not exist yet, and this token cannot be used from an " +
+          "account that does not exist. Send to an account that already has some XLM in it.",
+      );
+    }
+    return { kind: "ready", slotsNeeded: 0 };
+  }
+
+  private async accountExists(address: string): Promise<boolean> {
+    const accountId = Address.fromString(address).toScAddress().accountId();
+    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }));
+    // Through the freshness guard: a lagging node's silence looks exactly like
+    // an account that is not there.
+    const entry = await this.rpc.read(`account ${address}`, async () => {
+      const response = await this.rpc.server.getLedgerEntries(key);
+      return { value: response.entries[0], ledger: response.latestLedger };
+    });
+    return entry !== undefined;
+  }
+
+  private unreadDestination(cause: unknown): RouteRejection {
+    // A node that is merely behind is NOT an address that cannot receive.
+    if (cause instanceof MavnaError && cause.retryable) {
+      return this.decline(
+        "temporarily-unavailable",
+        "Stellar did not answer freshly enough to check that address. Nothing is wrong " +
+          "with it; try again in a moment.",
+      );
+    }
+    return this.decline(
+      "destination-unsupported",
+      // Our own wording, never the raw error, so nothing about the address the
+      // user pasted can be echoed back into the interface.
+      cause instanceof MavnaError
+        ? cause.message
+        : "That is not an address that can receive a payment on Stellar.",
+    );
   }
 
   /**
@@ -713,6 +892,28 @@ function asJson(value: string | bigint): string {
 
 function stellarChainId(network: NetworkId): string {
   return network === "mainnet" ? "stellar" : "stellar-testnet";
+}
+
+/** The plan layer speaks in readiness, the Stellar layer in reserve slots. */
+function readinessOf(lane: DestinationLane): "ready" | "needs-trustline" | "needs-account" {
+  switch (lane.kind) {
+    case "needs-account":
+      return "needs-account";
+    case "needs-trustline":
+      return "needs-trustline";
+    default:
+      return "ready";
+  }
+}
+
+function xlmAsset(network: NetworkId): Asset {
+  return {
+    chainId: stellarChainId(network),
+    id: "native",
+    symbol: "XLM",
+    decimals: 7,
+    curatedBy: "Stellar",
+  };
 }
 
 function stellarRef(network: NetworkId): ChainRef {

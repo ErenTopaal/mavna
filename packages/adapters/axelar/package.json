@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@mavna/core": "workspace:*",
+    "@mavna/routing": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0"
   }
