@@ -26,6 +26,11 @@ services:
       VITE_STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
       VITE_MAVNA_SPONSOR_URL: ${MAVNA_SPONSOR_URL:-http://localhost:8787}
       VITE_MAVNA_DISABLED_SOURCES: ${MAVNA_DISABLED_SOURCES:-}
+      VITE_MAVNA_NETWORKS: ${MAVNA_NETWORKS:-}
+      VITE_MAVNA_TESTNET_RPC_URL: ${MAVNA_TESTNET_RPC_URL:-}
+      VITE_MAVNA_TESTNET_SPONSOR_URL: ${MAVNA_TESTNET_SPONSOR_URL:-}
+      VITE_MAVNA_MAINNET_RPC_URL: ${MAVNA_MAINNET_RPC_URL:-}
+      VITE_MAVNA_MAINNET_SPONSOR_URL: ${MAVNA_MAINNET_SPONSOR_URL:-}
 
   # The only process holding a key. It prepares accounts it pays for and
   # triggers deliveries whose recipient Circle's attestation already fixed.
@@ -33,8 +38,6 @@ services:
   sponsor:
     image: node:24.19.0-alpine
     working_dir: /repo
-    volumes:
-      - .:/repo
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
              pnpm install --frozen-lockfile &&
@@ -42,6 +45,11 @@ services:
              node services/sponsor/dist/main.mjs"
     ports:
       - "8787:8787"
+    # Caps, held settlements and channel keys. It holds secret keys, so it is a
+    # named volume rather than a directory in the checkout.
+    volumes:
+      - .:/repo
+      - sponsor-state:/var/lib/mavna
     environment:
       MAVNA_NETWORK: ${MAVNA_NETWORK:-testnet}
       STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
@@ -49,4 +57,15 @@ services:
       MAVNA_ALLOWED_ORIGINS: ${MAVNA_ALLOWED_ORIGINS:-http://localhost:4319}
       MAVNA_IRIS_URL: ${MAVNA_IRIS_URL:-}
       MAVNA_SETTLE_SWEEP_SECONDS: ${MAVNA_SETTLE_SWEEP_SECONDS:-}
+      MAVNA_RESERVE_FUNDING: ${MAVNA_RESERVE_FUNDING:-sponsor}
+      MAVNA_STATE_DIR: ${MAVNA_STATE_DIR:-/var/lib/mavna}
+      MAVNA_CAP_STRANDING_PER_DAY: ${MAVNA_CAP_STRANDING_PER_DAY:-}
+      MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY: ${MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY:-}
+      MAVNA_CAP_VOLUME_CHEAP_PER_DAY: ${MAVNA_CAP_VOLUME_CHEAP_PER_DAY:-}
+      MAVNA_MIN_DELIVERY_USDC: ${MAVNA_MIN_DELIVERY_USDC:-}
+      MAVNA_RATE_LIMIT_PER_MINUTE: ${MAVNA_RATE_LIMIT_PER_MINUTE:-}
+      MAVNA_TRUST_PROXY: ${MAVNA_TRUST_PROXY:-}
       PORT: "8787"
+
+volumes:
+  sponsor-state:

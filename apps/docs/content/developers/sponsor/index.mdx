@@ -40,16 +40,29 @@ Everything is environment variables, read once at start.
 | --- | --- | --- | --- |
 | `SPONSOR_SECRET_KEY` | yes | none; the process exits without it | The funded signer's secret. An operational secret: never in the repository, a client bundle, or a log line |
 | `MAVNA_NETWORK` | no | `testnet` | `testnet` or `mainnet` |
-| `STELLAR_RPC_URL` | on mainnet | the foundation's public testnet endpoint | The Stellar RPC to read and submit through. Mainnet has no public default, so the process refuses to start without one |
+| `STELLAR_RPC_URL` | no | the foundation's public node on testnet; on mainnet the first of the measured public nodes in `@mavna/stellar` (`PUBLIC_MAINNET_RPC_URLS`) | The Stellar RPC to read and submit through. The foundation runs no mainnet node, so the mainnet default is a third party's; point it at your own provider when you have one |
 | `MAVNA_IRIS_URL` | no | Circle's sandbox on testnet, production on mainnet | Circle's attestation service |
 | `MAVNA_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:4319` | Browser origins allowed to call this server, comma separated. Never `*`: this server spends money on request |
 | `MAVNA_SETTLE_SWEEP_SECONDS` | no | `120` | How often held settlements are retried without a page asking, for LayerZero and Axelar deliveries whose tab closed. One account at a time, never overlapping. `0` turns it off |
+| `MAVNA_RESERVE_FUNDING` | no | `sponsor` | `sponsor`: the sponsor fronts a new account's reserve and is repaid from the arrival. `self`: a temporary switch for running without a funded key; an existing account pays its own trustline reserve, and an address that does not exist yet is declined at quote time. Anything else stops the process at start |
+| `MAVNA_STATE_DIR` | no, but set it in production | none: state in memory, lost on restart, with a warning at start | Directory for the caps, held settlements, built transactions, and channel keys and leases, one JSON file each, written atomically. Holds secret channel keys: the process creates it `0700` and its files `0600`; keep it on a private volume |
+| `MAVNA_CAP_STRANDING_PER_DAY` | no | `75` | Sponsorships that may strand in a day before sponsorship pauses |
+| `MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY` | no | `300` | Sponsorships a day from chains where gas is expensive |
+| `MAVNA_CAP_VOLUME_CHEAP_PER_DAY` | no | `200` | Sponsorships a day from chains where gas costs cents |
+| `MAVNA_MIN_DELIVERY_USDC` | no | `1` | The smallest Circle mint, in USDC (up to six decimals), the sponsor pays to deliver. `0` delivers any amount |
+| `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. `0` turns it off |
+| `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
 | `PORT` | no | `8787` | Where to listen |
 
 The curated asset list, the assets this sponsor opens trustlines for, is written
-in the entry point (`services/sponsor/src/main.ts`) rather than accepted from the
-wire: clients ask by name and the issuer comes from the operator's own list,
-because a sponsor that takes issuers from callers pays to phish its own users.
+per network in `services/sponsor/src/assets.ts` rather than accepted from the wire:
+clients ask by name and the issuer comes from the operator's own list, because a
+sponsor that takes issuers from callers pays to phish its own users. It is Circle's
+USDC only, with the issuers Circle publishes
+(`GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` on mainnet).
+
+Every setting is checked at start, and a mistake stops the process with its own
+message rather than surfacing later as a refusal nobody can explain.
 
 ## Running it
 
@@ -86,8 +99,8 @@ cents and an attack is nearly free) and 75 strandings a day, after which sponsor
 pauses globally for the day. A stranding is a sponsorship whose settlement can never
 land: one the network refuses for good, and one whose preparation landed and whose
 time bound passed with nothing settled. Cap refusals answer `429` with a user-readable reason.
-The counters live in memory by default and behind a storage interface: a cap that
-does not survive a restart is not a cap, so back it with something durable in
-production.
+The counters live behind a storage interface, on disk under `MAVNA_STATE_DIR`
+alongside the held settlements and channel keys: a cap that does not survive a
+restart is not a cap. Without a state directory they live in memory.
 
 The endpoint-by-endpoint contract is on the [HTTP API](/developers/sponsor/api) page.
