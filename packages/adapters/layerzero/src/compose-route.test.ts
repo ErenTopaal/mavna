@@ -217,6 +217,19 @@ describe("a compose route", () => {
     expect(line?.recipients[0]?.name).toBe("Example app");
   });
 
+  it("is refused when the integrator's fee account is not on Stellar", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, {
+      ...request(),
+      integratorFee: {
+        bps: 30,
+        recipient: "0x0000000000000000000000000000000000000001",
+        recipientName: "App",
+      },
+    });
+    expect((result as RouteRejection).explanation).toMatch(/not a Stellar account/);
+  });
+
   it("is refused, readably, for an account that cannot hold the wanted asset", async () => {
     const { ctx } = context();
     const result = await quoteComposeRoute(ctx, request(NO_TRUSTLINE));

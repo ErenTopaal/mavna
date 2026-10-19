@@ -86,6 +86,11 @@ export interface MavnaWidgetConfig {
   /** A sponsor the integrator runs; defaults to Mavna's local dev sponsor. */
   readonly sponsorUrl?: string;
   /**
+   * The Mavna Arrival Contract on this network, which lets USDT0 routes convert
+   * on arrival with one signature. Optional; without it those routes are not offered.
+   */
+  readonly arrivalContract?: string;
+  /**
    * How routes are ranked when several arrive, and the flow's initial priority.
    * The two the flow exposes: most received, or fastest.
    */
@@ -198,6 +203,7 @@ export function resolveConfig(config: MavnaWidgetConfig): ResolvedConfig {
       chains: config.chains,
       rails,
       stellar: config.walletConfig?.stellar,
+      arrivalContract: config.arrivalContract,
       // keyPrefix namespaces the browser transfer history per integrator.
       historyKey: config.keyPrefix
         ? `${config.keyPrefix}:mavna.transfers.v1`

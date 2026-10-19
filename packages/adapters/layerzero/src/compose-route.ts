@@ -13,7 +13,7 @@ import type {
 } from "@mavna/core";
 import { amountOf, MavnaError } from "@mavna/core";
 import { AccountNotFound, inspectDestination, type RpcClient } from "@mavna/stellar";
-import { Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import {
   arrivalAccepts,
   COMPOSE_RECEIVED,
@@ -250,6 +250,17 @@ export async function quoteComposeRoute(
   const fee = request.integratorFee;
   if (fee !== undefined && (!Number.isInteger(fee.bps) || fee.bps < 0 || fee.bps > 1_000)) {
     throw new RangeError(`An integrator fee must be 0 to 1000 basis points, got ${fee.bps}.`);
+  }
+  if (
+    fee !== undefined &&
+    fee.bps > 0 &&
+    !(StrKey.isValidEd25519PublicKey(fee.recipient) || StrKey.isValidContract(fee.recipient))
+  ) {
+    return ctx.decline(
+      "destination-unsupported",
+      "The integrator's fee account is not a Stellar account or contract, so a conversion on " +
+        "arrival has nowhere to pay it. The plain route is unaffected.",
+    );
   }
   try {
     const why =

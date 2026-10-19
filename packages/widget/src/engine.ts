@@ -14,7 +14,7 @@ import {
   type SwapAttachment,
 } from "@mavna/routing";
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
-import { SdexProvider } from "@mavna/swap";
+import { AquariusProvider, SdexProvider } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
@@ -70,6 +70,11 @@ export interface EngineConfig {
   readonly stellar?: StellarWalletApi | undefined;
   /** The localStorage key for transfer history, namespaced by keyPrefix. */
   readonly historyKey: string;
+  /**
+   * The Mavna Arrival Contract on this network. Set, it lets LayerZero offer
+   * routes that convert on arrival; unset, none are offered.
+   */
+  readonly arrivalContract?: string | undefined;
 }
 
 export interface Engine {
@@ -112,7 +117,7 @@ export function createEngine(config: EngineConfig): Engine {
   if (config.integratorFee !== undefined) {
     // Once per engine, at construction, so a re-quote does not repeat it.
     console.warn(
-      "Mavna: the configured integrator fee is not applied. No collector exists for these routes yet, so no fee is shown or taken.",
+      "Mavna: the configured integrator fee is only taken on routes that convert on arrival, where the Arrival Contract collects it. No other route has a collector, so none is shown or taken there.",
     );
   }
   const { network } = config;
@@ -135,6 +140,12 @@ export function createEngine(config: EngineConfig): Engine {
     network,
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
+    // Aquarius, because its router is the one the contract was built to call
+    ...(config.arrivalContract === undefined
+      ? {}
+      : {
+          arrival: { contract: config.arrivalContract, venue: new AquariusProvider(network) },
+        }),
   });
 
   const stellarChainId = network === "mainnet" ? "stellar" : "stellar-testnet";

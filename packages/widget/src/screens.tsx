@@ -22,6 +22,7 @@ import type { FlightRow } from "./transfer";
  * venue is read off the route, never assumed, so this is only ever the truth.
  */
 function railLabel(x: RouteView): string {
+  if (x.compose !== undefined) return `${x.source} · ${x.compose.label}`;
   return x.swapVenue === undefined ? x.source : `${x.source} + ${x.swapVenue}`;
 }
 
@@ -1509,7 +1510,7 @@ export function renderRoutes(
                     "display:block;margin-top:11px;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-muted-2)",
                   )}
                 >
-                  {x.trust}
+                  {x.compose === undefined ? x.trust : `${x.trust} · ${x.compose.walletNote}`}
                 </span>
                 <span
                   style={s(
@@ -1799,6 +1800,13 @@ function routeDetail(
       : []),
     ...(x.swapVenue !== undefined
       ? [{ key: "venue", name: "Converted on", value: x.swapVenue }]
+      : []),
+    ...(x.compose !== undefined
+      ? [
+          { key: "compose", name: "Conversion", value: x.compose.label },
+          { key: "wallet", name: "Stellar wallet", value: x.compose.walletNote },
+          { key: "trust", name: "Who is trusted", value: x.compose.trust },
+        ]
       : []),
     ...(x.newAccount && x.reserveXlm !== undefined
       ? [{ key: "res", name: "Account reserve", value: `${fmt(x.reserveXlm)} XLM` }]

@@ -12,6 +12,7 @@
  * the widget (an integrator's config).
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
+import { isSuccess } from "@mavna/core";
 import { buildPathPayment } from "@mavna/swap";
 import { TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
@@ -375,7 +376,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
         : `${STILL_MOVING} The last check failed: ${tracked.error}`,
     );
   }
-  if (tracked.phase.phase !== "done") throw new Error(endedNote(tracked.phase));
+  if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));
 
   if (owner !== undefined) {
     // The funds are on Stellar whatever the sponsor says next, so nothing here

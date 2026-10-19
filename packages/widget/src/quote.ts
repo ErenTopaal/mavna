@@ -75,6 +75,13 @@ export interface RouteView {
    * not convert has none and a route through a different venue shows that venue.
    */
   readonly swapVenue: string | undefined;
+  /**
+   * Set on a route that converts on arrival: its own label, who is trusted for
+   * the conversion in plain words, and that no Stellar wallet is needed.
+   */
+  readonly compose:
+    | { readonly label: string; readonly trust: string; readonly walletNote: string }
+    | undefined;
 }
 
 export interface DeclineView {
@@ -146,6 +153,14 @@ export function toRouteView(route: Route): RouteView {
         ? undefined
         : fromBaseUnits(reserve.total.baseUnits, reserve.total.asset.decimals),
     swapVenue: swapStep === undefined ? undefined : venueLabel(swapStep.source),
+    compose:
+      route.compose === undefined
+        ? undefined
+        : {
+            label: `Converts on arrival via ${venueLabel(route.compose.venue)}`,
+            trust: route.compose.trust,
+            walletNote: route.compose.walletNote,
+          },
   };
 }
 
