@@ -162,8 +162,15 @@ export class Discovery {
    * how a transfer routes into the deployment being retired.
    */
   async stellar(): Promise<StellarDeployment> {
-    this.stellarDeployment ??= this.loadStellarDeployment();
-    return this.stellarDeployment;
+    if (this.stellarDeployment !== undefined) return this.stellarDeployment;
+    const pending = this.loadStellarDeployment();
+    this.stellarDeployment = pending;
+    // A rejected load is dropped so the next call asks again. Caching it would
+    // turn one registry hiccup into a rail that is off until the process restarts.
+    pending.catch(() => {
+      if (this.stellarDeployment === pending) this.stellarDeployment = undefined;
+    });
+    return pending;
   }
 
   private async loadStellarDeployment(): Promise<StellarDeployment> {
@@ -251,7 +258,8 @@ export class Discovery {
   }
 
   private async registry(): Promise<Readonly<Record<string, readonly OftEntry[]>>> {
-    this.oftRegistry ??= (async () => {
+    if (this.oftRegistry !== undefined) return this.oftRegistry;
+    const pending = (async () => {
       const response = await this.fetchImpl(LAYERZERO_OFT_REGISTRY_URL, {
         signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
       });
@@ -265,7 +273,11 @@ export class Discovery {
       }
       return (await response.json()) as Readonly<Record<string, readonly OftEntry[]>>;
     })();
-    return this.oftRegistry;
+    this.oftRegistry = pending;
+    pending.catch(() => {
+      if (this.oftRegistry === pending) this.oftRegistry = undefined;
+    });
+    return pending;
   }
 
   /**
@@ -306,11 +318,15 @@ export class Discovery {
     const stellar = await this.stellar();
     const reader = this.readerFor(chainId, source);
     const problems: string[] = [];
+    let retryable = false;
 
     for (const candidate of candidates) {
       try {
         return await this.inspect(candidate, source, stellar, reader);
       } catch (cause) {
+        // One candidate failing for want of a node is enough to say the answer
+        // is not final, since the others may only have been refused on the way.
+        if (cause instanceof MavnaError && cause.retryable) retryable = true;
         problems.push(
           `${candidate.symbol} at ${candidate.address}: ` +
             (cause instanceof Error ? cause.message : String(cause)),
@@ -320,7 +336,7 @@ export class Discovery {
 
     throw new MavnaError(
       `No OFT on ${source.name} can reach Stellar right now. ${problems.join(" ")}`,
-      { retryable: false },
+      { retryable },
     );
   }
 

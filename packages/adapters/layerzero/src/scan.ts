@@ -124,6 +124,11 @@ export function classifyScanStatus(
     case "UNRESOLVABLE_COMMAND":
     case "MALFORMED_COMMAND":
       return "stalled";
+    default:
+      // A status added after this was written. Calling it pending would spin
+      // forever and calling it delivered would claim money arrived, so it is
+      // reported as stopped and left for a person to read.
+      return "stalled";
   }
 }
 
@@ -175,11 +180,19 @@ export function remedyForStatus(
         kind: "unrecoverable",
         because: "LayerZero could not read the message that was sent, so it cannot be delivered.",
       };
-    default:
+    case "FAILED":
       return {
         kind: "claim",
         at: scanUrl,
         because: "Delivery failed. The verifiers' and executor's own record of why is here.",
+      };
+    default:
+      return {
+        kind: "contact",
+        reference: scanUrl,
+        because:
+          "LayerZero reported a status this app does not recognise, so it cannot say whether " +
+          "the transfer is recoverable. The scan page has the details.",
       };
   }
 }

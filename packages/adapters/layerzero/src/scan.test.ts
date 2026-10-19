@@ -101,3 +101,18 @@ describe("where to look", () => {
     expect(scanMessageUrl("testnet", "0xabc")).toBe("https://testnet.layerzeroscan.com/tx/0xabc");
   });
 });
+
+describe("a status LayerZero has not told us about", () => {
+  const unknown = "SOMETHING_NEW" as ScanStatusName;
+
+  it("is stalled, never delivered", () => {
+    expect(classifyScanStatus(unknown)).toBe("stalled");
+  });
+
+  it("points at the scan page rather than claiming a fix", () => {
+    const url = scanMessageUrl("testnet", "0xabc");
+    const remedy = remedyForStatus(unknown, url, 1000);
+    expect(remedy.kind).toBe("contact");
+    if (remedy.kind === "contact") expect(remedy.reference).toBe(url);
+  });
+});

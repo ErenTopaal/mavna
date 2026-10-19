@@ -26,7 +26,7 @@ interface Endpoint {
   readonly url: string;
   /** What the node said its chain is. Undefined until it has been asked. */
   chainId: number | undefined;
-  /** True once the node has been ruled out, either as wrong or as unreachable. */
+  /** True once the node has been shown to serve a different chain. Never for a failed call. */
   rejected: boolean;
 }
 
@@ -85,7 +85,8 @@ export class EvmReader {
           const raw = await this.send(endpoint.url, "eth_chainId", []);
           endpoint.chainId = Number(raw);
         } catch (cause) {
-          endpoint.rejected = true;
+          // Unreachable is not wrong. Only a chain id mismatch rules a node out,
+          // so a blip here costs this request and not the endpoint.
           lastError = cause;
           continue;
         }
