@@ -403,7 +403,8 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     }
 
     const pool = await ensureChannels();
-    const channel = pool.acquire(body.destination);
+    const now = nowUnix();
+    const channel = pool.acquire(body.destination, now + SETTLEMENT_VALIDITY_SECONDS, now);
     if (channel === undefined) {
       reply(
         res,
@@ -434,7 +435,11 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       maxSpend: stroopsToDecimal(maxSpendBase),
       assets: [usdc],
       createdAccount,
+      validForSeconds: SETTLEMENT_VALIDITY_SECONDS,
     });
+    // The builder reads the clock again, so its bound can be a second past the
+    // lease. Pin the lease to the bound the network will actually enforce.
+    pool.acquire(body.destination, expiryOf(transaction), now);
     built.record({
       hash: transaction.hash().toString("hex"),
       kind: "settlement",
@@ -720,6 +725,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 const nowUnix = (): number => Math.floor(Date.now() / 1000);
+
+/** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
+const SETTLEMENT_VALIDITY_SECONDS = 86_400;
 
 /**
  * The account whose signature a built transaction still needs. A muxed address

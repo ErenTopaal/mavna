@@ -29,6 +29,8 @@ export interface ChannelPoolOptions {
 interface Lease {
   readonly channel: Channel;
   readonly heldFor: string;
+  /** The settlement's maxTime. Past it nothing can land on this channel's sequence. */
+  readonly untilUnix: number;
 }
 
 export class ChannelPool {
@@ -49,12 +51,28 @@ export class ChannelPool {
    * Take a channel for one settlement. Exhaustion is a refusal at quote time,
    * never a transfer breaking halfway, so this returns undefined rather than
    * throwing: the caller decides how to tell the user.
+   *
+   * A lease ends at `untilUnix` whether or not anyone releases it. Without that,
+   * every settlement built and never signed would hold its channel forever, and
+   * a few abandoned quotes would exhaust the pool. Asking again for the same
+   * transfer only ever extends the lease, because the earlier settlement may
+   * still be live on the same sequence.
    */
-  acquire(transferId: string): Channel | undefined {
-    if (this.leased.has(transferId)) return this.leased.get(transferId)?.channel;
+  acquire(transferId: string, untilUnix: number, nowUnix: number): Channel | undefined {
+    for (const [owner, lease] of this.leased) {
+      if (lease.untilUnix <= nowUnix) this.release(owner);
+    }
+    const existing = this.leased.get(transferId);
+    if (existing !== undefined) {
+      this.leased.set(transferId, {
+        ...existing,
+        untilUnix: Math.max(existing.untilUnix, untilUnix),
+      });
+      return existing.channel;
+    }
     const channel = this.available.pop();
     if (channel === undefined) return undefined;
-    this.leased.set(transferId, { channel, heldFor: transferId });
+    this.leased.set(transferId, { channel, heldFor: transferId, untilUnix });
     return channel;
   }
 
