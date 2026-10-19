@@ -19,7 +19,9 @@ import {
   buildSettlement,
   classifyAddress,
   inspectDestination,
+  readAccountEntry,
   SubmitRejected,
+  spareStroops,
   stroopsToXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
@@ -37,7 +39,6 @@ import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
 import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
-import { readAccountEntry, spareStroops } from "./spare.js";
 import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**

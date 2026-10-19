@@ -1,5 +1,5 @@
-import type { RpcClient } from "@mavna/stellar";
 import { Address, xdr } from "@stellar/stellar-sdk";
+import type { RpcClient } from "./rpc.js";
 
 /**
  * What an account can spend from its XLM without dropping below its minimum

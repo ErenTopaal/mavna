@@ -26,5 +26,6 @@ export {
 } from "./reserve.js";
 export type { FreshRead, LedgerFloor, RpcClientOptions, SubmitOptions } from "./rpc.js";
 export { AccountNotFound, createLedgerFloor, RpcClient, SubmitRejected } from "./rpc.js";
+export { readAccountEntry, spareStroops } from "./spare.js";
 export type { PreparationInputs, SettlementInputs } from "./sponsorship.js";
 export { buildPreparation, buildSettlement, buildSettlementLadder } from "./sponsorship.js";
