@@ -1949,24 +1949,21 @@ describe("the sponsor prepares only what the held settlement repays", () => {
     expect(server.rpc.submissions).toHaveLength(0);
   });
 
-  it("refuses a preparation that opens trustlines the settlement does not repay", async () => {
+  it("refuses to prepare trustlines the settlement does not repay", async () => {
     const EURC = new Asset("EURC", Keypair.random().publicKey());
     const server = await startServer({ curatedAssets: { USDC, EURC } });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
 
-    const both = await server.post("/prepare", {
-      destination: user.publicKey(),
-      assets: ["USDC", "EURC"],
-      sourceChainId: "1",
-    });
-    expect(both.status).toBe(200);
-    const response = await server.post("/submit", {
-      signedXdr: signXdr(both.body.xdr as string, user),
-    });
-    expect(response.status).toBe(409);
-    expect(response.body.error).toBe(MISMATCH);
-    expect(server.rpc.submissions).toHaveLength(0);
+    for (const assets of [["EURC"], ["USDC", "EURC"], ["USDC", "USDC"], []]) {
+      const refused = await server.post("/prepare", {
+        destination: user.publicKey(),
+        assets,
+        sourceChainId: "1",
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.body.retryable).toBe(false);
+    }
 
     // The preparation the settlement does repay still goes through.
     const usdcOnly = await server.post("/submit", {

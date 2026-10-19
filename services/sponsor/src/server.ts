@@ -514,7 +514,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const assets = (body.assets ?? ["USDC"]).map((name) => options.curatedAssets[name]);
+    const names = body.assets ?? ["USDC"];
+    const assets = names.map((name) => options.curatedAssets[name]);
     if (assets.some((asset) => asset === undefined)) {
       // By name from the curated list, never by issuer from the wire: sponsoring
       // a trustline to an imitation asset is paying to phish our own users.
@@ -522,6 +523,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         res,
         400,
         { error: "This sponsor only prepares accounts for assets it curates.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    // The settlement repays one USDC trustline, so any other set is a
+    // preparation /submit would refuse after the user had already signed it.
+    if (names.length !== 1 || names[0] !== "USDC") {
+      reply(
+        res,
+        400,
+        {
+          error: "This sponsor only prepares a USDC trustline, the one its settlement repays.",
+          retryable: false,
+        },
         origin,
       );
       return;
