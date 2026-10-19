@@ -443,10 +443,15 @@ function ownDeliveryBlocker(
 export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet {
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [...set.rejected];
+  // an account that pays its own Circle delivery also signs it, one more
+  // approval than the rail counted
+  const ownDelivery = !(check.terms instanceof Error) && check.terms.reserveFunding === "self";
   for (const route of set.routes) {
     const blocked = sponsorBlocker(route, check);
-    if (blocked === undefined) routes.push(route);
-    else rejected.push(blocked);
+    if (blocked !== undefined) rejected.push(blocked);
+    else if (ownDelivery && route.source === "cctp") {
+      routes.push({ ...route, signaturesRequired: route.signaturesRequired + 1 });
+    } else routes.push(route);
   }
   return { routes, rejected, complete: set.complete };
 }

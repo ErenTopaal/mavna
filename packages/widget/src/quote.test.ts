@@ -552,12 +552,17 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
     spareStroops,
     baseReserveStroops: 5_000_000,
   });
+  /** The route as offered: the account signs the delivery too. */
+  const counted = (route: ReturnType<typeof routeFor>) => ({
+    ...route,
+    signaturesRequired: route.signaturesRequired + 1,
+  });
   const only = (route: ReturnType<typeof routeFor>, spare: bigint | undefined) =>
     applySponsorTerms({ routes: [route], rejected: [], complete: true }, check(spare));
 
   it("is offered to an account that can spare the delivery fee", () => {
     const route = routeFor("cctp");
-    expect(only(route, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([route]);
+    expect(only(route, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([counted(route)]);
   });
 
   it("is declined, with what it costs and what the account has, when it cannot", () => {
@@ -572,7 +577,7 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
   it("counts the trustline's reserve too when the account must open one", () => {
     const route = routeFor("cctp", { newAccount: true });
     const enough = OWN_DELIVERY_FEE_BUDGET_STROOPS + 5_000_000n + 1_000n;
-    expect(only(route, enough).routes).toEqual([route]);
+    expect(only(route, enough).routes).toEqual([counted(route)]);
     const set = only(route, enough - 1n);
     expect(set.routes).toEqual([]);
     expect(set.rejected[0]?.explanation).toMatch(/plus 0\.5 XLM to hold USDC/);
@@ -589,7 +594,7 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
       ...routeFor("cctp"),
       sends: { asset: SOURCE_USDC, baseUnits: "10" },
     };
-    expect(only(small, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([small]);
+    expect(only(small, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([counted(small)]);
   });
 
   it("leaves rails that deliver by themselves alone", () => {
@@ -644,7 +649,7 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
       });
     // one subentry: a minimum of 1.5 XLM
     balance = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS;
-    expect((await quoted()).routes).toEqual([route]);
+    expect((await quoted()).routes).toEqual([counted(route)]);
     balance -= 1n;
     expect((await quoted()).routes).toEqual([]);
   });
@@ -701,5 +706,31 @@ describe("a route whose receiving account opens its own trustline", () => {
     expect(short.rejected[0]?.explanation).toMatch(
       /0\.5 XLM to hold USDT0.*0\.5000999 XLM to spare/,
     );
+  });
+});
+
+describe("how many approvals a route asks for", () => {
+  const terms = (reserveFunding: "self" | "sponsor") => ({
+    network: "testnet",
+    terms: { network: "testnet", reserveFunding, minDeliveryBaseUnits: 0n },
+    destination: "exists" as const,
+    spareStroops: 100_000_000n,
+    baseReserveStroops: 5_000_000,
+  });
+
+  it("counts the delivery the receiving account signs for a Circle route when it pays its own", () => {
+    const circle = routeFor("cctp");
+    const relayed = routeFor("layerzero");
+    const set = { routes: [circle, relayed], rejected: [], complete: true };
+    const own = applySponsorTerms(set, terms("self"));
+    expect(own.routes.map((r) => r.signaturesRequired)).toEqual([
+      circle.signaturesRequired + 1,
+      relayed.signaturesRequired,
+    ]);
+    const sponsored = applySponsorTerms(set, terms("sponsor"));
+    expect(sponsored.routes.map((r) => r.signaturesRequired)).toEqual([
+      circle.signaturesRequired,
+      relayed.signaturesRequired,
+    ]);
   });
 });
