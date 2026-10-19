@@ -132,7 +132,14 @@ const running: { close(): void }[] = [];
 afterEach(() => {
   for (const server of running.splice(0)) server.close();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+
+/** Move the server's clock past a settlement's whole validity window. */
+function skipPastSettlementWindow(): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + 86_400_000 + 60_000);
+}
 
 /**
  * Stand in for Circle's attestation service, and only it: every other request,
@@ -714,6 +721,51 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
 
     const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
     expect(response.body.settled).not.toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+});
+
+describe("the sponsor forgets a held settlement once it can no longer land", () => {
+  it("refuses to sponsor against a settlement past its time bound", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+
+    skipPastSettlementWindow();
+    const prepared = await preparedAndSigned(server, user);
+    const response = await server.post("/submit", { signedXdr: prepared });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe(NO_SETTLEMENT);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    // Its channel is free for the next person.
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("does not submit an expired settlement when the delivery lands", async () => {
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+
+    skipPastSettlementWindow();
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { message: cctpMessage(user.publicKey()), attestation: `0x${"ef".repeat(65)}` },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const response = await server.post("/deliver", { txHash: `0x${"cd".repeat(32)}`, domain: 0 });
+    expect(response.status).toBe(200);
+    expect(response.body.settled).toBe(false);
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
   });
 });

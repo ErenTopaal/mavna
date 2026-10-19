@@ -145,8 +145,30 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    */
   const heldSettlements = new Map<
     string,
-    { xdr: string; createdAtUnix: number; sourceChainId: string; channel: string | undefined }
+    {
+      xdr: string;
+      createdAtUnix: number;
+      sourceChainId: string;
+      channel: string | undefined;
+      maxTimeUnix: number;
+    }
   >();
+
+  /**
+   * The held settlement for an account, if it can still land. One past its
+   * time bound never will, so sponsoring against it would be the gift the
+   * ordering exists to prevent; it is dropped and its channel freed.
+   */
+  function liveSettlement(destination: string) {
+    const held = heldSettlements.get(destination);
+    if (held === undefined) return undefined;
+    if (held.maxTimeUnix <= nowUnix()) {
+      heldSettlements.delete(destination);
+      channels?.release(destination);
+      return undefined;
+    }
+    return held;
+  }
   /**
    * What this server built and has not yet seen signed. The funded key signs
    * nothing whose hash is not in here, because a signature check on a body the
@@ -536,6 +558,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       createdAtUnix: nowUnix(),
       sourceChainId: record.sourceChainId,
       channel: record.channel,
+      maxTimeUnix: record.expiresAtUnix,
     });
     reply(res, 200, { held: true }, origin);
   }
@@ -549,7 +572,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * the stranding cap, which is the exposure brake.
    */
   async function settleIfHeld(destination: string): Promise<Record<string, unknown>> {
-    const held = heldSettlements.get(destination);
+    const held = liveSettlement(destination);
     if (held === undefined) return { settled: false };
     const pool = await ensureChannels();
 
@@ -647,7 +670,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     // The governing order: no capital commits until the settlement that releases
     // it is already signed and held. Without this the deposit is a gift, which is
     // the model the cost decision explicitly rejected.
-    if (!heldSettlements.has(record.destination)) {
+    if (liveSettlement(record.destination) === undefined) {
       refuse(
         record,
         res,
