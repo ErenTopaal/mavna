@@ -14,7 +14,7 @@ import {
   type SwapAttachment,
 } from "@mavna/routing";
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
-import { SdexProvider } from "@mavna/swap";
+import { createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
@@ -86,6 +86,11 @@ export interface Engine {
   readonly usdcOnStellar: MavnaAsset;
   readonly xlmOnStellar: MavnaAsset;
   readonly xlmSwap: SwapAttachment;
+  /**
+   * The swap leg's venues in v2 order (Soroswap through this sponsor's proxy,
+   * SushiSwap for USDT0 pairs, Aquarius), which quote and build the conversion.
+   */
+  readonly swapVenues: SwapVenues;
   readonly usdcIssuer: string;
   readonly sourceChains: ReadonlyArray<{ id: string; name: string }>;
   readonly stellarChainId: string;
@@ -156,8 +161,13 @@ export function createEngine(config: EngineConfig): Engine {
   };
 
   const sdex = new SdexProvider(network);
+  const swapVenues = createSwapVenues({
+    network,
+    soroswapProxyUrl: config.sponsorUrl,
+    rpcUrl: netConfig.rpcUrl,
+  });
   const xlmSwap: SwapAttachment = {
-    provider: sdex,
+    provider: swapVenues,
     delivered: usdcOnStellar,
     deliveredContract: usdcOnStellar.id,
     wanted: xlmOnStellar,
@@ -208,6 +218,7 @@ export function createEngine(config: EngineConfig): Engine {
     usdcOnStellar,
     xlmOnStellar,
     xlmSwap,
+    swapVenues,
     usdcIssuer,
     sourceChains,
     stellarChainId,

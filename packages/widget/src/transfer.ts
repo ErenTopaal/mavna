@@ -12,7 +12,6 @@
  * the widget (an integrator's config).
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
-import { buildPathPayment } from "@mavna/swap";
 import { TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute } from "./execute";
@@ -72,12 +71,6 @@ export interface FlightStep {
   readonly phase: StepPhase;
 }
 
-function passphrase(network: NetworkId): string {
-  return network === "mainnet"
-    ? "Public Global Stellar Network ; September 2015"
-    : "Test SDF Network ; September 2015";
-}
-
 function stellarExplorer(network: NetworkId, hash: string): string {
   return `https://stellar.expert/explorer/${network === "mainnet" ? "public" : "testnet"}/tx/${hash}`;
 }
@@ -109,7 +102,7 @@ export type TransferEngine = Pick<
   | "stellar"
   | "historyKey"
   | "sourceDomain"
-  | "sdex"
+  | "swapVenues"
   | "rpc"
   | "usdcOnStellar"
 >;
@@ -168,9 +161,9 @@ async function prepareNow(
   await engine.sponsor.submitPreparation(signed);
 }
 
-/** Convert the arrived USDC into XLM on Stellar's own exchange. */
-async function convertOnStellar(
-  engine: TransferEngine,
+/** Convert the arrived USDC into XLM through the first venue that serves the pair. */
+export async function convertOnStellar(
+  engine: Pick<TransferEngine, "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar">,
   route: Route,
   owner: string | undefined,
 ): Promise<void> {
@@ -182,7 +175,9 @@ async function convertOnStellar(
     );
   }
   const swapStep = route.steps.find((s) => s.kind === "swap");
-  const quote = await engine.sdex.quote({
+  // Quoted again now rather than reused from the route: the route's quote is as
+  // old as the bridge leg, and the venue that serves now is the one that builds.
+  const quote = await engine.swapVenues.quote({
     assetIn: engine.usdcOnStellar.id,
     assetOut: "native",
     amountIn: swapStep?.from.baseUnits ?? route.sends.baseUnits,
@@ -190,11 +185,7 @@ async function convertOnStellar(
     destinationKind: "account",
   });
   const stellarAccount = await engine.rpc.loadAccount(account);
-  const unsigned = buildPathPayment({
-    networkPassphrase: passphrase(engine.network),
-    account: stellarAccount,
-    quote,
-  });
+  const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
   const signed = await engine.stellar.sign(unsigned.toXDR(), account);
   const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
   await engine.rpc.submit("conversion", async () => parsed as never);

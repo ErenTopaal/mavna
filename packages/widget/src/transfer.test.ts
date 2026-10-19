@@ -1,7 +1,7 @@
 import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
-import { SdexProvider } from "@mavna/swap";
+import { createSwapVenues } from "@mavna/swap";
 import type { Address, Hash } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -148,7 +148,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     },
     historyKey: HISTORY_KEY,
     sourceDomain: () => 3,
-    sdex: new SdexProvider("testnet"),
+    swapVenues: createSwapVenues({ network: "testnet" }),
     rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
   };
