@@ -1,7 +1,7 @@
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { assertOnlyExecutorCompose, ComposeRefused, Composer } from "./compose.js";
+import { assertFeeWithin, assertOnlyExecutorCompose, ComposeRefused, Composer } from "./compose.js";
 
 const CONTRACT = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
 const executor = Keypair.random().publicKey();
@@ -104,5 +104,14 @@ describe("the executor key", () => {
           executorSecret: payer,
         }),
     ).toThrow(/separate/);
+  });
+});
+
+describe("what the sponsor pays to sign a compose transaction", () => {
+  it("is refused above its ceiling, before anything is signed", () => {
+    expect(() => assertFeeWithin(10_000_001n, 10_000_000n, "finishing this conversion")).toThrow(
+      /finishing this conversion would cost 1\.0000001 XLM, more than the 1 XLM/,
+    );
+    expect(() => assertFeeWithin(10_000_000n, 10_000_000n, "x")).not.toThrow();
   });
 });

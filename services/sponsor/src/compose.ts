@@ -1,11 +1,12 @@
 import {
   COMPOSE_RECEIVED,
   composeMessageHash,
+  estimateFinishRent,
   readArrivalConfig,
   readComposeQueue,
 } from "@mavna/adapter-layerzero";
 import { MavnaError } from "@mavna/core";
-import { AccountNotFound, type NetworkConfig, type RpcClient } from "@mavna/stellar";
+import { AccountNotFound, type NetworkConfig, type RpcClient, stroopsToXlm } from "@mavna/stellar";
 import {
   Address,
   authorizeEntry,
@@ -119,6 +120,26 @@ export function assertOnlyExecutorCompose(
   if (got.length !== want.length || got.some((a, i) => a !== want[i])) refuse();
 }
 
+/**
+ * Refuse to sign a transaction whose fee is above what the sponsor agreed to
+ * pay for it. Simulation sets the fee, rent included, so the bound is stated
+ * here rather than left to whatever the network asks.
+ */
+export function assertFeeWithin(fee: bigint, ceiling: bigint, what: string): void {
+  if (fee > ceiling) {
+    throw new MavnaError(
+      `${what} would cost ${stroopsToXlm(fee)} XLM, more than the ${stroopsToXlm(ceiling)} XLM ` +
+        "this sponsor pays for it, so it was not signed.",
+      { retryable: true },
+    );
+  }
+}
+
+/** A finish's own cost beyond any storage renewal then due, as a ceiling. */
+const FINISH_FEE_ALLOWANCE_STROOPS = 10_000_000n;
+/** The most a keep-alive may cost: a code renewal measured 30.7 XLM on testnet. */
+const KEEP_ALIVE_FEE_CEILING_STROOPS = 1_000_000_000n;
+
 export class Composer {
   // # rather than private, so neither secret survives a JSON.stringify
   #payer: Keypair;
@@ -210,6 +231,11 @@ export class Composer {
         .setTimeout(120)
         .build();
       const prepared = await rpc.prepare(unsigned);
+      assertFeeWithin(
+        BigInt(prepared.fee),
+        KEEP_ALIVE_FEE_CEILING_STROOPS,
+        "Keeping the contract alive",
+      );
       prepared.sign(this.#payer);
       return prepared;
     });
@@ -301,6 +327,13 @@ export class Composer {
       if (auth.length !== 1 || auth[0]?.toXDR("base64") !== signed.toXDR("base64")) {
         throw new ComposeRefused("The prepared conversion changed what it authorizes; refused.");
       }
+      // what the run may cost: any storage renewal now due, plus the run itself
+      const renewal = await estimateFinishRent(rpc, network.passphrase, contract);
+      assertFeeWithin(
+        BigInt(prepared.fee),
+        renewal + FINISH_FEE_ALLOWANCE_STROOPS,
+        "Finishing this conversion",
+      );
       prepared.sign(this.#payer);
       return prepared;
     };
