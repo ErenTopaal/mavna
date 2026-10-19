@@ -119,8 +119,15 @@ export async function raceAdapters(
       }
 
       try {
-        const quoted = await withTimeout(adapter.quote(railRequest), timeoutMs, adapter.id);
-        const result = isRejection(quoted) ? quoted : await enrich(quoted);
+        // One bound over the quote and the swap leg together: a hung exchange
+        // must cost this rail its route, not stall the whole race.
+        const result = await withTimeout(
+          adapter
+            .quote(railRequest)
+            .then((quoted) => (isRejection(quoted) ? quoted : enrich(quoted))),
+          timeoutMs,
+          adapter.id,
+        );
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);
       } catch (error) {

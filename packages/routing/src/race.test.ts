@@ -1,5 +1,6 @@
 import type { BridgeAdapter, QuoteRequest, Route, RouteRejection, RouteSet } from "@mavna/core";
 import { describe, expect, it } from "vitest";
+import type { SwapQuoter } from "./enrich.js";
 import { raceAdapters } from "./race.js";
 
 const request = {} as QuoteRequest;
@@ -127,6 +128,37 @@ describe("racing route sources", () => {
     );
     expect(result.routes).toHaveLength(0);
     expect(result.rejected).toHaveLength(2);
+    expect(result.complete).toBe(true);
+  });
+
+  it("times out a swap leg that never answers without stalling the other sources", async () => {
+    const hung: SwapQuoter = { id: "hung", quote: () => new Promise(() => {}) };
+    const asset = { chainId: "stellar-testnet", id: "x", symbol: "X", decimals: 7, curatedBy: "t" };
+    const result = await raceAdapters(
+      [
+        adapter("stuck", async () => ({ ...route("stuck"), destination: "GDEST" })),
+        adapter("declines", async () => ({
+          source: "declines",
+          reason: "no-liquidity",
+          explanation: "none",
+          retryable: true,
+        })),
+      ],
+      { ...request, maxSlippageBps: 50 },
+      {
+        timeoutMs: 50,
+        swap: {
+          provider: hung,
+          delivered: asset,
+          deliveredContract: "CA",
+          wanted: asset,
+          wantedContract: "CB",
+        },
+      },
+    );
+
+    expect(result.rejected.find((r) => r.source === "stuck")?.reason).toBe("timed-out");
+    expect(result.rejected.find((r) => r.source === "declines")?.reason).toBe("no-liquidity");
     expect(result.complete).toBe(true);
   });
 });
