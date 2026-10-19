@@ -87,6 +87,28 @@ describe("attaching the conversion leg", () => {
     expect(out.signaturesRequired).toBe(3);
   });
 
+  it("prices the conversion on what the bridge guarantees, not on its estimate", async () => {
+    const asked: string[] = [];
+    const recording: SwapQuoter = {
+      id: "aquarius",
+      quote: (request) => {
+        asked.push(request.amountIn);
+        return Promise.resolve({
+          provider: "aquarius",
+          amountOut: "30380000000",
+          amountOutMinimum: "30228100000",
+        });
+      },
+    };
+    const out = await attachSwapLeg(route, attachment(recording), 50);
+    if ("reason" in out) throw new Error(out.explanation);
+    // 49 USDC is the least that lands, so it is the most the conversion may spend
+    expect(asked).toEqual(["49000000"]);
+    expect(out.receivesAtLeast.baseUnits).toBe("30228100000");
+    const swap = out.steps.find((s) => s.kind === "swap");
+    expect(swap?.from).toEqual(route.deliveredAtLeast);
+  });
+
   it("rejects with the reason when the pair cannot be served, never mis-delivers", async () => {
     const failing: SwapQuoter = {
       id: "aquarius",

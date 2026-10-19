@@ -29,6 +29,7 @@ const route = (source: string, receivesBaseUnits = "1"): Route =>
   ({
     source,
     receives: { asset: { symbol: "USDC", decimals: 7 }, baseUnits: receivesBaseUnits },
+    deliveredAtLeast: { asset: { symbol: "USDC", decimals: 7 }, baseUnits: receivesBaseUnits },
     estimatedSeconds: 60,
     signaturesRequired: 1,
   }) as Route;
@@ -194,6 +195,7 @@ describe("compose routes", () => {
       id: `${source}-plain`,
       destination: "GDEST",
       receivesAtLeast: { asset: usdt0, baseUnits: "99" },
+      deliveredAtLeast: { asset: usdt0, baseUnits: "99" },
       steps: [],
       fees: [],
     }) as unknown as Route;

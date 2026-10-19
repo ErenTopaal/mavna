@@ -72,10 +72,13 @@ export async function attachSwapLeg(
 ): Promise<Route | RouteRejection> {
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;
   try {
+    // Priced on what the bridge guarantees lands, not its estimate: a rail that
+    // settles anywhere between the two must never leave the conversion short,
+    // or spending money the account already held to make up the difference.
     quote = await attachment.provider.quote({
       assetIn: attachment.deliveredContract,
       assetOut: attachment.wantedContract,
-      amountIn: route.receives.baseUnits,
+      amountIn: route.deliveredAtLeast.baseUnits,
       maxSlippageBps,
       destinationKind: route.destination.startsWith("C") ? "contract" : "account",
     });
@@ -105,7 +108,7 @@ export async function attachSwapLeg(
         id: `${route.id}-swap`,
         kind: "swap",
         source: quote.provider,
-        from: route.receives,
+        from: route.deliveredAtLeast,
         to: receives,
         // A Stellar transaction settles in one ledger close; the estimate covers
         // building and signing it, not waiting for a network.
