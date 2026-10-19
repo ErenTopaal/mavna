@@ -3108,6 +3108,33 @@ describe("finishing a conversion on arrival", () => {
   // what the endpoint holds for a queued message: its keccak hash
   const queuedHash = Buffer.from(composeMessageHash("0x01").slice(2), "hex");
 
+  it("spends nothing on the contract when accounts fund themselves, and says so at start", async () => {
+    const logged: string[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    const own = await startServer({ reserveFunding: "self", arrivalContract: ARRIVAL });
+    own.server.startSweep();
+    await new Promise((r) => setTimeout(r, 50));
+    await own.server.stopSweep();
+    errors.mockRestore();
+    expect(own.rpc.submissions.map((s) => s.label)).not.toContain("arrival keep alive");
+    expect(logged.some((l) => /not kept alive/.test(l))).toBe(true);
+  });
+
+  it("keeps the contract alive when the sponsor pays", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const paid = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    paid.server.startSweep();
+    await new Promise((r) => setTimeout(r, 50));
+    await paid.server.stopSweep();
+    errors.mockRestore();
+    expect(paid.rpc.submissions.map((s) => s.label)).toContain("arrival keep alive");
+  });
+
   it("refuses to start finishing conversions without its own executor key", async () => {
     await expect(startServer({ arrivalContract: ARRIVAL })).rejects.toThrow(/executor key/);
   });

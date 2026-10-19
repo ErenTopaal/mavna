@@ -75,7 +75,8 @@ switch for running without a funded sponsor key:
   first), and the connected Stellar wallet must be that account. `POST /deliver`
   answers `409` in this mode, so the sponsor pays for no delivery whoever asks; a
   sponsor-funded deployment still uses it.
-- `POST /compose` answers `409` too. An overdue conversion on arrival is finished
+- `POST /compose` answers `409` too, and the sponsor does not keep the Arrival
+  Contract alive in this mode, so it pays for nothing at all. An overdue conversion on arrival is finished
   from Activity by the receiving account's own wallet, which runs `lz_compose` as
   both the transaction's source and the compose's executor (the call is
   permissionless) and pays its fee from its own XLM. Before asking for the

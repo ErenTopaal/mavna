@@ -348,14 +348,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     payerSecret: options.sponsorSecret,
     buildDelivery: options.buildDelivery,
   });
-  if (options.arrivalContract !== undefined && options.arrivalExecutorSecret === undefined) {
+  // An account paying its own way finishes its own composes, so in that mode the
+  // sponsor neither finishes nor keeps the contract alive, and needs no executor.
+  const finishes = (options.reserveFunding ?? "sponsor") === "sponsor";
+  if (
+    finishes &&
+    options.arrivalContract !== undefined &&
+    options.arrivalExecutorSecret === undefined
+  ) {
     throw new Error(
       "Finishing conversions needs its own executor key (arrivalExecutorSecret), separate " +
         "from the sponsor key.",
     );
   }
   const composer =
-    options.arrivalContract === undefined || options.arrivalExecutorSecret === undefined
+    !finishes ||
+    options.arrivalContract === undefined ||
+    options.arrivalExecutorSecret === undefined
       ? undefined
       : new Composer({
           rpc: options.rpc,
@@ -717,6 +726,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   function startSweep(): void {
+    if (!finishes && options.arrivalContract !== undefined && keepAliveTimer === undefined) {
+      console.error(
+        "[sponsor] reserves are paid by the accounts themselves, so this sponsor spends nothing: " +
+          "the Arrival Contract is not kept alive here, and whoever finishes a conversion pays " +
+          "any storage renewal then due (the widget shows it before they sign).",
+      );
+    }
     if (composer !== undefined && keepAliveTimer === undefined) {
       keepArrivalAlive();
       keepAliveTimer = setInterval(keepArrivalAlive, KEEP_ALIVE_EVERY_MS);

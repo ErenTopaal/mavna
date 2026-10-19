@@ -59,6 +59,9 @@ function arrival(): { arrivalContract?: string; arrivalExecutorSecret?: string }
   const contract = env("MAVNA_ARRIVAL_CONTRACT");
   if (contract === undefined) return {};
   const executor = env("MAVNA_ARRIVAL_EXECUTOR_SECRET");
+  // in self mode the sponsor finishes nothing and needs no executor
+  if (executor === undefined && config.reserveFunding === "self")
+    return { arrivalContract: contract };
   if (executor === undefined) {
     console.error(
       "MAVNA_ARRIVAL_CONTRACT is set but MAVNA_ARRIVAL_EXECUTOR_SECRET is not. Finishing " +
