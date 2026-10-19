@@ -295,6 +295,19 @@ async function holdSettlementFor(server: TestServer, user: Keypair): Promise<voi
   expect(committed.status).toBe(200);
 }
 
+/**
+ * The honest flow up to a landed preparation, the point at which a settlement
+ * may fire. What it submitted is cleared, so a test sees only what follows.
+ */
+async function preparedWithSettlementHeld(server: TestServer, user: Keypair): Promise<void> {
+  await holdSettlementFor(server, user);
+  const submitted = await server.post("/submit", {
+    signedXdr: await preparedAndSigned(server, user),
+  });
+  expect(submitted.status).toBe(200);
+  server.rpc.submissions.splice(0);
+}
+
 async function preparedAndSigned(server: TestServer, user: Keypair): Promise<string> {
   const built = await server.post("/prepare", {
     destination: user.publicKey(),
@@ -785,7 +798,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
   it("settles for the recipient named inside the attested message", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
-    await holdSettlementFor(server, user);
+    await preparedWithSettlementHeld(server, user);
     server.rpc.holding(user, PLENTY);
     irisReturns(cctpMessage(user.publicKey()));
 
@@ -799,7 +812,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
   it("delivers but settles nothing for a destination the message does not name", async () => {
     const server = await startServer({ buildDelivery });
     const victim = Keypair.random();
-    await holdSettlementFor(server, victim);
+    await preparedWithSettlementHeld(server, victim);
     server.rpc.holding(victim, PLENTY);
     irisReturns(cctpMessage(Keypair.random().publicKey()));
 
@@ -825,7 +838,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     const starknetUser = Keypair.random();
 
     // One channel in the harness, so one held settlement at a time.
-    await holdSettlementFor(server, solanaUser);
+    await preparedWithSettlementHeld(server, solanaUser);
     server.rpc.holding(solanaUser, PLENTY);
     irisReturns(
       cctpMessage(solanaUser.publicKey(), {
@@ -840,7 +853,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     });
     expect(fromSolana.body.settled).toBe(true);
 
-    await holdSettlementFor(server, starknetUser);
+    await preparedWithSettlementHeld(server, starknetUser);
 
     server.rpc.holding(starknetUser, PLENTY);
     irisReturns(
@@ -870,7 +883,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     it(`delivers but settles nothing on a message with ${name}`, async () => {
       const server = await startServer({ buildDelivery });
       const user = Keypair.random();
-      await holdSettlementFor(server, user);
+      await preparedWithSettlementHeld(server, user);
       server.rpc.holding(user, PLENTY);
       irisReturns(cctpMessage(user.publicKey(), overrides));
 
@@ -887,7 +900,7 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     // lands, but the user's settlement would fail on-chain and strand.
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
-    await holdSettlementFor(server, user);
+    await preparedWithSettlementHeld(server, user);
     server.rpc.holding(user, 1n);
     irisReturns(cctpMessage(user.publicKey()));
 
@@ -904,10 +917,25 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(arrived.body.settled).toBe(true);
   });
 
-  it("settles nothing on a message not bound for Stellar", async () => {
+  it("does not settle before the recipient's preparation has landed", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
+    server.rpc.holding(user, PLENTY);
+    irisReturns(cctpMessage(user.publicKey()));
+
+    const early = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(early.status).toBe(200);
+    expect(early.body.kind).toBe("delivered");
+    expect(early.body.settled).toBe(false);
+    expect(early.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+
+  it("settles nothing on a message not bound for Stellar", async () => {
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
     server.rpc.holding(user, PLENTY);
     irisReturns(cctpMessage(user.publicKey(), { destinationDomain: 6 }));
 
@@ -974,7 +1002,7 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
   it("does not submit an expired settlement when the delivery lands", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
-    await holdSettlementFor(server, user);
+    await preparedWithSettlementHeld(server, user);
     server.rpc.holding(user, PLENTY);
 
     skipPastSettlementWindow();
@@ -993,6 +1021,143 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
     expect(response.status).toBe(200);
     expect(response.body.settled).toBe(false);
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+});
+
+describe("any rail can trigger a held settlement", () => {
+  const NOT_HELD = "No settlement is held for that account.";
+
+  it("submits the held settlement once the preparation landed and the money arrived", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    const response = await server.post("/settle", { destination: user.publicKey() });
+    expect(response.status).toBe(200);
+    expect(response.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+    const submitted = server.rpc.submissions[0]?.tx as Transaction;
+    expect(response.body.settlementTxHash).toBe(submitted.hash().toString("hex"));
+    expect(signedBy(submitted, user.publicKey())).toBe(true);
+    expect(signedBy(submitted, server.channel.publicKey())).toBe(true);
+    expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
+
+    // Settled means no longer held.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    const again = await server.post("/settle", { destination: user.publicKey() });
+    expect(again.status).toBe(404);
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("answers one call per account every 30 seconds", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, 1n);
+
+    const first = await server.post("/settle", { destination: user.publicKey() });
+    expect(first.status).toBe(200);
+    expect(first.body.settled).toBe(false);
+    expect(first.body.settlementRetryable).toBe(true);
+
+    server.rpc.holding(user, PLENTY);
+    const tooSoon = await server.post("/settle", { destination: user.publicKey() });
+    expect(tooSoon.status).toBe(429);
+    expect(tooSoon.body.retryable).toBe(true);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    // Another account is not held back by this one's limit.
+    expect(
+      (await server.post("/settle", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(404);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    const later = await server.post("/settle", { destination: user.publicKey() });
+    expect(later.status).toBe(200);
+    expect(later.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("answers 404 for an account with no held settlement", async () => {
+    const server = await startServer();
+    const response = await server.post("/settle", { destination: Keypair.random().publicKey() });
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe(NOT_HELD);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("answers 404 once the held settlement can no longer land", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    skipPastSettlementWindow();
+    const response = await server.post("/settle", { destination: user.publicKey() });
+    expect(response.status).toBe(404);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("refuses anything that is not a usable Stellar address", async () => {
+    const server = await startServer();
+    for (const destination of [
+      undefined,
+      42,
+      "",
+      "not an address",
+      Keypair.random().secret(),
+      ["G"],
+    ]) {
+      const response = await server.post("/settle", { destination });
+      expect(response.status, String(destination)).toBe(400);
+      expect(response.body.retryable).toBe(false);
+    }
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("does not let a stranger fire a settlement before the preparation lands", async () => {
+    // The victim already holds USDC on an authorized trustline, so the balance
+    // check passes. Submitting now would fail on the revokes, count as a
+    // stranding, and drop the victim's settlement.
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 1,
+      volumeCapPerDay: { "expensive-gas": 10, "cheap-gas": 10 },
+    });
+    const server = await startServer({ caps });
+    const victim = Keypair.random();
+    await holdSettlementFor(server, victim);
+    server.rpc.holding(victim, PLENTY);
+    // How the network would answer a settlement whose revokes have nothing to revoke.
+    const onChainFailure = new MavnaError("settlement was rejected: opNoSponsorship", {
+      retryable: false,
+    });
+    server.rpc.rejectNext = onChainFailure;
+
+    const early = await server.post("/settle", { destination: victim.publicKey() });
+    expect(early.status).toBe(200);
+    expect(early.body.settled).toBe(false);
+    expect(early.body.settlementRetryable).toBe(true);
+    expect(server.rpc.rejectNext).toBe(onChainFailure);
+    expect((await caps.check("expensive-gas")).allowed).toBe(true);
+    server.rpc.rejectNext = undefined;
+
+    // Still held: the victim's own preparation goes through and the settlement
+    // fires once it has landed.
+    const submitted = await server.post("/submit", {
+      signedXdr: await preparedAndSigned(server, victim),
+    });
+    expect(submitted.status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    const later = await server.post("/settle", { destination: victim.publicKey() });
+    expect(later.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual([
+      "sponsored preparation",
+      "settlement",
+    ]);
   });
 });
 

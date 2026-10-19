@@ -116,6 +116,10 @@ interface SettlementBody {
   readonly sourceChainId?: string;
 }
 
+interface SettleBody {
+  readonly destination?: unknown;
+}
+
 interface SettlementCommitBody {
   readonly destination?: string;
   readonly signedXdr?: string;
@@ -162,8 +166,21 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       sourceChainId: string;
       channel: string | undefined;
       maxTimeUnix: number;
+      /**
+       * Whether the preparation this settlement repays has landed. Until it
+       * has, the revokes have nothing to revoke and the settlement can only
+       * fail, which would count as a stranding and drop it.
+       */
+      prepared: boolean;
     }
   >();
+
+  /**
+   * When each account last had a settlement asked for through /settle. Entries
+   * older than the window are pruned on every call, so this holds at most the
+   * accounts asked about in the last window.
+   */
+  const lastSettleCall = new Map<string, number>();
 
   /**
    * The held settlement for an account, if it can still land. One past its
@@ -309,6 +326,10 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     }
     if (req.method === "POST" && url.pathname === "/settlement/commit") {
       await settlementCommit((await readJson(req)) as SettlementCommitBody, res, origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/settle") {
+      await settle((await readJson(req)) as SettleBody, res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
@@ -572,6 +593,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       sourceChainId: record.sourceChainId,
       channel: record.channel,
       maxTimeUnix: record.expiresAtUnix,
+      prepared: false,
     });
     reply(res, 200, { held: true }, origin);
   }
@@ -587,6 +609,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
   async function settleIfHeld(destination: string): Promise<Record<string, unknown>> {
     const held = liveSettlement(destination);
     if (held === undefined) return { settled: false };
+    if (!held.prepared) return { settled: false, settlementRetryable: true };
     const pool = await ensureChannels();
 
     const transaction = TransactionBuilder.fromXDR(held.xdr, options.network.passphrase);
@@ -745,6 +768,8 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
       return;
     }
+    const held = liveSettlement(record.destination);
+    if (held !== undefined) held.prepared = true;
     try {
       await caps.recordStarted(source);
     } catch (cause) {
@@ -757,6 +782,53 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       );
     }
     reply(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
+  }
+
+  /**
+   * Submit a held settlement for rails that deliver without this server.
+   *
+   * LayerZero and Axelar land funds on Stellar by themselves, so nothing here
+   * learns when they arrive. Anyone may ask, because settleIfHeld only submits
+   * once the preparation has landed and the money is on the trustline, and the
+   * per-account limit keeps a caller from turning that into balance polling at
+   * our expense.
+   */
+  async function settle(
+    body: SettleBody,
+    res: ServerResponse,
+    origin: string | undefined,
+  ): Promise<void> {
+    const destination = body.destination;
+    if (typeof destination !== "string" || !settlesOnStellar(destination)) {
+      reply(res, 400, { error: "That is not a usable Stellar address.", retryable: false }, origin);
+      return;
+    }
+
+    const now = nowUnix();
+    for (const [account, at] of lastSettleCall) {
+      if (at + SETTLE_INTERVAL_SECONDS <= now) lastSettleCall.delete(account);
+    }
+    if (lastSettleCall.has(destination)) {
+      reply(
+        res,
+        429,
+        { error: "That account was asked about moments ago. Try again shortly.", retryable: true },
+        origin,
+      );
+      return;
+    }
+    lastSettleCall.set(destination, now);
+
+    if (liveSettlement(destination) === undefined) {
+      reply(
+        res,
+        404,
+        { error: "No settlement is held for that account.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    reply(res, 200, await settleIfHeld(destination), origin);
   }
 
   /** Trigger the mint for an attested burn. Idempotent; retrying is always safe. */
@@ -1051,8 +1123,24 @@ const TX_HASH: readonly RegExp[] = [
   /^0x[0-9a-fA-F]{1,64}$/,
 ];
 
+/** How often one account's held settlement may be asked for through /settle. */
+const SETTLE_INTERVAL_SECONDS = 30;
+
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;
+
+/**
+ * Whether an address is one a settlement can be held for: an account or muxed
+ * account, which holds its balance on a trustline. Anything else, including a
+ * secret key sent by mistake, is not.
+ */
+function settlesOnStellar(address: string): boolean {
+  try {
+    return classifyAddress(address).needsTrustline;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The account whose signature a built transaction still needs. A muxed address
