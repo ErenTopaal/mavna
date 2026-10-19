@@ -1,6 +1,16 @@
 import { MavnaError } from "@mavna/core";
-import { describe, expect, it } from "vitest";
-import { createLedgerFloor, RpcClient } from "./rpc.js";
+import {
+  Account,
+  Keypair,
+  Networks,
+  Operation,
+  rpc,
+  type Transaction,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLedgerFloor, RpcClient, SubmitRejected } from "./rpc.js";
 
 const noSleep = async (): Promise<void> => {};
 
@@ -76,5 +86,132 @@ describe("read guard", () => {
     expect(client.floor.value).toBe(700);
 
     await expect(client.read("second", async () => ({ value: 2, ledger: 699 }))).rejects.toThrow();
+  });
+});
+
+describe("submission", () => {
+  const passphrase = Networks.TESTNET;
+  const source = Keypair.random();
+
+  function presignedTx(validForSeconds: number): Transaction {
+    const tx = new TransactionBuilder(new Account(source.publicKey(), "41"), {
+      fee: "100",
+      networkPassphrase: passphrase,
+    })
+      .addOperation(Operation.bumpSequence({ bumpTo: "50" }))
+      .setTimeout(validForSeconds)
+      .build();
+    tx.sign(source);
+    return tx;
+  }
+
+  function rejectedWith(code: "txBadSeq"): rpc.Api.SendTransactionResponse {
+    return {
+      status: "ERROR",
+      hash: "00",
+      latestLedger: 1,
+      latestLedgerCloseTime: 0,
+      errorResult: new xdr.TransactionResult({
+        feeCharged: xdr.Int64.fromString("100"),
+        result: xdr.TransactionResultResult[code](),
+        ext: new xdr.TransactionResultExt(0),
+      }),
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up at once on a stale sequence when the envelope cannot be rebuilt", async () => {
+    const client = clientForTest();
+    let sent = 0;
+    client.server.sendTransaction = async () => {
+      sent += 1;
+      return rejectedWith("txBadSeq");
+    };
+
+    const tx = presignedTx(300);
+    const failure = await client
+      .submit("settlement", async () => tx, { presigned: true })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubmitRejected);
+    expect((failure as SubmitRejected).code).toBe("txBadSeq");
+    expect((failure as SubmitRejected).retryable).toBe(false);
+    expect(sent).toBe(1);
+  });
+
+  it("still retries a stale sequence for a transaction it rebuilds", async () => {
+    const client = clientForTest();
+    let sent = 0;
+    client.server.sendTransaction = async () => {
+      sent += 1;
+      return rejectedWith("txBadSeq");
+    };
+
+    const failure = await client
+      .submit("delivery", async () => presignedTx(300), { attempts: 3 })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(true);
+    expect(sent).toBe(3);
+  });
+
+  it("stops waiting for inclusion after the wait it was given, not the time bound", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const started = Date.now();
+    const client = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 1000,
+      // each pause moves the clock, so the wait is measured in pretend seconds
+      sleep: async (ms) => {
+        vi.setSystemTime(Date.now() + ms);
+      },
+    });
+    const tx = presignedTx(86_400);
+    client.server.sendTransaction = async () => ({
+      status: "PENDING",
+      hash: tx.hash().toString("hex"),
+      latestLedger: 1,
+      latestLedgerCloseTime: 0,
+    });
+    client.server.getTransaction = async (hash) => ({
+      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      txHash: hash,
+      latestLedger: 1,
+      latestLedgerCloseTime: 0,
+      oldestLedger: 1,
+      oldestLedgerCloseTime: 0,
+    });
+
+    const failure = await client
+      .submit("settlement", async () => tx, { presigned: true, waitSeconds: 120 })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(true);
+    expect((failure as MavnaError).message).toMatch(/may still land/);
+    const waited = (Date.now() - started) / 1000;
+    expect(waited).toBeGreaterThanOrEqual(120);
+    expect(waited).toBeLessThan(130);
+  });
+
+  it("looks a transaction up only from a node that has caught up", async () => {
+    const client = clientForTest();
+    client.observeWrite(10);
+    const heights = [9, 10];
+    let asked = 0;
+    client.server.getTransaction = async (hash) => ({
+      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      txHash: hash,
+      latestLedger: heights[asked++] ?? 10,
+      latestLedgerCloseTime: 0,
+      oldestLedger: 1,
+      oldestLedgerCloseTime: 0,
+    });
+
+    const found = await client.findTransaction("ab");
+    expect(found.status).toBe(rpc.Api.GetTransactionStatus.NOT_FOUND);
+    expect(found.latestLedger).toBe(10);
+    expect(asked).toBe(2);
   });
 });

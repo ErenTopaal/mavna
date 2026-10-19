@@ -56,6 +56,37 @@ export interface FreshRead<T> {
   readonly ledger: number;
 }
 
+export interface SubmitOptions {
+  /** How many times to send before giving up on transient failures. */
+  readonly attempts?: number;
+  /**
+   * The builder hands back the same signed envelope every time, as with a
+   * settlement the user signed in advance. A stale sequence then means the
+   * sequence is spent, not that the view was stale, so it is not retried.
+   */
+  readonly presigned?: boolean;
+  /**
+   * The longest to wait for inclusion, in seconds, when that is shorter than
+   * the transaction's own time bound. Giving up here says nothing about the
+   * transaction's fate, so the failure is retryable and says it may still land.
+   */
+  readonly waitSeconds?: number;
+}
+
+/**
+ * The network refused a submission outright. `code` is the transaction result
+ * code it gave, such as `txBadSeq`, for callers whose next step depends on it.
+ */
+export class SubmitRejected extends MavnaError {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message, { retryable: false });
+    this.name = "SubmitRejected";
+    this.code = code;
+  }
+}
+
 export class RpcClient {
   readonly server: rpc.Server;
   readonly floor: LedgerFloor;
@@ -174,18 +205,41 @@ export class RpcClient {
      */
     deadlineUnix: number = Math.floor(Date.now() / 1000) + 300,
   ): Promise<rpc.Api.GetTransactionResponse> {
+    const result = await this.pollUntil(hash, deadlineUnix);
+    if (result !== undefined) return result;
+    throw new MavnaError(`Transaction ${hash} was not included before it expired.`, {
+      retryable: true,
+    });
+  }
+
+  /** The polling behind waitForTransaction. Undefined means the deadline passed first. */
+  private async pollUntil(
+    hash: string,
+    deadlineUnix: number,
+  ): Promise<rpc.Api.GetTransactionResponse | undefined> {
     for (;;) {
       const result = await this.server.getTransaction(hash);
       if (result.status !== "NOT_FOUND") {
         if (result.status === "SUCCESS") this.observeWrite(result.ledger);
         return result;
       }
-      if (Math.floor(Date.now() / 1000) > deadlineUnix) break;
+      if (Math.floor(Date.now() / 1000) > deadlineUnix) return undefined;
       await this.sleep(this.baseDelayMs * 2);
     }
-    throw new MavnaError(`Transaction ${hash} was not included before it expired.`, {
-      retryable: true,
+  }
+
+  /**
+   * Look a transaction up by hash, once, from a node at or past our high-water
+   * mark. A lagging node reports NOT_FOUND for a transaction that landed, so
+   * only a caught-up node's absence is an answer.
+   */
+  async findTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse> {
+    const result = await this.read(`transaction ${hash}`, async () => {
+      const response = await this.server.getTransaction(hash);
+      return { value: response, ledger: response.latestLedger };
     });
+    if (result.status === "SUCCESS") this.observeWrite(result.ledger);
+    return result;
   }
 
   /**
@@ -223,8 +277,9 @@ export class RpcClient {
   async submit(
     label: string,
     build: () => Promise<Transaction | FeeBumpTransaction>,
-    attempts = 8,
+    options: SubmitOptions = {},
   ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
+    const attempts = options.attempts ?? 8;
     let lastReason = "unknown";
 
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -233,8 +288,14 @@ export class RpcClient {
 
       if (sent.status === "ERROR") {
         const reason = sent.errorResult?.result().switch().name ?? "unknown";
-        if (!TRANSIENT_SUBMIT_ERRORS.has(reason)) {
-          throw new MavnaError(`${label} was rejected: ${reason}`, { retryable: false });
+        // A stale sequence is only transient for a transaction that can be
+        // rebuilt. A signed envelope carries its sequence for good, so resending
+        // it cannot help, and the caller needs to know which failure this was.
+        const transient =
+          TRANSIENT_SUBMIT_ERRORS.has(reason) &&
+          !(options.presigned === true && reason === "txBadSeq");
+        if (!transient) {
+          throw new SubmitRejected(`${label} was rejected: ${reason}`, reason);
         }
         lastReason = reason;
         await this.sleep(this.baseDelayMs * 2 ** Math.min(attempt, 4));
@@ -252,7 +313,20 @@ export class RpcClient {
       // A fee-bump carries its bounds on the inner transaction, not the envelope.
       const bounds = "timeBounds" in tx ? tx.timeBounds : tx.innerTransaction.timeBounds;
       const maxTime = Number(bounds?.maxTime ?? 0);
-      const result = await this.waitForTransaction(sent.hash, maxTime > 0 ? maxTime : undefined);
+      const expires = maxTime > 0 ? maxTime : Math.floor(Date.now() / 1000) + 300;
+      const capped =
+        options.waitSeconds === undefined
+          ? expires
+          : Math.min(expires, Math.floor(Date.now() / 1000) + options.waitSeconds);
+      const result = await this.pollUntil(sent.hash, capped);
+      if (result === undefined) {
+        throw new MavnaError(
+          capped < expires
+            ? `${label} was not seen included within ${options.waitSeconds} seconds; it may still land.`
+            : `Transaction ${sent.hash} was not included before it expired.`,
+          { retryable: true },
+        );
+      }
       if (result.status === "SUCCESS") return result;
 
       throw new MavnaError(`${label} failed on-chain.`, { retryable: false });
