@@ -191,7 +191,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * convert on arrival, so the user signs once and needs no Stellar wallet.
    */
   async quoteCompose(request: ComposeQuoteRequest): Promise<Route | RouteRejection | undefined> {
-    if (this.composing === undefined) return undefined;
+    if (this.composing === undefined) {
+      // said rather than left out, so the user sees why only the plain route is there
+      return this.decline(
+        "chain-unsupported",
+        `There is no Arrival Contract on ${this.network} yet, so nothing converts on arrival ` +
+          "here: deploying one needs a signature on that network this app does not make. The " +
+          "plain route still delivers, and the conversion is signed on Stellar.",
+      );
+    }
     return quoteComposeRoute(this.composing, request);
   }
 

@@ -3,7 +3,8 @@ import { ADAPTER_QUOTE_TIMEOUT_MS } from "@mavna/core";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
-import { STELLAR_SIDE } from "./config.js";
+import { readArrivalConfig } from "./compose.js";
+import { ARRIVAL_CONTRACTS, STELLAR_SIDE } from "./config.js";
 import { Discovery, type ResolvedRoute, readStellarOft } from "./discovery.js";
 import { isExplicitlyConfigured, verifierThreshold } from "./dvn.js";
 
@@ -586,4 +587,17 @@ describe("testnet, where the pathway exists and the token does not", () => {
     // that is the entire hazard this package refuses to walk into.
     expect(peer.endpoint).not.toBe(current.endpoint);
   });
+});
+
+describe("the Arrival Contract recorded for testnet", () => {
+  it("is the one deployed there, with the same lists", async () => {
+    const recorded = ARRIVAL_CONTRACTS.testnet;
+    if (recorded === undefined) throw new Error("no testnet Arrival Contract is recorded");
+    const stored = await readArrivalConfig(
+      new RpcClient({ url: PUBLIC_TESTNET_RPC_URL }),
+      recorded.contract,
+    );
+    const { contract: _contract, wasmSha256: _hash, ...lists } = recorded;
+    expect(stored).toEqual(lists);
+  }, 60_000);
 });

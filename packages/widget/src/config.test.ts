@@ -85,3 +85,37 @@ describe("resolveConfig, the network", () => {
     expect(resolved.engineConfig.sponsorUrl).toBe("https://t.example");
   });
 });
+
+describe("the Arrival Contract a network converts through", () => {
+  const config = {
+    integrator: "t",
+    network: "testnet" as const,
+    networks: ["testnet", "mainnet"] as const,
+    endpoints: { mainnet: { sponsorUrl: "https://m.example" } },
+  };
+
+  it("is the deployed one on testnet unless the integrator names another", () => {
+    expect(resolveConfig(config).engineConfig.arrivalContract).toBe(
+      "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+    );
+    expect(
+      resolveConfig({ ...config, arrivalContract: "CAOWN" }).engineConfig.arrivalContract,
+    ).toBe("CAOWN");
+  });
+
+  it("is none on mainnet, and the default network's choice does not carry over to it", () => {
+    expect(resolveConfig(config, "mainnet").engineConfig.arrivalContract).toBeUndefined();
+    expect(
+      resolveConfig({ ...config, arrivalContract: "CAOWN" }, "mainnet").engineConfig
+        .arrivalContract,
+    ).toBeUndefined();
+  });
+
+  it("is set per network in endpoints", () => {
+    const own = {
+      ...config,
+      endpoints: { mainnet: { sponsorUrl: "https://m.example", arrivalContract: "CAMAIN" } },
+    };
+    expect(resolveConfig(own, "mainnet").engineConfig.arrivalContract).toBe("CAMAIN");
+  });
+});

@@ -4,8 +4,10 @@ import { RpcClient } from "@mavna/stellar";
 import { Keypair, Networks, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import entries from "./__fixtures__/testnet-ledger-entries.json" with { type: "json" };
+import { LayerZeroAdapter } from "./adapter.js";
 import { arrivalRecipientOf } from "./compose.js";
 import { type ComposeContext, composeSendFor, quoteComposeRoute } from "./compose-route.js";
+import { ARRIVAL_CONTRACTS } from "./config.js";
 import type { Discovery, ResolvedRoute } from "./discovery.js";
 import type { SendParam } from "./oft.js";
 
@@ -395,5 +397,34 @@ describe("building a compose send", () => {
     expect(built.to).toBe(ARRIVAL);
     expect(built.extraOptions).toBe("0x");
     expect(arrivalRecipientOf(built.composeMsg)).toBe(READY);
+  });
+});
+
+describe("the Arrival Contract each network has", () => {
+  it("names the testnet deployment with the lists it was built with", () => {
+    expect(ARRIVAL_CONTRACTS.testnet).toEqual({
+      contract: ARRIVAL,
+      wasmSha256: "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+      endpoint: ENDPOINT,
+      router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
+      ofts: [[SENDER, XLM_SAC]],
+      wanted: [USDC_SAC],
+      pathTokens: [AQUA, "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN"],
+    });
+  });
+
+  it("has none on mainnet, and a rail there says so instead of staying silent", async () => {
+    expect(ARRIVAL_CONTRACTS.mainnet).toBeUndefined();
+    const rail = new LayerZeroAdapter({
+      network: "mainnet",
+      rpc: new RpcClient({ url: "https://example.invalid" }),
+      baseReserveStroops: 5_000_000,
+    });
+    const answer = await rail.quoteCompose(request());
+    expect(answer !== undefined && isRejection(answer)).toBe(true);
+    if (answer === undefined || !isRejection(answer)) return;
+    expect(answer.reason).toBe("chain-unsupported");
+    expect(answer.retryable).toBe(false);
+    expect(answer.explanation).toMatch(/no Arrival Contract on mainnet.*plain route/);
   });
 });

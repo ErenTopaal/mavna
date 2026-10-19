@@ -1,3 +1,4 @@
+import { ARRIVAL_CONTRACTS } from "@mavna/adapter-layerzero";
 import type { NetworkId } from "@mavna/core";
 import type { IntegratorFee } from "@mavna/routing";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
@@ -106,8 +107,10 @@ export interface MavnaWidgetConfig {
   /** A sponsor the integrator runs; defaults to Mavna's local dev sponsor. */
   readonly sponsorUrl?: string;
   /**
-   * The Mavna Arrival Contract on this network, which lets USDT0 routes convert
-   * on arrival with one signature. Optional; without it those routes are not offered.
+   * The Mavna Arrival Contract on `network`, which lets USDT0 routes convert on
+   * arrival with one signature. Defaults to the deployed one (testnet only); a
+   * network without one says so on its LayerZero routes. Other networks set
+   * theirs in `endpoints`.
    */
   readonly arrivalContract?: string;
   /**
@@ -159,6 +162,8 @@ export interface MavnaWidgetConfig {
 export interface NetworkEndpoints {
   readonly rpcUrl?: string;
   readonly sponsorUrl?: string;
+  /** The Arrival Contract on this network, in place of the deployed default. */
+  readonly arrivalContract?: string;
 }
 
 /** One entry in the header overflow menu. */
@@ -288,7 +293,10 @@ export function resolveConfig(config: MavnaWidgetConfig, active?: NetworkId): Re
       chains: config.chains,
       rails,
       stellar: config.walletConfig?.stellar,
-      arrivalContract: config.arrivalContract,
+      arrivalContract:
+        config.endpoints?.[network]?.arrivalContract ??
+        (network === defaultNetwork ? config.arrivalContract : undefined) ??
+        ARRIVAL_CONTRACTS[network]?.contract,
       // keyPrefix namespaces the browser transfer history per integrator, and
       // the network per network: a record carries no network, and Activity
       // looks it up on the adapters of whichever network is showing.

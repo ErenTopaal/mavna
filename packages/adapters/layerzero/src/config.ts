@@ -313,6 +313,53 @@ export const EVM_SOURCES: Readonly<Record<NetworkId, Readonly<Record<string, Evm
 /** Stellar's own decimals. Seven on both networks, and not negotiable. */
 export const STELLAR_DECIMALS = 7;
 
+/**
+ * A deployed Mavna Arrival Contract and the lists it was constructed with.
+ * The lists are fixed at construction (no admin, no setters), so they are
+ * recorded here beside the id and checked against storage by the live tests.
+ */
+export interface ArrivalDeployment {
+  readonly contract: string;
+  /** sha256 of the deployed wasm, reproducible with contracts/build.sh. */
+  readonly wasmSha256: string;
+  readonly endpoint: string;
+  /** Aquarius's router, the venue the contract calls. */
+  readonly router: string;
+  /** (OFT or sender, token it delivers) pairs it accepts arrivals from. */
+  readonly ofts: readonly (readonly [string, string])[];
+  /** What it converts into. */
+  readonly wanted: readonly string[];
+  /** What else a conversion path may pass through. */
+  readonly pathTokens: readonly string[];
+}
+
+/**
+ * The Arrival Contract per network. Testnet's was deployed 2026-10-19 and its
+ * OFT list holds a harness key and the native XLM contract, since no public
+ * OFT is peered to Stellar testnet. Mainnet has none: deploying needs a
+ * mainnet signature, which this project does not make yet.
+ */
+export const ARRIVAL_CONTRACTS: Readonly<Record<NetworkId, ArrivalDeployment | undefined>> = {
+  testnet: {
+    contract: "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+    wasmSha256: "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+    endpoint: "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV",
+    router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
+    ofts: [
+      [
+        "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB",
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      ],
+    ],
+    wanted: ["CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"],
+    pathTokens: [
+      "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE",
+      "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN",
+    ],
+  },
+  mainnet: undefined,
+};
+
 export function sourceFor(network: NetworkId, chainId: string): EvmSource | undefined {
   return EVM_SOURCES[network][chainId];
 }

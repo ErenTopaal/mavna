@@ -27,11 +27,13 @@ export {
   quoteComposeRoute,
 } from "./compose-route.js";
 export type {
+  ArrivalDeployment,
   EvmSource,
   NativeCurrency,
   StellarSide,
 } from "./config.js";
 export {
+  ARRIVAL_CONTRACTS,
   chainIdForLayerZeroKey,
   EVM_SOURCES,
   explorerTxUrl,
