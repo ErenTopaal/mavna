@@ -1,7 +1,10 @@
 import { rpc } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { oldDelivery as old, recentDelivery as recent } from "./__fixtures__/fixtures.js";
+import { CCTP_CONTRACTS } from "./config.js";
 import { deliveredByEvent, deliveredByOperation, identifyMessage } from "./proof.js";
+
+const testnet = CCTP_CONTRACTS.testnet;
 
 const recentEvents = [
   ...rpc.parseRawEvents(recent.messageReceived).events,
@@ -48,6 +51,40 @@ describe("deliveredByEvent", () => {
     expect(
       deliveredByEvent(receiptOnly, identifyMessage(recent.iris.message), "testnet"),
     ).toBeUndefined();
+  });
+});
+
+describe("deliveredByEvent against look-alike events", () => {
+  const id = identifyMessage(recent.iris.message);
+
+  it("ignores a message_received from a contract that is not the transmitter", () => {
+    // The same topics and data, emitted by another contract. Anyone can deploy
+    // one that emits whatever it likes.
+    const [receipt] = recent.messageReceived.events;
+    if (receipt === undefined) throw new Error("fixture has no receipt");
+    const lookalike = {
+      ...recent.messageReceived,
+      events: [{ ...receipt, contractId: testnet.usdcContract }],
+    };
+    const events = [
+      ...rpc.parseRawEvents(lookalike).events,
+      ...rpc.parseRawEvents(recent.mintAndForward).events,
+    ];
+    expect(deliveredByEvent(events, id, "testnet")).toBeUndefined();
+  });
+
+  it("does not pair the receipt with a forwarder event from another operation", () => {
+    const [forward] = recent.mintAndForward.events;
+    if (forward === undefined) throw new Error("fixture has no forward");
+    const elsewhere = {
+      ...recent.mintAndForward,
+      events: [{ ...forward, operationIndex: forward.operationIndex + 1 }],
+    };
+    const events = [
+      ...rpc.parseRawEvents(recent.messageReceived).events,
+      ...rpc.parseRawEvents(elsewhere).events,
+    ];
+    expect(deliveredByEvent(events, id, "testnet")).toBeUndefined();
   });
 });
 
