@@ -173,16 +173,18 @@ describe("finishing a conversion on arrival from Activity", () => {
     const engine = engineFor("self");
     queued = xdr.ScVal.scvBytes(Buffer.from(composeMessageHash(MESSAGE).slice(2), "hex"));
     recordedAuth = (args) => [composeAuth(args)];
-    const outcome = await finishCompose(engine, finish);
-    expect(outcome).toEqual({ kind: "composed", txHash: "c0de", ledger: 7 });
+    const priced = await finishCompose(engine, finish);
+    // priced first, from the prepared run, and nothing signed until agreed
+    expect(priced).toMatchObject({ kind: "priced", feeStroops: 500_000n });
     expect(log).toEqual([
       "stellar connect",
       "simulate compose_queue",
       "simulate lz_compose",
       "prepare",
-      "stellar sign compose",
-      `send from ${USER}`,
     ]);
+    if (priced.kind !== "priced") return;
+    expect(await priced.finish()).toEqual({ kind: "composed", txHash: "c0de", ledger: 7 });
+    expect(log.slice(4)).toEqual(["stellar sign compose", `send from ${USER}`]);
   });
 
   it("asks the sponsor when it pays for finishing", async () => {

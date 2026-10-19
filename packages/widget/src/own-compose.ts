@@ -34,11 +34,25 @@ export async function finishCompose(
     "network" | "rpc" | "stellar" | "stellarNetwork" | "arrivalContract" | "sponsorTerms"
   > & { readonly sponsor: Pick<Engine["sponsor"], "requestCompose"> },
   finish: ComposeFinish,
-): Promise<SponsorCompose> {
+): Promise<FinishAnswer> {
   const terms = await engine.sponsorTerms();
   if (terms.reserveFunding !== "self") return engine.sponsor.requestCompose(finish);
   return composeOwn(engine, finish, await engine.stellar.connect());
 }
+
+/**
+ * The sponsor's answer, or, when the account runs it itself, the run priced
+ * from its simulation and waiting for the user to agree: `finish` asks the
+ * wallet to sign exactly the transaction that was priced.
+ */
+export type FinishAnswer =
+  | SponsorCompose
+  | {
+      readonly kind: "priced";
+      /** The most the run can charge, from the prepared transaction. */
+      readonly feeStroops: bigint;
+      readonly finish: () => Promise<SponsorCompose>;
+    };
 
 // the endpoint's ComposeNotFound: someone ran it between our read and our write
 const COMPOSE_NOT_FOUND = /Error\(Contract, #3\)/;
@@ -49,7 +63,7 @@ async function composeOwn(
   engine: Pick<Engine, "rpc" | "stellar" | "stellarNetwork" | "arrivalContract">,
   finish: ComposeFinish,
   payer: string,
-): Promise<SponsorCompose> {
+): Promise<FinishAnswer> {
   const { rpc, stellarNetwork } = engine;
   const contract = finish.contract;
   if (engine.arrivalContract === undefined || contract !== engine.arrivalContract) {
@@ -138,21 +152,27 @@ async function composeOwn(
       { retryable: false },
     );
   }
-  const signed = TransactionBuilder.fromXDR(
-    await engine.stellar.sign(prepared.toXDR(), payer),
-    stellarNetwork.passphrase,
-  );
-  try {
-    const result = await rpc.submit("compose finish", async () => signed as Transaction, {
-      presigned: true,
-    });
-    return { kind: "composed", txHash: result.txHash, ledger: result.ledger };
-  } catch (cause) {
-    if (cause instanceof Error && COMPOSE_NOT_FOUND.test(cause.message)) {
-      return { kind: "already-composed" };
-    }
-    throw cause;
-  }
+  return {
+    kind: "priced",
+    feeStroops: BigInt(prepared.fee),
+    finish: async () => {
+      const signed = TransactionBuilder.fromXDR(
+        await engine.stellar.sign(prepared.toXDR(), payer),
+        stellarNetwork.passphrase,
+      );
+      try {
+        const result = await rpc.submit("compose finish", async () => signed as Transaction, {
+          presigned: true,
+        });
+        return { kind: "composed", txHash: result.txHash, ledger: result.ledger };
+      } catch (cause) {
+        if (cause instanceof Error && COMPOSE_NOT_FOUND.test(cause.message)) {
+          return { kind: "already-composed" };
+        }
+        throw cause;
+      }
+    },
+  };
 }
 
 /**

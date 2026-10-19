@@ -13,6 +13,7 @@
  */
 import { ERC20_ABI } from "@mavna/adapter-cctp";
 import { escalateIfOverdue, parseLookupKey, toHandle } from "@mavna/status";
+import { stroopsToXlm } from "@mavna/stellar";
 import React, { type ReactNode } from "react";
 import type { Address } from "viem";
 import type {
@@ -28,7 +29,7 @@ import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { box, DUR, EASE, mo } from "./motion";
-import { finishCompose } from "./own-compose";
+import { type FinishAnswer, finishCompose } from "./own-compose";
 import { pseudo } from "./pseudo";
 import {
   type Priority,
@@ -1158,12 +1159,32 @@ export class Flow extends React.Component<FlowProps, State> {
     }
   }
 
+  /** A finish the user was shown the price of, waiting for their second press. */
+  private pricedFinish:
+    | (() => ReturnType<Extract<FinishAnswer, { kind: "priced" }>["finish"]>)
+    | undefined;
+
   async onFinish(): Promise<void> {
     const compose = this.state.found?.compose;
     if (compose !== undefined) {
       try {
-        // the sponsor runs it, or with self-funded reserves the user's own wallet does
-        const outcome = await finishCompose(this.engine, compose);
+        // A run the user already saw priced is signed now; otherwise the sponsor
+        // runs it, or, with self-funded reserves, it is priced for the user first.
+        const pending = this.pricedFinish;
+        this.pricedFinish = undefined;
+        const outcome =
+          pending === undefined ? await finishCompose(this.engine, compose) : await pending();
+        if (outcome.kind === "priced") {
+          this.pricedFinish = outcome.finish;
+          this.setState({
+            lookupNote:
+              `Finishing it costs up to ${stroopsToXlm(outcome.feeStroops)} XLM from this ` +
+              "account, simulated just now. Press Finish the delivery again to approve it in " +
+              "your Stellar wallet.",
+            lookupNoteKind: "quiet",
+          });
+          return;
+        }
         if (outcome.kind === "not-queued") {
           this.setState({
             lookupNote: "Stellar holds nothing waiting for this transfer yet. Try again shortly.",
