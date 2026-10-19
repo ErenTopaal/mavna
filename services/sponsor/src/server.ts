@@ -340,6 +340,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     throw new Error(`The minimum delivery cannot be negative; got ${minDelivery}.`);
   }
   const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
+  const composesPerClient = new RequestLimiter(COMPOSES_PER_CLIENT_PER_MINUTE);
   const deliverer = new Deliverer({
     rpc: options.rpc,
     network: options.network,
@@ -846,7 +847,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     if (req.method === "POST" && url.pathname === "/compose") {
-      await compose((await readJson(req)) as ComposeBody, res, origin);
+      await compose((await readJson(req)) as ComposeBody, res, origin, client);
       return;
     }
 
@@ -1883,7 +1884,24 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     body: ComposeBody,
     res: ServerResponse,
     origin: string | undefined,
+    client: string,
   ): Promise<void> {
+    // An account paying its own way also runs its own compose (lz_compose is
+    // permissionless), so a sponsor in that mode spends nothing here.
+    if (reserveFunding === "self") {
+      reply(
+        res,
+        409,
+        {
+          error:
+            "This sponsor does not pay to finish conversions right now: the receiving " +
+            "account's own wallet runs it.",
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
     if (composer === undefined) {
       reply(
         res,
@@ -1918,6 +1936,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           429,
           {
             error: "This conversion was asked about moments ago. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      // each finish is paid for, so one client gets a few a minute, counted by
+      // the same client address every other limit uses
+      if (!composesPerClient.allow(client, Date.now())) {
+        reply(
+          res,
+          429,
+          {
+            error: "Too many conversions finished from this address. Try again in a minute.",
             retryable: true,
           },
           origin,
@@ -2334,6 +2366,8 @@ const SETTLEMENT_WAIT_SECONDS = 120;
 const SETTLE_INTERVAL_SECONDS = 30;
 /** How often one message may be asked to finish, and how many finishes a minute in all. */
 const COMPOSE_INTERVAL_SECONDS = 30;
+/** Finishes one client address may ask the sponsor to pay for in a minute. */
+const COMPOSES_PER_CLIENT_PER_MINUTE = 3;
 const COMPOSES_PER_MINUTE = 10;
 /** Daily, well inside the thirty days KEEP_ALIVE_LEDGERS buys. */
 const KEEP_ALIVE_EVERY_MS = 24 * 60 * 60 * 1000;

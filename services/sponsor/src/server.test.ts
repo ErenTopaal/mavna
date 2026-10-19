@@ -3095,15 +3095,57 @@ describe("finishing a conversion on arrival", () => {
     expect(again.body.retryable).toBe(true);
   });
 
-  it("caps how many finishes it will try a minute", async () => {
+  it("pays for no finish when accounts fund themselves, since they run their own", async () => {
     const server = await startServer({
+      reserveFunding: "self",
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    const response = await server.post("/compose", good);
+    expect(response.status).toBe(409);
+    expect(response.body.retryable).toBe(false);
+    expect(response.body.error).toMatch(/does not pay/);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("limits each client's finishes, counted like every other request behind the proxy", async () => {
+    const server = await startServer({
+      trustProxy: true,
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    const ask = async (client: string, n: number) => {
+      const guid = n.toString(16).padStart(64, "0");
+      const response = await fetch(`${server.url}/compose`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": client },
+        body: JSON.stringify({ ...good, guid }),
+      });
+      return response.status;
+    };
+    const one: number[] = [];
+    for (let n = 0; n < 4; n++) one.push(await ask("198.51.100.7", n));
+    expect(one.slice(0, 3)).not.toContain(429);
+    expect(one[3]).toBe(429);
+    expect(await ask("198.51.100.8", 9)).not.toBe(429);
+  });
+
+  it("caps how many finishes it will try a minute, across every client", async () => {
+    const server = await startServer({
+      trustProxy: true,
       arrivalContract: ARRIVAL,
       arrivalExecutorSecret: Keypair.random().secret(),
     });
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
       const guid = i.toString(16).padStart(64, "0");
-      statuses.push((await server.post("/compose", { ...good, guid })).status);
+      // a different address each time, so only the overall cap can refuse
+      const response = await fetch(`${server.url}/compose`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": `198.51.100.${i}` },
+        body: JSON.stringify({ ...good, guid }),
+      });
+      statuses.push(response.status);
     }
     expect(statuses.slice(0, 10)).not.toContain(429);
     expect(statuses[10]).toBe(429);
