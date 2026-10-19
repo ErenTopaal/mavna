@@ -1,4 +1,4 @@
-import type { StepPhase, TransferHandle } from "@mavna/core";
+import { MavnaError, type StepPhase, type TransferHandle } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { rpc, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +78,35 @@ describe("status from a destination address alone", () => {
   });
 });
 
+describe("status when a network edge fails", () => {
+  it("reports a failed health read as retryable", async () => {
+    const adapter = adapterWith({ captured: recent, health: new Error("socket hang up") });
+    const failure = await adapter
+      .status(handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"))
+      .catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(true);
+  });
+
+  it("reports Horizon that cannot be reached as retryable", async () => {
+    const adapter = adapterWith({
+      captured: old,
+      events: replayScan(old),
+      horizonError: new TypeError("fetch failed"),
+    });
+    const failure = await adapter
+      .status(handleFor(old.burn, old.recipient))
+      .catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(true);
+  });
+
+  it("surfaces a failing Horizon rather than reporting the transfer pending", async () => {
+    const adapter = adapterWith({ captured: old, events: replayScan(old), horizonStatus: 503 });
+    await expect(adapter.status(handleFor(old.burn, old.recipient))).rejects.toThrow(/503/);
+  });
+});
+
 type EventsHandler = (request: rpc.Api.GetEventsRequest) => rpc.Api.RawGetEventsResponse;
 
 /** Replays the captured scan page by page, keyed on the cursor the adapter sends. */
@@ -101,13 +130,18 @@ function adapterWith(options: {
   readonly events?: EventsHandler;
   readonly horizon?: HorizonPage;
   readonly horizonStatus?: number;
+  readonly horizonError?: Error;
+  readonly health?: Error;
   readonly ledgerEntries?: OperationsCapture["recipientLedgerEntries"];
 }): CctpAdapter {
   const client = new RpcClient({
     url: "https://soroban-testnet.stellar.org",
     sleep: async () => {},
   });
-  vi.spyOn(client.server, "getHealth").mockResolvedValue(options.captured.health);
+  vi.spyOn(client.server, "getHealth").mockImplementation(async () => {
+    if (options.health !== undefined) throw options.health;
+    return options.captured.health;
+  });
   vi.spyOn(client.server, "getEvents").mockImplementation(async (request) => {
     if (options.events === undefined) throw new Error("getEvents was not expected");
     return rpc.parseRawEvents(options.events(request));
@@ -133,6 +167,7 @@ function adapterWith(options: {
       return new Response("{}", { status: 404 });
     }
     if (url.startsWith("https://horizon-testnet.stellar.org/accounts/")) {
+      if (options.horizonError !== undefined) throw options.horizonError;
       if (options.horizonStatus !== undefined) {
         return new Response("{}", { status: options.horizonStatus });
       }

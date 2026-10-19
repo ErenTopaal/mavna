@@ -200,7 +200,9 @@ export class DeliveryProof {
    */
   async find(messageHex: string, recipient: string | undefined): Promise<Delivery | undefined> {
     const message = identifyMessage(messageHex);
-    const health = await this.rpc.server.getHealth();
+    const health = await this.rpc.server.getHealth().catch((cause: unknown) => {
+      throw unreachable("Stellar RPC", cause);
+    });
     const start = health.oldestLedger + RETENTION_MARGIN;
 
     const recent = await this.searchEvents(message, start);
@@ -290,7 +292,9 @@ export class DeliveryProof {
 
   private events(request: rpc.Api.GetEventsRequest): Promise<rpc.Api.GetEventsResponse> {
     return this.rpc.read("forwarder events", async () => {
-      const response = await this.rpc.server.getEvents(request);
+      const response = await this.rpc.server.getEvents(request).catch((cause: unknown) => {
+        throw unreachable("Stellar RPC", cause);
+      });
       return { value: response, ledger: response.latestLedger };
     });
   }
@@ -319,14 +323,18 @@ export class DeliveryProof {
   }
 }
 
-export interface HorizonOperationsPage {
+interface HorizonOperationsPage {
   readonly _embedded?: { readonly records?: readonly HorizonOperation[] };
   readonly _links?: { readonly next?: { readonly href?: string } };
 }
 
 /** One page of an account's operations, or undefined when the account does not exist. */
-export async function horizonOperations(url: string): Promise<HorizonOperationsPage | undefined> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+async function horizonOperations(url: string): Promise<HorizonOperationsPage | undefined> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(
+    (cause: unknown) => {
+      throw unreachable("Horizon", cause);
+    },
+  );
   if (response.status === 404) return undefined;
   if (!response.ok) {
     throw new MavnaError(`Horizon returned ${response.status} for the account's operations.`, {
@@ -334,6 +342,16 @@ export async function horizonOperations(url: string): Promise<HorizonOperationsP
     });
   }
   return (await response.json()) as HorizonOperationsPage;
+}
+
+/**
+ * A network failure, as distinct from an answer. Retryable, because nothing
+ * about the transfer is known to be wrong, and a raw TypeError from fetch says
+ * nothing a caller can act on.
+ */
+function unreachable(service: string, cause: unknown): MavnaError {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return new MavnaError(`${service} could not be reached: ${detail}`, { retryable: true, cause });
 }
 
 function isReceiptOf(
