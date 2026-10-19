@@ -33,6 +33,7 @@ import {
   type Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
+import { z } from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
 import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
@@ -232,6 +233,58 @@ interface ChannelDocument extends ChannelPoolSnapshot {
 }
 
 /**
+ * The shapes this version writes, checked on load. A file in another shape,
+ * from another version or edited by hand, stops the process with its name
+ * rather than failing later on some field it lacked.
+ */
+const repaymentShape = z.object({ createdAccount: z.boolean(), assets: z.array(z.string()) });
+const storedShapes = {
+  built: z.array(
+    z.looseObject({
+      hash: z.string(),
+      kind: z.string(),
+      destination: z.string(),
+      signer: z.string(),
+      sourceChainId: z.string(),
+      expiresAtUnix: z.number(),
+      repays: repaymentShape.optional(),
+    }),
+  ),
+  held: z.object({
+    held: z.record(
+      z.string(),
+      z.looseObject({
+        xdr: z.string(),
+        createdAtUnix: z.number(),
+        sourceChainId: z.string(),
+        maxTimeUnix: z.number(),
+        repays: repaymentShape,
+        prepared: z.boolean(),
+        preparation: z.object({ hash: z.string(), expiresAtUnix: z.number() }).optional(),
+      }),
+    ),
+    settled: z.record(z.string(), z.object({ txHash: z.string(), untilUnix: z.number() })),
+  }),
+  channels: z.object({
+    secrets: z.array(z.string()),
+    leases: z.array(z.object({ owner: z.string(), channel: z.string(), untilUnix: z.number() })),
+    pending: z.string().optional(),
+  }),
+} as const;
+
+async function readStored<K extends keyof typeof storedShapes>(
+  state: DocumentStore,
+  name: K,
+): Promise<unknown> {
+  const value = await state.read(name);
+  if (value === undefined) return undefined;
+  if (!storedShapes[name].safeParse(value).success) {
+    throw new Error(`The sponsor's ${name} state is not in the shape this version writes.`);
+  }
+  return value;
+}
+
+/**
  * How long past a preparation's time bound before it is taken as never
  * landing. The bound is inclusive on the network and this clock is not the
  * ledger's.
@@ -382,10 +435,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   /** What is written down, read back. Runs once, before the first request. */
   async function load(): Promise<void> {
     const now = nowUnix();
-    const builtDocument = (await state.read("built")) as readonly BuiltRecord[] | undefined;
+    const builtDocument = (await readStored(state, "built")) as readonly BuiltRecord[] | undefined;
     if (builtDocument !== undefined) built = BuiltLedger.fromSnapshot(builtDocument, now);
 
-    const heldDocument = (await state.read("held")) as HeldDocument | undefined;
+    const heldDocument = (await readStored(state, "held")) as HeldDocument | undefined;
     for (const [destination, held] of Object.entries(heldDocument?.held ?? {})) {
       heldSettlements.set(destination, { ...held, preparing: false });
     }
@@ -393,7 +446,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       recentlySettled.set(destination, record);
     }
 
-    const channelDocument = (await state.read("channels")) as ChannelDocument | undefined;
+    const channelDocument = (await readStored(state, "channels")) as ChannelDocument | undefined;
     if (channelDocument === undefined) return;
     if (channels !== undefined) {
       channels.restoreLeases(channelDocument.leases, now);

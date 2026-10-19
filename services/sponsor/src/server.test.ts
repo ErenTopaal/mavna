@@ -2435,6 +2435,21 @@ describe("the sponsor funds its own channel once", () => {
   });
 });
 
+describe("the sponsor refuses state it did not write", () => {
+  it.each([
+    ["held", { held: 5 }],
+    ["built", { not: "a list" }],
+    ["channels", { secrets: "S...", leases: [] }],
+  ])("stops with a named error when %s is not in the shape it writes", async (name, value) => {
+    const state = new MemoryDocumentStore();
+    await state.write(name, value);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { server } = await startServer({ state });
+    await expect(server.ready()).rejects.toThrow(new RegExp(`${name} state .*not in the shape`));
+    errors.mockRestore();
+  });
+});
+
 describe("the sponsor writes its state only when it changed", () => {
   /** A memory store that counts what it is asked to write. */
   class CountingStore extends MemoryDocumentStore {

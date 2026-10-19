@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CapStore, CapUsage } from "./caps.js";
 
@@ -91,13 +91,25 @@ export class FileDocumentStore implements DocumentStore {
         await this.ensureDir();
         this.sequence += 1;
         const temporary = `${path}.${process.pid}.${this.sequence}.tmp`;
-        await writeFile(temporary, text, { mode: 0o600, flush: true });
-        await rename(temporary, path);
+        try {
+          await writeFile(temporary, text, { mode: 0o600, flush: true });
+          await rename(temporary, path);
+        } catch (cause) {
+          // the temporary file may hold secrets, so it does not stay behind
+          await rm(temporary, { force: true });
+          throw cause;
+        }
+        // the rename is only durable once the directory entry is
+        await syncDirectory(this.dir);
       });
     this.queues.set(name, next);
-    void next.finally(() => {
-      if (this.queues.get(name) === next) this.queues.delete(name);
-    });
+    // the caller is handed `next` and hears about a failure there; this branch
+    // only tidies the queue
+    next
+      .finally(() => {
+        if (this.queues.get(name) === next) this.queues.delete(name);
+      })
+      .catch(() => {});
     return next;
   }
 
@@ -113,6 +125,16 @@ export class FileDocumentStore implements DocumentStore {
       chmod(this.dir, 0o700),
     );
     return this.ready;
+  }
+}
+
+/** Flush a directory's entries to disk, so a rename in it survives power loss. */
+async function syncDirectory(dir: string): Promise<void> {
+  const handle = await open(dir, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 

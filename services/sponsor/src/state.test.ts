@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,6 +55,16 @@ describe("a file-backed store keeps what it was given across processes", () => {
     await store.write("caps", {});
     await writeFile(join(dir, "caps.json"), "{not json");
     await expect(new FileDocumentStore(dir).read("caps")).rejects.toThrow(/caps/);
+  });
+
+  it("leaves no temporary file behind when a write fails", async () => {
+    const dir = await freshDir();
+    const store = new FileDocumentStore(dir);
+    await store.write("held", { ok: true });
+    // a directory where the document should go makes the rename fail
+    await mkdir(join(dir, "built.json"));
+    await expect(store.write("built", { secret: "S..." })).rejects.toThrow();
+    expect((await readdir(dir)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 
   it("writes JSON a person can read", async () => {
