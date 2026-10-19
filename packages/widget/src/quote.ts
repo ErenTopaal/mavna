@@ -83,6 +83,11 @@ export interface RouteView {
   readonly newAccount: boolean;
   readonly reserveXlm: number | undefined;
   /**
+   * What the conversion leaves in the arriving asset to repay the sponsor's
+   * reserve, in that asset, when the arrival repays it.
+   */
+  readonly repaymentSetAside: { readonly amount: number; readonly symbol: string } | undefined;
+  /**
    * The exchange the conversion runs through, when the route has a swap leg.
    * Read off the swap step's own provider, never assumed, so a route that does
    * not convert has none and a route through a different venue shows that venue.
@@ -162,6 +167,7 @@ function venueLabel(id: string): string {
 export function toRouteView(route: Route): RouteView {
   const bridge = route.fees.find((f) => f.kind === "bridge");
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  const repayment = route.fees.find((f) => f.kind === "reserve-repayment");
   const swapStep = route.steps.find((s) => s.kind === "swap");
   const receives = amountValue(route.receives);
   const floor = amountValue(route.receivesAtLeast);
@@ -183,6 +189,13 @@ export function toRouteView(route: Route): RouteView {
       reserve === undefined
         ? undefined
         : fromBaseUnits(reserve.total.baseUnits, reserve.total.asset.decimals),
+    repaymentSetAside:
+      repayment === undefined
+        ? undefined
+        : {
+            amount: fromBaseUnits(repayment.total.baseUnits, repayment.total.asset.decimals),
+            symbol: repayment.total.asset.symbol,
+          },
     swapVenue: swapStep === undefined ? undefined : venueLabel(swapStep.source),
     feeSymbol: bridge?.total.asset.symbol ?? route.sends.asset.symbol,
     compose:
@@ -781,7 +794,10 @@ export function runQuote(
               if (live) onUpdate(settle(partial));
             },
             breaker: engine.breaker,
-            swap,
+            // when the sponsor fronts the reserve the arrival repays it, so the
+            // conversion may only count on what is left after that
+            swap:
+              swap === undefined || funding !== "sponsor" ? swap : { ...swap, repaysReserve: true },
             ranking: inputs.priority === "fast" ? "fastest" : "best-received",
             // No transaction builder pays a fee out yet, so nothing may be shown as
             // taken. Revisit when a collector exists for a route.

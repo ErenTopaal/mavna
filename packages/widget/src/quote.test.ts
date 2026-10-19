@@ -1042,3 +1042,89 @@ describe("the reason a sponsor-funded route cannot set up a trustline", () => {
     expect(why).toMatch(/new Stellar account/);
   });
 });
+
+describe("a conversion on a route whose arrival repays the sponsor", () => {
+  const fronted = (() => {
+    const base = routeFor("cctp", { newAccount: true });
+    return {
+      ...base,
+      fees: [
+        {
+          kind: "account-reserve" as const,
+          total: { asset: engine.xlmOnStellar, baseUnits: "15000000" },
+          recipients: [],
+          includedInQuote: true,
+        },
+      ],
+    };
+  })();
+  const atFive = {
+    id: "venue",
+    quote: async (q: { amountIn: string }) => {
+      const out = (BigInt(q.amountIn) * 5n).toString();
+      return { provider: "venue", amountOut: out, amountOutMinimum: out };
+    },
+  };
+  const quoted = (reserveFunding: "self" | "sponsor") =>
+    new Promise<RouteSet>((resolve) => {
+      const rpc = new RpcClient({
+        url: "https://example.invalid",
+        baseDelayMs: 0,
+        sleep: async () => {},
+      });
+      vi.spyOn(rpc.server, "getLedgerEntries").mockResolvedValue({
+        entries: [accountLedger(500_000_000n, 0)],
+        latestLedger: 1,
+      } as never);
+      runQuote(
+        {
+          ...engine,
+          adapters: [quotingOnce(fronted)],
+          breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
+          xlmSwap: {
+            provider: atFive,
+            delivered: engine.usdcOnStellar,
+            deliveredContract: engine.usdcOnStellar.id,
+            wanted: engine.xlmOnStellar,
+            wantedContract: "native",
+          },
+          integratorFee: undefined,
+          rpc,
+          usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+          sponsorTerms: async () => ({
+            network: "testnet",
+            reserveFunding,
+            minDeliveryBaseUnits: 0n,
+          }),
+          usdt0Assets: async () => {
+            throw new Error("not asked");
+          },
+          usdt0Swap: () => {
+            throw new Error("not asked");
+          },
+        },
+        {
+          chainId: "ethereum-sepolia",
+          wanted: "XLM",
+          amount: "5",
+          destination: fronted.destination,
+          priority: "best",
+          rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+        },
+        () => {},
+        resolve,
+      );
+    });
+
+  it("leaves the repayment aside and shows it as its own line when the sponsor fronts the reserve", async () => {
+    const [route] = (await quoted("sponsor")).routes;
+    const repayment = route?.fees.find((f) => f.kind === "reserve-repayment");
+    expect(repayment?.total.baseUnits).toBe("6000000");
+    expect(route && toRouteView(route).repaymentSetAside).toEqual({ amount: 0.6, symbol: "USDC" });
+  });
+
+  it("sets nothing aside when the account pays its own reserve", async () => {
+    const [route] = (await quoted("self")).routes;
+    expect(route?.fees.some((f) => f.kind === "reserve-repayment")).toBe(false);
+  });
+});

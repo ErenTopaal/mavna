@@ -932,6 +932,15 @@ export function renderReview(
                 },
               ]
             : []),
+          ...(r.repaymentSetAside !== undefined
+            ? [
+                {
+                  key: "repay",
+                  name: "Left unconverted to repay the reserve",
+                  value: `${fmt(r.repaymentSetAside.amount)} ${r.repaymentSetAside.symbol}`,
+                },
+              ]
+            : []),
           {
             key: "min",
             name: r.exact ? "You receive" : "Minimum received",
@@ -1901,6 +1910,15 @@ function routeDetail(
       : []),
     ...(x.newAccount && x.reserveXlm !== undefined
       ? [{ key: "res", name: "Account reserve", value: `${fmt(x.reserveXlm)} XLM` }]
+      : []),
+    ...(x.repaymentSetAside !== undefined
+      ? [
+          {
+            key: "repay",
+            name: "Left unconverted to repay the reserve",
+            value: `${fmt(x.repaymentSetAside.amount)} ${x.repaymentSetAside.symbol}`,
+          },
+        ]
       : []),
     { key: "sig", name: "Approvals", value: `${x.sigs} steps` },
     { key: "eta", name: "Estimated time", value: `About ${x.minutes} min` },
