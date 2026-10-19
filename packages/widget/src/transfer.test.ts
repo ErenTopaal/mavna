@@ -87,6 +87,8 @@ beforeEach(() => {
   preparedSource = undefined;
   preparedShape = {};
   heldOnly = undefined;
+  usdcHeld = 0n;
+  conversionAmounts = [];
   askedAssets = [];
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
@@ -99,6 +101,13 @@ beforeEach(() => {
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname;
     const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+    if (url.includes("/api/external/v1/find-path/")) {
+      const asked = bodyOf(init) as { amount: string };
+      conversionAmounts.push(asked.amount);
+      // nothing more to see here: the conversion's size is the point
+      return reply(503, {});
+    }
+    if (url.includes("/api/external/v1/pools/")) return reply(200, { count: 1 });
     if (path.startsWith("/v2/messages/")) {
       log.push(`iris ${path}`);
       const next = irisReplies.length > 1 ? irisReplies.shift() : irisReplies[0];
@@ -213,7 +222,7 @@ function ledgerEntries(): unknown[] {
       new xdr.TrustLineEntry({
         accountId,
         asset: new Asset(code ?? "", issuer).toTrustLineXDRObject(),
-        balance: xdr.Int64.fromString("0"),
+        balance: xdr.Int64.fromString(usdcHeld.toString()),
         limit: xdr.Int64.fromString((10n ** 15n).toString()),
         flags: 1,
         ext: new xdr.TrustLineEntryExt(0),
@@ -224,6 +233,12 @@ function ledgerEntries(): unknown[] {
   if (lane === "needs-trustline") return [account];
   return [account, trustline];
 }
+
+/** How much each conversion quote asked to convert. */
+let conversionAmounts: string[];
+
+/** The destination's USDC balance, in base units, as the node reports it now. */
+let usdcHeld: bigint;
 
 /** The trustlines the destination holds, by CODE:ISSUER, when a test asks per asset. */
 let heldOnly: Set<string> | undefined;
@@ -903,6 +918,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     const signed = log.indexOf("stellar sign PREPARATION");
     expect(signed).toBeGreaterThan(-1);
     expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
+  });
+
+  it("converts only what this transfer brought in, not what the account already held", async () => {
+    // 10 USDC already there; 49.5 arrive, though the route estimated 50
+    usdcHeld = 100_000_000n;
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "49000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 100_000_000n + 495_000_000n / 10n;
+      },
+    });
+    await run(adapter, route, patches().patch).catch(() => undefined);
+    expect(conversionAmounts).toContain("49500000");
+    expect(conversionAmounts).not.toContain("149500000");
   });
 
   it("still refuses a USDT0 trustline the sponsor would have to front", async () => {

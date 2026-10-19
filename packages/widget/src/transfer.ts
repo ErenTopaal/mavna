@@ -285,25 +285,37 @@ export async function convertOnStellar(
   engine: Pick<TransferEngine, "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar">,
   route: Route,
   owner: string | undefined,
+  /**
+   * What this transfer measurably brought in, in base units of the arriving
+   * asset: the account's balance after delivery less before it. The conversion
+   * spends exactly this, so money the account already held is never touched.
+   */
+  arrived: string,
 ): Promise<void> {
   const swapStep = route.steps.find((s) => s.kind === "swap");
   // what the rail delivered and what the user asked to hold: USDC into XLM, or
   // the USDT0 LayerZero delivers into USDC or XLM
-  const arrived = swapStep?.from.asset ?? engine.usdcOnStellar;
+  const asset = swapStep?.from.asset ?? engine.usdcOnStellar;
   const wanted = swapStep?.to.asset ?? route.receivesAtLeast.asset;
   const account = owner ?? (await engine.stellar.connect());
   if (account !== route.destination) {
     throw new Error(
       "The conversion spends from the receiving account, so only its owner can " +
-        `sign it. The ${arrived.symbol} has arrived and is theirs either way.`,
+        `sign it. The ${asset.symbol} has arrived and is theirs either way.`,
+    );
+  }
+  if (BigInt(arrived) <= 0n) {
+    throw new Error(
+      `Nothing measurable arrived in ${asset.symbol} for this transfer, so there is nothing to ` +
+        "convert. Whatever did arrive stays yours as it is.",
     );
   }
   // Quoted again now rather than reused from the route: the route's quote is as
   // old as the bridge leg, and the venue that serves now is the one that builds.
   const quote = await engine.swapVenues.quote({
-    assetIn: arrived.id,
+    assetIn: asset.id,
     assetOut: wanted.id,
-    amountIn: swapStep?.from.baseUnits ?? route.sends.baseUnits,
+    amountIn: arrived,
     maxSlippageBps: 50,
     destinationKind: "account",
   });
@@ -313,7 +325,7 @@ export async function convertOnStellar(
   if (shown.asset.id === wanted.id && BigInt(quote.amountOutMinimum) < BigInt(shown.baseUnits)) {
     throw new Error(
       "The price moved since this transfer was quoted, and converting now could give less " +
-        `${wanted.symbol} than you were shown. The ${arrived.symbol} has arrived and is yours; ` +
+        `${wanted.symbol} than you were shown. The ${asset.symbol} has arrived and is yours; ` +
         "convert it later.",
     );
   }
@@ -647,6 +659,11 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   const route = view.route;
   const adapter = adapterFor(engine, route);
   let owner: string | undefined;
+  // a conversion on Stellar spends what this transfer adds, so the balance is
+  // read before anything moves
+  const swapFrom = route.steps.find((s) => s.kind === "swap")?.from.asset;
+  const heldBefore =
+    swapFrom === undefined ? undefined : await balanceOf(engine, route.destination, swapFrom);
 
   if (adapter.id === "cctp") {
     let prepared = false;
@@ -676,9 +693,27 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
     owner = await runRelayed(deps, adapter);
   }
 
-  if (route.steps.some((s) => s.kind === "swap")) {
+  if (swapFrom !== undefined && heldBefore !== undefined) {
     patch("swap", { phase: "blocked" });
-    await convertOnStellar(engine, route, owner);
+    // exactly what this transfer brought in, so nothing the account held before is spent
+    const heldAfter = await balanceOf(engine, route.destination, swapFrom);
+    await convertOnStellar(engine, route, owner, (heldAfter - heldBefore).toString());
     patch("swap", { phase: "done" });
   }
+}
+
+/** What an account holds of an asset, in base units; nothing when it cannot hold it. */
+async function balanceOf(
+  engine: Pick<TransferEngine, "rpc">,
+  account: string,
+  asset: Route["deliveredAtLeast"]["asset"],
+): Promise<bigint> {
+  const [code, issuer] = asset.id.split(":");
+  const state = await inspectDestination(
+    engine.rpc,
+    account,
+    asset.id === "native" ? StellarAsset.native() : new StellarAsset(code ?? "", issuer),
+  );
+  if (asset.id === "native") return BigInt(state.account?.balanceStroops ?? "0");
+  return BigInt(state.trustline?.balanceStroops ?? "0");
 }

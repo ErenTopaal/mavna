@@ -58,6 +58,7 @@ describe("converting on Stellar", () => {
   function setUp() {
     const simulated: string[] = [];
     const pathsAsked: string[] = [];
+    const amountsAsked: string[] = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       // The testnet sponsor holds no Soroswap key, so it has no proxy.
@@ -70,6 +71,7 @@ describe("converting on Stellar", () => {
           token_out_address: string;
         };
         pathsAsked.push(`${asked.token_in_address} ${asked.token_out_address}`);
+        amountsAsked.push(String((asked as { amount?: unknown }).amount));
         const tokenIn = asked.token_in_address;
         const tokenOut = asked.token_out_address;
         return respond({
@@ -150,12 +152,12 @@ describe("converting on Stellar", () => {
       usdcOnStellar: STELLAR_USDC,
     };
 
-    return { engine, simulated, signed, sent, pathsAsked };
+    return { engine, simulated, signed, sent, pathsAsked, amountsAsked };
   }
 
   it("quotes through the venue chain, builds with the venue that quoted, and submits", async () => {
     const { engine, simulated, signed, sent } = setUp();
-    await convertOnStellar(engine, usdcIntoXlm(), DESTINATION);
+    await convertOnStellar(engine, usdcIntoXlm(), DESTINATION, "50000000");
 
     expect(simulated).toEqual([`${ROUTER} swap_chained`]);
     expect(signed).toHaveLength(1);
@@ -181,9 +183,24 @@ describe("converting on Stellar", () => {
       ),
     };
     const run = setUp();
-    await convertOnStellar(run.engine, route, DESTINATION);
+    await convertOnStellar(run.engine, route, DESTINATION, "50000000");
     expect(run.pathsAsked).toEqual([`${XLM} ${USDC}`]);
     expect(run.sent).toHaveLength(1);
+  });
+
+  it("converts exactly what arrived for this transfer, never the account's other funds", async () => {
+    const run = setUp();
+    // the route expected 50 USDC; 49.5 landed, and that is all that may be spent
+    await convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "49500000");
+    expect(run.amountsAsked).toEqual(["49500000"]);
+  });
+
+  it("refuses to convert when nothing measurable arrived", async () => {
+    const run = setUp();
+    await expect(convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "0")).rejects.toThrow(
+      /nothing.*arrived/i,
+    );
+    expect(run.signed).toEqual([]);
   });
 
   it("will not convert below the least XLM the user was shown", async () => {
@@ -193,13 +210,13 @@ describe("converting on Stellar", () => {
       receivesAtLeast: { asset: STELLAR_XLM, baseUnits },
     });
     const held = setUp();
-    await convertOnStellar(held.engine, shown("25870000"), DESTINATION);
+    await convertOnStellar(held.engine, shown("25870000"), DESTINATION, "50000000");
     expect(held.sent).toHaveLength(1);
 
     const moved = setUp();
-    await expect(convertOnStellar(moved.engine, shown("25870001"), DESTINATION)).rejects.toThrow(
-      /price moved.*USDC has arrived/,
-    );
+    await expect(
+      convertOnStellar(moved.engine, shown("25870001"), DESTINATION, "50000000"),
+    ).rejects.toThrow(/price moved.*USDC has arrived/);
     expect(moved.signed).toEqual([]);
   });
 });
