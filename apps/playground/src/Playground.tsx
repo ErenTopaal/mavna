@@ -473,6 +473,8 @@ function describeEvent(e: MavnaWidgetEvent): string {
       return "transferCompleted";
     case "transferFailed":
       return `transferFailed · ${e.reason}`;
+    case "transferStillMoving":
+      return `transferStillMoving · ${e.reason}`;
   }
 }
 
