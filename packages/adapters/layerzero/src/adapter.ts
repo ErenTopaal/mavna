@@ -28,9 +28,11 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { decodeOftComposePayload } from "./compose.js";
 import {
   type ArrivalSetup,
   type ComposeContext,
+  composedElsewhere,
   composePhase,
   composeSendFor,
   quoteComposeRoute,
@@ -51,6 +53,7 @@ import { describeDvnStack } from "./dvn.js";
 import {
   buildApproval,
   buildSendParam,
+  bytes32ToStellarContract,
   decodeOftMessage,
   ERC20_ABI,
   executorLzReceiveOption,
@@ -711,6 +714,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
           deliveredTx === undefined ? scanUrl : stellarExplorerTxUrl(this.network, deliveredTx),
       });
       if (composed !== undefined) return composed;
+    } else {
+      // no Arrival Contract here, yet the message carries a compose for one
+      const payload = message.source?.tx?.payload;
+      const compose = payload === undefined ? undefined : decodeOftComposePayload(payload);
+      if (compose !== undefined) {
+        return composedElsewhere(this.network, bytes32ToStellarContract(compose.sendTo), {
+          chainId: STELLAR_SIDE[this.network].chainId,
+          txHash: deliveredTx ?? handle.sourceTxHash,
+          explorerUrl:
+            deliveredTx === undefined ? scanUrl : stellarExplorerTxUrl(this.network, deliveredTx),
+        });
+      }
     }
     const received = await this.receivedFrom(message.source?.tx, chainId);
     if (received === undefined) {

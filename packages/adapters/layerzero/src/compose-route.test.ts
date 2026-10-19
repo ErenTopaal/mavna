@@ -9,6 +9,7 @@ import { arrivalRecipientOf } from "./compose.js";
 import {
   COMPOSE_FINISH_BASE_STROOPS,
   type ComposeContext,
+  composePhase,
   composeSendFor,
   quoteComposeRoute,
 } from "./compose-route.js";
@@ -481,5 +482,55 @@ describe("the Arrival Contract each network has", () => {
     expect(answer.reason).toBe("chain-unsupported");
     expect(answer.retryable).toBe(false);
     expect(answer.explanation).toMatch(/no Arrival Contract on mainnet.*plain route/);
+  });
+});
+
+describe("reading a compose's status from LayerZero's record", () => {
+  // what Scan carries for a compose to the Arrival Contract: recipient, amount, from, message
+  const payloadTo = (contract: string) =>
+    `0x${Buffer.from(StrKey.decodeContract(contract)).toString("hex")}${100_000_000n.toString(16).padStart(16, "0")}${"ab".repeat(32)}0102`;
+  const scan = (contract: string, blockTimestamp?: number) => ({
+    guid: `0x${"cd".repeat(32)}`,
+    pathway: { nonce: 1, srcEid: 30110 },
+    source: { tx: { payload: payloadTo(contract) } },
+    destination: {
+      tx: { txHash: "7e37", ...(blockTimestamp === undefined ? {} : { blockTimestamp }) },
+    },
+  });
+  const ref = { chainId: "stellar-testnet", txHash: "7e37", explorerUrl: "" };
+
+  it("dates a delivery Scan did not time from the Stellar transaction itself", async () => {
+    const { ctx } = context();
+    vi.spyOn(ctx.rpc.server, "getTransaction").mockResolvedValue({
+      status: "SUCCESS",
+      ledger: 5,
+      createdAt: 1_700_000_000,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "getHealth").mockResolvedValue({
+      oldestLedger: 1,
+      latestLedger: 9,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "getEvents").mockResolvedValue({
+      events: [],
+      latestLedger: 9,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "simulateTransaction").mockResolvedValue({
+      latestLedger: 9,
+      result: { retval: xdr.ScVal.scvBytes(Buffer.alloc(32, 3)), auth: [] },
+    } as never);
+    const phase = await composePhase(ctx, scan(ARRIVAL) as never, "arbitrum-sepolia", ref);
+    expect(phase).toMatchObject({
+      phase: "delivered-conversion-pending",
+      deliveredAtUnix: 1_700_000_000,
+    });
+  });
+
+  it("says plainly that a compose went to another Arrival Contract rather than calling it delivered", async () => {
+    const { ctx } = context();
+    const phase = await composePhase(ctx, scan(STRANGER) as never, "arbitrum-sepolia", ref);
+    expect(phase?.phase).toBe("stalled");
+    if (phase?.phase !== "stalled") return;
+    expect(phase.remedy).toMatchObject({ kind: "contact" });
+    expect(phase.remedy.because).toMatch(/another Arrival Contract/);
   });
 });

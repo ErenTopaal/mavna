@@ -545,6 +545,31 @@ async function assetOfToken(ctx: ComposeContext, token: string): Promise<Asset> 
  * never from a balance: a balance says what an account holds, not what this
  * transfer did.
  */
+/**
+ * A compose for a contract this app does not use (another app's, or one this
+ * app used before its setting changed) cannot be read here. Calling it
+ * delivered would say the money reached the recipient, when it reached that
+ * contract and waits on whatever it does.
+ */
+export function composedElsewhere(
+  network: NetworkId,
+  sentTo: string,
+  delivered: OnChainRef,
+): StepPhase {
+  return {
+    phase: "stalled",
+    ref: delivered,
+    overdueSeconds: 0,
+    remedy: {
+      kind: "contact",
+      reference: `https://stellar.expert/explorer/${STELLAR_SIDE[network].explorerPath}/contract/${sentTo}`,
+      because:
+        "This transfer went to another Arrival Contract than the one this app uses, so how it " +
+        "ended cannot be read here. That contract's history on the explorer shows it.",
+    },
+  };
+}
+
 export async function composePhase(
   ctx: ComposeContext,
   message: ScanMessage,
@@ -554,7 +579,8 @@ export async function composePhase(
   const payload = message.source?.tx?.payload;
   const compose = payload === undefined ? undefined : decodeOftComposePayload(payload);
   if (compose === undefined) return undefined;
-  if (bytes32ToStellarContract(compose.sendTo) !== ctx.arrival.contract) return undefined;
+  const sentTo = bytes32ToStellarContract(compose.sendTo);
+  if (sentTo !== ctx.arrival.contract) return composedElsewhere(ctx.network, sentTo, delivered);
   const guid = message.guid;
   if (guid === undefined) return { phase: "pending", ref: delivered, expectedByUnix: 0 };
 
@@ -569,9 +595,14 @@ export async function composePhase(
   // the delivery's own ledger, so the event search starts where it can be
   const deliveredTx = message.destination?.tx?.txHash;
   let fromLedger: number | undefined;
+  let deliveredAt = message.destination?.tx?.blockTimestamp;
   if (deliveredTx !== undefined) {
     const found = await ctx.rpc.server.getTransaction(deliveredTx);
-    if (found.status === "SUCCESS") fromLedger = found.ledger;
+    if (found.status === "SUCCESS") {
+      fromLedger = found.ledger;
+      // when Scan does not time the delivery, the transaction itself does
+      deliveredAt ??= found.createdAt;
+    }
   }
 
   const event = await findArrivalEvent(ctx.rpc, contract, guid, fromLedger);
@@ -649,7 +680,10 @@ export async function composePhase(
   return {
     phase: "delivered-conversion-pending",
     ref: delivered,
-    deliveredAtUnix: message.destination?.tx?.blockTimestamp ?? Math.floor(Date.now() / 1000),
+    // Untimed by Scan and by the node: dated as long ago rather than now, so a
+    // finish is offered. Finishing checks the endpoint's own slot first and a
+    // second run changes nothing, so offering it early costs nothing.
+    deliveredAtUnix: deliveredAt ?? 0,
     finish,
   };
 }
