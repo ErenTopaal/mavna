@@ -29,7 +29,10 @@ export interface ChannelPoolOptions {
 interface Lease {
   readonly channel: Channel;
   readonly heldFor: string;
-  /** The settlement's maxTime. Past it nothing can land on this channel's sequence. */
+  /**
+   * A few minutes while the settlement waits for the user's signature, then
+   * the settlement's maxTime, past which nothing can land on its sequence.
+   */
   readonly untilUnix: number;
 }
 

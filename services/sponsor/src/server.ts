@@ -616,7 +616,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     const pool = await ensureChannels();
     const now = nowUnix();
-    const channel = pool.acquire(body.destination, now + SETTLEMENT_VALIDITY_SECONDS, now);
+    // Short until the settlement comes back signed, which settlementCommit
+    // extends to the settlement's own bound. Anyone can ask for a settlement,
+    // and a day-long lease per request would let one caller take every slot.
+    const channel = pool.acquire(body.destination, now + PROVISIONAL_LEASE_SECONDS, now);
     if (channel === undefined) {
       reply(
         res,
@@ -649,9 +652,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       createdAccount,
       validForSeconds: SETTLEMENT_VALIDITY_SECONDS,
     });
-    // The builder reads the clock again, so its bound can be a second past the
-    // lease. Pin the lease to the bound the network will actually enforce.
-    pool.acquire(body.destination, expiryOf(transaction), now);
     built.record({
       hash: transaction.hash().toString("hex"),
       kind: "settlement",
@@ -1425,6 +1425,13 @@ const SETTLE_INTERVAL_SECONDS = 30;
 
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;
+
+/**
+ * How long a channel is held for a settlement nobody has signed yet. Long
+ * enough for a person to read and sign in their wallet, short enough that an
+ * abandoned or hostile request gives the slot back within minutes.
+ */
+const PROVISIONAL_LEASE_SECONDS = 300;
 
 /**
  * Whether an address is one a settlement can be held for: an account or muxed

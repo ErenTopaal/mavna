@@ -1886,3 +1886,55 @@ describe("the sponsor prepares only what the held settlement repays", () => {
     expect(usdcOnly.status).toBe(200);
   });
 });
+
+describe("a settlement slot is held for a day only once the settlement is signed", () => {
+  function skip(seconds: number): void {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + seconds * 1000);
+  }
+
+  it("gives the channel to the next caller once an unsigned settlement's short lease lapses", async () => {
+    const server = await startServer();
+    const idle = Keypair.random();
+    const built = await server.post("/settlement", {
+      destination: idle.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+
+    // Still inside the short lease: the one channel is taken.
+    skip(60);
+    const early = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(early.status).toBe(503);
+
+    // Five minutes and the clock-drift grace later, it is free again.
+    skip(300);
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+
+    // And the lapsed settlement can no longer be held.
+    const late = await server.post("/settlement/commit", {
+      destination: idle.publicKey(),
+      signedXdr: signXdr(built.body.xdr as string, idle),
+    });
+    expect(late.status).toBe(409);
+  });
+
+  it("keeps a signed settlement's channel until the settlement's own time bound", async () => {
+    const server = await startServer();
+    await holdSettlementFor(server, Keypair.random());
+
+    skip(3_600);
+    const later = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(later.status).toBe(503);
+  });
+});
