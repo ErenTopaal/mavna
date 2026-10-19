@@ -38,14 +38,16 @@ nothing is signed here; the transaction returns unsigned.
 
 Request: `{ "destination": "G...", "assets": ["USDC"], "sourceChainId": "ethereum-sepolia" }`.
 `assets` is optional and defaults to `["USDC"]`; each name must be on the operator's
-curated list. `sourceChainId` feeds the volume cap's chain class.
+curated list, and since the settlement repays one USDC trustline and nothing else,
+the only set accepted is `["USDC"]`. `sourceChainId` feeds the volume cap's chain
+class.
 
 Answers:
 
 - `200` `{ "xdr": "...", "sponsor": "G..." }`
 - `400` when the destination is missing, is not an address a Stellar account can
-  use, can already receive (nothing to prepare), or names an asset outside the
-  curated list
+  use, can already receive (nothing to prepare), names an asset outside the
+  curated list, or asks for any set of assets other than `["USDC"]`
 - `429` when a daily cap refuses, with the reason. The caps are checked here,
   before anyone is asked for a signature
 
@@ -114,7 +116,7 @@ built, signed by the account it was built for, is held, and only under that
 account. The envelope is also refused unless its operations are only a
 strict-receive path payment and sponsorship-revocation operations, and fee bumps
 are refused. A new commit replaces a held settlement whose preparation has not
-landed yet.
+landed yet and is not being submitted.
 
 Request: `{ "destination": "G...", "signedXdr": "..." }`. `destination` is
 optional and only checked against the account the settlement was built for.
@@ -128,7 +130,7 @@ Answers:
   invalid
 - `409` when the settlement was not built here or has expired ("Ask for a new
   one"), when the account's preparation has already landed against the
-  settlement held for it, or when the settlement's channel slot lapsed or passed to
+  settlement held for it or is being submitted against it right now, or when the settlement's channel slot lapsed or passed to
   someone else before it was signed
 
 ## `POST /settle`
