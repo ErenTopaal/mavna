@@ -208,6 +208,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
        * fail, which would count as a stranding and drop it.
        */
       prepared: boolean;
+      /**
+       * Whether a preparation against this settlement is being submitted. It
+       * is matched to what this settlement repays before it goes out, so the
+       * settlement cannot be swapped while it is on its way.
+       */
+      preparing: boolean;
     }
   >();
 
@@ -767,6 +773,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    if (current?.preparing === true) {
+      refuse(
+        record,
+        res,
+        origin,
+        409,
+        "This account's preparation is being submitted against the settlement already held.",
+      );
+      return;
+    }
     if (record.repays === undefined) {
       throw new Error("a built settlement has no record of what it repays");
     }
@@ -801,6 +817,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       maxTimeUnix: record.expiresAtUnix,
       repays: record.repays,
       prepared: false,
+      preparing: false,
     });
     reply(res, 200, { held: true }, origin);
   }
@@ -1072,24 +1089,46 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    // Marked before the first await, so the settlement just matched cannot be
+    // swapped for a cheaper one while this preparation is on its way.
+    held.preparing = true;
     const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);
-    const decision = await caps.check(source);
-    if (!decision.allowed) {
-      refuse(record, res, origin, 429, decision.reason, true);
-      return;
-    }
-
-    transaction.sign(keypair);
     let result: Awaited<ReturnType<RpcClient["submit"]>>;
     try {
-      result = await options.rpc.submit("sponsored preparation", async () => transaction);
-    } catch (cause) {
-      const retryable = cause instanceof MavnaError ? cause.retryable : true;
-      reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
-      return;
+      const decision = await caps.check(source);
+      if (!decision.allowed) {
+        refuse(record, res, origin, 429, decision.reason, true);
+        return;
+      }
+
+      transaction.sign(keypair);
+      try {
+        result = await options.rpc.submit("sponsored preparation", async () => transaction);
+      } catch (cause) {
+        const retryable = cause instanceof MavnaError ? cause.retryable : true;
+        reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
+        return;
+      }
+    } finally {
+      held.preparing = false;
     }
-    const landed = await liveSettlement(record.destination);
-    if (landed !== undefined) landed.prepared = true;
+    if (heldSettlements.get(record.destination) === held) {
+      held.prepared = true;
+    } else {
+      // Dropped as expired while the preparation was out, before it was marked
+      // prepared, so nothing counted it. The reserve is out and unrepaid.
+      console.error(
+        `[sponsor] a preparation for ${record.destination} landed after its settlement was dropped`,
+      );
+      try {
+        await caps.recordStranded();
+      } catch (cause) {
+        console.error(
+          "[sponsor] a stranded preparation was not counted against the cap:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     try {
       await caps.recordStarted(source);
     } catch (cause) {

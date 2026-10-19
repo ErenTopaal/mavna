@@ -86,6 +86,8 @@ class RecordingRpc extends RpcClient {
   private readonly pending = new Map<string, Transaction | FeeBumpTransaction>();
   /** What each transaction was submitted as, by hash. */
   private readonly labels = new Map<string, string>();
+  /** Sends held back before they reach the network, by label. */
+  private readonly stalls = new Map<string, () => Promise<void>>();
 
   constructor() {
     // the pause between polls yields to the event loop and nothing more
@@ -99,7 +101,15 @@ class RecordingRpc extends RpcClient {
         return val === undefined ? [] : [{ key, val, lastModifiedLedgerSeq: 1 }];
       }),
     });
-    this.server.sendTransaction = async (tx) => this.send(tx);
+    this.server.sendTransaction = async (tx) => {
+      const label = this.labels.get(tx.hash().toString("hex"));
+      const stall = label === undefined ? undefined : this.stalls.get(label);
+      if (label !== undefined && stall !== undefined) {
+        this.stalls.delete(label);
+        await stall();
+      }
+      return this.send(tx);
+    };
     this.server.getTransaction = async (hash) =>
       this.landed.get(hash) ?? {
         status: rpc.Api.GetTransactionStatus.NOT_FOUND,
@@ -180,6 +190,26 @@ class RecordingRpc extends RpcClient {
       return tx;
     };
     return super.submit(label, labelled, options);
+  }
+
+  /**
+   * Hold the next transaction submitted under this label before it reaches the
+   * network, the way a slow connection does, until released.
+   */
+  stallNext(label: string): { reached: Promise<void>; release: () => void } {
+    let release: () => void = () => {};
+    let arrived: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reached = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    this.stalls.set(label, async () => {
+      arrived();
+      await gate;
+    });
+    return { reached, release };
   }
 
   /** Let every transaction the network has queued land, in order. */
@@ -1943,6 +1973,136 @@ describe("the sponsor prepares only what the held settlement repays", () => {
       signedXdr: await preparedAndSigned(server, user),
     });
     expect(usdcOnly.status).toBe(200);
+  });
+});
+
+describe("the held settlement stays put while a preparation lands against it", () => {
+  /** A cap store whose next read waits until released, as a slow database does. */
+  class StallingStore extends InMemoryCapStore {
+    private stall: (() => Promise<void>) | undefined;
+
+    stallNext(): { reached: Promise<void>; release: () => void } {
+      let release: () => void = () => {};
+      let arrived: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const reached = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      this.stall = async () => {
+        arrived();
+        await gate;
+      };
+      return { reached, release };
+    }
+
+    override async load(day: string): Promise<CapUsage | undefined> {
+      const stall = this.stall;
+      this.stall = undefined;
+      if (stall !== undefined) await stall();
+      return super.load(day);
+    }
+  }
+
+  it("will not swap in a cheaper settlement while the preparation is being submitted", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    // While the account exists, a settlement repays one trustline.
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    const cheap = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(cheap.status).toBe(200);
+
+    // Merged away, the account needs creating, and the held settlement repays that too.
+    server.rpc.accounts.delete(user.publicKey());
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+
+    const stall = server.rpc.stallNext("sponsored preparation");
+    const submitting = server.post("/submit", { signedXdr: prepared });
+    await stall.reached;
+    const swapped = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(cheap.body.xdr as string, user),
+    });
+    stall.release();
+    expect(swapped.status).toBe(409);
+    expect(swapped.body.retryable).toBe(false);
+    expect((await submitting).status).toBe(200);
+
+    server.rpc.submissions.splice(0);
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(landed.operations.map((op) => op.type)).toContain("revokeAccountSponsorship");
+  });
+
+  it("takes a new settlement again once the cap has refused the preparation", async () => {
+    let day = "2026-10-19";
+    const store = new StallingStore();
+    const caps = new CapLedger(
+      store,
+      { strandingCapPerDay: 75, volumeCapPerDay: { "expensive-gas": 1, "cheap-gas": 1 } },
+      () => day,
+    );
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    const replacement = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(replacement.status).toBe(200);
+    await caps.recordStarted("expensive-gas");
+
+    // Refused while the submission is still checking the cap...
+    const stall = store.stallNext();
+    const submitting = server.post("/submit", { signedXdr: prepared });
+    await stall.reached;
+    const during = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(replacement.body.xdr as string, user),
+    });
+    stall.release();
+    expect(during.status).toBe(409);
+    expect((await submitting).status).toBe(429);
+
+    // ...and accepted once the cap has turned the submission away.
+    const after = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(replacement.body.xdr as string, user),
+    });
+    expect(after.status).toBe(200);
+    day = "2026-10-20";
+    const allowed = await server.post("/submit", { signedXdr: prepared });
+    expect(allowed.status).toBe(200);
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("counts a preparation that lands after its settlement expired as stranded", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const stall = server.rpc.stallNext("sponsored preparation");
+    const submitting = server.post("/submit", { signedXdr: prepared });
+    await stall.reached;
+    skipPastSettlementWindow();
+    const dropped = await server.post("/settle", { destination: user.publicKey() });
+    stall.release();
+    expect(dropped.status).toBe(404);
+    expect((await submitting).status).toBe(200);
+    expect((await caps.usage()).stranded).toBe(1);
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/landed after its settlement was dropped/);
+    logged.mockRestore();
   });
 });
 
