@@ -17,8 +17,11 @@ On the **Send to Stellar** screen, switch the asset beside the amount from `USDC
   Optimism, Polygon, Ink, Unichain, Sei, Hyperliquid EVM, X Layer, Berachain, Flare
   and Rootstock. A chain stays in the list even when its USDT0 deployment cannot reach
   Stellar at the moment, and the quote then says why.
-- **Receive on Stellar** shows `USDT0` and nothing else. USDT0 is not converted on
-  arrival, so the recipient holds USDT0.
+- **Receive on Stellar** offers `USDT0`, `USDC` or `XLM`. USDT0 arrives as itself;
+  picking USDC or XLM converts it on Stellar. The plain route has the recipient sign
+  that conversion after the USDT0 lands. Where an Arrival Contract is configured for
+  the network, a second route converts on arrival instead, with one signature and no
+  Stellar wallet, and delivers the USDT0 as it came if the minimum cannot be met.
 
 ## What you send and what arrives
 

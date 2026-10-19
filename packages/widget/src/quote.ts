@@ -17,7 +17,7 @@ import {
   rejectionIsRetryable,
   type TrustModel,
 } from "@mavna/core";
-import { raceAdapters } from "@mavna/routing";
+import { raceAdapters, type SwapAttachment } from "@mavna/routing";
 import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
@@ -553,6 +553,7 @@ export function runQuote(
     | "usdcIssuer"
     | "sponsorTerms"
     | "usdt0Assets"
+    | "usdt0Swap"
     | "baseReserveStroops"
   >,
   inputs: QuoteInputs,
@@ -609,7 +610,7 @@ export function runQuote(
     onDone(declined);
   };
 
-  const race = ({ from, to }: { from: Asset; to: Asset }): void => {
+  const race = ({ from, to }: { from: Asset; to: Asset }, swap?: SwapAttachment): void => {
     // The sponsor's terms come first, so no route it cannot carry is ever shown
     // and then taken back. They are cached on the engine after the first answer.
     void checkSponsor(engine, destination)
@@ -634,8 +635,7 @@ export function runQuote(
               if (live) onUpdate(settle(partial));
             },
             breaker: engine.breaker,
-            // the XLM leg converts arrived USDC, so it only rides on a USDC send
-            swap: inputs.wanted === "XLM" && send === "USDC" ? engine.xlmSwap : undefined,
+            swap,
             ranking: inputs.priority === "fast" ? "fastest" : "best-received",
             // No transaction builder pays a fee out yet, so nothing may be shown as
             // taken. Revisit when a collector exists for a route.
@@ -660,7 +660,17 @@ export function runQuote(
   if (send === "USDT0") {
     engine.usdt0Assets(inputs.chainId).then(
       (assets) => {
-        if (live) race(assets);
+        if (!live) return;
+        // USDT0 lands as USDT0; anything else wanted is a conversion of it,
+        // signed by the user on the plain route or run on arrival by contract
+        const wantedAsset =
+          inputs.wanted === "USDC"
+            ? engine.usdcOnStellar
+            : inputs.wanted === "XLM"
+              ? engine.xlmOnStellar
+              : undefined;
+        if (wantedAsset === undefined) race(assets);
+        else race({ from: assets.from, to: wantedAsset }, engine.usdt0Swap(assets.to, wantedAsset));
       },
       (cause: unknown) => {
         if (live) declineAll(cause);
@@ -676,7 +686,8 @@ export function runQuote(
     declineAll(cause);
     return handle;
   }
-  race(assets);
+  // the XLM leg converts arrived USDC
+  race(assets, inputs.wanted === "XLM" ? engine.xlmSwap : undefined);
 
   return handle;
 }

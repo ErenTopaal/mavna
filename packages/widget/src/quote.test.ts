@@ -2,6 +2,7 @@ import { CCTP_CONTRACTS, sourceUsdcFor } from "@mavna/adapter-cctp";
 import {
   type Asset,
   type BridgeAdapter,
+  type ComposeQuoteRequest,
   MavnaError,
   type QuoteRequest,
   type RouteRejection,
@@ -23,6 +24,7 @@ import {
   toRouteView,
   trustlineName,
 } from "./quote";
+import { usdt0SwapFor } from "./usdt0";
 
 const stellar = (id: string, symbol: string, decimals: number): Asset => ({
   chainId: "stellar-testnet",
@@ -110,6 +112,9 @@ describe("runQuote", () => {
     sponsorTerms: () => Promise.reject(new Error("not asked: the quote ends before the sponsor")),
     usdt0Assets: async (): Promise<{ from: Asset; to: Asset }> => {
       throw new Error("a USDC send never asks for USDT0");
+    },
+    usdt0Swap: () => {
+      throw new Error("a USDC send never converts USDT0");
     },
   };
   const inputs = {
@@ -349,11 +354,14 @@ describe("sending USDT0", () => {
   function quoteWith(
     assets: (chainId: string) => Promise<{ from: Asset; to: Asset }>,
     rail: Recorder,
+    over: { wanted?: "USDT0" | "USDC" | "XLM" } = {},
+    usdcOnStellar: Asset = engine.usdcOnStellar,
   ): Promise<RouteSet> {
     return new Promise((resolve) => {
       runQuote(
         {
           ...engine,
+          usdcOnStellar,
           usdt0Assets: assets,
           rpc: new RpcClient({ url: "https://example.invalid" }),
           usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
@@ -364,6 +372,8 @@ describe("sending USDT0", () => {
           }),
           adapters: [rail],
           breaker,
+          usdt0Swap: (usdt0: Asset, wanted: Asset) =>
+            usdt0SwapFor("mainnet", new SdexProvider("mainnet"), usdt0, wanted),
           xlmSwap: {
             provider: new SdexProvider("testnet"),
             delivered: engine.usdcOnStellar,
@@ -373,7 +383,7 @@ describe("sending USDT0", () => {
           },
           integratorFee: undefined,
         },
-        inputs,
+        { ...inputs, ...over },
         () => {},
         resolve,
       );
@@ -389,6 +399,52 @@ describe("sending USDT0", () => {
     expect(request?.to).toEqual(usdt0To);
     expect(request?.sends).toEqual({ asset: usdt0From, baseUnits: "12500000" });
     expect(request?.destination).toBe("GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI");
+  });
+
+  /** A LayerZero double that quotes a plain route and records the compose ask. */
+  class Composing extends Recorder {
+    readonly composeAsks: ComposeQuoteRequest[] = [];
+    override async quote(request?: QuoteRequest): Promise<RouteRejection> {
+      return super.quote(request);
+    }
+    async quoteCompose(request: ComposeQuoteRequest): Promise<undefined> {
+      this.composeAsks.push(request);
+      return undefined;
+    }
+  }
+
+  it.each([
+    ["USDC", "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"],
+    ["XLM", "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"],
+  ] as const)("races a conversion on arrival for USDT0 into %s", async (wanted, wantedContract) => {
+    const rail = new Composing("layerzero", [{ phase: "idle" }]);
+    const plain = routeFor("layerzero", { delivers: usdt0To });
+    rail.quote = async (request?: QuoteRequest) => {
+      if (request !== undefined) rail.requests.push(request);
+      return plain as never;
+    };
+    // USDT0 is mainnet only, so the USDC it converts into is mainnet's
+    const mainnetUsdc: Asset = {
+      ...engine.usdcOnStellar,
+      chainId: "stellar",
+      id: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    };
+    await quoteWith(usdt0Assets, rail, { wanted }, mainnetUsdc);
+    // the rail is still asked for USDT0, what it can deliver
+    expect(rail.requests[0]?.to).toEqual(usdt0To);
+    expect(rail.composeAsks).toHaveLength(1);
+    const ask = rail.composeAsks[0];
+    expect(ask?.arriving).toEqual(usdt0To);
+    // the token contract LayerZero delivers on Stellar, read on mainnet
+    expect(ask?.arrivingContract).toBe("CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF");
+    expect(ask?.wantedContract).toBe(wantedContract);
+    expect(ask?.to.symbol).toBe(wanted);
+  });
+
+  it("asks for no conversion when USDT0 is what is wanted", async () => {
+    const rail = new Composing("layerzero", [{ phase: "idle" }]);
+    await quoteWith(usdt0Assets, rail);
+    expect(rail.composeAsks).toEqual([]);
   });
 
   it("declines every rail with the deployment's own reason when the chain has none", async () => {
@@ -522,6 +578,9 @@ describe("a trustline an account opens with its own XLM", () => {
               minDeliveryBaseUnits: 0n,
             }),
             usdt0Assets: async () => ({ from: SOURCE_USDC, to: usdt0 }),
+            usdt0Swap: () => {
+              throw new Error("this quote wants USDT0 itself");
+            },
           },
           {
             chainId: "arbitrum",
@@ -637,6 +696,9 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
             sponsorTerms: async () => selfFunded,
             usdt0Assets: async () => {
               throw new Error("a USDC send never asks for USDT0");
+            },
+            usdt0Swap: () => {
+              throw new Error("a USDC send never converts USDT0");
             },
           },
           {

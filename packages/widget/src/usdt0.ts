@@ -8,7 +8,9 @@
  * comes from the LayerZero table too.
  */
 import { EVM_SOURCES } from "@mavna/adapter-layerzero";
-import type { NetworkId } from "@mavna/core";
+import type { Asset, NetworkId } from "@mavna/core";
+import type { SwapAttachment } from "@mavna/routing";
+import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
 
 export interface ChainFilter {
   readonly allow?: readonly string[];
@@ -50,5 +52,35 @@ export function layerZeroSourceDetail(
     evmChainId: source.evmChainId,
     name: source.name,
     nativeCurrency: { ...source.nativeCurrency },
+  };
+}
+
+/** The contract id an asset trades under on Stellar: its asset contract. */
+function contractOf(network: NetworkId, id: string): string {
+  const passphrase = network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+  if (id === "native") return StellarAsset.native().contractId(passphrase);
+  const [code, issuer] = id.split(":");
+  if (code === undefined || issuer === undefined) return id;
+  return new StellarAsset(code, issuer).contractId(passphrase);
+}
+
+/**
+ * Converting what LayerZero delivers (USDT0) into what the user wants. Keyed
+ * by token contracts, since that is how both the venues and the Arrival
+ * Contract name them; the plain route converts with the user's own signature,
+ * and the race also asks LayerZero for a conversion on arrival with it.
+ */
+export function usdt0SwapFor(
+  network: NetworkId,
+  provider: SwapAttachment["provider"],
+  usdt0: Asset,
+  wanted: Asset,
+): SwapAttachment {
+  return {
+    provider,
+    delivered: usdt0,
+    deliveredContract: contractOf(network, usdt0.id),
+    wanted,
+    wantedContract: contractOf(network, wanted.id),
   };
 }

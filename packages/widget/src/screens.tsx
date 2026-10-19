@@ -11,7 +11,14 @@ import type { Flow } from "./flow";
 import { fmt, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
-import { enabledRailCount, type RailName, type RouteView, railDisplay, TRUST_LABEL } from "./quote";
+import {
+  enabledRailCount,
+  type RailName,
+  type RouteView,
+  railDisplay,
+  TRUST_LABEL,
+  type Wanted,
+} from "./quote";
 import { s } from "./style";
 import type { FlightRow } from "./transfer";
 
@@ -74,12 +81,13 @@ export function renderSend(
   },
 ): ReactElement {
   const st = c.state;
-  const { r, chain, sym, xlm } = d;
+  const { r, chain, sym } = d;
   const hasBalance = st.wallet !== null && st.balance !== null;
   const balanceLine = st.balance !== null ? `Balance ${fmt(st.balance)} ${st.send}` : "";
-  const segX = xlm ? "52px" : "0px";
-  const usdcInk = xlm ? "var(--mv-muted)" : "var(--mv-on-light)";
-  const xlmInk = xlm ? "var(--mv-on-light)" : "var(--mv-muted)";
+  // USDT0 lands as itself unless converted on Stellar; USDC lands as USDC or XLM
+  const receiveChoices: readonly Wanted[] =
+    st.send === "USDT0" ? ["USDT0", "USDC", "XLM"] : ["USDC", "XLM"];
+  const segX = `${Math.max(0, receiveChoices.indexOf(st.wanted)) * 52}px`;
   const receiveFigure = r === undefined ? "0" : fmt(r.receives);
   const figureInk = r === undefined ? "var(--mv-faintest)" : "var(--mv-ink)";
   const floorLine = r === undefined ? "" : r.exact ? "Exact" : `Min ${fmt(r.floor)} ${sym}`;
@@ -201,52 +209,34 @@ export function renderSend(
           >
             Receive on Stellar
           </p>
-          {st.send === "USDT0" ? (
-            // nothing converts USDT0 here, so there is no choice to offer
-            <span
-              style={s(
-                "flex:0 0 auto;padding:5px 12px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:var(--mv-ink)",
-              )}
-            >
-              USDT0
-            </span>
-          ) : (
+          <div
+            style={s(
+              "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+            )}
+          >
             <div
               style={s(
-                "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+                `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
               )}
-            >
-              <div
-                style={s(
-                  `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
-                )}
-              />
+            />
+            {receiveChoices.map((asset) => (
               <button
+                key={asset}
                 type="button"
+                aria-label={`Receive ${asset}`}
+                aria-pressed={st.wanted === asset}
                 onClick={() => {
-                  if (!xlm) return;
-                  c.setState({ wanted: "USDC" }, () => c.runQuote());
+                  if (st.wanted === asset) return;
+                  c.setState({ wanted: asset }, () => c.runQuote());
                 }}
                 style={s(
-                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${usdcInk}`,
+                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${st.wanted === asset ? "var(--mv-on-light)" : "var(--mv-muted)"}`,
                 )}
               >
-                USDC
+                {asset}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (xlm) return;
-                  c.setState({ wanted: "XLM" }, () => c.runQuote());
-                }}
-                style={s(
-                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${xlmInk}`,
-                )}
-              >
-                XLM
-              </button>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
         <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
           <span

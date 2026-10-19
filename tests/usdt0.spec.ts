@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("picking USDT0 narrows the chains to LayerZero's and fixes what arrives", async ({
+test("picking USDT0 narrows the chains to LayerZero's and offers it, USDC or XLM on arrival", async ({
   page,
   baseURL,
 }) => {
@@ -17,13 +17,20 @@ test("picking USDT0 narrows the chains to LayerZero's and fixes what arrives", a
 
   const usdt0 = root.getByRole("button", { name: "USDT0", exact: true });
   await expect(usdt0).toHaveAttribute("aria-pressed", "false");
+  const receive = (asset: string) =>
+    root.getByRole("button", { name: `Receive ${asset}`, exact: true });
   // the receive side offers USDC or XLM while USDC is being sent
-  await expect(root.getByRole("button", { name: "XLM", exact: true })).toBeVisible();
+  await expect(receive("XLM")).toBeVisible();
+  await expect(receive("USDT0")).toBeHidden();
 
   await usdt0.click();
   await expect(usdt0).toHaveAttribute("aria-pressed", "true");
-  // nothing converts USDT0, so the receive choice is gone
-  await expect(root.getByRole("button", { name: "XLM", exact: true })).toBeHidden();
+  // USDT0 arrives as itself unless a conversion into USDC or XLM is picked
+  await expect(receive("USDT0")).toHaveAttribute("aria-pressed", "true");
+  await expect(receive("USDC")).toHaveAttribute("aria-pressed", "false");
+  await expect(receive("XLM")).toBeVisible();
+  await receive("XLM").click();
+  await expect(receive("XLM")).toHaveAttribute("aria-pressed", "true");
 
   // Ethereum Sepolia carries the Stellar pathway, so the chain stays put
   await root.getByRole("button", { name: /Ethereum Sepolia/ }).click();

@@ -19,7 +19,7 @@ import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } fro
 import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
-import { layerZeroSourceDetail, usdt0ChainsFor } from "./usdt0.js";
+import { layerZeroSourceDetail, usdt0ChainsFor, usdt0SwapFor } from "./usdt0.js";
 
 /**
  * The SDK, assembled from configuration instead of from the environment.
@@ -93,6 +93,8 @@ export interface Engine {
   readonly usdcOnStellar: MavnaAsset;
   readonly xlmOnStellar: MavnaAsset;
   readonly xlmSwap: SwapAttachment;
+  /** Converting the USDT0 LayerZero delivers into `wanted`, through the same venues. */
+  usdt0Swap(usdt0: MavnaAsset, wanted: MavnaAsset): SwapAttachment;
   /**
    * The swap leg's venues in v2 order (Soroswap through this sponsor's proxy,
    * SushiSwap for USDT0 pairs, Aquarius), which quote and build the conversion.
@@ -260,6 +262,7 @@ export function createEngine(config: EngineConfig): Engine {
     usdcOnStellar,
     xlmOnStellar,
     xlmSwap,
+    usdt0Swap: (usdt0, wanted) => usdt0SwapFor(network, swapVenues, usdt0, wanted),
     swapVenues,
     usdcIssuer,
     baseReserveStroops: netConfig.baseReserveStroops,
