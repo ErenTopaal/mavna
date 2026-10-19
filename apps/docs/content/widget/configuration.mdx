@@ -49,13 +49,16 @@ this page.
 - **`chains`**. `{ allow?, deny? }`, filtered over the network's real chain list by
   Mavna slug. These narrow the list; they cannot add a chain the network does not
   carry.
-- **`wanted`**. `"USDC"` or `"XLM"`, the asset the recipient arrives holding. The
-  send asset is always USDC.
+- **`wanted`**. `"USDC"` or `"XLM"`, the asset the recipient arrives holding when
+  sending USDC. A USDT0 send always arrives as USDT0.
 
 ## Starting the form
 
 - **`fromChain`**. The chain the form starts on, by Mavna slug (for example
   `"ethereum-sepolia"`).
+- **`fromAsset`**. `"USDC"` or `"USDT0"`, what the form starts out sending. Defaults
+  to `"USDC"`. USDT0 is offered only while the LayerZero rail is enabled, and its
+  chain list is LayerZero's, narrowed by the same `chains` filter.
 - **`fromAmount`**. The amount the form starts with.
 - **`toAddress`**. The recipient's Stellar address, pre-filled. Combine with
   `requiredUI: ["destination"]` to lock it.

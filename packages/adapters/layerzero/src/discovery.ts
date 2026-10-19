@@ -1,6 +1,13 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import type { RpcClient } from "@mavna/stellar";
-import { Contract, scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  Contract,
+  Networks,
+  Asset as StellarAsset,
+  StrKey,
+  scValToNative,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { type Abi, decodeFunctionResult, encodeFunctionData } from "viem";
 import {
   type EvmSource,
@@ -65,6 +72,14 @@ export interface StellarOftFacts {
   readonly kind: string;
 }
 
+/** A Stellar classic asset, as a person and the order book name it. */
+export interface StellarClassicAsset {
+  readonly code: string;
+  readonly issuer: string;
+  /** `CODE:ISSUER`, the only form of the name that is an identity. */
+  readonly id: string;
+}
+
 export interface ResolvedRoute {
   readonly chainId: string;
   readonly source: EvmSource;
@@ -81,6 +96,12 @@ export interface ResolvedRoute {
   /** The Stellar contract this OFT is peered to, decoded from its own storage. */
   readonly stellarOft: string;
   readonly stellar: StellarOftFacts;
+  /**
+   * The classic asset behind the Stellar token, read from the token's own
+   * storage, or undefined when the token is a plain Soroban contract with no
+   * code and issuer to address it by.
+   */
+  readonly delivers: StellarClassicAsset | undefined;
   /** What the OApp already enforces, so nothing has to be invented. */
   readonly enforcedOptions: `0x${string}`;
   readonly sendLibrary: string;
@@ -426,6 +447,12 @@ export class Discovery {
       );
     }
 
+    const delivers = await readStellarToken(
+      this.rpc,
+      facts.token,
+      this.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
+    );
+
     const local = Number(sharedDecimals) + facts.decimalsDiff;
     if (local !== 7) {
       throw new MavnaError(
@@ -449,6 +476,7 @@ export class Discovery {
       sourceEid,
       stellarOft,
       stellar: facts,
+      delivers,
       enforcedOptions: enforced as `0x${string}`,
       sendLibrary,
       uln: uln as UlnConfig,
@@ -541,18 +569,7 @@ export class Discovery {
  * whatever the contract would do if invoked.
  */
 export async function readStellarOft(rpc: RpcClient, contract: string): Promise<StellarOftFacts> {
-  const key = xdr.LedgerKey.contractData(
-    new xdr.LedgerKeyContractData({
-      contract: new Contract(contract).address().toScAddress(),
-      key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
-    }),
-  );
-
-  const entry = await rpc.read(`Stellar OFT ${contract}`, async () => {
-    const response = await rpc.server.getLedgerEntries(key);
-    return { value: response.entries[0], ledger: response.latestLedger };
-  });
+  const entry = await readInstance(rpc, `Stellar OFT ${contract}`, contract);
 
   if (entry === undefined) {
     throw new MavnaError(
@@ -589,6 +606,102 @@ export async function readStellarOft(rpc: RpcClient, contract: string): Promise<
     decimalsDiff: Number(decimalsDiff ?? 0),
     kind: Array.isArray(oftType) && typeof oftType[0] === "string" ? oftType[0] : "unknown",
   };
+}
+
+async function readInstance(
+  rpc: RpcClient,
+  label: string,
+  contract: string,
+): Promise<{ readonly val: xdr.LedgerEntryData } | undefined> {
+  const key = xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Contract(contract).address().toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+  return rpc.read(label, async () => {
+    const response = await rpc.server.getLedgerEntries(key);
+    return { value: response.entries[0], ledger: response.latestLedger };
+  });
+}
+
+/**
+ * The classic asset a Stellar token stands for, read from the token itself.
+ *
+ * A Stellar asset contract keeps the asset it wraps in an `AssetInfo` slot, and
+ * that is the only place the code and issuer can be learned without trusting a
+ * document. The answer is then checked the other way round: an asset contract's
+ * id is a hash of its asset, so a derived id that is not this contract means the
+ * storage was misread, and a transfer labelled with a misread identity is
+ * labelled as something it is not.
+ *
+ * Undefined for a token deployed from its own Wasm, or one wrapping native XLM.
+ * Neither has a code and issuer, so neither can be named the way the rest of
+ * this codebase names a Stellar asset.
+ */
+export async function readStellarToken(
+  rpc: RpcClient,
+  token: string,
+  passphrase: string,
+): Promise<StellarClassicAsset | undefined> {
+  const entry = await readInstance(rpc, `Stellar token ${token}`, token);
+  if (entry === undefined) {
+    throw new MavnaError(
+      `the Stellar token ${token} its OFT credits does not exist, or its storage has been archived`,
+      { retryable: false },
+    );
+  }
+  const instance = entry.val.contractData().val().instance();
+  if (instance.executable().switch().name !== "contractExecutableStellarAsset") return undefined;
+
+  let info: xdr.ScVal | undefined;
+  for (const item of instance.storage() ?? []) {
+    const key = item.key();
+    if (key.switch().name !== "scvVec") continue;
+    const head = key.vec()?.[0];
+    if (head?.switch().name === "scvSymbol" && head.sym().toString() === "AssetInfo") {
+      info = item.val();
+    }
+  }
+  const parts = info?.switch().name === "scvVec" ? (info.vec() ?? []) : [];
+  const head = parts[0];
+  const variant = head?.switch().name === "scvSymbol" ? head.sym().toString() : undefined;
+  if (variant !== "AlphaNum4" && variant !== "AlphaNum12") return undefined;
+
+  const fields = new Map<string, xdr.ScVal>();
+  for (const field of parts[1]?.map() ?? []) {
+    if (field.key().switch().name === "scvSymbol") {
+      fields.set(field.key().sym().toString(), field.val());
+    }
+  }
+  const rawCode = fields.get("asset_code");
+  const rawIssuer = fields.get("issuer");
+  if (rawCode === undefined || rawIssuer?.switch().name !== "scvBytes") {
+    throw new MavnaError(
+      `the Stellar asset contract ${token} has no readable asset code and issuer`,
+      { retryable: false },
+    );
+  }
+  // stored at its fixed width, padded with NULs
+  const code = String(scValToNative(rawCode)).replace(/\0+$/, "");
+  const issuer = StrKey.encodeEd25519PublicKey(rawIssuer.bytes());
+
+  let derived = "";
+  try {
+    derived = new StellarAsset(code, issuer).contractId(passphrase);
+  } catch {
+    // an unbuildable asset derives nothing, which the check below refuses
+  }
+  if (derived !== token) {
+    throw new MavnaError(
+      `the Stellar asset contract ${token} says it wraps ${code}:${issuer}, which does not ` +
+        "derive its own address. Refusing to label a transfer with an identity that does not " +
+        "check out",
+      { retryable: false },
+    );
+  }
+  return { code, issuer, id: `${code}:${issuer}` };
 }
 
 /**

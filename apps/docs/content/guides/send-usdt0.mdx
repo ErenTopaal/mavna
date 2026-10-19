@@ -1,0 +1,60 @@
+---
+title: Send USDT0 to Stellar
+description: Send USDT0 over LayerZero and receive USDT0 on Stellar, the classic asset Tether's USDT0 deployment issues there.
+---
+
+# Send USDT0 to Stellar
+
+If your dollars are USDT rather than USDC, send USDT0. It travels over LayerZero,
+the only route to native USDT on Stellar, and arrives as USDT0 on Stellar.
+
+## Pick USDT0
+
+On the **Send to Stellar** screen, switch the asset beside the amount from `USDC` to
+`USDT0`. Two things follow from that switch:
+
+- **Send from** now lists the chains USDT0 can leave from: Ethereum, Arbitrum,
+  Optimism, Polygon, Ink, Unichain, Sei, Hyperliquid EVM, X Layer, Berachain, Flare
+  and Rootstock. A chain stays in the list even when its USDT0 deployment cannot reach
+  Stellar at the moment, and the quote then says why.
+- **Receive on Stellar** shows `USDT0` and nothing else. USDT0 is not converted on
+  arrival, so the recipient holds USDT0.
+
+## What you send and what arrives
+
+The token you send is the one the chain's USDT0 contract moves, read from that
+contract when you quote, never from a list of names. What arrives is the Stellar
+asset the USDT0 contract on Stellar credits, read from that contract's own storage:
+`USDT0` issued by `GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q`. Anyone
+can issue an asset called USDT0, so check the issuer if you add it to a wallet by
+hand.
+
+## The receiving account
+
+The recipient needs a Stellar account that already holds a USDT0 trustline. If it
+does not, the screen tells you before anything is signed.
+
+A brand-new account cannot receive USDT0 through Mavna yet. Setting one up is paid
+back in USDC from what arrives, and USDC is the only asset the sponsor curates, so a
+USDT0 route to a new address is declined at quote time with that reason. Send to an
+account that exists and can hold USDT0, or [send USDC](/guides/send) instead.
+
+## Costs and time
+
+LayerZero's fee is paid in the source chain's own gas token, separately from the
+amount, and the quote shows it in that token. The least you receive is enforced by
+the USDT0 contract itself, from the slippage you chose. How long delivery takes
+depends on the confirmations USDT0 asks for on the chain you send from, so the same
+amount can take seconds from Arbitrum and many minutes from Ethereum. The quote works
+the estimate out per chain.
+
+## Test network
+
+USDT0 exists on the main network only. On the test network the asset can be picked,
+and the quote explains that this route carries no token there.
+
+## Find it later
+
+A USDT0 transfer shows in **Activity** like any other, and can be
+[found again](/guides/track) from its source transaction alone. Its status is read
+from LayerZero's own message index.

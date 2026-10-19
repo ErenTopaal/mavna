@@ -38,6 +38,7 @@ import {
   type RouteView,
   railDisplay,
   runQuote as realQuote,
+  type SendAsset,
   toRouteView,
   type Wanted,
 } from "./quote";
@@ -87,6 +88,8 @@ interface State {
   cameFrom: Screen | null;
   dir: "push" | "pop";
   chainId: string;
+  /** What the user is sending. The chain list and the receive side follow it. */
+  send: SendAsset;
   wanted: Wanted;
   amount: string;
   destination: string;
@@ -143,6 +146,7 @@ export interface FlowProps {
   readonly init?: {
     readonly chainId?: string | undefined;
     readonly wanted?: Wanted | undefined;
+    readonly send?: SendAsset | undefined;
     readonly amount?: string | undefined;
     readonly destination?: string | undefined;
   };
@@ -192,7 +196,9 @@ export class Flow extends React.Component<FlowProps, State> {
     cameFrom: null,
     dir: "push",
     chainId: this.props.init?.chainId ?? this.engine.defaultSourceChain,
-    wanted: this.props.init?.wanted ?? "USDC",
+    send: this.props.init?.send ?? "USDC",
+    // a USDT0 send has no conversion leg, so it lands as USDT0
+    wanted: this.props.init?.send === "USDT0" ? "USDT0" : (this.props.init?.wanted ?? "USDC"),
     amount: this.props.init?.amount ?? "",
     destination: this.props.init?.destination ?? "",
     routes: [],
@@ -288,7 +294,33 @@ export class Flow extends React.Component<FlowProps, State> {
   // ---------------------------------------------------------------- helpers ---
 
   list(): ReadonlyArray<{ id: string; name: string }> {
-    return this.engine.sourceChains;
+    return this.state.send === "USDT0" ? this.engine.usdt0Chains : this.engine.sourceChains;
+  }
+  /** Whether USDT0 can be offered at all: only LayerZero carries it. */
+  usdt0Offered(): boolean {
+    return this.engine.adapters.some((a) => a.id === "layerzero");
+  }
+  /**
+   * Switch what is being sent. The chain stays when the new asset can leave from
+   * it, and otherwise moves to the first chain that can, so the form never sits
+   * on a chain the picker would not offer.
+   */
+  setSend(send: SendAsset): void {
+    if (send === this.state.send) return;
+    const chains = send === "USDT0" ? this.engine.usdt0Chains : this.engine.sourceChains;
+    const preferred = this.engine.network === "mainnet" ? "ethereum" : "ethereum-sepolia";
+    const chainId = chains.some((c) => c.id === this.state.chainId)
+      ? this.state.chainId
+      : chains.some((c) => c.id === preferred)
+        ? preferred
+        : (chains[0]?.id ?? "");
+    this.setState(
+      { send, chainId, wanted: send === "USDT0" ? "USDT0" : "USDC", balance: null },
+      () => {
+        this.runQuote();
+        void this.refreshBalance({ align: true });
+      },
+    );
   }
   chain(): { id: string; name: string } {
     return (
@@ -306,7 +338,7 @@ export class Flow extends React.Component<FlowProps, State> {
     return /^G[A-Z2-7]{55}$/.test(this.state.destination.trim());
   }
   sym(): string {
-    return this.state.wanted === "XLM" ? "XLM" : "USDC";
+    return this.state.wanted;
   }
 
   // ------------------------------------------------------------- lifecycle ---
@@ -731,6 +763,7 @@ export class Flow extends React.Component<FlowProps, State> {
         destination: this.state.destination,
         priority: this.state.priority,
         rails: this.state.rails,
+        send: this.state.send,
       },
       (partial) => this.applyQuote(partial, false),
       (final) => this.applyQuote(final, true),
@@ -819,7 +852,7 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   /**
-   * Read the connected wallet's USDC balance on the selected chain.
+   * Read the connected wallet's balance of what it is sending, on the selected chain.
    *
    * The app ships no RPC of its own, so the balance is read through the wallet's
    * own node, which means the wallet has to be on the selected chain. With
@@ -832,13 +865,24 @@ export class Flow extends React.Component<FlowProps, State> {
       this.setState({ balance: null });
       return;
     }
-    const detail = this.engine.sourceChainDetail(this.state.chainId);
-    const usdc = this.engine.sourceUsdc(this.state.chainId);
-    if (detail.kind !== "evm" || usdc === undefined) {
+    const send = this.state.send;
+    const chainId = this.state.chainId;
+    const detail = this.engine.sourceChainDetail(chainId);
+    if (detail.kind !== "evm") {
       this.setState({ balance: null });
       return;
     }
     try {
+      // USDT0's address is whatever the chain's OFT moves, so it is asked for
+      // rather than looked up; a chain with no route simply shows no balance.
+      const token =
+        send === "USDT0"
+          ? (await this.engine.usdt0Assets(chainId)).from
+          : { id: this.engine.sourceUsdc(chainId), decimals: 6 };
+      if (token.id === undefined) {
+        this.setState({ balance: null });
+        return;
+      }
       let current = Number(await w.connection.provider.request({ method: "eth_chainId" }));
       if (opts?.align === true && current !== detail.evmChainId) {
         try {
@@ -853,13 +897,15 @@ export class Flow extends React.Component<FlowProps, State> {
         return;
       }
       const raw = (await w.connection.reader.readContract({
-        address: usdc as Address,
+        address: token.id as Address,
         abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [w.connection.address],
       })) as bigint;
+      // the picker may have moved on while this was being read
+      if (this.state.send !== send || this.state.chainId !== chainId) return;
       const cap = this.lockHeight();
-      this.setState({ balance: Number(raw) / 1e6 }, () => this.animateHeight(cap));
+      this.setState({ balance: Number(raw) / 10 ** token.decimals }, () => this.animateHeight(cap));
     } catch {
       this.setState({ balance: null });
     }

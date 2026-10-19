@@ -10,6 +10,7 @@
 import { sourceUsdcFor } from "@mavna/adapter-cctp";
 import {
   type Asset,
+  MavnaError,
   type Route,
   type RouteRejection,
   type RouteSet,
@@ -28,7 +29,10 @@ const USDC_DECIMALS_ON_EVM = 6;
 
 export type RailName = "Circle" | "Axelar" | "LayerZero";
 export type Priority = "best" | "fast";
-export type Wanted = "USDC" | "XLM";
+/** USDT0 lands as itself: no conversion leg is offered for it here. */
+export type Wanted = "USDC" | "XLM" | "USDT0";
+/** What the user sends, as the picker names it. */
+export type SendAsset = "USDC" | "USDT0";
 
 /** Adapter id ⇄ the display name the design uses for each rail. */
 const SOURCE_TO_RAIL: Readonly<Record<string, RailName>> = {
@@ -56,6 +60,8 @@ export interface QuoteInputs {
   readonly destination: string;
   readonly priority: Priority;
   readonly rails: Readonly<Record<RailName, boolean>>;
+  /** Defaults to USDC. */
+  readonly send?: SendAsset;
 }
 
 /** A route reduced to the numbers the design's cards and review screen show. */
@@ -78,6 +84,8 @@ export interface RouteView {
    * not convert has none and a route through a different venue shows that venue.
    */
   readonly swapVenue: string | undefined;
+  /** What the transfer fee is counted in, read off the fee itself. */
+  readonly feeSymbol: string;
 }
 
 export interface DeclineView {
@@ -149,6 +157,7 @@ export function toRouteView(route: Route): RouteView {
         ? undefined
         : fromBaseUnits(reserve.total.baseUnits, reserve.total.asset.decimals),
     swapVenue: swapStep === undefined ? undefined : venueLabel(swapStep.source),
+    feeSymbol: bridge?.total.asset.symbol ?? route.sends.asset.symbol,
   };
 }
 
@@ -176,6 +185,24 @@ export function buildAssets(
 }
 
 /**
+ * The assets for what the user picked to send.
+ *
+ * USDT0's come from the LayerZero deployment through the engine, never from a
+ * symbol: the source id is the token the chain's OFT moves and the Stellar id is
+ * the classic asset its Stellar token wraps. Nothing converts USDT0 here, so
+ * what it lands as is what the recipient gets whatever `wanted` says.
+ */
+export async function assetsFor(
+  engine: Pick<Engine, "network" | "usdcOnStellar" | "xlmOnStellar" | "usdt0Assets">,
+  chainId: string,
+  send: SendAsset,
+  wanted: Wanted,
+): Promise<{ from: Asset; to: Asset }> {
+  if (send === "USDT0") return engine.usdt0Assets(chainId);
+  return buildAssets(engine, chainId, wanted);
+}
+
+/**
  * Why a route cannot set up a new account, or undefined when it can.
  *
  * The sponsor fronts the reserve and is repaid out of what arrives, and the
@@ -188,8 +215,9 @@ export function settlementBlocker(route: Route, usdcId: string): string | undefi
   const delivers = route.deliveredAtLeast.asset;
   if (delivers.id === usdcId) return undefined;
   return (
-    "A new Stellar account can only be set up on a route that delivers USDC, because its " +
-    `deposit is repaid in USDC from what arrives, and this route delivers ${delivers.symbol}.`
+    "A new Stellar account can only be set up on a route that delivers USDC, the one asset " +
+    "the sponsor curates, because its deposit is repaid in USDC from what arrives, and this " +
+    `route delivers ${delivers.symbol}.`
   );
 }
 
@@ -361,6 +389,7 @@ export function runQuote(
     | "rpc"
     | "usdcIssuer"
     | "sponsorTerms"
+    | "usdt0Assets"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,
@@ -369,8 +398,10 @@ export function runQuote(
   onSponsor?: (check: SponsorCheck) => void,
 ): QuoteRun {
   let live = true;
-  const amountBase = toBaseUnits(inputs.amount, USDC_DECIMALS_ON_EVM);
-  if (BigInt(amountBase) <= 0n) {
+  const send = inputs.send ?? "USDC";
+  // only asks whether there is anything to send; the amount is counted in the
+  // source token's own decimals once that token is known
+  if (BigInt(toBaseUnits(inputs.amount, USDC_DECIMALS_ON_EVM)) <= 0n) {
     const empty: RouteSet = { routes: [], rejected: [], complete: true };
     onUpdate(empty);
     onDone(empty);
@@ -388,73 +419,98 @@ export function runQuote(
     },
   };
 
-  let assets: { from: Asset; to: Asset };
-  try {
-    assets = buildAssets(engine, inputs.chainId, inputs.wanted);
-  } catch (cause) {
-    // Nothing can be asked without the source token, and every enabled rail is
-    // owed the reason rather than a picker that quietly shows nothing.
+  const usdc = engine.usdcOnStellar.id;
+  const destination = inputs.destination.trim();
+
+  // Nothing can be asked without the source token, and every enabled rail is
+  // owed the reason rather than a picker that quietly shows nothing.
+  const declineAll = (cause: unknown): void => {
     const explanation = cause instanceof Error ? cause.message : String(cause);
+    // A node that did not answer is not a chain with no route.
+    const reason =
+      cause instanceof MavnaError && cause.retryable
+        ? ("temporarily-unavailable" as const)
+        : ("asset-unsupported" as const);
     const declined: RouteSet = {
       routes: [],
       rejected: adapters.map((a) => ({
         source: a.id,
-        reason: "asset-unsupported" as const,
+        reason,
         explanation,
-        retryable: rejectionIsRetryable("asset-unsupported"),
+        retryable: rejectionIsRetryable(reason),
       })),
       complete: true,
     };
     onUpdate(declined);
     onDone(declined);
-    return handle;
-  }
-  const { from, to } = assets;
-  const usdc = engine.usdcOnStellar.id;
-  const destination = inputs.destination.trim();
+  };
 
-  // The sponsor's terms come first, so no route it cannot carry is ever shown
-  // and then taken back. They are cached on the engine after the first answer.
-  void checkSponsor(engine, destination)
-    .then((check) => {
-      if (!live) return undefined;
-      onSponsor?.(check);
-      const settle = (set: RouteSet): RouteSet =>
-        applySponsorTerms(declineUnsettleable(set, usdc), check);
-      return raceAdapters(
-        adapters,
-        {
-          from,
-          to,
-          sends: { asset: from, baseUnits: amountBase },
-          destination,
-          maxSlippageBps: 50,
-        },
-        {
-          onUpdate: (partial) => {
-            if (live) onUpdate(settle(partial));
+  const race = ({ from, to }: { from: Asset; to: Asset }): void => {
+    // The sponsor's terms come first, so no route it cannot carry is ever shown
+    // and then taken back. They are cached on the engine after the first answer.
+    void checkSponsor(engine, destination)
+      .then((check) => {
+        if (!live) return undefined;
+        onSponsor?.(check);
+        const settle = (set: RouteSet): RouteSet =>
+          applySponsorTerms(declineUnsettleable(set, usdc), check);
+        return raceAdapters(
+          adapters,
+          {
+            from,
+            to,
+            sends: { asset: from, baseUnits: toBaseUnits(inputs.amount, from.decimals) },
+            destination,
+            maxSlippageBps: 50,
           },
-          breaker: engine.breaker,
-          swap: inputs.wanted === "XLM" ? engine.xlmSwap : undefined,
-          ranking: inputs.priority === "fast" ? "fastest" : "best-received",
-          // No transaction builder pays a fee out yet, so nothing may be shown as
-          // taken. Revisit when a collector exists for a route.
-          integratorFee:
-            engine.integratorFee === undefined
-              ? undefined
-              : { ...engine.integratorFee, collects: () => false },
+          {
+            onUpdate: (partial) => {
+              if (live) onUpdate(settle(partial));
+            },
+            breaker: engine.breaker,
+            // the XLM leg converts arrived USDC, so it only rides on a USDC send
+            swap: inputs.wanted === "XLM" && send === "USDC" ? engine.xlmSwap : undefined,
+            ranking: inputs.priority === "fast" ? "fastest" : "best-received",
+            // No transaction builder pays a fee out yet, so nothing may be shown as
+            // taken. Revisit when a collector exists for a route.
+            integratorFee:
+              engine.integratorFee === undefined
+                ? undefined
+                : { ...engine.integratorFee, collects: () => false },
+          },
+        ).then((final) => settle(final));
+      })
+      .then(
+        (final) => {
+          if (live && final !== undefined) onDone(final);
         },
-      ).then((final) => settle(final));
-    })
-    .then(
-      (final) => {
-        if (live && final !== undefined) onDone(final);
+        () => {
+          // A total failure still resolves to a complete, empty set for the UI.
+          if (live) onDone({ routes: [], rejected: [], complete: true });
+        },
+      );
+  };
+
+  if (send === "USDT0") {
+    engine.usdt0Assets(inputs.chainId).then(
+      (assets) => {
+        if (live) race(assets);
       },
-      () => {
-        // A total failure still resolves to a complete, empty set for the UI.
-        if (live) onDone({ routes: [], rejected: [], complete: true });
+      (cause: unknown) => {
+        if (live) declineAll(cause);
       },
     );
+    return handle;
+  }
+
+  let assets: { from: Asset; to: Asset };
+  try {
+    assets = buildAssets(engine, inputs.chainId, inputs.wanted);
+  } catch (cause) {
+    declineAll(cause);
+    return handle;
+  }
+  race(assets);
 
   return handle;
 }

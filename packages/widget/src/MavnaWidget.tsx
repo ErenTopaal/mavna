@@ -125,6 +125,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
       wanted: resolved.init.wanted,
       amount: resolved.init.fromAmount,
       destination: resolved.init.toAddress,
+      send: resolved.init.fromAsset,
     },
     rails: resolved.rails,
     hiddenUI: resolved.hiddenUI,
