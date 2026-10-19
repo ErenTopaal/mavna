@@ -31,15 +31,16 @@ custom properties, so it looks like your product.
 
 ## What it moves, and from where
 
-Three rails, each a separate adapter behind one interface, each with its own
-trust model. The engine races all three on every quote and shows the differences
-side by side.
+Four rails, each a separate adapter behind one interface, each with its own
+trust model. The engine races every rail on offer on each quote and shows the
+differences side by side.
 
 | Rail | Trust model | Source chains | Assets into Stellar |
 | --- | --- | --- | --- |
 | Circle CCTP | The issuer burns and mints; nobody holds the money in between | 26 on testnet, 25 on mainnet: EVM, Solana, Starknet | USDC |
 | Axelar ITS | A named validator set attests | Resolved at runtime from Axelar's registry | Interchain Token Service tokens, USDC among them on mainnet |
 | LayerZero OFT | Verifiers chosen by whoever deployed the token | 12 on mainnet, 3 on testnet | USDT0 on mainnet, the only route to native USDT on Stellar; any OFT you deploy yourself |
+| NEAR Intents | Competing solvers deliver from their own inventory | 13 EVM chains, mainnet only | USDC and XLM |
 
 On top of the rails, a swap leg converts what a bridge delivers into the asset
 you asked for, priced on Stellar's own exchange. That is how "send USDC, receive

@@ -141,7 +141,7 @@ export interface MavnaWidgetConfig {
   // ---- narrowing what the widget offers ----
   /** Chains the picker offers, filtered over the network's real chain list. */
   readonly chains?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] };
-  /** The rails to race and toggle. Defaults to all three. */
+  /** The rails to race and toggle. Defaults to all four. */
   readonly rails?: readonly RailName[];
   readonly hiddenUI?: readonly HiddenUIElement[];
   readonly requiredUI?: readonly RequiredUIElement[];

@@ -47,18 +47,24 @@ this page.
 - **`routePriority`**. `"best-received"` (the default) or `"fastest"`, the initial
   ranking.
 - **`fee`**. An integrator fee, `{ bps, recipient, recipientName }`. `bps` is an
-  integer in `[0, 1000]`. The fee is deducted from what the user receives and carried
-  on the route as an itemised `integrator` fee.
+  integer in `[0, 1000]`. It is taken only on routes that convert on arrival, where
+  the Arrival Contract pays it out on-chain and the route itemises it as an
+  `integrator` fee. No other route has anything that collects it, so on those it is
+  neither shown nor taken (the widget warns once at start when one is set).
 - **`rails`**. Which rails to race and offer, as display names:
-  `["Circle", "Axelar", "LayerZero"]`. Defaults to all three.
+  `["Circle", "Axelar", "LayerZero", "NEAR Intents"]`. Defaults to all four. NEAR
+  Intents (trust model `solver-network`: competing solvers deliver from their own
+  inventory) is on by default and quotes on mainnet only; leave it out of this list
+  to keep it off.
 - **`disabledSources`**. Rails an operator has taken out of rotation, in the circuit
   breaker's `id:reason` format using adapter ids, for example
   `"cctp:Circle is paused"`. A disabled rail shows the reason rather than vanishing.
 - **`chains`**. `{ allow?, deny? }`, filtered over the network's real chain list by
   Mavna slug. These narrow the list; they cannot add a chain the network does not
   carry.
-- **`wanted`**. `"USDC"` or `"XLM"`, the asset the recipient arrives holding when
-  sending USDC. A USDT0 send always arrives as USDT0.
+- **`wanted`**. What the recipient arrives holding: `"USDC"` or `"XLM"` when sending
+  USDC, and `"USDT0"`, `"USDC"` or `"XLM"` when sending USDT0 (anything but USDT0 is
+  converted on Stellar).
 
 ## Starting the form
 

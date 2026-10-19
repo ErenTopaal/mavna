@@ -850,7 +850,7 @@ export function renderNetworkToggle(c: Flow): ReactElement {
 
 export function renderRails(c: Flow): ReactElement {
   const st = c.state;
-  // Only the rails the integrator offers; the default is all three.
+  // Only the rails the integrator offers; the default is all four.
   const names: readonly RailName[] = c.availableRails();
   return (
     <div style={s("display:flex;flex-direction:column;gap:6px")}>

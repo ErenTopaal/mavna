@@ -18,11 +18,11 @@ From a checkout, after [installing and building](/developers/install):
 node apps/docs/examples/quote.ts GBD4SMJWOYPPTVSRUK7J5M3JHHOOIEUMWYGQOLHVHUDL4ZN2ESE3BJYA 25 ethereum-sepolia
 ```
 
-Three rails are asked at once. On the test network, CCTP answers with a route and
-the other two decline, each with a reason you can read: LayerZero's registry
-carries no testnet token to route, and Axelar either declines or does not answer
-inside the racing budget. Neither is an exception or a silent omission; both are
-values in `RouteSet.rejected` with a reason you can branch on and a sentence you
+Every rail on offer is asked at once. On the test network, CCTP answers with a route
+and the others decline, each with a reason you can read: LayerZero's registry
+carries no testnet token to route, NEAR Intents has no test network, and Axelar
+either declines or does not answer inside the racing budget. None of these is an
+exception or a silent omission; each is a value in `RouteSet.rejected` with a reason you can branch on and a sentence you
 can show. [Routes and rejections](/developers/concepts/routes) covers the model.
 
 ## The file

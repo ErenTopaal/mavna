@@ -19,7 +19,7 @@ type TrustModel =
   | "dvn-stack";
 ```
 
-The three rails in this repository use three of these:
+The four rails in this repository use four of these:
 
 **`native-mint`** ([Circle CCTP](/developers/rails/cctp)). The issuer burns the
 token on the source chain and mints it on Stellar. Nobody holds the money in
@@ -37,8 +37,14 @@ token, not by the network, so two routes on the same rail can be verified by
 entirely different parties. The adapter names the verifiers on every transaction
 it builds.
 
-`solver-network` and `liquidity-pool` exist in the type for rails with those
-shapes. No adapter in this repository uses them today.
+**`solver-network`** ([NEAR Intents](/developers/rails/near-intents)). Competing
+solvers deliver on Stellar from their own inventory against a deposit the user pays
+into an address 1Click hands out; the NEAR Intents contract settles, and a deposit
+that cannot be filled at the floor is returned. What you are trusting is that
+settlement and the solver market.
+
+`liquidity-pool` exists in the type for rails of that shape. No adapter in this
+repository uses it today.
 
 ## How it reaches a user
 
