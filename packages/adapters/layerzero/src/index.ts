@@ -23,10 +23,11 @@ export type {
   DiscoveryOptions,
   OftLocation,
   ResolvedRoute,
+  StellarClassicAsset,
   StellarDeployment,
   StellarOftFacts,
 } from "./discovery.js";
-export { Discovery, readStellarOft } from "./discovery.js";
+export { Discovery, readStellarOft, readStellarToken } from "./discovery.js";
 export type { UlnConfig } from "./dvn.js";
 export {
   assertDvnStackIsSound,

@@ -80,6 +80,10 @@ export const STELLAR_SIDE: Readonly<Record<NetworkId, StellarSide>> = {
  * anyone but its owner. A caller who has their own OFT can name it directly
  * through `LayerZeroAdapterOptions.ofts`; inventing a default would be quoting a
  * route no user can take.
+ *
+ * Checked again on 19 October 2026: the registry's 369 entries name no testnet
+ * chain key, USDT0's own deployment list is mainnet only, and LayerZero's
+ * Stellar OFT documentation names no public test token.
  */
 export const ROUTED_SYMBOLS: Readonly<Record<NetworkId, readonly string[]>> = {
   testnet: [],
@@ -146,16 +150,11 @@ export interface EvmSource {
  * Membership is not a claim that a transfer works, only that the chain is worth
  * asking. Every quote re-derives the endpoint, the OFT, the peer and the DVN
  * configuration from these chains and declines when any of it is missing. Three
- * mainnet chains here were declining as of 12 August 2026, and they are kept
- * rather than pruned because the reason is somebody else's configuration and can
- * change without warning in either direction, and because a user is owed a
- * reason rather than a chain that quietly does not appear:
- *
- *   Hyperliquid EVM and X Layer carry USDT0, but its `peers(30600)` is unset on
- *   both, so no message can leave for Stellar at all.
- *
- *   Berachain is peered, but USDT0 there has chosen no DVN set of its own and is
- *   inheriting the network default, which this package refuses to route through.
+ * mainnet chains here were declining as of 12 August 2026, and they were kept
+ * rather than pruned because the reason was somebody else's configuration and
+ * can change without warning in either direction. It did: by 19 October 2026
+ * Hyperliquid EVM and X Layer had peered USDT0 to Stellar, and Berachain had
+ * set a DVN configuration of its own, so all three now pass every check.
  *
  * `scripts/verify-layerzero.mjs` reports the current list on every run.
  *

@@ -170,6 +170,35 @@ describe("resolving LayerZero from the chains rather than from a table", () => {
   });
 });
 
+describe("USDT0 as a send asset, resolved from mainnet", () => {
+  /**
+   * The one place this file names the classic asset, and only to check the
+   * chain against what USDT0 and Stellar publish. The adapter reads it from the
+   * Stellar token's own storage.
+   */
+  it("reads the classic asset USDT0 lands as from the Stellar token itself", async () => {
+    const { from, to } = await mainnet.sendableAssets("arbitrum");
+    expect(to.id).toBe("USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q");
+    expect(to.symbol).toBe("USDT0");
+    expect(to.decimals).toBe(7);
+    expect(from.id).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+
+  it("quotes the request an app builds from those assets", async () => {
+    const { from, to } = await mainnet.sendableAssets("arbitrum");
+    const result = await mainnet.quote({
+      from,
+      to,
+      sends: { asset: from, baseUnits: (25n * 10n ** BigInt(from.decimals)).toString() },
+      destination: UNFUNDED,
+      maxSlippageBps: 50,
+    });
+    if (!isRoute(result)) throw new Error(result.explanation);
+    expect(result.deliveredAtLeast.asset.id).toBe(to.id);
+    expect(result.steps.some((s) => s.kind === "prepare-account")).toBe(true);
+  });
+});
+
 describe("quoting a real pathway", () => {
   let ethereum: ResolvedRoute;
 

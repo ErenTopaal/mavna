@@ -162,6 +162,44 @@ export class LayerZeroAdapter implements BridgeAdapter {
     return Promise.resolve(sourceChainsFor(this.network));
   }
 
+  /**
+   * What a user on this chain can send over this rail, and what it lands as.
+   *
+   * Both sides come from the deployment rather than from a table: the source
+   * token is whatever the OFT's own `token()` answers, and the Stellar asset is
+   * read from the storage of the token the Stellar OFT credits. An app building
+   * a quote request from this cannot name a token by symbol, which matters on a
+   * rail whose token anyone could imitate. Rejects, in words a person can read,
+   * when the chain has no route or what lands has no classic identity.
+   */
+  async sendableAssets(chainId: string): Promise<{ readonly from: Asset; readonly to: Asset }> {
+    const route = await this.discovery.routeFrom(chainId);
+    if (route.delivers === undefined) {
+      throw new MavnaError(
+        `${route.tokenSymbol} from ${route.source.name} lands on Stellar as the token contract ` +
+          `${route.stellar.token}, which is not a Stellar asset with a code and an issuer, so ` +
+          "this app cannot check or show the account it would arrive in.",
+        { retryable: false },
+      );
+    }
+    return {
+      from: {
+        chainId,
+        id: route.token,
+        symbol: route.tokenSymbol,
+        decimals: route.tokenDecimals,
+        curatedBy: "LayerZero",
+      },
+      to: {
+        chainId: STELLAR_SIDE[this.network].chainId,
+        id: route.delivers.id,
+        symbol: route.delivers.code,
+        decimals: STELLAR_DECIMALS,
+        curatedBy: "LayerZero",
+      },
+    };
+  }
+
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
     const stellarChainId = STELLAR_SIDE[this.network].chainId;
 
@@ -223,6 +261,17 @@ export class LayerZeroAdapter implements BridgeAdapter {
           `${request.to.id}.`,
       );
     }
+    // Labelled with what the token itself says it is, so a request that named
+    // the right asset under some other symbol still shows the real one.
+    const arrives: Asset =
+      route.delivers === undefined
+        ? request.to
+        : {
+            ...request.to,
+            id: route.delivers.id,
+            symbol: route.delivers.code,
+            decimals: STELLAR_DECIMALS,
+          };
 
     let destination: Awaited<ReturnType<typeof inspectDestination>>;
     try {
@@ -331,8 +380,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
     try {
       arriving = valueInXlm(
         delivered,
-        request.to.decimals,
-        await this.prices.xlmStroopsPerUnit(stellarAssetFor(request.to)),
+        arrives.decimals,
+        await this.prices.xlmStroopsPerUnit(stellarAssetFor(arrives)),
       );
     } catch (cause) {
       return this.decline(
@@ -350,8 +399,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
 
     const steps = planTransfer({
       destination: readinessOf(destination.lane),
-      bridgeDelivers: request.to.id,
-      userWants: request.to.id,
+      bridgeDelivers: arrives.id,
+      userWants: arrives.id,
       // A token is arriving, not XLM, so nothing about the account pays for itself.
       arrivingXlmCoversReserve: false,
       // Asked of the contract, never assumed from the deployment's name. USDT0
@@ -360,7 +409,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
       sourceNeedsApproval: route.approvalRequired,
     });
 
-    const receives: Amount = { asset: request.to, baseUnits: delivered.toString() };
+    const receives: Amount = { asset: arrives, baseUnits: delivered.toString() };
     const bridgeFeeLd = sends - deliveredLocal;
 
     return {
@@ -375,8 +424,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
       // Not equal to `receives` on this rail, unlike a native mint. The token
       // contract can take a fee between quoting and sending, so the honest floor
       // is the minimum the send itself will enforce.
-      receivesAtLeast: { asset: request.to, baseUnits: guaranteed.toString() },
-      deliveredAtLeast: { asset: request.to, baseUnits: guaranteed.toString() },
+      receivesAtLeast: { asset: arrives, baseUnits: guaranteed.toString() },
+      deliveredAtLeast: { asset: arrives, baseUnits: guaranteed.toString() },
       fees: [
         {
           kind: "gas",
@@ -661,8 +710,10 @@ export class LayerZeroAdapter implements BridgeAdapter {
     return {
       asset: {
         chainId: STELLAR_SIDE[this.network].chainId,
-        id: route.stellar.token,
-        symbol: route.tokenSymbol,
+        // The classic asset where there is one, so what Activity shows is a
+        // Stellar asset a wallet recognises rather than its contract address.
+        id: route.delivers?.id ?? route.stellar.token,
+        symbol: route.delivers?.code ?? route.tokenSymbol,
         decimals: STELLAR_DECIMALS,
         curatedBy: "LayerZero",
       },
