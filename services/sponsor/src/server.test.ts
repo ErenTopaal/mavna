@@ -1458,9 +1458,9 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     const after = await server.post("/settle", { destination: user.publicKey() });
     expect(after.status).toBe(200);
     expect(after.body.settled).toBe(true);
-    expect(after.body.settlementTxHash).toBe(
-      (server.rpc.submissions[0]?.tx as Transaction).hash().toString("hex"),
-    );
+    const submitted = server.rpc.submissions[0]?.tx as Transaction | undefined;
+    expect(submitted).toBeDefined();
+    expect(after.body.settlementTxHash).toBe(submitted?.hash().toString("hex"));
   });
 
   it("forgets a repayment once the settlement's own time bound has passed", async () => {
