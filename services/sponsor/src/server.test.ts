@@ -112,6 +112,8 @@ interface TestServer {
   readonly sponsor: Keypair;
   readonly channel: Keypair;
   post(path: string, body: Record<string, unknown>): Promise<{ status: number; body: Body }>;
+  /** A body sent exactly as given, for input no well-behaved client would produce. */
+  postRaw(path: string, text: string): Promise<{ status: number; body: Body }>;
 }
 
 type Body = Record<string, unknown>;
@@ -148,19 +150,22 @@ async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promi
   running.push(server);
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
+  const postRaw = async (path: string, text: string) => {
+    const response = await fetch(`${url}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: text,
+    });
+    return { status: response.status, body: (await response.json()) as Body };
+  };
+
   return {
     url,
     rpc: recording,
     sponsor,
     channel,
-    async post(path, body) {
-      const response = await fetch(`${url}${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return { status: response.status, body: (await response.json()) as Body };
-    },
+    post: (path, body) => postRaw(path, JSON.stringify(body)),
+    postRaw,
   };
 }
 
@@ -465,5 +470,49 @@ describe("the sponsor only countersigns what it built", () => {
     const again = await server.post("/submit", { signedXdr: prepared });
     expect(again.status).toBe(409);
     expect(server.rpc.submissions).toHaveLength(0);
+  });
+});
+
+describe("the sponsor turns away malformed input before doing any work", () => {
+  it("refuses a body larger than it will read", async () => {
+    const server = await startServer();
+    const response = await server.postRaw(
+      "/submit",
+      JSON.stringify({ signedXdr: "A".repeat(70 * 1024) }),
+    );
+    expect(response.status).toBe(413);
+    expect(response.body.retryable).toBe(false);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("answers a body that is not JSON with 400", async () => {
+    const server = await startServer();
+    const response = await server.postRaw("/submit", "{");
+    expect(response.status).toBe(400);
+    expect(response.body.retryable).toBe(false);
+  });
+
+  it("answers JSON that is not an object with 400", async () => {
+    const server = await startServer();
+    const response = await server.postRaw("/submit", "null");
+    expect(response.status).toBe(400);
+  });
+
+  it("answers a submission that is not a transaction with 400", async () => {
+    const server = await startServer();
+    const response = await server.post("/submit", { signedXdr: "not a transaction" });
+    expect(response.status).toBe(400);
+    expect(response.body.retryable).toBe(false);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("answers a settlement that is not a transaction with 400", async () => {
+    const server = await startServer();
+    const response = await server.post("/settlement/commit", {
+      destination: Keypair.random().publicKey(),
+      signedXdr: "not a transaction",
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.retryable).toBe(false);
   });
 });

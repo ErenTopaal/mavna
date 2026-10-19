@@ -207,6 +207,10 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
 
   return createServer((req, res) => {
     void handle(req, res).catch((cause: unknown) => {
+      if (cause instanceof RequestError) {
+        reply(res, cause.status, { error: cause.message, retryable: false }, corsOrigin(req));
+        return;
+      }
       // Nothing internal reaches the wire. A caller learns that it failed and
       // whether to retry; the operator reads the rest from the process log.
       console.error("[sponsor]", cause instanceof Error ? cause.message : cause);
@@ -471,7 +475,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       reply(res, 400, { error: "Send the signed settlement.", retryable: false }, origin);
       return;
     }
-    const transaction = TransactionBuilder.fromXDR(body.signedXdr, options.network.passphrase);
+    const transaction = parseTransaction(body.signedXdr, options.network.passphrase);
     if ("innerTransaction" in transaction) {
       reply(res, 400, { error: "Fee bumps are not accepted here.", retryable: false }, origin);
       return;
@@ -572,7 +576,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       return;
     }
 
-    const transaction = TransactionBuilder.fromXDR(body.signedXdr, options.network.passphrase);
+    const transaction = parseTransaction(body.signedXdr, options.network.passphrase);
     if ("innerTransaction" in transaction) {
       reply(res, 400, { error: "Fee bumps are not accepted here.", retryable: false }, origin);
       return;
@@ -712,15 +716,78 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
   }
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (text.length === 0) return {};
+/**
+ * A refusal caused by the request itself, carrying the status to answer with.
+ * The message is written for the caller, so it is safe to send as is.
+ */
+class RequestError extends MavnaError {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message, { retryable: false });
+    this.name = "RequestError";
+    this.status = status;
+  }
+}
+
+/**
+ * Read a JSON object body, refusing anything past `limit` bytes. Every route
+ * here takes a few hundred bytes at most, and an unbounded read lets one client
+ * hold as much of our memory as it cares to send. Past the limit the rest of the
+ * body is drained unread, so the answer still reaches the caller.
+ */
+function readJson(req: IncomingMessage, limit = 65_536): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let refused = false;
+    req.on("data", (chunk: Buffer) => {
+      if (refused) return;
+      size += chunk.length;
+      if (size > limit) {
+        refused = true;
+        chunks.length = 0;
+        reject(new RequestError("The request body is too large.", 413));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      if (refused) return;
+      const text = Buffer.concat(chunks).toString("utf8");
+      if (text.length === 0) {
+        resolve({});
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        reject(new RequestError("The request body is not JSON.", 400));
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        reject(new RequestError("The request body must be a JSON object.", 400));
+        return;
+      }
+      resolve(parsed as Record<string, unknown>);
+    });
+  });
+}
+
+/** Decode a transaction from the wire, where anything at all may arrive. */
+function parseTransaction(
+  xdrText: unknown,
+  passphrase: string,
+): ReturnType<typeof TransactionBuilder.fromXDR> {
+  if (typeof xdrText !== "string") {
+    throw new RequestError("That is not a Stellar transaction.", 400);
+  }
   try {
-    return JSON.parse(text);
+    return TransactionBuilder.fromXDR(xdrText, passphrase);
   } catch {
-    throw new MavnaError("The request body is not JSON.", { retryable: false });
+    throw new RequestError("That is not a Stellar transaction.", 400);
   }
 }
 
