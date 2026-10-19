@@ -26,7 +26,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { beforeAll, describe, expect, it } from "vitest";
-import { Composer } from "./compose.js";
+import { Composer, KEEP_ALIVE_LEDGERS } from "./compose.js";
 
 /**
  * Finishing a conversion on arrival, on Stellar testnet, end to end.
@@ -322,5 +322,21 @@ describe("an overdue conversion on arrival", () => {
     expect((await composer().finish(before.finish)).kind).toBe("composed");
     const after = await composePhase(ctx, message, "test", ref);
     expect(after?.phase).toBe("delivered-as-came");
+  });
+});
+
+describe("keeping the contract alive", () => {
+  it("extends the contract's instance and code so it is never archived between arrivals", async () => {
+    const result = await composer().keepAlive();
+    const key = xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: new Address(arrival).toScAddress(),
+        key: xdr.ScVal.scvLedgerKeyContractInstance(),
+        durability: xdr.ContractDataDurability.persistent(),
+      }),
+    );
+    const entries = await rpc.server.getLedgerEntries(key);
+    const liveUntil = entries.entries[0]?.liveUntilLedgerSeq ?? 0;
+    expect(liveUntil).toBeGreaterThanOrEqual(result.ledger + KEEP_ALIVE_LEDGERS - 1);
   });
 });

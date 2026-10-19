@@ -436,7 +436,26 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     });
   }
 
+  let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
+
+  function keepArrivalAlive(): void {
+    if (composer === undefined) return;
+    composer.keepAlive().then(
+      (done) => console.error(`[sponsor] arrival contract kept alive, tx ${done.txHash}`),
+      (cause: unknown) =>
+        console.error(
+          "[sponsor] could not keep the arrival contract alive:",
+          cause instanceof Error ? cause.message : cause,
+        ),
+    );
+  }
+
   function startSweep(): void {
+    if (composer !== undefined && keepAliveTimer === undefined) {
+      keepArrivalAlive();
+      keepAliveTimer = setInterval(keepArrivalAlive, KEEP_ALIVE_EVERY_MS);
+      keepAliveTimer.unref?.();
+    }
     if (sweepSeconds === 0 || sweepTimer !== undefined) return;
     sweepTimer = setInterval(sweepTick, sweepSeconds * 1000);
     // The sweep alone is no reason to keep the process alive.
@@ -444,6 +463,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   function stopSweep(): Promise<void> {
+    if (keepAliveTimer !== undefined) clearInterval(keepAliveTimer);
+    keepAliveTimer = undefined;
     if (sweepTimer !== undefined) clearInterval(sweepTimer);
     sweepTimer = undefined;
     return sweepRun ?? Promise.resolve();
@@ -1665,6 +1686,8 @@ const SETTLE_INTERVAL_SECONDS = 30;
 /** How often one message may be asked to finish, and how many finishes a minute in all. */
 const COMPOSE_INTERVAL_SECONDS = 30;
 const COMPOSES_PER_MINUTE = 10;
+/** Daily, well inside the thirty days KEEP_ALIVE_LEDGERS buys. */
+const KEEP_ALIVE_EVERY_MS = 24 * 60 * 60 * 1000;
 
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;

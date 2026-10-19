@@ -9,10 +9,12 @@ import { AccountNotFound, type NetworkConfig, type RpcClient } from "@mavna/stel
 import {
   Address,
   authorizeEntry,
+  Contract,
   Keypair,
   nativeToScVal,
   Operation,
   rpc as rpc_,
+  SorobanDataBuilder,
   StrKey,
   type Transaction,
   TransactionBuilder,
@@ -171,6 +173,49 @@ export class Composer {
     });
   }
 
+  /**
+   * Extend the contract's instance and code TTL. Anyone may; the sponsor does,
+   * because a contract that archives between arrivals makes every quote decline
+   * until someone restores it.
+   */
+  async keepAlive(): Promise<{ readonly txHash: string; readonly ledger: number }> {
+    const { rpc, network, contract } = this.options;
+    const instance = xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: new Contract(contract).address().toScAddress(),
+        key: xdr.ScVal.scvLedgerKeyContractInstance(),
+        durability: xdr.ContractDataDurability.persistent(),
+      }),
+    );
+    const entry = await rpc.read(`Arrival Contract ${contract}`, async () => {
+      const response = await rpc.server.getLedgerEntries(instance);
+      return { value: response.entries[0], ledger: response.latestLedger };
+    });
+    if (entry === undefined) {
+      throw new MavnaError(`There is no Arrival Contract at ${contract}, or it is archived.`, {
+        retryable: false,
+      });
+    }
+    const executable = entry.val.contractData().val().instance().executable();
+    const code = xdr.LedgerKey.contractCode(
+      new xdr.LedgerKeyContractCode({ hash: executable.wasmHash() }),
+    );
+    const result = await rpc.submit("arrival keep alive", async () => {
+      const unsigned = new TransactionBuilder(await rpc.loadAccount(this.#payer.publicKey()), {
+        fee: "100000",
+        networkPassphrase: network.passphrase,
+      })
+        .addOperation(Operation.extendFootprintTtl({ extendTo: KEEP_ALIVE_LEDGERS }))
+        .setSorobanData(new SorobanDataBuilder().setReadOnly([instance, code]).build())
+        .setTimeout(120)
+        .build();
+      const prepared = await rpc.prepare(unsigned);
+      prepared.sign(this.#payer);
+      return prepared;
+    });
+    return { txHash: result.txHash, ledger: result.ledger };
+  }
+
   async finish(request: ComposeRequest): Promise<ComposeOutcome> {
     const { from, guid, index, message } = parseComposeRequest(request);
     const { rpc, network, contract } = this.options;
@@ -261,6 +306,13 @@ export class Composer {
     }
   }
 }
+
+/**
+ * How far ahead the contract's instance and code are kept alive, about 30 days
+ * at 5 second ledgers. Refreshed daily by the sponsor, so an Arrival Contract
+ * with no arrivals for a while is never archived.
+ */
+export const KEEP_ALIVE_LEDGERS: number = 17_280 * 30;
 
 /** The executor's minimum balance, which is all it ever holds. */
 const EXECUTOR_STARTING_XLM = "1";

@@ -16,6 +16,7 @@ export {
   assertOnlyExecutorCompose,
   ComposeRefused,
   Composer,
+  KEEP_ALIVE_LEDGERS,
   parseComposeRequest,
 } from "./compose.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
