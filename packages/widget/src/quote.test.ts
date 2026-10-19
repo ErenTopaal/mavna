@@ -1,10 +1,16 @@
 import { CCTP_CONTRACTS, sourceUsdcFor } from "@mavna/adapter-cctp";
-import type { Asset, RouteSet } from "@mavna/core";
+import {
+  type Asset,
+  MavnaError,
+  type QuoteRequest,
+  type RouteRejection,
+  type RouteSet,
+} from "@mavna/core";
 import { createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import { SdexProvider } from "@mavna/swap";
 import { describe, expect, it } from "vitest";
 import { routeFor, ScriptedAdapter, STELLAR_XLM } from "./__fixtures__/scripted";
-import { buildAssets, declineUnsettleable, runQuote } from "./quote";
+import { assetsFor, buildAssets, declineUnsettleable, runQuote, toRouteView } from "./quote";
 
 const stellar = (id: string, symbol: string, decimals: number): Asset => ({
   chainId: "stellar-testnet",
@@ -53,6 +59,9 @@ describe("runQuote", () => {
       wantedContract: "native",
     },
     integratorFee: undefined,
+    usdt0Assets: async (): Promise<{ from: Asset; to: Asset }> => {
+      throw new Error("a USDC send never asks for USDT0");
+    },
   };
   const inputs = {
     chainId: "fantom",
@@ -110,5 +119,160 @@ describe("declineUnsettleable", () => {
       },
     ]);
     expect(set.complete).toBe(true);
+  });
+});
+
+describe("sending USDT0", () => {
+  const usdt0From: Asset = {
+    chainId: "arbitrum",
+    id: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    symbol: "USD₮0",
+    decimals: 6,
+    curatedBy: "LayerZero",
+  };
+  const usdt0To: Asset = {
+    chainId: "stellar",
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+    decimals: 7,
+    curatedBy: "LayerZero",
+  };
+  const asked: string[] = [];
+  const usdt0Assets = async (chainId: string) => {
+    asked.push(chainId);
+    return { from: { ...usdt0From, chainId }, to: usdt0To };
+  };
+
+  it("takes both assets from the LayerZero deployment, whatever the receive toggle says", async () => {
+    for (const wanted of ["USDC", "XLM", "USDT0"] as const) {
+      const assets = await assetsFor({ ...engine, usdt0Assets }, "arbitrum", "USDT0", wanted);
+      expect(assets).toEqual({ from: usdt0From, to: usdt0To });
+    }
+    expect(asked).toEqual(["arbitrum", "arbitrum", "arbitrum"]);
+  });
+
+  it("still names USDC by its token address when USDC is picked", async () => {
+    const { from } = await assetsFor(
+      { ...engine, usdt0Assets },
+      "ethereum-sepolia",
+      "USDC",
+      "USDC",
+    );
+    expect(from.id).toBe(sourceUsdcFor("testnet", "ethereum-sepolia")?.address);
+  });
+
+  /** Records what each rail is asked, and answers like a rail with no route. */
+  class Recorder extends ScriptedAdapter {
+    readonly requests: QuoteRequest[] = [];
+    override async quote(request?: QuoteRequest): Promise<RouteRejection> {
+      if (request !== undefined) this.requests.push(request);
+      return super.quote();
+    }
+  }
+
+  const breaker = createCircuitBreaker(() => parseDisabledSources(undefined));
+  const inputs = {
+    chainId: "arbitrum",
+    wanted: "USDT0" as const,
+    amount: "12.5",
+    destination: " GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI ",
+    priority: "best" as const,
+    rails: { Circle: true, Axelar: true, LayerZero: true },
+    send: "USDT0" as const,
+  };
+
+  function quoteWith(
+    assets: (chainId: string) => Promise<{ from: Asset; to: Asset }>,
+    rail: Recorder,
+  ): Promise<RouteSet> {
+    return new Promise((resolve) => {
+      runQuote(
+        {
+          ...engine,
+          usdt0Assets: assets,
+          adapters: [rail],
+          breaker,
+          xlmSwap: {
+            provider: new SdexProvider("testnet"),
+            delivered: engine.usdcOnStellar,
+            deliveredContract: engine.usdcOnStellar.id,
+            wanted: engine.xlmOnStellar,
+            wantedContract: "native",
+          },
+          integratorFee: undefined,
+        },
+        inputs,
+        () => {},
+        resolve,
+      );
+    });
+  }
+
+  it("asks the rails for USDT0 into its Stellar asset, counted in the token's decimals", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    await quoteWith(usdt0Assets, rail);
+    expect(rail.requests).toHaveLength(1);
+    const request = rail.requests[0];
+    expect(request?.from).toEqual(usdt0From);
+    expect(request?.to).toEqual(usdt0To);
+    expect(request?.sends).toEqual({ asset: usdt0From, baseUnits: "12500000" });
+    expect(request?.destination).toBe("GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI");
+  });
+
+  it("declines every rail with the deployment's own reason when the chain has none", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    const set = await quoteWith(async () => {
+      throw new MavnaError("This route carries no token on the test network.", {
+        retryable: false,
+      });
+    }, rail);
+    expect(rail.requests).toEqual([]);
+    expect(set.rejected).toEqual([
+      {
+        source: "layerzero",
+        reason: "asset-unsupported",
+        explanation: "This route carries no token on the test network.",
+        retryable: false,
+      },
+    ]);
+  });
+
+  it("calls a node that did not answer temporary, not a missing route", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    const set = await quoteWith(async () => {
+      throw new MavnaError("No usable node answered for chain 42161.", { retryable: true });
+    }, rail);
+    expect(set.rejected[0]?.reason).toBe("temporarily-unavailable");
+    expect(set.rejected[0]?.retryable).toBe(true);
+  });
+
+  it("declines a new-account USDT0 route, saying the sponsor only curates USDC", () => {
+    const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
+    const ready = routeFor("layerzero", { delivers: usdt0To });
+    const set = declineUnsettleable(
+      { routes: [fresh, ready], rejected: [], complete: true },
+      engine.usdcOnStellar.id,
+    );
+    expect(set.routes).toEqual([ready]);
+    expect(set.rejected[0]?.explanation).toMatch(/the sponsor curates/);
+    expect(set.rejected[0]?.explanation).toMatch(/this route delivers USDT0\.$/);
+  });
+
+  it("shows the transfer fee in the asset it is charged in", () => {
+    const route = routeFor("layerzero", { delivers: usdt0To });
+    const charged = {
+      ...route,
+      sends: { asset: usdt0From, baseUnits: "5000000" },
+      fees: [
+        {
+          kind: "bridge" as const,
+          total: { asset: usdt0From, baseUnits: "1000" },
+          recipients: [],
+          includedInQuote: true,
+        },
+      ],
+    };
+    expect(toRouteView(charged).feeSymbol).toBe("USD₮0");
+    expect(toRouteView(route).feeSymbol).toBe("USDC");
   });
 });

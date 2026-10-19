@@ -2,7 +2,7 @@ import type { NetworkId } from "@mavna/core";
 import type { IntegratorFee } from "@mavna/routing";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
 import type { EngineConfig } from "./engine.js";
-import type { RailName, Wanted } from "./quote.js";
+import type { RailName, SendAsset, Wanted } from "./quote.js";
 import type { StellarWalletApi } from "./stellar-wallet.js";
 import type { Connection } from "./wallet.js";
 /** What an integrator sets. Whether it can be collected is decided by the engine. */
@@ -22,7 +22,7 @@ export type IntegratorFeeConfig = Omit<IntegratorFee, "collects">;
 export type Variant = "compact" | "wide" | "drawer";
 export type Appearance = "light" | "dark" | "system";
 
-export type { RailName };
+export type { RailName, SendAsset };
 
 /** UI the integrator can remove. Each maps to a real control in the flow. */
 export type HiddenUIElement =
@@ -101,8 +101,10 @@ export interface MavnaWidgetConfig {
   // ---- form initialisation ----
   /** The chain the form starts on, by its Mavna slug (e.g. "ethereum"). */
   readonly fromChain?: string;
-  /** Whether the recipient receives USDC or XLM. */
+  /** Whether the recipient receives USDC or XLM. A USDT0 send always lands as USDT0. */
   readonly wanted?: Wanted;
+  /** What the form starts out sending. Defaults to USDC. */
+  readonly fromAsset?: SendAsset;
   /** The amount the form starts with. */
   readonly fromAmount?: string;
   /** The recipient's Stellar address, pre-filled (locked with requiredUI). */
@@ -147,6 +149,7 @@ export interface ResolvedConfig {
     readonly wanted: Wanted | undefined;
     readonly fromAmount: string | undefined;
     readonly toAddress: string | undefined;
+    readonly fromAsset: SendAsset | undefined;
   };
   readonly rails: readonly RailName[];
   readonly hiddenUI: readonly HiddenUIElement[];
@@ -180,6 +183,7 @@ export function resolveConfig(config: MavnaWidgetConfig): ResolvedConfig {
       wanted: config.wanted,
       fromAmount: config.fromAmount,
       toAddress: config.toAddress,
+      fromAsset: config.fromAsset,
     },
     rails,
     hiddenUI: config.hiddenUI ?? [],

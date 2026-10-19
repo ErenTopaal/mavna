@@ -27,6 +27,41 @@ function railLabel(x: RouteView): string {
 
 // ------------------------------------------------------------------- send ---
 
+/**
+ * What the user sends, as the design's own segmented control, the same one the
+ * receive side uses for USDC and XLM.
+ */
+function renderSendAsset(c: Flow): ReactElement {
+  const usdt0 = c.state.send === "USDT0";
+  const ink = (on: boolean): string => (on ? "var(--mv-on-light)" : "var(--mv-muted)");
+  return (
+    <div
+      style={s(
+        "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+      )}
+    >
+      <div
+        style={s(
+          `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${usdt0 ? "52px" : "0px"})`,
+        )}
+      />
+      {(["USDC", "USDT0"] as const).map((asset) => (
+        <button
+          key={asset}
+          type="button"
+          aria-pressed={c.state.send === asset}
+          onClick={() => c.setSend(asset)}
+          style={s(
+            `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${ink(c.state.send === asset)}`,
+          )}
+        >
+          {asset}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function renderSend(
   c: Flow,
   d: {
@@ -40,7 +75,7 @@ export function renderSend(
   const st = c.state;
   const { r, chain, sym, xlm } = d;
   const hasBalance = st.wallet !== null && st.balance !== null;
-  const balanceLine = st.balance !== null ? `Balance ${fmt(st.balance)} USDC` : "";
+  const balanceLine = st.balance !== null ? `Balance ${fmt(st.balance)} ${st.send}` : "";
   const segX = xlm ? "52px" : "0px";
   const usdcInk = xlm ? "var(--mv-muted)" : "var(--mv-on-light)";
   const xlmInk = xlm ? "var(--mv-on-light)" : "var(--mv-muted)";
@@ -99,9 +134,15 @@ export function renderSend(
               "flex:1 1 auto;min-width:0;border:0;padding:0;background:transparent;outline:none;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
             )}
           />
-          <span style={s("font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-muted-2)")}>
-            USDC
-          </span>
+          {c.usdt0Offered() ? (
+            renderSendAsset(c)
+          ) : (
+            <span
+              style={s("font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-muted-2)")}
+            >
+              USDC
+            </span>
+          )}
         </div>
         {hasBalance ? (
           <div style={s("display:flex;align-items:baseline;gap:8px;margin-top:8px")}>
@@ -159,41 +200,52 @@ export function renderSend(
           >
             Receive on Stellar
           </p>
-          <div
-            style={s(
-              "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
-            )}
-          >
+          {st.send === "USDT0" ? (
+            // nothing converts USDT0 here, so there is no choice to offer
+            <span
+              style={s(
+                "flex:0 0 auto;padding:5px 12px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:var(--mv-ink)",
+              )}
+            >
+              USDT0
+            </span>
+          ) : (
             <div
               style={s(
-                `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
-              )}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                if (!xlm) return;
-                c.setState({ wanted: "USDC" }, () => c.runQuote());
-              }}
-              style={s(
-                `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${usdcInk}`,
+                "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
               )}
             >
-              USDC
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (xlm) return;
-                c.setState({ wanted: "XLM" }, () => c.runQuote());
-              }}
-              style={s(
-                `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${xlmInk}`,
-              )}
-            >
-              XLM
-            </button>
-          </div>
+              <div
+                style={s(
+                  `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!xlm) return;
+                  c.setState({ wanted: "USDC" }, () => c.runQuote());
+                }}
+                style={s(
+                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${usdcInk}`,
+                )}
+              >
+                USDC
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (xlm) return;
+                  c.setState({ wanted: "XLM" }, () => c.runQuote());
+                }}
+                style={s(
+                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${xlmInk}`,
+                )}
+              >
+                XLM
+              </button>
+            </div>
+          )}
         </div>
         <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
           <span
@@ -406,9 +458,7 @@ function rowStyle(on: boolean): CSSProperties {
 export function renderChains(c: Flow): ReactElement {
   const st = c.state;
   const q = st.chainQuery.trim().toLowerCase();
-  const matches = c.engine.sourceChains.filter(
-    (chain) => q === "" || chain.name.toLowerCase().includes(q),
-  );
+  const matches = c.list().filter((chain) => q === "" || chain.name.toLowerCase().includes(q));
   const rows = matches.map((chain) => {
     const detail = c.engine.sourceChainDetail(chain.id);
     // The tag is real: the chain's gas token on EVM, the chain family otherwise.
@@ -861,7 +911,7 @@ export function renderReview(
   d: { r: RouteView | undefined; chain: { id: string; name: string }; sym: string },
 ): ReactElement {
   const { r, chain, sym } = d;
-  const reviewSend = r === undefined ? "—" : `${fmt(c.amountNumber())} USDC`;
+  const reviewSend = r === undefined ? "—" : `${fmt(c.amountNumber())} ${c.state.send}`;
   const reviewGet = r === undefined ? "—" : `${fmt(r.receives)} ${sym}`;
   const reviewGetOn = r === undefined ? "Stellar" : `Stellar · ${r.source}`;
   const reviewRows =
@@ -870,7 +920,7 @@ export function renderReview(
       : [
           { key: "dest", name: "Recipient", value: short(c.state.destination) },
           { key: "rail", name: "Rail", value: railLabel(r) },
-          { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} USDC` },
+          { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} ${r.feeSymbol}` },
           ...(r.newAccount && r.reserveXlm !== undefined
             ? [{ key: "res", name: "Kept in your account", value: `${fmt(r.reserveXlm)} XLM` }]
             : []),
@@ -998,7 +1048,7 @@ export function renderFlight(
       ? []
       : [
           { key: "from", name: "From", value: chain.name },
-          { key: "sent", name: "Sent", value: `${fmt(c.amountNumber())} USDC` },
+          { key: "sent", name: "Sent", value: `${fmt(c.amountNumber())} ${c.state.send}` },
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "to", name: "Recipient", value: short(c.state.destination) },
           {
@@ -1518,7 +1568,7 @@ export function renderRoutes(
                 >
                   <span
                     style={s("display:flex;align-items:center;gap:6px;white-space:nowrap")}
-                    title="Transfer fee in USDC"
+                    title={`Transfer fee in ${x.feeSymbol}`}
                   >
                     <svg
                       width="13"
@@ -1788,7 +1838,11 @@ function routeDetail(
   const perUsdc = net > 0 ? x.receives / net : 0;
   return [
     { key: "rail", name: "Rail", value: x.source },
-    { key: "fee", name: "Transfer fee", value: x.fee === 0 ? "None" : `${fmt(x.fee)} USDC` },
+    {
+      key: "fee",
+      name: "Transfer fee",
+      value: x.fee === 0 ? "None" : `${fmt(x.fee)} ${x.feeSymbol}`,
+    },
     {
       key: "min",
       name: x.exact ? "You receive" : "Minimum received",

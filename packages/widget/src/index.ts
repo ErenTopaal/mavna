@@ -9,6 +9,7 @@ export type {
   RailName,
   RequiredUIElement,
   ResolvedConfig,
+  SendAsset,
   Variant,
   WalletConfig,
   WidgetTheme,

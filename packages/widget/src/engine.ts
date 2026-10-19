@@ -18,6 +18,7 @@ import { SdexProvider } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
+import { layerZeroSourceDetail, usdt0ChainsFor } from "./usdt0.js";
 
 /**
  * The SDK, assembled from configuration instead of from the environment.
@@ -101,6 +102,14 @@ export interface Engine {
   sourceChainDetail(chainId: string): SourceDetail;
   /** The USDC contract address on a source chain, for reading a balance. */
   sourceUsdc(chainId: string): string | undefined;
+  /** Chains USDT0 can be sent from, filtered by the same allow and deny lists. */
+  readonly usdt0Chains: ReadonlyArray<{ id: string; name: string }>;
+  /**
+   * What sending USDT0 from a chain means, read from the LayerZero deployment:
+   * the token the chain's OFT moves and the Stellar asset it lands as. Rejects
+   * with the rail's own words when the chain has no route.
+   */
+  usdt0Assets(chainId: string): Promise<{ from: MavnaAsset; to: MavnaAsset }>;
 }
 
 const STELLAR_USDC_ISSUER: Readonly<Record<NetworkId, string>> = {
@@ -179,6 +188,7 @@ export function createEngine(config: EngineConfig): Engine {
     (c) =>
       (allow === undefined || allow.includes(c.id)) && (deny === undefined || !deny.includes(c.id)),
   );
+  const usdt0Chains = usdt0ChainsFor(network, config.chains);
 
   // Ethereum is where most people hold USDC and where the test funds are, so it
   // is the default when present rather than whatever sorts earliest.
@@ -233,11 +243,17 @@ export function createEngine(config: EngineConfig): Engine {
           nativeCurrency: evm.nativeCurrency,
         };
       }
+      const layerzeroOnly = layerZeroSourceDetail(network, chainId);
+      if (layerzeroOnly !== undefined) return layerzeroOnly;
       const other = NON_EVM_CHAINS[network][chainId];
       return { kind: "other", name: other?.name ?? chainId, family: other?.family ?? "unknown" };
     },
     sourceUsdc(chainId) {
       return EVM_DEPLOYMENTS[network][chainId]?.usdc;
+    },
+    usdt0Chains,
+    usdt0Assets(chainId) {
+      return layerzero.sendableAssets(chainId);
     },
   };
 }
