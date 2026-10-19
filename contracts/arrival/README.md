@@ -26,13 +26,18 @@ bytes to compare against.
 
 | Network | Contract | Wasm sha256 | Allowlist |
 | --- | --- | --- | --- |
-| testnet | `CACZ7BVNAE42AIL7DCQPUAMA6APM6GJG7VBDZ6O4UFK2TK5NAC7765MH` | `9d76f0b45fef9af36a4fd531a7f7e7d011deb4a98162a18f863d5954ef01f4a2` | test sender `GBNCXZUV...N2NB` with native XLM |
+| testnet | `CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F` | `47921dcdba974b2af1d0bbb99ceef4518858c646a55f13f7972ad40e1dcdd714` | test sender `GBNCXZUV...N2NB` with native XLM |
 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its
 allowlisted sender is a key that queues compose messages on the real testnet
 endpoint itself. It proves the endpoint queue, the Aquarius router and this
 contract together; it does not prove an OFT's `lz_receive`. Mainnet is not
 deployed: the contract goes through an independent audit first.
+
+An earlier testnet instance, `CACZ7BVN...65MH` (`9d76f0b4...f4a2`), swapped
+without estimating first. Its fallback path failed on-chain whenever the swap
+reverted, because a rolled-back swap still costs ledger writes that simulation
+does not predict. It holds nothing and is not used.
 
 ## Test
 
