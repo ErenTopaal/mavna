@@ -44,6 +44,8 @@ Everything is environment variables, read once at start.
 | `MAVNA_IRIS_URL` | no | Circle's sandbox on testnet, production on mainnet | Circle's attestation service |
 | `MAVNA_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:4319` | Browser origins allowed to call this server, comma separated. Never `*`: this server spends money on request |
 | `MAVNA_SETTLE_SWEEP_SECONDS` | no | `120` | How often held settlements are retried without a page asking, for LayerZero and Axelar deliveries whose tab closed. One account at a time, never overlapping. `0` turns it off |
+| `MAVNA_ARRIVAL_CONTRACT` | no | none; `/compose` answers that it finishes nothing | The Mavna Arrival Contract whose overdue conversions this sponsor finishes. Also kept alive daily (instance and code TTL) |
+| `MAVNA_ARRIVAL_EXECUTOR_SECRET` | with `MAVNA_ARRIVAL_CONTRACT` | none; the process exits without it | A separate key named as the conversion's executor. It signs only `lz_compose` authorizations and holds only its 1 XLM minimum, created by the sponsor on first use. Never the sponsor key: a token named in a message must not reach funded keys |
 | `PORT` | no | `8787` | Where to listen |
 
 The curated asset list, the assets this sponsor opens trustlines for, is written

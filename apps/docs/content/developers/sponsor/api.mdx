@@ -204,8 +204,8 @@ in the same `settled`, `settlementTxHash` and `settlementRetryable` fields
 
 Finishes an overdue conversion on arrival: runs `lz_compose` on the Mavna Arrival
 Contract for a message LayerZero has delivered and queued but whose compose step has
-not run. Only a sponsor started with `MAVNA_ARRIVAL_CONTRACT` serves it; any other
-answers `404` with an `error`.
+not run. Only a sponsor started with `MAVNA_ARRIVAL_CONTRACT` and
+`MAVNA_ARRIVAL_EXECUTOR_SECRET` serves it; any other answers `404` with an `error`.
 
 Request: `{ "from": "C...", "guid": "...", "index": 0, "message": "0x..." }`, read
 from the delivered message by the SDK (`delivered-conversion-pending` carries it as
@@ -216,7 +216,14 @@ Nothing in the request can change where the money goes. The recipient is inside 
 message the user signed on the source chain, and the server checks the message
 against the hash LayerZero's endpoint holds for it before submitting; any other
 bytes answer `400`. The endpoint runs a queued message once, so a second call
-answers `already-composed` and never delivers twice. The answer is `200` with one of:
+answers `already-composed` and never delivers twice.
+
+The sponsor pays the fee as the transaction's source and names a separate,
+unfunded key as the executor. Before that key signs, the simulated run must ask for
+exactly one authorization: the executor's, for `lz_compose` on the configured
+contract with these arguments, and nothing nested under it. Anything more (a token
+in the message trying to spend the executor's authority, for example) is refused
+with `400`. The answer is `200` with one of:
 
 ```json
 { "kind": "composed", "txHash": "...", "ledger": 123 }
@@ -224,4 +231,5 @@ answers `already-composed` and never delivers twice. The answer is `200` with on
 ```
 
 or `404` with `{ "kind": "not-queued" }` when the endpoint holds nothing for that
-message yet, and `429` while the same message is already being finished.
+message yet, and `429` when the same message was asked about in the last 30
+seconds or ten finishes have been tried in the last minute.
