@@ -251,12 +251,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * ordering exists to prevent, and it is dropped. Its channel is not released
    * here: the lease ends on its own at the same bound, and by now the account
    * may hold a newer lease on the same channel for a settlement still live.
+   *
+   * Dropping one whose preparation landed is a stranding like any other: the
+   * reserve went out and nothing will repay it. That is also the cheapest way
+   * to cause one, by preparing and never sending, so the brake must see it.
    */
   async function liveSettlement(destination: string) {
     const held = heldSettlements.get(destination);
     if (held === undefined) return undefined;
     if (held.maxTimeUnix <= nowUnix()) {
       heldSettlements.delete(destination);
+      if (held.prepared) await caps.recordStranded();
       return undefined;
     }
     return held;
@@ -340,9 +345,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    */
   async function sweepHeld(): Promise<void> {
     for (const destination of [...heldSettlements.keys()]) {
-      const held = await liveSettlement(destination);
-      if (held === undefined || !held.prepared) continue;
       try {
+        // Inside the try: dropping an expired settlement writes to the cap
+        // store, and one account's failed write must not end the sweep.
+        const held = await liveSettlement(destination);
+        if (held === undefined || !held.prepared) continue;
         const outcome = await settleIfHeld(destination, SWEEP_ACCOUNT_DEADLINE_MS);
         if (outcome.settled === true) {
           console.error(`[sponsor] sweep settled a held settlement for ${destination}`);

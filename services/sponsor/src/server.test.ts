@@ -1080,6 +1080,27 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
     expect(committed.status).toBe(200);
   });
 
+  it("counts a prepared settlement that expired unsettled as stranded", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const pool = [Keypair.random(), Keypair.random()];
+    const server = await startServer({ caps, channels: new ChannelPool({ channels: pool }) });
+    for (const channel of pool) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const prepared = Keypair.random();
+    const unprepared = Keypair.random();
+    // Prepared and never funded: the sponsor's reserve is out and nothing repays it.
+    await preparedWithSettlementHeld(server, prepared);
+    // Held but never prepared: nothing was lent, so nothing is lost.
+    await holdSettlementFor(server, unprepared);
+
+    skipPastSettlementWindow();
+    expect((await server.post("/settle", { destination: prepared.publicKey() })).status).toBe(404);
+    expect((await server.post("/settle", { destination: unprepared.publicKey() })).status).toBe(
+      404,
+    );
+    expect((await caps.usage()).stranded).toBe(1);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
   it("does not submit an expired settlement when the delivery lands", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
