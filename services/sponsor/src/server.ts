@@ -948,11 +948,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const stranded = async (): Promise<Record<string, unknown>> => {
       // The held transaction can never land. The capital it would have
       // released is now the §6.1 loss, counted where the brake can see it.
-      // One no longer held was counted when it was dropped as expired.
+      // One no longer held was counted when it was dropped as expired. Cleared
+      // before the count is awaited, so a newer settlement held meanwhile is
+      // not the one cleared.
       if (stillHeld()) {
-        await caps.recordStranded();
         heldSettlements.delete(destination);
         pool.release(destination, transaction.source);
+        await caps.recordStranded();
       }
       return { settled: false, settlementRetryable: false };
     };

@@ -32,7 +32,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedBy } from "./built.js";
-import { CapLedger, type CapUsage, InMemoryCapStore } from "./caps.js";
+import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 
@@ -2166,6 +2166,49 @@ describe("the held settlement stays put while a preparation lands against it", (
     expect(again.status).toBe(409);
     expect(again.body.error).toBe(ALREADY);
     expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("does not accept a newer settlement and then drop it while a stranding is counted", async () => {
+    const store = new StallingStore();
+    // One cap day throughout, though the clock below crosses a day.
+    const caps = new CapLedger(store, DEFAULT_CAPS, () => "2026-10-19");
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    vi.setSystemTime(start + 1_000_000);
+    const newer = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(newer.status).toBe(200);
+
+    // Something else spent the channel's sequence, so the held settlement is
+    // stranded, and counting it waits on a slow store.
+    server.rpc.accounts.set(server.channel.publicKey(), 201n);
+    const stall = store.stallNext();
+    const stranding = server.post("/settle", { destination: user.publicKey() });
+    await stall.reached;
+    vi.setSystemTime(start + 86_400_000 + 10_000);
+    const committed = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(newer.body.xdr as string, user),
+    });
+    stall.release();
+    // The stranded settlement and its channel are already given up, so the
+    // newer one is turned away now rather than accepted and then dropped.
+    expect(committed.status).toBe(409);
+    expect((await stranding).body.settlementRetryable).toBe(false);
+    expect((await caps.usage()).stranded).toBe(1);
+    expect((await server.post("/settle", { destination: user.publicKey() })).status).toBe(404);
+    const other = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(200);
   });
 
   it("does not let a settlement that lands late drop the newer one held after it", async () => {
