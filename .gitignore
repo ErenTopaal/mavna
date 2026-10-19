@@ -16,3 +16,5 @@ playwright-report/
 .next/
 apps/docs/generated/
 shot.png
+target/
+test_snapshots/
