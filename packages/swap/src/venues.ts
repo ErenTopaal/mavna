@@ -133,7 +133,18 @@ export class SwapVenues implements SwapProvider {
     const reasons: string[] = [];
     let retryable = false;
     for (const venue of this.venues) {
-      if (venue.serves !== undefined && !venue.serves(request.assetIn, request.assetOut)) continue;
+      // a pair this venue cannot even read is its reason, not the chain's end
+      let served: boolean;
+      try {
+        served = venue.serves?.(request.assetIn, request.assetOut) ?? true;
+      } catch (cause) {
+        reasons.push(
+          `${venue.provider.id}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+        retryable ||= cause instanceof MavnaError && cause.retryable;
+        continue;
+      }
+      if (!served) continue;
       if (!(await this.isVenueUsable(venue.provider))) {
         reasons.push(`${venue.provider.id} is unavailable`);
         retryable = true;

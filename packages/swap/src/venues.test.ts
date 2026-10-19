@@ -92,6 +92,22 @@ describe("the chain", () => {
     expect(net.calls.some((c) => c.url.startsWith(RPC))).toBe(false);
   });
 
+  it("answers an asset id it cannot read as a refusal naming each venue, not a throw from the chain", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${PROXY}/swap/soroswap/health`]: healthy("mainnet"),
+        [`${AQUA_MAIN}/api/external/v1/pools/`]: pools,
+      }).fetch,
+    );
+    const error = await createSwapVenues({ network: "mainnet", soroswapProxyUrl: PROXY })
+      .quote({ ...usdcToXlm, assetIn: "not an asset" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).retryable).toBe(false);
+    expect((error as MavnaError).message).toMatch(/sushiswap:/);
+  });
+
   it("falls to Aquarius when Soroswap has no route", async () => {
     const net = routedFetch({
       [`${PROXY}/swap/soroswap/health`]: healthy("testnet"),
