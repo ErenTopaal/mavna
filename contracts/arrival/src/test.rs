@@ -1218,3 +1218,43 @@ fn a_fee_above_the_cap_is_not_converted() {
     assert_eq!(w.token(&w.usdc).balance(&fee_to), 0);
     assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
 }
+
+#[test]
+fn a_path_longer_than_the_cap_is_delivered_as_it_came() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let hop = |from: &Address, to: &Address, i: u8| {
+        (std::vec![from.clone(), to.clone()], [i; 32], to.clone())
+    };
+    let mut ask = w.ask(&recipient);
+    // five hops, every token on the list and the path sound
+    ask.path = std::vec![
+        hop(&w.usdt0, &w.usdc, 1),
+        hop(&w.usdc, &w.usdt0, 2),
+        hop(&w.usdt0, &w.usdc, 3),
+        hop(&w.usdc, &w.usdt0, 4),
+        hop(&w.usdt0, &w.usdc, 5),
+    ];
+    let (guid, message) = w.arrive(1_000_000, &encode(&w.env, &ask));
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+
+    let recipient = Address::generate(&w.env);
+    let mut ask = w.ask(&recipient);
+    // one hop naming four tokens
+    ask.path = std::vec![(
+        std::vec![
+            w.usdt0.clone(),
+            w.usdc.clone(),
+            w.usdt0.clone(),
+            w.usdc.clone()
+        ],
+        [7u8; 32],
+        w.usdc.clone()
+    )];
+    let (guid, message) = w.arrive(1_000_000, &encode(&w.env, &ask));
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+}

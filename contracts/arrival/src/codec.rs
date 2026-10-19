@@ -86,6 +86,11 @@ pub fn decode_oft_compose(env: &Env, message: &Bytes) -> Option<OftComposeMsg> {
 }
 
 pub const MESSAGE_VERSION: u8 = 1;
+/// The longest path a conversion may take, and the most tokens a pool hop may
+/// name. A message past either is not converted, so a sender cannot spend an
+/// executor's budget on a path no venue would quote.
+pub const MAX_HOPS: u8 = 4;
+pub const MAX_HOP_TOKENS: u8 = 3;
 const KIND_ACCOUNT: u8 = 0;
 const KIND_CONTRACT: u8 = 1;
 
@@ -156,9 +161,15 @@ fn decode_conversion(env: &Env, r: &mut Reader) -> Option<Conversion> {
     let fee_payload = r.bytes32(env)?;
     let fee_recipient = address(env, fee_kind, fee_payload)?;
     let hops = r.u8()?;
+    if hops > MAX_HOPS {
+        return None;
+    }
     let mut path = Vec::new(env);
     for _ in 0..hops {
         let count = r.u8()?;
+        if count > MAX_HOP_TOKENS {
+            return None;
+        }
         let mut tokens = Vec::new(env);
         for _ in 0..count {
             tokens.push_back(contract(env, r.bytes32(env)?));
