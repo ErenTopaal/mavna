@@ -89,7 +89,25 @@ export interface SponsorServerOptions {
    * money on request.
    */
   readonly allowedOrigins: readonly string[];
+  /**
+   * How often held settlements are swept, in seconds. Zero turns the sweep off.
+   *
+   * LayerZero and Axelar deliver without this server, and only the user's open
+   * page asks for the settlement afterwards. A tab closed in between would
+   * otherwise leave the reserve unpaid until the settlement's time bound.
+   */
+  readonly settleSweepSeconds?: number;
 }
+
+/** The HTTP server, and the sweep that settles what no page came back for. */
+export interface SponsorServer extends Server {
+  /** Start sweeping on the configured interval. Does nothing when it is zero. */
+  startSweep(): void;
+  /** Stop sweeping. Resolves once a sweep already under way has finished. */
+  stopSweep(): Promise<void>;
+}
+
+const DEFAULT_SETTLE_SWEEP_SECONDS = 120;
 
 interface PrepareBody {
   readonly destination?: string;
@@ -139,7 +157,14 @@ const reply = (
   res.end(JSON.stringify(body));
 };
 
-export function createSponsorServer(options: SponsorServerOptions): Server {
+export function createSponsorServer(options: SponsorServerOptions): SponsorServer {
+  const sweepSeconds = options.settleSweepSeconds ?? DEFAULT_SETTLE_SWEEP_SECONDS;
+  if (!Number.isInteger(sweepSeconds) || sweepSeconds < 0) {
+    throw new Error(
+      `The settlement sweep interval must be a whole number of seconds, zero to turn it off; ` +
+        `got ${String(options.settleSweepSeconds)}.`,
+    );
+  }
   const keypair = Keypair.fromSecret(options.sponsorSecret);
   const caps = options.caps ?? new CapLedger(new InMemoryCapStore());
   const deliverer = new Deliverer({
@@ -181,6 +206,14 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * accounts asked about in the last window.
    */
   const lastSettleCall = new Map<string, number>();
+
+  /**
+   * Accounts whose settlement is being submitted right now. The sweep and a
+   * page's /settle can reach the same account at once, and a second submission
+   * of the same transaction fails on its sequence, which would read as a
+   * stranding and drop a settlement that in fact landed.
+   */
+  const settling = new Set<string>();
 
   /**
    * The held settlement for an account, if it can still land. One past its
@@ -265,12 +298,62 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     reply(res, status, { error, retryable }, origin);
   }
 
+  let sweepTimer: ReturnType<typeof setInterval> | undefined;
+  let sweepRun: Promise<void> | undefined;
+
+  /**
+   * Try every held settlement that could land now, one at a time.
+   *
+   * Sequential on purpose: each is a balance read and maybe a submission, and
+   * there is no deadline here worth spending the RPC's patience on. One account
+   * failing is logged and does not stop the rest.
+   */
+  async function sweepHeld(): Promise<void> {
+    for (const destination of [...heldSettlements.keys()]) {
+      const held = liveSettlement(destination);
+      if (held === undefined || !held.prepared) continue;
+      try {
+        const outcome = await settleIfHeld(destination);
+        if (outcome.settled === true) {
+          console.error(`[sponsor] sweep settled a held settlement for ${destination}`);
+        }
+      } catch (cause) {
+        console.error(
+          `[sponsor] sweep could not settle for ${destination}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
+  }
+
+  function sweepTick(): void {
+    // A slow node can make one sweep outlast the interval. The next tick is
+    // skipped rather than queued, so sweeps never overlap or pile up.
+    if (sweepRun !== undefined) return;
+    sweepRun = sweepHeld().finally(() => {
+      sweepRun = undefined;
+    });
+  }
+
+  function startSweep(): void {
+    if (sweepSeconds === 0 || sweepTimer !== undefined) return;
+    sweepTimer = setInterval(sweepTick, sweepSeconds * 1000);
+    // The sweep alone is no reason to keep the process alive.
+    sweepTimer.unref?.();
+  }
+
+  function stopSweep(): Promise<void> {
+    if (sweepTimer !== undefined) clearInterval(sweepTimer);
+    sweepTimer = undefined;
+    return sweepRun ?? Promise.resolve();
+  }
+
   const corsOrigin = (req: IncomingMessage): string | undefined => {
     const origin = req.headers.origin;
     return origin !== undefined && options.allowedOrigins.includes(origin) ? origin : undefined;
   };
 
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     void handle(req, res).catch((cause: unknown) => {
       if (cause instanceof RequestError) {
         reply(res, cause.status, { error: cause.message, retryable: false }, corsOrigin(req));
@@ -287,6 +370,10 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       );
     });
   });
+  server.on("close", () => {
+    void stopSweep();
+  });
+  return Object.assign(server, { startSweep, stopSweep });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = corsOrigin(req);
@@ -607,6 +694,16 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * the stranding cap, which is the exposure brake.
    */
   async function settleIfHeld(destination: string): Promise<Record<string, unknown>> {
+    if (settling.has(destination)) return { settled: false, settlementRetryable: true };
+    settling.add(destination);
+    try {
+      return await settleHeld(destination);
+    } finally {
+      settling.delete(destination);
+    }
+  }
+
+  async function settleHeld(destination: string): Promise<Record<string, unknown>> {
     const held = liveSettlement(destination);
     if (held === undefined) return { settled: false };
     if (!held.prepared) return { settled: false, settlementRetryable: true };

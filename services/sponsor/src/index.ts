@@ -20,5 +20,5 @@ export type {
   SponsoredRecord,
 } from "./reconcile.js";
 export { HorizonSponsorshipView, reconcile } from "./reconcile.js";
-export type { SponsorServerOptions } from "./server.js";
+export type { SponsorServer, SponsorServerOptions } from "./server.js";
 export { createSponsorServer } from "./server.js";

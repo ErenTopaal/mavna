@@ -48,4 +48,5 @@ services:
       SPONSOR_SECRET_KEY: ${SPONSOR_SECRET_KEY:?the sponsor cannot pay without its key}
       MAVNA_ALLOWED_ORIGINS: ${MAVNA_ALLOWED_ORIGINS:-http://localhost:4319}
       MAVNA_IRIS_URL: ${MAVNA_IRIS_URL:-}
+      MAVNA_SETTLE_SWEEP_SECONDS: ${MAVNA_SETTLE_SWEEP_SECONDS:-}
       PORT: "8787"

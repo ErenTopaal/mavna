@@ -43,6 +43,7 @@ Everything is environment variables, read once at start.
 | `STELLAR_RPC_URL` | on mainnet | the foundation's public testnet endpoint | The Stellar RPC to read and submit through. Mainnet has no public default, so the process refuses to start without one |
 | `MAVNA_IRIS_URL` | no | Circle's sandbox on testnet, production on mainnet | Circle's attestation service |
 | `MAVNA_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:4319` | Browser origins allowed to call this server, comma separated. Never `*`: this server spends money on request |
+| `MAVNA_SETTLE_SWEEP_SECONDS` | no | `120` | How often held settlements are retried without a page asking, for LayerZero and Axelar deliveries whose tab closed. One account at a time, never overlapping. `0` turns it off |
 | `PORT` | no | `8787` | Where to listen |
 
 The curated asset list, the assets this sponsor opens trustlines for, is written

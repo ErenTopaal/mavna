@@ -33,7 +33,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
-import { createSponsorServer, type SponsorServerOptions } from "./server.js";
+import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 
 /**
  * The sponsor's endpoints, driven over real HTTP against a real server.
@@ -189,6 +189,7 @@ class FixedPrice extends XlmPriceSource {
 }
 
 interface TestServer {
+  readonly server: SponsorServer;
   readonly url: string;
   readonly rpc: RecordingRpc;
   readonly sponsor: Keypair;
@@ -266,6 +267,7 @@ async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promi
   };
 
   return {
+    server,
     url,
     rpc: recording,
     sponsor,
@@ -1183,5 +1185,227 @@ describe("the sponsor reports a submission that landed", () => {
     expect(response.body.txHash).toBe(submitted.hash().toString("hex"));
     expect(logged.mock.calls.flat().join(" ")).toContain("cap store is unreachable");
     logged.mockRestore();
+  });
+});
+
+describe("the sponsor sweeps held settlements the page never finished", () => {
+  const SWEEP_MS = 120_000;
+
+  /** Only the interval is faked: the HTTP calls these tests make still run on real time. */
+  function fakeInterval(): void {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  }
+
+  it("submits a prepared, funded settlement without anyone calling /settle", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+    const submitted = server.rpc.submissions[0]?.tx as Transaction;
+    expect(signedBy(submitted, user.publicKey())).toBe(true);
+    expect(signedBy(submitted, server.channel.publicKey())).toBe(true);
+    expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
+    // Settled means no longer held.
+    const after = await server.post("/settle", { destination: user.publicKey() });
+    expect(after.status).toBe(404);
+  });
+
+  it("does not run before the first interval has passed", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS - 1);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("leaves a settlement whose preparation has not landed", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS * 3);
+    await server.server.stopSweep();
+
+    expect(server.rpc.submissions).toHaveLength(0);
+    const still = await server.post("/settle", { destination: user.publicKey() });
+    expect(still.status).toBe(200);
+    expect(still.body.settled).toBe(false);
+  });
+
+  it("leaves a settlement whose money has not arrived, and keeps holding it", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, 1n);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    // Still held, so the sweep after the money lands submits it.
+    server.rpc.holding(user, PLENTY);
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("settles every ready account in one pass, one at a time", async () => {
+    fakeInterval();
+    const pool = [Keypair.random(), Keypair.random()];
+    const server = await startServer({ channels: new ChannelPool({ channels: pool }) });
+    // the pool replaces the harness's own channel, so its accounts have to exist
+    for (const channel of pool) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const users = [Keypair.random(), Keypair.random()];
+    let inFlight = 0;
+    let most = 0;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        return await submit(label, build);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    for (const user of users) {
+      await preparedWithSettlementHeld(server, user);
+      server.rpc.holding(user, PLENTY);
+    }
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement", "settlement"]);
+    expect(most).toBe(1);
+  });
+
+  it("skips a tick while the previous sweep is still running", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let attempts = 0;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build) => {
+      attempts += 1;
+      await gate;
+      return submit(label, build);
+    };
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await vi.waitFor(() => expect(attempts).toBe(1));
+    // Two more ticks while the first is stuck on the network.
+    await vi.advanceTimersByTimeAsync(SWEEP_MS * 2);
+    expect(attempts).toBe(1);
+
+    release();
+    await server.server.stopSweep();
+    expect(attempts).toBe(1);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("does not submit twice when /settle arrives during a sweep", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let attempts = 0;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build) => {
+      attempts += 1;
+      await gate;
+      return submit(label, build);
+    };
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await vi.waitFor(() => expect(attempts).toBe(1));
+
+    const page = await server.post("/settle", { destination: user.publicKey() });
+    expect(page.status).toBe(200);
+    expect(page.body.settled).toBe(false);
+    expect(page.body.settlementRetryable).toBe(true);
+
+    release();
+    await server.server.stopSweep();
+    expect(attempts).toBe(1);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("stops when the server closes", async () => {
+    fakeInterval();
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await new Promise<void>((resolve) => server.server.close(() => resolve()));
+    await vi.advanceTimersByTimeAsync(SWEEP_MS * 2);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("never runs when the interval is zero", async () => {
+    fakeInterval();
+    const server = await startServer({ settleSweepSeconds: 0 });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS * 10);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("runs on the interval it is given", async () => {
+    fakeInterval();
+    const server = await startServer({ settleSweepSeconds: 5 });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("refuses an interval that is not a whole number of seconds", async () => {
+    for (const settleSweepSeconds of [-1, 1.5, Number.NaN]) {
+      await expect(startServer({ settleSweepSeconds })).rejects.toThrow(/sweep/);
+    }
   });
 });

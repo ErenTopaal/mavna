@@ -43,6 +43,20 @@ const CURATED: Record<string, Asset> = {
   ),
 };
 
+// Checked here so a typo stops the process at start-up with its own message,
+// rather than a sweep that silently never runs.
+const sweepSetting = env("MAVNA_SETTLE_SWEEP_SECONDS");
+const settleSweepSeconds = sweepSetting === undefined ? undefined : Number(sweepSetting);
+if (
+  settleSweepSeconds !== undefined &&
+  (!/^\d+$/.test(sweepSetting ?? "") || !Number.isSafeInteger(settleSweepSeconds))
+) {
+  console.error(
+    `MAVNA_SETTLE_SWEEP_SECONDS must be a whole number of seconds, 0 to turn the sweep off; got "${sweepSetting}".`,
+  );
+  process.exit(2);
+}
+
 const server = createSponsorServer({
   rpc: new RpcClient({ url: network.rpcUrl }),
   network,
@@ -59,6 +73,7 @@ const server = createSponsorServer({
     .split(",")
     .map((origin) => origin.trim())
     .filter((origin) => origin !== ""),
+  ...(settleSweepSeconds === undefined ? {} : { settleSweepSeconds }),
 });
 
 const port = Number(env("PORT") ?? 8787);
@@ -66,4 +81,5 @@ server.listen(port, () => {
   // The one line an operator needs at start-up, on stderr with the rest of the
   // process's own reporting; stdout stays clean for anything piped through it.
   console.error(`[sponsor] listening on :${port}, network ${networkId}`);
+  server.startSweep();
 });
