@@ -356,6 +356,7 @@ describe("sending USDT0", () => {
     rail: Recorder,
     over: { wanted?: "USDT0" | "USDC" | "XLM" } = {},
     usdcOnStellar: Asset = engine.usdcOnStellar,
+    engineOver: Record<string, unknown> = {},
   ): Promise<RouteSet> {
     return new Promise((resolve) => {
       runQuote(
@@ -382,6 +383,7 @@ describe("sending USDT0", () => {
             wantedContract: "native",
           },
           integratorFee: undefined,
+          ...engineOver,
         },
         { ...inputs, ...over },
         () => {},
@@ -439,6 +441,42 @@ describe("sending USDT0", () => {
     expect(ask?.arrivingContract).toBe("CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF");
     expect(ask?.wantedContract).toBe(wantedContract);
     expect(ask?.to.symbol).toBe(wanted);
+  });
+
+  it("declines converting USDT0 into USDC for a recipient that cannot hold USDC", async () => {
+    const rail = new Composing("layerzero", [{ phase: "idle" }]);
+    const plain = routeFor("layerzero", { delivers: usdt0To });
+    rail.quote = async () => plain as never;
+    const mainnetUsdc: Asset = {
+      ...engine.usdcOnStellar,
+      chainId: "stellar",
+      id: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    };
+    // a venue that prices it, so only the recipient's trustline can stop it
+    const pricing = {
+      id: "venue",
+      quote: async () => ({
+        provider: "venue",
+        amountOut: "49000000",
+        amountOutMinimum: "48700000",
+      }),
+    };
+    const rpc = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    // the recipient's account exists and holds no USDC trustline
+    vi.spyOn(rpc.server, "getLedgerEntries").mockResolvedValue({
+      entries: [accountLedger(50_000_000n, 1)],
+      latestLedger: 1,
+    } as never);
+    const set = await quoteWith(usdt0Assets, rail, { wanted: "USDC" }, mainnetUsdc, {
+      rpc,
+      usdt0Swap: (usdt0: Asset, wanted: Asset) => usdt0SwapFor("mainnet", pricing, usdt0, wanted),
+    });
+    expect(set.routes.filter((r) => r.steps.some((st) => st.kind === "swap"))).toEqual([]);
+    expect(set.rejected.map((r) => r.explanation).join(" ")).toMatch(/cannot hold USDC yet/);
   });
 
   it("asks for no conversion when USDT0 is what is wanted", async () => {
@@ -810,5 +848,82 @@ describe("how many approvals a route asks for", () => {
       circle.signaturesRequired,
       relayed.signaturesRequired,
     ]);
+  });
+});
+
+describe("a conversion on Stellar the recipient must be able to hold", () => {
+  const usdt0: Asset = {
+    chainId: "stellar",
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+    decimals: 7,
+    curatedBy: "LayerZero",
+  };
+  // USDT0 arrives, and the recipient's own signature converts it into USDC
+  const converting = (() => {
+    const base = routeFor("layerzero", { swap: true, delivers: engine.usdcOnStellar });
+    return {
+      ...base,
+      deliveredAtLeast: { asset: usdt0, baseUnits: "50000000" },
+      steps: base.steps.map((s) =>
+        s.kind === "swap"
+          ? { ...s, from: { asset: usdt0, baseUnits: "50000000" }, to: base.receives }
+          : s,
+      ),
+    };
+  })();
+  const check = (
+    reserveFunding: "self" | "sponsor",
+    holdsWanted: "ready" | "missing" | "unauthorized" | Error,
+    spareStroops = 100_000_000n,
+  ) => ({
+    network: "testnet",
+    terms: { network: "testnet", reserveFunding, minDeliveryBaseUnits: 0n },
+    destination: "exists" as const,
+    spareStroops,
+    baseReserveStroops: 5_000_000,
+    convertsInto: engine.usdcOnStellar,
+    holdsWanted,
+  });
+  const only = (c: ReturnType<typeof check>) =>
+    applySponsorTerms({ routes: [converting], rejected: [], complete: true }, c);
+
+  it("is offered as it is when the recipient can already hold what it converts into", () => {
+    expect(only(check("sponsor", "ready")).routes).toEqual([converting]);
+  });
+
+  it("is declined at quote time when the recipient cannot hold it and the sponsor would not help", () => {
+    const set = only(check("sponsor", "missing"));
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ reason: "destination-unsupported" });
+    expect(set.rejected[0]?.explanation).toMatch(/cannot hold USDC yet.*receive USDT0/);
+  });
+
+  it("is declined on any terms when the issuer has not authorised the recipient", () => {
+    for (const funding of ["self", "sponsor"] as const) {
+      expect(only(check(funding, "unauthorized")).rejected[0]?.explanation).toMatch(
+        /not authorised/,
+      );
+    }
+  });
+
+  it("is offered with one more approval when the account opens the trustline itself", () => {
+    const set = only(check("self", "missing"));
+    expect(set.routes.map((r) => r.signaturesRequired)).toEqual([
+      converting.signaturesRequired + 1,
+    ]);
+  });
+
+  it("is declined when the account cannot spare the reserve for that trustline", () => {
+    const set = only(check("self", "missing", 5_000_000n));
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/0\.5 XLM to hold USDC/);
+  });
+
+  it("says it could not check rather than guessing", () => {
+    expect(only(check("sponsor", new Error("node down"))).rejected[0]).toMatchObject({
+      reason: "temporarily-unavailable",
+      retryable: true,
+    });
   });
 });

@@ -316,6 +316,14 @@ export interface SponsorCheck {
   readonly spareStroops?: bigint | undefined;
   /** The network's base reserve, in stroops, for pricing a trustline. */
   readonly baseReserveStroops?: number;
+  /**
+   * The asset a conversion on Stellar would produce, when one was asked for and
+   * it is not XLM, and whether the destination can hold it: a trustline the
+   * issuer has authorised. Read on any terms, since the conversion is the
+   * recipient's own transaction whoever funds reserves.
+   */
+  readonly convertsInto?: Asset;
+  readonly holdsWanted?: "ready" | "missing" | "unauthorized" | "no-account" | Error | undefined;
 }
 
 const message = (cause: unknown): string =>
@@ -331,13 +339,17 @@ const message = (cause: unknown): string =>
 function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | undefined {
   const circle = route.source === "cctp";
   const setsUp = route.steps.some((s) => s.kind === "prepare-account");
-  if (!circle && !setsUp) return undefined;
   const decline = (reason: RouteRejection["reason"], explanation: string): RouteRejection => ({
     source: route.source,
     reason,
     explanation,
     retryable: rejectionIsRetryable(reason),
   });
+  if (!circle && !setsUp) {
+    // only the conversion's trustline to check; the sponsor is not involved
+    const holds = convertBlocker(route, check);
+    return holds === undefined ? undefined : decline(holds[0], holds[1]);
+  }
 
   const { terms } = check;
   if (terms instanceof Error) {
@@ -386,6 +398,9 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
 
+  const holds = convertBlocker(route, check);
+  if (holds !== undefined) return decline(holds[0], holds[1]);
+
   if (circle && terms.reserveFunding === "self") {
     const blocked = ownDeliveryBlocker(route, check, setsUp);
     if (blocked !== undefined) return decline(blocked[0], blocked[1]);
@@ -411,6 +426,64 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
   return undefined;
+}
+
+/** The non-XLM asset this route converts into on Stellar, when the quote asked for one. */
+function convertsInto(route: Route, check: SponsorCheck): Asset | undefined {
+  const wanted = check.convertsInto;
+  if (wanted === undefined) return undefined;
+  const swap = route.steps.find((s) => s.kind === "swap");
+  return swap?.to.asset.id === wanted.id ? wanted : undefined;
+}
+
+/**
+ * Why the recipient could not hold what this route converts into. The
+ * conversion is their own transaction after the money lands, so a missing or
+ * unauthorised trustline would fail it with the funds already arrived.
+ */
+function convertBlocker(
+  route: Route,
+  check: SponsorCheck,
+): [RouteRejection["reason"], string] | undefined {
+  const wanted = convertsInto(route, check);
+  if (wanted === undefined) return undefined;
+  const arrives = route.deliveredAtLeast.asset.symbol;
+  const state = check.holdsWanted;
+  if (state === undefined || state === "ready") return undefined;
+  if (state instanceof Error) {
+    return [
+      "temporarily-unavailable",
+      `Whether the receiving account can hold ${wanted.symbol} could not be checked: ${message(state)}`,
+    ];
+  }
+  if (state === "unauthorized") {
+    return [
+      "destination-unsupported",
+      `The receiving account's ${wanted.symbol} trustline is not authorised by its issuer, so ` +
+        `converting into ${wanted.symbol} would fail. Receive ${arrives} instead.`,
+    ];
+  }
+  const self = !(check.terms instanceof Error) && check.terms.reserveFunding === "self";
+  if (state === "missing" && self) {
+    // the account opens it itself before the send; it needs the reserve for it
+    const reserve = BigInt(check.baseReserveStroops ?? 0);
+    const prepares = route.steps.some((s) => s.kind === "prepare-account") ? reserve : 0n;
+    const need = prepares + reserve + 2n * OWN_TRUSTLINE_FEE_STROOPS;
+    if (check.spareStroops === undefined || check.spareStroops >= need) return undefined;
+    const spare = check.spareStroops > 0n ? check.spareStroops : 0n;
+    return [
+      "destination-unsupported",
+      `Right now an account pays its own reserve: ${stroopsToXlm(reserve)} XLM to hold ` +
+        `${wanted.symbol}, plus a small fee, and this one has ${stroopsToXlm(spare)} XLM to ` +
+        `spare. Add XLM to it, or receive ${arrives}.`,
+    ];
+  }
+  return [
+    "destination-unsupported",
+    `The receiving account cannot hold ${wanted.symbol} yet, so converting into it on Stellar ` +
+      `would fail after the ${arrives} arrives. Add a ${wanted.symbol} trustline to it first, ` +
+      `or receive ${arrives}.`,
+  ];
 }
 
 /**
@@ -475,13 +548,19 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
       continue;
     }
     const extra =
-      funding === "self"
+      (funding === "self"
         ? route.source === "cctp"
           ? 1
           : 0
         : funding === "sponsor" && route.steps.some((s) => s.kind === "settle-account")
           ? 1
-          : 0;
+          : 0) +
+      // an account paying its own way opens the trustline it converts into
+      (funding === "self" &&
+      check.holdsWanted === "missing" &&
+      convertsInto(route, check) !== undefined
+        ? 1
+        : 0);
     routes.push(
       extra === 0 ? route : { ...route, signaturesRequired: route.signaturesRequired + extra },
     );
@@ -493,6 +572,8 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
 async function checkSponsor(
   engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops">,
   destination: string,
+  /** What a conversion on Stellar would produce, when it is not XLM. */
+  convertsInto?: Asset,
 ): Promise<SponsorCheck> {
   let terms: SponsorTerms | Error;
   try {
@@ -521,12 +602,34 @@ async function checkSponsor(
       found = cause instanceof Error ? cause : new Error(String(cause));
     }
   }
+  let holdsWanted: SponsorCheck["holdsWanted"];
+  if (convertsInto !== undefined) {
+    const [code, issuer] = convertsInto.id.split(":");
+    try {
+      const state = await inspectDestination(
+        engine.rpc,
+        destination,
+        new StellarAsset(code ?? "", issuer),
+      );
+      holdsWanted =
+        state.lane.kind === "needs-account"
+          ? "no-account"
+          : state.lane.kind === "needs-trustline"
+            ? "missing"
+            : state.trustline !== undefined && !state.trustline.authorized
+              ? "unauthorized"
+              : "ready";
+    } catch (cause) {
+      holdsWanted = cause instanceof Error ? cause : new Error(String(cause));
+    }
+  }
   return {
     network: engine.network,
     terms,
     destination: found,
     spareStroops: spare,
     baseReserveStroops,
+    ...(convertsInto === undefined ? {} : { convertsInto, holdsWanted }),
   };
 }
 
@@ -613,7 +716,9 @@ export function runQuote(
   const race = ({ from, to }: { from: Asset; to: Asset }, swap?: SwapAttachment): void => {
     // The sponsor's terms come first, so no route it cannot carry is ever shown
     // and then taken back. They are cached on the engine after the first answer.
-    void checkSponsor(engine, destination)
+    // a conversion into anything but XLM needs a trustline the recipient holds
+    const into = swap !== undefined && swap.wanted.id !== "native" ? swap.wanted : undefined;
+    void checkSponsor(engine, destination, into)
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
