@@ -80,10 +80,21 @@ export function stepsFor(
     user: true,
     actor: "Your wallet",
   };
+  const swapTo = route.steps.find((s) => s.kind === "swap")?.to.asset;
   const swap: StepTemplate = {
     id: "swap",
-    label: "Convert to XLM on Stellar's exchange",
+    label: `Convert to ${swapTo?.symbol ?? "XLM"} on Stellar`,
     note: "Approve the conversion in your Stellar wallet.",
+    user: true,
+    actor: "Your wallet",
+  };
+  // Converting into anything but XLM needs that trustline too; an account
+  // paying its own way opens it before the send, as its own signature.
+  const holds = selfFunded && swapTo !== undefined && swapTo.id !== "native";
+  const hold: StepTemplate = {
+    id: "hold",
+    label: `Let the account hold ${swapTo?.symbol ?? ""}`,
+    note: "Approve in your Stellar wallet. The reserve comes from this account's own XLM.",
     user: true,
     actor: "Your wallet",
   };
@@ -93,6 +104,7 @@ export function stepsFor(
   if (circle && selfFunded) {
     return [
       ...(newAccount ? [prepare] : []),
+      ...(holds ? [hold] : []),
       approve,
       send,
       {
@@ -142,6 +154,7 @@ export function stepsFor(
   const compose = route.compose;
   return [
     ...(newAccount ? (selfFunded ? [prepare] : [settle, prepare]) : []),
+    ...(holds ? [hold] : []),
     ...(approves ? [approve] : []),
     send,
     {

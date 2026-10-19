@@ -461,3 +461,46 @@ describe("stepsFor an account that pays its own reserve", () => {
     expect(sponsored).toMatchObject({ user: false, actor: "Mavna" });
   });
 });
+
+describe("the steps of a route that converts into something other than XLM", () => {
+  const usdt0 = {
+    ...STELLAR_USDC,
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+  };
+  const converting = (() => {
+    const base = routeFor("layerzero", { swap: true });
+    return {
+      ...base,
+      deliveredAtLeast: { asset: usdt0, baseUnits: "50000000" },
+      steps: base.steps.map((s) =>
+        s.kind === "swap"
+          ? {
+              ...s,
+              from: { asset: usdt0, baseUnits: "50000000" },
+              to: { asset: STELLAR_USDC, baseUnits: "49000000" },
+            }
+          : s,
+      ),
+    };
+  })();
+
+  it("names the conversion by what it produces", () => {
+    const swap = stepsFor(converting, "sponsor").find((s) => s.id === "swap");
+    expect(swap?.label).toBe("Convert to USDC on Stellar");
+    const xlm = stepsFor(
+      routeFor("layerzero", { swap: true, delivers: STELLAR_XLM }),
+      "sponsor",
+    ).find((s) => s.id === "swap");
+    expect(xlm?.label).toBe("Convert to XLM on Stellar");
+  });
+
+  it("gives the trustline an account opens for it its own row, before the send, when it pays its own way", () => {
+    const ids = stepsFor(converting, "self").map((s) => s.id);
+    expect(ids).toContain("hold");
+    expect(ids.indexOf("hold")).toBeLessThan(ids.indexOf("burn"));
+    const hold = stepsFor(converting, "self").find((s) => s.id === "hold");
+    expect(hold).toMatchObject({ user: true, label: "Let the account hold USDC" });
+    expect(stepsFor(converting, "sponsor").map((s) => s.id)).not.toContain("hold");
+  });
+});

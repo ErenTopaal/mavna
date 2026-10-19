@@ -913,8 +913,14 @@ describe("runTransfer when the account pays its own reserve", () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
     });
-    await run(adapter, route, patches().patch).catch(() => undefined);
+    const { seen, patch } = patches();
+    await run(adapter, route, patch).catch(() => undefined);
     expect(askedAssets).toEqual([["USDC"]]);
+    // its own row on the flight, signed before the send
+    expect(seen.filter((p) => p.id === "hold").map((p) => p.patch.phase)).toEqual([
+      "blocked",
+      "done",
+    ]);
     const signed = log.indexOf("stellar sign PREPARATION");
     expect(signed).toBeGreaterThan(-1);
     expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
