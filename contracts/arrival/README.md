@@ -71,6 +71,28 @@ a key that queues compose messages on the real testnet endpoint itself. It prove
 queue, the Aquarius router and this contract together; it does not prove an OFT's `lz_receive`.
 Mainnet is not deployed: the contract goes through an independent audit first.
 
+## Before a mainnet deployment
+
+What the constructor is given decides what the contract will ever trust, so on mainnet:
+
+- Every listed token (each OFT's credited token, every asset it converts into, every path token)
+  must be a Stellar asset contract, the built-in contract of a classic asset, whose code is the
+  network's own. The contract calls `balance`, `authorized` and `transfer` on these tokens inside
+  every compose; a custom token contract runs its own code there, with the executor's call above it.
+- The OFT list must name the real USDT0 OFT on Stellar
+  (`CBOWOLFSDM5PZXNFIVDMP5NZ7U2GSIHED6H6R446QOHF266XINKUMMF6`, crediting
+  `CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF`), read and checked from the OFT's own
+  storage at the time of deployment, never a key. A key in that list can queue a compose with any
+  `amount_ld` and be paid out of other arrivals waiting in the contract (see above).
+- The Aquarius router is a trusted party, and so is whoever can upgrade it. The contract calls its
+  `estimate_swap` and `swap_chained` with the arriving funds approved to it. The mainnet router
+  `CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK` exposes `commit_upgrade` and
+  `apply_upgrade` for its `Admin`, read from its instance storage on 2026-10-20 as
+  `GAV5FBMKD2ZF4X2MGWDNQYUP7KFL7MRM6HZBY7HKQLB4BRHSCCX5J6VS`, and `set_emergency_mode` for its
+  `EmergencyAdmin`, `GCGZ6E5RBUKLNB4VZ5RC65C4QMBSBJ3COVRRJCWAMCXJC36LB7YYWEKM`. Either key, or a router
+  upgraded by them, can change what a swap does with the funds it is given. The router's source was
+  not reviewed here; check these roles again at deployment time.
+
 Earlier testnet instances hold nothing and are not used. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`)
 swapped without estimating first, and its fallback failed on-chain whenever the swap reverted,
 because a rolled-back swap still costs ledger writes that simulation does not predict.
