@@ -176,11 +176,16 @@ export async function assertBalanceCovers(
   const native = await connection.reader.getBalance({ address: connection.address });
   if (native < fee) {
     const currency = options.nativeCurrency;
-    const label = currency?.symbol ?? "the native token";
-    const decimals = currency?.decimals ?? 18;
+    // Without the chain's own decimals any scaling is a guess, and a wrong
+    // amount reads as true. The exact base units are at least honest.
+    const needs =
+      currency === undefined
+        ? `${fee} base units of this chain's native currency`
+        : `${format(fee, currency.decimals)} ${currency.symbol}`;
+    const holds = currency === undefined ? native.toString() : format(native, currency.decimals);
     throw new Error(
-      `This transfer needs ${format(fee, decimals)} ${label} to pay for delivery, plus gas, ` +
-        `and this wallet holds ${format(native, decimals)}. Nothing has been sent.`,
+      `This transfer needs ${needs} to pay for delivery, plus gas, ` +
+        `and this wallet holds ${holds}. Nothing has been sent.`,
     );
   }
 }

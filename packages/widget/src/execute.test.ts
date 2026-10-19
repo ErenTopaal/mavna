@@ -136,6 +136,21 @@ describe("assertBalanceCovers", () => {
     await expect(check).rejects.toThrow(/needs 0\.000000000000000777 ETH.*Nothing has been sent/);
   });
 
+  it("states raw base units when the chain's native currency is unknown", async () => {
+    // Guessing 18 decimals would print a plausible and wrong amount on a chain
+    // that uses some other number.
+    const check = assertBalanceCovers({
+      connection: connection(776n),
+      route,
+      transactions: [transaction(layerZeroPayload("777"))],
+      nativeCurrency: undefined,
+    });
+    await expect(check).rejects.toThrow(
+      "This transfer needs 777 base units of this chain's native currency to pay for " +
+        "delivery, plus gas, and this wallet holds 776. Nothing has been sent.",
+    );
+  });
+
   it("passes when the native balance covers the fee", async () => {
     await expect(
       assertBalanceCovers({
