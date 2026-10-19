@@ -554,6 +554,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       reply(res, 400, { error: "Say which account will settle.", retryable: false }, origin);
       return;
     }
+    // A settlement being submitted may already have spent its channel's
+    // sequence. Building now would put this one on the next sequence, which is
+    // the next user's once the channel is released.
+    if (settling.has(body.destination)) {
+      reply(
+        res,
+        409,
+        {
+          error: "This account's last settlement is still landing. Ask again shortly.",
+          retryable: true,
+        },
+        origin,
+      );
+      return;
+    }
     const decision = await caps.check(
       classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
     );

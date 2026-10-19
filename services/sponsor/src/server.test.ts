@@ -1635,6 +1635,38 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     return release;
   }
 
+  it("will not build on a channel while the owner's last settlement is still confirming", async () => {
+    const server = await startServer();
+    const owner = Keypair.random();
+    const next = Keypair.random();
+    await preparedWithSettlementHeld(server, owner);
+    server.rpc.holding(owner, PLENTY);
+
+    const confirmed = confirmLate(server);
+    const first = server.post("/settle", { destination: owner.publicKey() });
+    await vi.waitFor(() =>
+      expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]),
+    );
+
+    // The channel's sequence is spent on the network and the server has not
+    // heard yet. A build now would sit on the sequence the next user gets.
+    const during = await server.post("/settlement", {
+      destination: owner.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(during.status).toBe(409);
+    expect(during.body.retryable).toBe(true);
+
+    confirmed();
+    expect((await first).body.settled).toBe(true);
+
+    await preparedWithSettlementHeld(server, next);
+    server.rpc.holding(next, PLENTY);
+    const settled = await server.post("/settle", { destination: next.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
   it("will not hold a settlement built on a channel that has since gone to someone else", async () => {
     const server = await startServer();
     const owner = Keypair.random();
