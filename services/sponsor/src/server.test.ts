@@ -1045,11 +1045,13 @@ describe("any rail can trigger a held settlement", () => {
     expect(signedBy(submitted, server.channel.publicKey())).toBe(true);
     expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
 
-    // Settled means no longer held.
+    // Settled means no longer held, and asking again reports the repayment
+    // that landed rather than submitting anything.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 31_000);
     const again = await server.post("/settle", { destination: user.publicKey() });
-    expect(again.status).toBe(404);
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ settled: true, settlementTxHash: response.body.settlementTxHash });
     expect(server.rpc.submissions).toHaveLength(1);
   });
 
@@ -1212,9 +1214,11 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     expect(signedBy(submitted, user.publicKey())).toBe(true);
     expect(signedBy(submitted, server.channel.publicKey())).toBe(true);
     expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
-    // Settled means no longer held.
+    // Settled means no longer held; the page is told it was repaid.
     const after = await server.post("/settle", { destination: user.publicKey() });
-    expect(after.status).toBe(404);
+    expect(after.status).toBe(200);
+    expect(after.body.settled).toBe(true);
+    expect(server.rpc.submissions).toHaveLength(1);
   });
 
   it("does not run before the first interval has passed", async () => {
@@ -1401,6 +1405,79 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await server.server.stopSweep();
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+  });
+
+  it("tells a page that comes back after the sweep that the account was repaid", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+    const submitted = server.rpc.submissions[0]?.tx as Transaction;
+    expect(submitted).toBeDefined();
+
+    const page = await server.post("/settle", { destination: user.publicKey() });
+    expect(page.status).toBe(200);
+    expect(page.body).toEqual({
+      settled: true,
+      settlementTxHash: submitted.hash().toString("hex"),
+    });
+    expect(server.rpc.submissions).toHaveLength(1);
+  });
+
+  it("answers repaid to the page that was told to retry while the sweep was submitting", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build) => {
+      await gate;
+      return submit(label, build);
+    };
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    const during = await server.post("/settle", { destination: user.publicKey() });
+    expect(during.body).toEqual({ settled: false, settlementRetryable: true });
+
+    release();
+    await server.server.stopSweep();
+    // The page's poll interval, past the per-account limit.
+    await vi.advanceTimersByTimeAsync(31_000);
+    const after = await server.post("/settle", { destination: user.publicKey() });
+    expect(after.status).toBe(200);
+    expect(after.body.settled).toBe(true);
+    expect(after.body.settlementTxHash).toBe(
+      (server.rpc.submissions[0]?.tx as Transaction).hash().toString("hex"),
+    );
+  });
+
+  it("forgets a repayment once the settlement's own time bound has passed", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions).toHaveLength(1);
+
+    vi.setSystemTime(Date.now() + 86_400_000 + 60_000);
+    const later = await server.post("/settle", { destination: user.publicKey() });
+    expect(later.status).toBe(404);
   });
 
   it("refuses an interval that is not a whole number of seconds", async () => {

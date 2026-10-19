@@ -389,6 +389,15 @@ describe("pollSettlement", () => {
     expect(asked[0]).toBe(`https://sponsor.test/settle {"destination":"${DESTINATION}"}`);
   });
 
+  it("says repaid when the sponsor's sweep settled the account between two asks", async () => {
+    answers(
+      [200, { settled: false, settlementRetryable: true }],
+      [200, { settled: true, settlementTxHash: "5e7" }],
+    );
+    const result = await pollSettlement(sponsor, DESTINATION, { wait: instant });
+    expect(settleNote(result)).toBe("Delivered, and the deposit repaid itself from the arrival.");
+  });
+
   it("stops when nothing is held", async () => {
     const asked = answers([404, { error: "none", retryable: false }]);
     expect(await pollSettlement(sponsor, DESTINATION, { wait: instant })).toEqual({

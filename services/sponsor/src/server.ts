@@ -216,6 +216,26 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const settling = new Set<string>();
 
   /**
+   * Settlements that landed, kept until their own time bound so a page asking
+   * after the sweep got there first hears that it was repaid rather than that
+   * nothing was held. Pruned on every write and read, so it never holds more
+   * than one window's worth of settlements.
+   */
+  const recentlySettled = new Map<string, { txHash: string; untilUnix: number }>();
+
+  function pruneSettled(): void {
+    const now = nowUnix();
+    for (const [account, record] of recentlySettled) {
+      if (record.untilUnix <= now) recentlySettled.delete(account);
+    }
+  }
+
+  function settledRecently(destination: string): string | undefined {
+    pruneSettled();
+    return recentlySettled.get(destination)?.txHash;
+  }
+
+  /**
    * The held settlement for an account, if it can still land. One past its
    * time bound never will, so sponsoring against it would be the gift the
    * ordering exists to prevent, and it is dropped. Its channel is not released
@@ -736,6 +756,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       const result = await options.rpc.submit("settlement", async () => transaction);
       heldSettlements.delete(destination);
       pool.release(destination, transaction.source);
+      pruneSettled();
+      recentlySettled.set(destination, { txHash: result.txHash, untilUnix: held.maxTimeUnix });
       return { settled: true, settlementTxHash: result.txHash };
     } catch (cause) {
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
@@ -917,6 +939,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     lastSettleCall.set(destination, now);
 
     if (liveSettlement(destination) === undefined) {
+      const settledHash = settledRecently(destination);
+      if (settledHash !== undefined) {
+        reply(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
+        return;
+      }
       reply(
         res,
         404,
