@@ -40,6 +40,8 @@ export interface SoroswapOptions {
   readonly apiKey: string;
   /** Basis points. The integrator keeps roughly 60 percent of whatever is set. */
   readonly feeBps?: number;
+  /** How long a request gets before it is abandoned. Defaults to 10 seconds. */
+  readonly timeoutMs?: number;
 }
 
 /** Venues Soroswap can route through. */
@@ -65,12 +67,14 @@ export class SoroswapProvider implements SwapProvider {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly feeBps: number | undefined;
+  private readonly timeoutMs: number;
 
   constructor(options: SoroswapOptions) {
     this.network = options.network;
     this.baseUrl = options.baseUrl ?? "https://api.soroswap.finance";
     this.apiKey = options.apiKey;
     this.feeBps = options.feeBps;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
 
     if (this.apiKey.length === 0) {
       throw new MavnaError("Soroswap needs an API key, and it is server-side only.", {
@@ -87,7 +91,9 @@ export class SoroswapProvider implements SwapProvider {
    */
   async isUsable(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      const response = await fetch(`${this.baseUrl}/health`, {
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
       if (!response.ok) return false;
       const body = (await response.json()) as {
         status?: { indexer?: Record<string, string[]> };
@@ -102,7 +108,8 @@ export class SoroswapProvider implements SwapProvider {
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
     const protocols = protocolsFor(request.destinationKind);
 
-    const response = await fetch(`${this.baseUrl}/quote?network=${this.network}`, {
+    const response = await fetchOrThrow(`${this.baseUrl}/quote?network=${this.network}`, {
+      signal: AbortSignal.timeout(this.timeoutMs),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -177,4 +184,13 @@ export function protocolsFor(destinationKind: "account" | "contract"): SoroswapP
   return destinationKind === "contract"
     ? ["soroswap", "phoenix", "aqua"]
     : ["soroswap", "phoenix", "aqua", "sdex"];
+}
+
+/** A network failure or timeout is the service being briefly unreachable, so it is retryable. */
+async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    throw new MavnaError("Soroswap did not answer.", { retryable: true, cause });
+  }
 }

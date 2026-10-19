@@ -27,6 +27,9 @@ const BASE_URL: Readonly<Record<NetworkId, string>> = {
   mainnet: "https://amm-api.aqua.network",
 };
 
+/** Without a bound, a hung exchange holds the whole route race open. */
+const DEFAULT_TIMEOUT_MS = 10_000;
+
 interface FindPathResponse {
   readonly success: boolean;
   readonly swap_chain_xdr: string;
@@ -44,15 +47,19 @@ export class AquariusProvider implements SwapProvider {
   readonly canCollectIntegratorFee = false;
 
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
-  constructor(network: NetworkId, baseUrl?: string) {
+  constructor(network: NetworkId, baseUrl?: string, options: { readonly timeoutMs?: number } = {}) {
     this.network = network;
     this.baseUrl = baseUrl ?? BASE_URL[network];
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async isUsable(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/external/v1/pools/?size=1`);
+      const response = await fetch(`${this.baseUrl}/api/external/v1/pools/?size=1`, {
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
       if (!response.ok) return false;
       const body = (await response.json()) as { count?: number };
       return typeof body.count === "number" && body.count > 0;
@@ -62,7 +69,8 @@ export class AquariusProvider implements SwapProvider {
   }
 
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
-    const response = await fetch(`${this.baseUrl}/api/external/v1/find-path/`, {
+    const response = await fetchOrThrow(`${this.baseUrl}/api/external/v1/find-path/`, {
+      signal: AbortSignal.timeout(this.timeoutMs),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -109,5 +117,14 @@ export class AquariusProvider implements SwapProvider {
       isClassicPathPayment: false,
       raw: body,
     };
+  }
+}
+
+/** A network failure or timeout is the service being briefly unreachable, so it is retryable. */
+async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    throw new MavnaError("Aquarius did not answer.", { retryable: true, cause });
   }
 }
