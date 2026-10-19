@@ -774,7 +774,6 @@ export function Landing(): ReactNode {
             { name: "Circle CCTP", asset: "USDC", who: "Circle itself" },
             { name: "LayerZero OFT", asset: "USDT0", who: "The verifiers the token trusts" },
             { name: "Axelar ITS", asset: "Interchain assets", who: "A named group of validators" },
-            { name: "Allbridge Core", asset: "Pooled stablecoins", who: "A pool of money" },
             { name: "NEAR Intents", asset: "Native assets, BTC to XLM", who: "Traders bid for it" },
           ].map((rail, i, arr) => (
             <Hover
