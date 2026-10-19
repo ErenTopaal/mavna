@@ -10,8 +10,10 @@ import {
 import { createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
+import { Keypair, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { routeFor, ScriptedAdapter, SOURCE_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
+import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import {
   applySponsorTerms,
   assetsFor,
@@ -31,9 +33,43 @@ const stellar = (id: string, symbol: string, decimals: number): Asset => ({
 });
 const engine = {
   network: "testnet" as const,
+  baseReserveStroops: 5_000_000,
   usdcOnStellar: stellar(`USDC:${CCTP_CONTRACTS.testnet.usdcIssuer}`, "USDC", 7),
   xlmOnStellar: stellar("native", "XLM", 7),
 };
+
+/** An account entry the way the Stellar node returns it. */
+function accountLedger(balance: bigint, subEntries: number) {
+  return {
+    val: xdr.LedgerEntryData.account(
+      new xdr.AccountEntry({
+        accountId: Keypair.random().xdrAccountId(),
+        balance: xdr.Int64.fromString(balance.toString()),
+        seqNum: xdr.Int64.fromString("1"),
+        numSubEntries: subEntries,
+        inflationDest: null,
+        flags: 0,
+        homeDomain: "",
+        thresholds: Buffer.from([1, 0, 0, 0]),
+        signers: [],
+        ext: new xdr.AccountEntryExt(0),
+      }),
+    ),
+  };
+}
+
+/** A rail that quotes one route, the way a real one answers. */
+function quotingOnce(route: ReturnType<typeof routeFor>): BridgeAdapter {
+  const scripted = new ScriptedAdapter(route.source, [{ phase: "idle" }]);
+  return {
+    id: route.source,
+    trustModel: scripted.trustModel,
+    supportedChains: () => scripted.supportedChains(),
+    quote: async () => route,
+    buildTransactions: (r, context) => scripted.buildTransactions(r, context),
+    status: (handle) => scripted.status(handle),
+  };
+}
 
 describe("buildAssets", () => {
   it("names the real USDC token of the source chain, not the chain", () => {
@@ -448,19 +484,6 @@ describe("a trustline an account opens with its own XLM", () => {
     ).toBeUndefined();
   });
 
-  /** A rail that quotes one route, the way a real one answers. */
-  const quoting = (route: ReturnType<typeof routeFor>): BridgeAdapter => {
-    const scripted = new ScriptedAdapter(route.source, [{ phase: "idle" }]);
-    return {
-      id: route.source,
-      trustModel: scripted.trustModel,
-      supportedChains: () => scripted.supportedChains(),
-      quote: async () => route,
-      buildTransactions: (r, context) => scripted.buildTransactions(r, context),
-      status: (handle) => scripted.status(handle),
-    };
-  };
-
   it("offers a USDT0 route to an existing account without the trustline when it pays its own reserve", async () => {
     const route = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
     const rpc = new RpcClient({
@@ -468,14 +491,8 @@ describe("a trustline an account opens with its own XLM", () => {
       baseDelayMs: 0,
       sleep: async () => {},
     });
-    const account = {
-      val: {
-        switch: () => ({ name: "account" }),
-        account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 0 }),
-      },
-    };
     vi.spyOn(rpc.server, "getLedgerEntries").mockResolvedValue({
-      entries: [account],
+      entries: [accountLedger(50_000_000n, 0)],
       latestLedger: 1,
     } as never);
     const quoted = (reserveFunding: "self" | "sponsor") =>
@@ -483,7 +500,7 @@ describe("a trustline an account opens with its own XLM", () => {
         runQuote(
           {
             ...engine,
-            adapters: [quoting(route)],
+            adapters: [quotingOnce(route)],
             breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
             xlmSwap: {
               provider: new SdexProvider("testnet"),
@@ -519,5 +536,116 @@ describe("a trustline an account opens with its own XLM", () => {
     const sponsored = await quoted("sponsor");
     expect(sponsored.routes).toEqual([]);
     expect(sponsored.rejected[0]?.explanation).toMatch(/the sponsor curates/);
+  });
+});
+
+describe("a Circle transfer whose receiving account pays its own delivery", () => {
+  const selfFunded = {
+    network: "testnet",
+    reserveFunding: "self" as const,
+    minDeliveryBaseUnits: 1_000_000n,
+  };
+  const check = (spareStroops: bigint | undefined) => ({
+    network: "testnet",
+    terms: selfFunded,
+    destination: "exists" as const,
+    spareStroops,
+    baseReserveStroops: 5_000_000,
+  });
+  const only = (route: ReturnType<typeof routeFor>, spare: bigint | undefined) =>
+    applySponsorTerms({ routes: [route], rejected: [], complete: true }, check(spare));
+
+  it("is offered to an account that can spare the delivery fee", () => {
+    const route = routeFor("cctp");
+    expect(only(route, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([route]);
+  });
+
+  it("is declined, with what it costs and what the account has, when it cannot", () => {
+    const set = only(routeFor("cctp"), OWN_DELIVERY_FEE_BUDGET_STROOPS - 1n);
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ source: "cctp", reason: "destination-unsupported" });
+    expect(set.rejected[0]?.explanation).toMatch(
+      /pays for Circle's delivery on Stellar from its own XLM: up to 0\.1 XLM, and it has 0\.0999999 XLM to spare/,
+    );
+  });
+
+  it("counts the trustline's reserve too when the account must open one", () => {
+    const route = routeFor("cctp", { newAccount: true });
+    const enough = OWN_DELIVERY_FEE_BUDGET_STROOPS + 5_000_000n + 1_000n;
+    expect(only(route, enough).routes).toEqual([route]);
+    const set = only(route, enough - 1n);
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/plus 0\.5 XLM to hold USDC/);
+  });
+
+  it("is declined for an address that cannot sign for its own account", () => {
+    const set = only(routeFor("cctp"), undefined);
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/ordinary G account/);
+  });
+
+  it("is not held to the sponsor's minimum delivery, which only guards the sponsor's XLM", () => {
+    const small = {
+      ...routeFor("cctp"),
+      sends: { asset: SOURCE_USDC, baseUnits: "10" },
+    };
+    expect(only(small, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([small]);
+  });
+
+  it("leaves rails that deliver by themselves alone", () => {
+    const route = routeFor("layerzero");
+    expect(only(route, 0n).routes).toEqual([route]);
+  });
+
+  it("reads the account's spare XLM from the network at quote time", async () => {
+    const route = routeFor("cctp");
+    const rpc = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    let balance = 0n;
+    vi.spyOn(rpc.server, "getLedgerEntries").mockImplementation(
+      async () => ({ entries: [accountLedger(balance, 1)], latestLedger: 1 }) as never,
+    );
+    const quoted = () =>
+      new Promise<RouteSet>((resolve) => {
+        runQuote(
+          {
+            ...engine,
+            adapters: [quotingOnce(route)],
+            breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
+            xlmSwap: {
+              provider: new SdexProvider("testnet"),
+              delivered: engine.usdcOnStellar,
+              deliveredContract: engine.usdcOnStellar.id,
+              wanted: engine.xlmOnStellar,
+              wantedContract: "native",
+            },
+            integratorFee: undefined,
+            rpc,
+            usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+            sponsorTerms: async () => selfFunded,
+            usdt0Assets: async () => {
+              throw new Error("a USDC send never asks for USDT0");
+            },
+          },
+          {
+            chainId: "arbitrum-sepolia",
+            wanted: "USDC",
+            amount: "5",
+            destination: route.destination,
+            priority: "best",
+            rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+          },
+          () => {},
+          resolve,
+        );
+      });
+    // one subentry: a minimum of 1.5 XLM
+    balance = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS;
+    expect((await quoted()).routes).toEqual([route]);
+    balance -= 1n;
+    expect((await quoted()).routes).toEqual([]);
   });
 });

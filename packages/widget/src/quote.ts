@@ -18,10 +18,11 @@ import {
   type TrustModel,
 } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
-import { inspectDestination } from "@mavna/stellar";
-import { Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
+import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { amountValue, fromBaseUnits, toBaseUnits } from "./format";
+import { OWN_DELIVERY_FEE_BUDGET_STROOPS, OWN_TRUSTLINE_FEE_STROOPS } from "./own-delivery";
 import type { SponsorTerms } from "./sponsor";
 
 /** USDC carries six decimals on every source chain the rails start from. */
@@ -285,6 +286,14 @@ export interface SponsorCheck {
    * the lookup failed.
    */
   readonly destination: "exists" | "missing" | Error;
+  /**
+   * What the destination can spend above its minimum balance, in stroops, read
+   * alongside `destination` for an ordinary account. Undefined for an address
+   * that is not one, which cannot sign for its own delivery.
+   */
+  readonly spareStroops?: bigint | undefined;
+  /** The network's base reserve, in stroops, for pricing a trustline. */
+  readonly baseReserveStroops?: number;
 }
 
 const message = (cause: unknown): string =>
@@ -340,7 +349,14 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
 
-  if (circle && terms.minDeliveryBaseUnits > 0n) {
+  if (circle && terms.reserveFunding === "self") {
+    const blocked = ownDeliveryBlocker(route, check, setsUp);
+    if (blocked !== undefined) return decline(blocked[0], blocked[1]);
+  }
+
+  // The minimum guards the sponsor's XLM, and an account paying for its own
+  // delivery spends none of it.
+  if (circle && terms.reserveFunding === "sponsor" && terms.minDeliveryBaseUnits > 0n) {
     // What the sponsor will see minted: what is sent less Circle's fee, in the
     // source token's units, against a minimum stated at six decimals.
     const decimals = route.sends.asset.decimals;
@@ -360,6 +376,53 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
   return undefined;
 }
 
+/**
+ * Why the receiving account cannot pay for Circle's delivery on Stellar, when
+ * it must. It signs and pays `mint_and_forward` itself, so it has to be an
+ * account that exists, can sign, and can spare the fee, and the trustline's
+ * reserve too when it opens one first.
+ */
+function ownDeliveryBlocker(
+  route: Route,
+  check: SponsorCheck,
+  setsUp: boolean,
+): [RouteRejection["reason"], string] | undefined {
+  if (check.destination instanceof Error) {
+    return [
+      "temporarily-unavailable",
+      `Whether the receiving account can pay for its delivery could not be checked: ${message(check.destination)}`,
+    ];
+  }
+  const pays =
+    "Right now the receiving account pays for Circle's delivery on Stellar from its own XLM";
+  if (check.destination === "missing") {
+    return [
+      "destination-unsupported",
+      `${pays}, and that account does not exist yet. Send it some XLM first, or send to an ` +
+        "account that already exists.",
+    ];
+  }
+  if (check.spareStroops === undefined) {
+    return [
+      "destination-unsupported",
+      `${pays}, which needs an ordinary G account that can sign for itself. Send to one, or ` +
+        "pick another route.",
+    ];
+  }
+  const reserve = setsUp ? BigInt(check.baseReserveStroops ?? 0) + OWN_TRUSTLINE_FEE_STROOPS : 0n;
+  if (check.spareStroops >= OWN_DELIVERY_FEE_BUDGET_STROOPS + reserve) return undefined;
+  const holds = route.deliveredAtLeast.asset.symbol;
+  const spare = check.spareStroops > 0n ? check.spareStroops : 0n;
+  return [
+    "destination-unsupported",
+    `${pays}: up to ${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM` +
+      (setsUp
+        ? `, plus ${stroopsToXlm(BigInt(check.baseReserveStroops ?? 0))} XLM to hold ${holds}`
+        : "") +
+      `, and it has ${stroopsToXlm(spare)} XLM to spare. Add XLM to it, or pick another route.`,
+  ];
+}
+
 /** Move the routes the sponsor cannot carry into the declines, with the reason. */
 export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet {
   const routes: Route[] = [];
@@ -374,7 +437,7 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
 
 /** Ask the sponsor for its terms, and the network for the destination if they need it. */
 async function checkSponsor(
-  engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms">,
+  engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops">,
   destination: string,
 ): Promise<SponsorCheck> {
   let terms: SponsorTerms | Error;
@@ -384,6 +447,8 @@ async function checkSponsor(
     terms = cause instanceof Error ? cause : new Error(String(cause));
   }
   let found: SponsorCheck["destination"] = "exists";
+  let spare: bigint | undefined;
+  const { baseReserveStroops } = engine;
   if (!(terms instanceof Error) && terms.reserveFunding === "self") {
     try {
       const state = await inspectDestination(
@@ -392,11 +457,23 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
+      // Only an ordinary account can sign for and pay its own delivery.
+      if (found === "exists" && StrKey.isValidEd25519PublicKey(destination)) {
+        const entry = await readAccountEntry(engine.rpc, destination);
+        if (entry === undefined) found = "missing";
+        else spare = spareStroops(entry, baseReserveStroops);
+      }
     } catch (cause) {
       found = cause instanceof Error ? cause : new Error(String(cause));
     }
   }
-  return { network: engine.network, terms, destination: found };
+  return {
+    network: engine.network,
+    terms,
+    destination: found,
+    spareStroops: spare,
+    baseReserveStroops,
+  };
 }
 
 export interface QuoteRun {
@@ -422,6 +499,7 @@ export function runQuote(
     | "usdcIssuer"
     | "sponsorTerms"
     | "usdt0Assets"
+    | "baseReserveStroops"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,

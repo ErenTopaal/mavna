@@ -89,6 +89,8 @@ export interface Engine {
   readonly xlmOnStellar: MavnaAsset;
   readonly xlmSwap: SwapAttachment;
   readonly usdcIssuer: string;
+  /** The network's base reserve in stroops, for pricing what an account pays itself. */
+  readonly baseReserveStroops: number;
   readonly sourceChains: ReadonlyArray<{ id: string; name: string }>;
   readonly stellarChainId: string;
   readonly defaultSourceChain: string;
@@ -236,6 +238,7 @@ export function createEngine(config: EngineConfig): Engine {
     xlmOnStellar,
     xlmSwap,
     usdcIssuer,
+    baseReserveStroops: netConfig.baseReserveStroops,
     sourceChains,
     stellarChainId,
     defaultSourceChain,
