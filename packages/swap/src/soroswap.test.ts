@@ -70,9 +70,9 @@ const struct = (fields: Record<string, xdr.ScVal>) =>
   );
 
 /** One operation from `source`, wrapped the way Soroswap's build returns it. */
-function envelope(source: string, op: xdr.Operation): string {
+function envelope(source: string, op: xdr.Operation, fee: string = BASE_FEE): string {
   return new TransactionBuilder(new Account(source, "41"), {
-    fee: BASE_FEE,
+    fee,
     networkPassphrase: Networks.PUBLIC,
   })
     .addOperation(op)
@@ -438,5 +438,35 @@ describe("what Soroswap built, checked before the user signs it", () => {
       await built(pathPayment(Keypair.random().publicKey(), "56.2468867"), asSdex),
     ).toBeInstanceOf(MavnaError);
     expect(await built(pathPayment(owner, "56.2468867", "11"), asSdex)).toBeInstanceOf(MavnaError);
+  });
+
+  it("refuses a swap whose fee is more than any swap costs, since the user pays it", async () => {
+    const pricey = envelope(
+      owner,
+      new Contract(V3).call(
+        "swap_exact_in",
+        address(owner),
+        address(USDC),
+        i128("100000000"),
+        address(XLM),
+        i128("562468867"),
+        xdr.ScVal.scvVec([
+          struct({
+            amount_in: i128("99900000"),
+            hops: xdr.ScVal.scvVec([
+              xdr.ScVal.scvVec([
+                xdr.ScVal.scvSymbol("Soroswap"),
+                struct({ pair: address(PAIR), token_in: address(USDC), token_out: address(XLM) }),
+              ]),
+            ]),
+          }),
+        ]),
+        xdr.ScVal.scvVoid(),
+      ),
+      "10000001",
+    );
+    const error = await built(pricey);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/fee of 1\.0000001 XLM/);
   });
 });

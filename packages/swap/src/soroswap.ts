@@ -363,6 +363,14 @@ export class SoroswapProvider implements SwapProvider {
         retryable: false,
       });
     }
+    // the user pays this fee from their own account, so it is bounded here too
+    if (BigInt(tx.fee) > SOROSWAP_FEE_CEILING_STROOPS) {
+      throw new MavnaError(
+        `Soroswap built a swap with a fee of ${(Number(tx.fee) / 1e7).toFixed(7)} XLM, more than ` +
+          "any swap should cost, so it was not offered for signing.",
+        { retryable: false },
+      );
+    }
     return tx;
   }
 }
@@ -384,6 +392,13 @@ export const SOROSWAP_CONTRACTS: Readonly<
   },
   testnet: { router: "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD" },
 };
+
+/**
+ * The most a Soroswap swap may charge, in stroops. Aggregator v3 swaps on
+ * mainnet were charged 151,947 and 228,913 stroops; a strict-send path payment
+ * costs a hundred. A fee past this is not a swap's.
+ */
+export const SOROSWAP_FEE_CEILING_STROOPS = 10_000_000n;
 
 export interface SoroswapExpected {
   readonly network: NetworkId;
