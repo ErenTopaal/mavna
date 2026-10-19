@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { buildPreparation, buildSettlement, classifyAddress, XlmPriceSource } from "@mavna/stellar";
@@ -84,8 +85,8 @@ interface SubmitBody {
 }
 
 interface DeliverBody {
-  readonly txHash?: string;
-  readonly domain?: number;
+  readonly txHash?: unknown;
+  readonly domain?: unknown;
   /**
    * Who the transfer is for, so a held settlement can be submitted the moment
    * the delivery lands. Optional: a delivery without it still mints, and the
@@ -147,6 +148,13 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * caller chose proves only that the caller can sign.
    */
   const built = new BuiltLedger();
+  /** Circle domains this network routes into Stellar from, and nothing else. */
+  const sourceDomains = new Set(
+    [
+      ...Object.values(EVM_DEPLOYMENTS[options.networkId]),
+      ...Object.values(NON_EVM_CHAINS[options.networkId]),
+    ].map((chain) => chain.domain),
+  );
   let channels = options.channels;
   const prices =
     options.prices ??
@@ -669,21 +677,59 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     res: ServerResponse,
     origin: string | undefined,
   ): Promise<void> {
-    if (body.txHash === undefined) {
+    if (
+      typeof body.txHash !== "string" ||
+      !TX_HASH.some((form) => form.test(body.txHash as string))
+    ) {
       reply(res, 400, { error: "Say which transaction to deliver.", retryable: false }, origin);
       return;
     }
+    const domain = body.domain;
+    if (typeof domain !== "number" || !sourceDomains.has(domain)) {
+      reply(
+        res,
+        400,
+        { error: "That is not a chain this sponsor delivers from.", retryable: false },
+        origin,
+      );
+      return;
+    }
 
-    const domain = body.domain ?? 0;
     const iris = await fetch(
-      `${options.irisUrl}/v2/messages/${domain}?transactionHash=${body.txHash}`,
+      `${options.irisUrl}/v2/messages/${domain}?transactionHash=${encodeURIComponent(body.txHash)}`,
       { signal: AbortSignal.timeout(30_000) },
     );
-    const parsed = (await iris.json()) as {
-      messages?: readonly { message?: string; attestation?: string; status?: string }[];
-    };
-    const message = parsed.messages?.[0];
-    if (message?.message === undefined || message.attestation === undefined) {
+    if (iris.status === 404) {
+      reply(
+        res,
+        404,
+        { error: "Circle has no attested record of that transaction yet.", retryable: true },
+        origin,
+      );
+      return;
+    }
+    const unavailable = (): void =>
+      reply(
+        res,
+        502,
+        { error: "Circle's attestation service did not answer usefully.", retryable: true },
+        origin,
+      );
+    if (!iris.ok) {
+      console.error("[sponsor] iris answered", iris.status);
+      unavailable();
+      return;
+    }
+    let parsed: { messages?: readonly { message?: string; attestation?: string }[] };
+    try {
+      parsed = (await iris.json()) as typeof parsed;
+    } catch (cause) {
+      console.error("[sponsor] iris answered with something that is not JSON", cause);
+      unavailable();
+      return;
+    }
+    const message = parsed?.messages?.[0];
+    if (typeof message?.message !== "string" || typeof message.attestation !== "string") {
       reply(
         res,
         404,
@@ -792,6 +838,16 @@ function parseTransaction(
 }
 
 const nowUnix = (): number => Math.floor(Date.now() / 1000);
+
+/**
+ * The source transaction id forms CCTP chains use: an EVM hash, a Solana
+ * signature in base58, or a Starknet felt, which may drop leading zeros.
+ */
+const TX_HASH: readonly RegExp[] = [
+  /^0x[0-9a-fA-F]{64}$/,
+  /^[1-9A-HJ-NP-Za-km-z]{64,90}$/,
+  /^0x[0-9a-fA-F]{1,64}$/,
+];
 
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;

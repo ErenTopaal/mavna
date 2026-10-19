@@ -17,7 +17,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedBy } from "./built.js";
 import { CapLedger, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
@@ -43,6 +43,9 @@ const USDC = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH
 // instead of quietly reaching testnet.
 const NOWHERE = "https://127.0.0.1:9";
 
+/** Where the server is told Circle's attestation service lives. Only the fetch double answers it. */
+const IRIS = "https://iris.invalid";
+
 /** Accounts known to exist, and every transaction handed over for submission. */
 class RecordingRpc extends RpcClient {
   readonly accounts = new Map<string, bigint>();
@@ -58,6 +61,11 @@ class RecordingRpc extends RpcClient {
     const sequence = this.accounts.get(address);
     if (sequence === undefined) throw new Error(`account ${address} not found`);
     return new Account(address, sequence.toString());
+  }
+
+  /** Simulation is a network call; what it would add does not matter to these tests. */
+  override async prepare(tx: Transaction): Promise<Transaction> {
+    return tx;
   }
 
   override async submit(
@@ -122,7 +130,24 @@ const running: { close(): void }[] = [];
 
 afterEach(() => {
   for (const server of running.splice(0)) server.close();
+  vi.unstubAllGlobals();
 });
+
+/**
+ * Stand in for Circle's attestation service, and only it: every other request,
+ * including the tests' own calls to the server, goes to the real fetch.
+ */
+function stubIris(answer: (url: URL) => Response): URL[] {
+  const asked: URL[] = [];
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.origin !== IRIS) return realFetch(input, init);
+    asked.push(url);
+    return Promise.resolve(answer(url));
+  });
+  return asked;
+}
 
 async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promise<TestServer> {
   const sponsor = Keypair.random();
@@ -140,7 +165,7 @@ async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promi
     buildDelivery: () => {
       throw new Error("delivery is not exercised by these tests");
     },
-    irisUrl: NOWHERE,
+    irisUrl: IRIS,
     channels: new ChannelPool({ channels: [channel] }),
     prices: new FixedPrice(),
     allowedOrigins: [],
@@ -514,5 +539,78 @@ describe("the sponsor turns away malformed input before doing any work", () => {
     });
     expect(response.status).toBe(400);
     expect(response.body.retryable).toBe(false);
+  });
+});
+
+describe("the sponsor only asks Circle about well-formed deliveries", () => {
+  const EVM_HASH = `0x${"ab".repeat(32)}`;
+  const SOLANA_SIGNATURE =
+    "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+  const notFound = () => new Response("{}", { status: 404 });
+
+  it("refuses a transaction hash that is not one", async () => {
+    const asked = stubIris(notFound);
+    const server = await startServer();
+    for (const txHash of ["abc", "0xZZ", `${EVM_HASH}&domain=7`, "../../v1/x", 42]) {
+      const response = await server.post("/deliver", { txHash, domain: 0 });
+      expect(response.status, String(txHash)).toBe(400);
+      expect(response.body.retryable).toBe(false);
+    }
+    expect(asked).toHaveLength(0);
+  });
+
+  it("refuses a domain this network does not route from", async () => {
+    const asked = stubIris(notFound);
+    const server = await startServer();
+    for (const domain of [undefined, "0", 1.5, -1, 4, 27, 9999]) {
+      const response = await server.post("/deliver", { txHash: EVM_HASH, domain });
+      expect(response.status, String(domain)).toBe(400);
+    }
+    expect(asked).toHaveLength(0);
+  });
+
+  it("checks the domain against the configured network only", async () => {
+    // Arc routes on testnet and not on mainnet. Nothing here reaches any network.
+    const asked = stubIris(notFound);
+    const testnet = await startServer();
+    expect((await testnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(404);
+    const mainnet = await startServer({ networkId: "mainnet" });
+    expect((await mainnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(400);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("asks Circle for exactly the transaction it was given", async () => {
+    const asked = stubIris(notFound);
+    const server = await startServer();
+    await server.post("/deliver", { txHash: SOLANA_SIGNATURE, domain: 5 });
+    await server.post("/deliver", { txHash: "0x4a5b", domain: 25 });
+    expect(asked.map((url) => url.toString())).toEqual([
+      `${IRIS}/v2/messages/5?transactionHash=${SOLANA_SIGNATURE}`,
+      `${IRIS}/v2/messages/25?transactionHash=0x4a5b`,
+    ]);
+  });
+
+  it("says not yet when Circle has no record", async () => {
+    stubIris(notFound);
+    const server = await startServer();
+    const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
+    expect(response.status).toBe(404);
+    expect(response.body.retryable).toBe(true);
+  });
+
+  it("answers 502 when Circle fails", async () => {
+    stubIris(() => new Response("upstream down", { status: 503 }));
+    const server = await startServer();
+    const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
+    expect(response.status).toBe(502);
+    expect(response.body.retryable).toBe(true);
+  });
+
+  it("answers 502 when Circle answers with something that is not JSON", async () => {
+    stubIris(() => new Response("<html>maintenance</html>", { status: 200 }));
+    const server = await startServer();
+    const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
+    expect(response.status).toBe(502);
+    expect(response.body.retryable).toBe(true);
   });
 });
