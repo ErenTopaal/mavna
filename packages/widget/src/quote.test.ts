@@ -300,7 +300,7 @@ describe("sending USDT0", () => {
     amount: "12.5",
     destination: " GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI ",
     priority: "best" as const,
-    rails: { Circle: true, Axelar: true, LayerZero: true },
+    rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
     send: "USDT0" as const,
   };
 
