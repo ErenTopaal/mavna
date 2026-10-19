@@ -39,7 +39,7 @@ describe("BuiltLedger", () => {
   it("hands a record out once, then forgets it", () => {
     const ledger = new BuiltLedger();
     const record = recordFor(buildTx());
-    ledger.record(record);
+    ledger.record(record, 900);
     expect(ledger.take(record.hash, "preparation", 1000)).toEqual(record);
     expect(ledger.take(record.hash, "preparation", 1000)).toBeUndefined();
     expect(ledger.size).toBe(0);
@@ -48,7 +48,7 @@ describe("BuiltLedger", () => {
   it("returns undefined for the wrong kind and keeps the record", () => {
     const ledger = new BuiltLedger();
     const record = recordFor(buildTx());
-    ledger.record(record);
+    ledger.record(record, 900);
     expect(ledger.take(record.hash, "settlement", 1000)).toBeUndefined();
     expect(ledger.size).toBe(1);
     expect(ledger.take(record.hash, "preparation", 1000)).toEqual(record);
@@ -57,7 +57,7 @@ describe("BuiltLedger", () => {
   it("returns undefined for an expired record and prunes it", () => {
     const ledger = new BuiltLedger();
     const record = recordFor(buildTx(), { expiresAtUnix: 1500 });
-    ledger.record(record);
+    ledger.record(record, 900);
     expect(ledger.take(record.hash, "preparation", 1500)).toBeUndefined();
     expect(ledger.size).toBe(0);
   });
@@ -65,12 +65,22 @@ describe("BuiltLedger", () => {
   it("prunes every expired record on each take", () => {
     const ledger = new BuiltLedger();
     const live = recordFor(buildTx("1"), { expiresAtUnix: 5000 });
-    ledger.record(live);
-    ledger.record(recordFor(buildTx("2"), { expiresAtUnix: 1000 }));
-    ledger.record(recordFor(buildTx("3"), { expiresAtUnix: 1200 }));
+    ledger.record(live, 900);
+    ledger.record(recordFor(buildTx("2"), { expiresAtUnix: 1000 }), 900);
+    ledger.record(recordFor(buildTx("3"), { expiresAtUnix: 1200 }), 900);
     expect(ledger.take("unknown", "preparation", 2000)).toBeUndefined();
     expect(ledger.size).toBe(1);
     expect(ledger.take(live.hash, "preparation", 2000)).toEqual(live);
+  });
+
+  it("prunes every expired record on each record too", () => {
+    // A server asked to build far more often than anything is signed would
+    // otherwise keep every abandoned build until the next signed one arrives.
+    const ledger = new BuiltLedger();
+    ledger.record(recordFor(buildTx("1"), { expiresAtUnix: 1000 }), 900);
+    ledger.record(recordFor(buildTx("2"), { expiresAtUnix: 1200 }), 900);
+    ledger.record(recordFor(buildTx("3"), { expiresAtUnix: 5000 }), 1300);
+    expect(ledger.size).toBe(1);
   });
 
   it("returns undefined for a hash it never built", () => {

@@ -39,7 +39,13 @@ export interface Repayment {
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
 
-  record(record: BuiltRecord): void {
+  /**
+   * Expired records are pruned here as well as in take. Building is open to
+   * anyone and signing is not, so a ledger pruned only on take would keep
+   * every abandoned build until someone next signs.
+   */
+  record(record: BuiltRecord, nowUnix: number): void {
+    this.prune(nowUnix);
     this.records.set(record.hash, record);
   }
 
@@ -51,13 +57,17 @@ export class BuiltLedger {
    * without a timer.
    */
   take(hash: string, kind: BuiltKind, nowUnix: number): BuiltRecord | undefined {
-    for (const [key, record] of this.records) {
-      if (record.expiresAtUnix <= nowUnix) this.records.delete(key);
-    }
+    this.prune(nowUnix);
     const found = this.records.get(hash);
     if (found === undefined || found.kind !== kind) return undefined;
     this.records.delete(hash);
     return found;
+  }
+
+  private prune(nowUnix: number): void {
+    for (const [key, record] of this.records) {
+      if (record.expiresAtUnix <= nowUnix) this.records.delete(key);
+    }
   }
 
   get size(): number {

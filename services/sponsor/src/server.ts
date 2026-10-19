@@ -347,7 +347,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     error: string,
     retryable = false,
   ): void {
-    built.record(record);
+    built.record(record, nowUnix());
     reply(res, status, { error, retryable }, origin);
   }
 
@@ -555,14 +555,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       createAccount: created,
       assets: assets as Asset[],
     });
-    built.record({
-      hash: transaction.hash().toString("hex"),
-      kind: "preparation",
-      destination: body.destination,
-      signer: signerFor(body.destination),
-      sourceChainId: body.sourceChainId ?? "unknown",
-      expiresAtUnix: expiryOf(transaction),
-    });
+    built.record(
+      {
+        hash: transaction.hash().toString("hex"),
+        kind: "preparation",
+        destination: body.destination,
+        signer: signerFor(body.destination),
+        sourceChainId: body.sourceChainId ?? "unknown",
+        expiresAtUnix: expiryOf(transaction),
+      },
+      nowUnix(),
+    );
 
     reply(res, 200, { xdr: transaction.toXDR(), sponsor: keypair.publicKey() }, origin);
   }
@@ -673,16 +676,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       createdAccount,
       validForSeconds: SETTLEMENT_VALIDITY_SECONDS,
     });
-    built.record({
-      hash: transaction.hash().toString("hex"),
-      kind: "settlement",
-      destination: body.destination,
-      signer: signerFor(body.destination),
-      sourceChainId: body.sourceChainId ?? "unknown",
-      expiresAtUnix: expiryOf(transaction),
-      channel: channel.address,
-      repays: { createdAccount, assets: [usdc.toString()] },
-    });
+    built.record(
+      {
+        hash: transaction.hash().toString("hex"),
+        kind: "settlement",
+        destination: body.destination,
+        signer: signerFor(body.destination),
+        sourceChainId: body.sourceChainId ?? "unknown",
+        expiresAtUnix: expiryOf(transaction),
+        channel: channel.address,
+        repays: { createdAccount, assets: [usdc.toString()] },
+      },
+      nowUnix(),
+    );
 
     reply(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
   }
