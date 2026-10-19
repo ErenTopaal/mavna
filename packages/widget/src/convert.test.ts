@@ -47,7 +47,14 @@ describe("converting on Stellar", () => {
       if (url.startsWith(`${AQUA}/api/external/v1/find-path/`)) {
         return respond({
           success: true,
-          swap_chain_xdr: xdr.ScVal.scvVec([]).toXDR("base64"),
+          // one pool straight from USDC to XLM, as Aquarius encodes a chain
+          swap_chain_xdr: xdr.ScVal.scvVec([
+            xdr.ScVal.scvVec([
+              xdr.ScVal.scvVec([new Address(USDC).toScVal(), new Address(XLM).toScVal()]),
+              xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
+              new Address(XLM).toScVal(),
+            ]),
+          ]).toXDR("base64"),
           pools: ["CD3LFMMLBQ6RBJUD3Z2LFDFE6544WDRMWHEZYPI5YDVESYRSO2TT32BX"],
           tokens_addresses: [USDC, XLM],
           amount: 26_000_000,
