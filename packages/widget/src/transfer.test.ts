@@ -1,7 +1,7 @@
 import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
-import { createSwapVenues, SdexProvider } from "@mavna/swap";
+import { createSwapVenues } from "@mavna/swap";
 import {
   Account,
   Asset,
@@ -112,13 +112,13 @@ beforeEach(() => {
       case "/settlement":
         return reply(200, { xdr: "SETTLEMENT", channel: "GCHANNEL" });
       case "/settlement/commit":
-        expect(JSON.parse(String(init?.body))).toEqual({
+        expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
           signedXdr: "signed SETTLEMENT",
         });
         return reply(200, { held: true });
       case "/prepare": {
-        const asked = JSON.parse(String(init?.body)) as { assets: string[] };
+        const asked = bodyOf(init) as { assets: string[] };
         askedAssets.push(asked.assets);
         if (funding === "sponsor") return reply(200, { xdr: "PREPARATION", sponsor: "GSPONSOR" });
         // the real shape of a self-funded preparation: one changeTrust the account sources
@@ -136,7 +136,7 @@ beforeEach(() => {
         return reply(200, { xdr: preparation, selfFunded: true });
       }
       case "/submit":
-        expect(JSON.parse(String(init?.body))).toEqual({
+        expect(bodyOf(init)).toEqual({
           signedXdr: `signed ${funding === "self" ? preparation : "PREPARATION"}`,
         });
         return reply(200, { txHash: "9e9", ledger: 1 });
@@ -171,6 +171,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** A request's JSON body; every sponsor call sends one as a string. */
+function bodyOf(init: RequestInit | undefined): unknown {
+  if (typeof init?.body !== "string") throw new Error("the request was sent without a JSON body");
+  return JSON.parse(init.body);
+}
 
 /** Ledger entries the way the Stellar node returns them. */
 function ledgerEntries(): unknown[] {
