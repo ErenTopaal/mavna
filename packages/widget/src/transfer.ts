@@ -24,6 +24,7 @@ import {
   endedNote,
   pollSettlement,
   STILL_MOVING,
+  STOPPED_WATCHING,
   settleNote,
   sleep,
   stepsFor,
@@ -125,7 +126,12 @@ export interface TransferDeps {
   readonly patch: Patch;
   readonly onEvmEvent: (event: ExecutionEvent) => void;
   /** How the runner waits between polls. A test passes one that does not. */
-  readonly wait?: (ms: number) => Promise<void>;
+  readonly wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /**
+   * Aborted when the page goes away. It stops watching a relayed delivery, and
+   * nothing else: the sponsor is still asked to take its repayment.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -357,7 +363,11 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
     destinationAddress: route.destination,
     sourceChainId: chainId,
   };
-  const tracked = await trackDelivery(adapter, handle, patch, { wait });
+  const tracked = await trackDelivery(adapter, handle, patch, {
+    wait,
+    ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+  });
+  if (tracked.outcome === "stopped") throw new Error(STOPPED_WATCHING);
   if (tracked.outcome === "timed-out") {
     throw new Error(
       tracked.error === undefined

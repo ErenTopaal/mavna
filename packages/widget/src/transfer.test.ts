@@ -18,7 +18,7 @@ import {
 } from "./__fixtures__/scripted";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
-import { runTransfer, type TransferEngine } from "./transfer";
+import { runTransfer, type TransferDeps, type TransferEngine } from "./transfer";
 import type { Connection } from "./wallet";
 
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
@@ -195,6 +195,7 @@ function run(
   route: ReturnType<typeof routeFor>,
   patch: ReturnType<typeof patches>["patch"],
   conn = connection(),
+  extra: Partial<TransferDeps> = {},
 ) {
   return runTransfer({
     engine: engineWith(adapter),
@@ -208,6 +209,7 @@ function run(
     patch,
     onEvmEvent: () => {},
     wait: instant,
+    ...extra,
   });
 }
 
@@ -296,6 +298,23 @@ describe("runTransfer over a relayed rail", () => {
       expect(log).toEqual(["stellar read destination"]);
       expect(adapter.built).toBe(0);
     }
+  });
+
+  it("stops watching the rail once the page is gone", async () => {
+    const controller = new AbortController();
+    const adapter = new ScriptedAdapter("layerzero", [pending()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        log.push("status");
+        if (log.filter((l) => l === "status").length === 2) controller.abort();
+      },
+    });
+    await expect(
+      run(adapter, routeFor("layerzero"), patches().patch, connection(), {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/Activity/);
+    expect(adapter.asked).toHaveLength(2);
   });
 
   it("refuses a new account the sponsor cannot settle in what the rail delivers, before any signature", async () => {

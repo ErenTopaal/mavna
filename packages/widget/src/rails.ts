@@ -172,8 +172,10 @@ export interface TrackOptions {
   readonly stepId?: string;
   readonly intervalMs?: number;
   readonly timeoutMs?: number;
-  readonly wait?: (ms: number) => Promise<void>;
+  readonly wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
   readonly now?: () => number;
+  /** Aborted when nobody is left to show progress to, which ends the watch. */
+  readonly signal?: AbortSignal;
 }
 
 export type Tracked =
@@ -183,10 +185,30 @@ export type Tracked =
       readonly last: StepPhase | undefined;
       /** The last status read that failed, when the rail could not be asked. */
       readonly error: string | undefined;
-    };
+    }
+  | { readonly outcome: "stopped"; readonly last: StepPhase | undefined };
 
-export const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/** Wait, ending early when the signal aborts. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/** What to tell someone whose page stopped watching a transfer still in flight. */
+export const STOPPED_WATCHING =
+  "This page stopped watching the transfer. Your funds are not lost: find the " +
+  "transfer under Activity to check on it.";
 
 /** What to tell someone whose transfer outlived the page's patience. */
 export const STILL_MOVING =
@@ -235,13 +257,19 @@ export async function trackDelivery(
   const timeoutMs = options.timeoutMs ?? 60 * 60 * 1000;
   const wait = options.wait ?? sleep;
   const now = options.now ?? Date.now;
+  const signal = options.signal;
+  // read through a call, so the check inside the loop is not narrowed away by
+  // the one before it: the signal changes while this function awaits
+  const aborted = (): boolean => signal?.aborted === true;
 
   const started = now();
   let last: StepPhase | undefined;
   let error: string | undefined;
+  if (aborted()) return { outcome: "stopped", last };
   patch(stepId, { phase: "pending" });
 
   while (now() - started < timeoutMs) {
+    if (aborted()) return { outcome: "stopped", last };
     let phase: StepPhase | undefined;
     try {
       phase = await adapter.status(handle);
@@ -278,7 +306,7 @@ export async function trackDelivery(
     }
 
     if (now() - started >= timeoutMs) break;
-    await wait(intervalMs);
+    await wait(intervalMs, signal);
   }
 
   patch(stepId, { note: STILL_MOVING });

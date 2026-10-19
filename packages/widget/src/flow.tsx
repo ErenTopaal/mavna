@@ -256,6 +256,11 @@ export class Flow extends React.Component<FlowProps, State> {
   EASE = EASE;
 
   private currentQuote: QuoteRun | undefined;
+  /**
+   * Aborted on unmount so a relayed delivery stops being polled for a page that
+   * is gone. Replaced on mount, because a remount reuses the instance.
+   */
+  private unmounted = new AbortController();
   private debounce: ReturnType<typeof setTimeout> | undefined;
   private hideTimer: ReturnType<typeof setTimeout> | null = null;
   private stopWallets: (() => void) | undefined;
@@ -294,6 +299,7 @@ export class Flow extends React.Component<FlowProps, State> {
   // ------------------------------------------------------------- lifecycle ---
 
   override componentDidMount(): void {
+    this.unmounted = new AbortController();
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.onDown = (e) => {
       if (
@@ -332,6 +338,7 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   override componentWillUnmount(): void {
+    this.unmounted.abort();
     document.removeEventListener("mousedown", this.onDown);
     document.removeEventListener("keydown", this.onKey);
     this.timers.forEach(clearTimeout);
@@ -875,6 +882,7 @@ export class Flow extends React.Component<FlowProps, State> {
         wanted: this.state.wanted,
         patch: (id, p) => this.setStep(id, p),
         onEvmEvent: () => {},
+        signal: this.unmounted.signal,
       });
       this.arrive();
     } catch (e) {

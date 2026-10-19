@@ -17,6 +17,7 @@ import {
   lookupAcross,
   pollSettlement,
   settleNote,
+  sleep,
   stepsFor,
   trackDelivery,
 } from "./rails";
@@ -225,6 +226,37 @@ describe("trackDelivery", () => {
     expect(adapter.asked).toHaveLength(4);
     expect(result).toEqual({ outcome: "timed-out", last: undefined, error: "scan answered 503" });
     expect(patches.at(-1)?.patch.note).toMatch(/Activity/);
+  });
+});
+
+describe("trackDelivery when the page goes away", () => {
+  it("stops asking once the signal is aborted, even in the middle of a wait", async () => {
+    const controller = new AbortController();
+    const adapter = new ScriptedAdapter("layerzero", [pending()], {
+      onStatus: () => {
+        if (adapter.asked.length === 2) setTimeout(() => controller.abort(), 5);
+      },
+    });
+
+    // a real sleep of a minute: only the abort can end it in time
+    const result = await trackDelivery(adapter, handle, () => {}, {
+      intervalMs: 60_000,
+      signal: controller.signal,
+      wait: (ms, signal) => (adapter.asked.length < 2 ? instant() : sleep(ms, signal)),
+    });
+
+    expect(result.outcome).toBe("stopped");
+    expect(adapter.asked).toHaveLength(2);
+  });
+
+  it("does not ask at all with a signal that is already aborted", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [pending()]);
+    const result = await trackDelivery(adapter, handle, () => {}, {
+      signal: AbortSignal.abort(),
+      wait: instant,
+    });
+    expect(result.outcome).toBe("stopped");
+    expect(adapter.asked).toHaveLength(0);
   });
 });
 
