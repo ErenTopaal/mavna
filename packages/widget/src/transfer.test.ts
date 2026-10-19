@@ -926,6 +926,17 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
   });
 
+  it("refuses a conversion for someone else's account before anything is sent", async () => {
+    // the recipient must sign the conversion, so a wallet that is not theirs stops it now
+    const route = { ...routeFor("layerzero", { swap: true }), destination: SENDER_STELLAR };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+    expect(adapter.built).toBe(0);
+  });
+
   it("converts only what this transfer brought in, not what the account already held", async () => {
     // 10 USDC already there; 49.5 arrive, though the route estimated 50
     usdcHeld = 100_000_000n;

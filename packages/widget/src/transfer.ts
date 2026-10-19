@@ -666,6 +666,9 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   // a conversion on Stellar spends what this transfer adds, so the balance is
   // read before anything moves
   const swapFrom = route.steps.find((s) => s.kind === "swap")?.from.asset;
+  // the recipient signs the conversion, so a wallet that is not theirs is
+  // turned away now, not after the money has arrived
+  if (swapFrom !== undefined) owner = await ownWallet(engine, route, "its conversion on Stellar");
   const heldBefore =
     swapFrom === undefined ? undefined : await balanceOf(engine, route.destination, swapFrom);
 
