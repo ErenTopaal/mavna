@@ -31,6 +31,8 @@ export type { GasEstimate } from "./fees.js";
 export { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";
 export { buildAddGas, GAS_SERVICE_ABI, GmpApi, legDelivered } from "./gmp.js";
+export type { JsonReply } from "./http.js";
+export { REQUEST_TIMEOUT_MS, requestJson } from "./http.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";
 export type { ItsToken, ResolveInputs } from "./token.js";
 export {

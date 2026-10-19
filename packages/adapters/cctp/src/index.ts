@@ -54,6 +54,19 @@ export {
   nonEvmChainsFor,
   nonEvmExplorerTxUrl,
 } from "./nonevm.js";
+export type {
+  Delivery,
+  DeliveryProofOptions,
+  HorizonOperation,
+  MessageIdentity,
+} from "./proof.js";
+export {
+  DeliveryProof,
+  deliveredByEvent,
+  deliveredByOperation,
+  horizonAccountFor,
+  identifyMessage,
+} from "./proof.js";
 export type { SolanaAccountMeta, SolanaBurnParams, SolanaInstruction } from "./solana.js";
 export {
   associatedTokenAddress,
