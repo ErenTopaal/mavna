@@ -142,6 +142,16 @@ fn convert(
         return None;
     }
     let floor = venue_floor(conversion.min_out, conversion.fee_bps)?;
+    match venue::estimate(
+        env,
+        router,
+        &arrival.token,
+        arrival.amount,
+        &conversion.path,
+    ) {
+        Some(estimate) if estimate >= floor => {}
+        _ => return None,
+    }
 
     let me = env.current_contract_address();
     let wanted = TokenClient::new(env, &conversion.wanted);

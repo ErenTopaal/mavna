@@ -18,6 +18,41 @@ pub trait AquariusRouter {
         in_amount: u128,
         out_min: u128,
     ) -> u128;
+    fn estimate_swap(
+        env: Env,
+        tokens: Vec<Address>,
+        token_in: Address,
+        token_out: Address,
+        pool_index: BytesN<32>,
+        in_amount: u128,
+    ) -> u128;
+}
+
+/// What the venue says `amount` of `token_in` buys along `path`, hop by hop,
+/// without moving anything. None when any hop will not say.
+///
+/// Asked before swapping because a swap that fails and rolls back still costs
+/// ledger writes the network's simulation does not predict (seen on testnet:
+/// 628 bytes simulated, 3764 written), so an executor that simulates first
+/// would keep failing the very delivery that is meant to be the safe fallback.
+pub fn estimate(
+    env: &Env,
+    router: &Address,
+    token_in: &Address,
+    amount: i128,
+    path: &Vec<Hop>,
+) -> Option<i128> {
+    let client = AquariusRouterClient::new(env, router);
+    let mut holding = token_in.clone();
+    let mut out = u128::try_from(amount).ok()?;
+    for (tokens, pool_index, token_out) in path.iter() {
+        out = match client.try_estimate_swap(&tokens, &holding, &token_out, &pool_index, &out) {
+            Ok(Ok(v)) => v,
+            _ => return None,
+        };
+        holding = token_out;
+    }
+    i128::try_from(out).ok()
 }
 
 /// Swaps `amount` of `token_in` along `path` through the router, refusing anything

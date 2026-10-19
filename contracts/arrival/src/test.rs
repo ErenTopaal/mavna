@@ -34,6 +34,9 @@ mod endpoint {
 enum VenueKey {
     Rate,
     Reenter,
+    // what estimate_swap overstates by, in basis points, so the swap can still
+    // refuse after an estimate that cleared the floor
+    Optimism,
 }
 
 #[contracttype]
@@ -53,6 +56,27 @@ struct Venue;
 impl Venue {
     pub fn set_rate(env: Env, num: i128, den: i128) {
         env.storage().instance().set(&VenueKey::Rate, &(num, den));
+    }
+
+    pub fn set_optimism(env: Env, bps: i128) {
+        env.storage().instance().set(&VenueKey::Optimism, &bps);
+    }
+
+    pub fn estimate_swap(
+        env: Env,
+        _tokens: Vec<Address>,
+        _token_in: Address,
+        _token_out: Address,
+        _pool_index: BytesN<32>,
+        in_amount: u128,
+    ) -> u128 {
+        let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
+        let optimism: i128 = env
+            .storage()
+            .instance()
+            .get(&VenueKey::Optimism)
+            .unwrap_or(0);
+        (in_amount as i128 * num / den * (10_000 + optimism) / 10_000) as u128
     }
 
     pub fn set_reenter(env: Env, reentry: Reentry) {
@@ -536,6 +560,27 @@ fn delivers_as_it_came_when_the_floor_cannot_be_met() {
     assert_eq!(e.asset, w.usdt0);
     assert_eq!(e.amount, 1_000_000);
     assert_eq!(e.fee, 0);
+}
+
+#[test]
+fn delivers_as_it_came_when_the_venue_refuses_after_an_estimate_that_cleared_the_floor() {
+    let mut w = setup();
+    let venue = VenueClient::new(&w.env, &w.venue);
+    venue.set_rate(&98, &100);
+    // the estimate says 1.029x, the swap pays 0.98x, so only the swap's own
+    // out_min stands between the user and a delivery under their minimum
+    venue.set_optimism(&500);
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.token(&w.usdt0).balance(&w.venue), 0);
+    assert_eq!(w.held(), (0, 0));
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
 }
 
 #[test]
