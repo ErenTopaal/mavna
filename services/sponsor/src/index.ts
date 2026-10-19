@@ -7,11 +7,13 @@ export {
   DEFAULT_CAPS,
   DEFAULT_CHEAP_GAS_CHAINS,
   InMemoryCapStore,
+  TESTNET_COUNTERPART,
 } from "./caps.js";
 export type { Channel, ChannelPoolOptions } from "./channels.js";
 export { ChannelPool } from "./channels.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
 export { Deliverer } from "./deliver.js";
+export { env } from "./env.js";
 export type {
   ChainSponsorshipView,
   ReconciliationReport,
