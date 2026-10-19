@@ -13,11 +13,15 @@
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { buildPathPayment } from "@mavna/swap";
-import { TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  FeeBumpTransaction,
+  Asset as StellarAsset,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute } from "./execute";
 import { remember } from "./history";
-import { type RouteView, settlementBlocker, type Wanted } from "./quote";
+import { type RouteView, settlementBlocker, trustlineName, type Wanted } from "./quote";
 import {
   adapterFor,
   destinationBlocker,
@@ -181,16 +185,54 @@ async function collectSettlement(
  * goes first, and an account short of XLM hears so before anything is sent.
  */
 async function prepareOwn(engine: TransferEngine, route: Route, chainId: string): Promise<string> {
+  const holds = route.deliveredAtLeast.asset;
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
     throw new Error(
-      "Only the owner of the receiving account can allow it to hold USDC. " +
+      `Only the owner of the receiving account can allow it to hold ${holds.symbol}. ` +
         "Connect that wallet, or send to an address that can already receive. " +
         "Nothing has been sent.",
     );
   }
-  await prepareNow(engine, route, chainId, address);
+  const name = trustlineName(route, engine.usdcOnStellar.id);
+  if (name === undefined) {
+    throw new Error(`The sponsor curates no trustline for ${holds.symbol}. Nothing has been sent.`);
+  }
+  const preparation = await engine.sponsor.requestPreparation(route.destination, chainId, name);
+  // The account pays for this one, and the sponsor names the issuer by its own
+  // list, so it is checked against what the rail will deliver before the user
+  // is asked to sign: a trustline to anything else lets the delivery fail.
+  if (!opensOnly(preparation.xdr, engine.network, route.destination, holds.id)) {
+    throw new Error(
+      `The sponsor's preparation is not the trustline this transfer needs (${holds.symbol} ` +
+        "for the receiving account), so it was not signed. Nothing has been sent.",
+    );
+  }
+  const signed = await engine.stellar.sign(preparation.xdr, address);
+  await engine.sponsor.submitPreparation(signed);
   return address;
+}
+
+/** Whether a transaction does nothing but open `assetId` for `account`, from it. */
+function opensOnly(xdr: string, network: NetworkId, account: string, assetId: string): boolean {
+  let parsed: ReturnType<typeof TransactionBuilder.fromXDR>;
+  try {
+    parsed = TransactionBuilder.fromXDR(xdr, passphrase(network));
+  } catch {
+    // unreadable is answered as "not that trustline" by the caller
+    return false;
+  }
+  if (parsed instanceof FeeBumpTransaction || parsed.source !== account) return false;
+  return (
+    parsed.operations.length > 0 &&
+    parsed.operations.every(
+      (op) =>
+        op.type === "changeTrust" &&
+        (op.source === undefined || op.source === account) &&
+        op.line instanceof StellarAsset &&
+        op.line.toString() === assetId,
+    )
+  );
 }
 
 /** Prepare the account, only once the attestation exists. */
@@ -365,10 +407,9 @@ async function send(
  * learn who pays its reserve.
  */
 async function assertSponsorable(engine: TransferEngine, route: Route): Promise<SponsorTerms> {
-  const blocked = settlementBlocker(route, engine.usdcOnStellar.id);
-  if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
+  let terms: SponsorTerms;
   try {
-    return await engine.sponsorTerms();
+    terms = await engine.sponsorTerms();
   } catch (cause) {
     throw new Error(
       "Setting up a new Stellar account needs the sponsor service, which is not " +
@@ -376,6 +417,9 @@ async function assertSponsorable(engine: TransferEngine, route: Route): Promise<
         "Nothing has been sent.",
     );
   }
+  const blocked = settlementBlocker(route, engine.usdcOnStellar.id, terms.reserveFunding);
+  if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
+  return terms;
 }
 
 /**

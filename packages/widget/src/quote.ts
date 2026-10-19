@@ -213,9 +213,22 @@ export async function assetsFor(
  * anything else leaves that repayment with nothing to spend, so the sponsor
  * would be out the reserve for good.
  */
-export function settlementBlocker(route: Route, usdcId: string): string | undefined {
+export function settlementBlocker(
+  route: Route,
+  usdcId: string,
+  reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
+): string | undefined {
   if (!route.steps.some((s) => s.kind === "prepare-account")) return undefined;
   const delivers = route.deliveredAtLeast.asset;
+  if (reserveFunding === "self") {
+    // Nothing is lent, so nothing has to be repaid in USDC; the sponsor only
+    // has to curate the trustline the account opens for itself.
+    if (trustlineName(route, usdcId) !== undefined) return undefined;
+    return (
+      "An account paying its own reserve can only open a trustline to USDC or USDT0, " +
+      `the assets the sponsor curates, and this route delivers ${delivers.symbol}.`
+    );
+  }
   if (delivers.id === usdcId) return undefined;
   return (
     "A new Stellar account can only be set up on a route that delivers USDC, the one asset " +
@@ -224,12 +237,28 @@ export function settlementBlocker(route: Route, usdcId: string): string | undefi
   );
 }
 
+/**
+ * The curated name the sponsor knows the route's trustline by, or undefined
+ * when it curates none. The sponsor holds the issuer; the widget checks the
+ * preparation it gets back against the delivered asset before anyone signs.
+ */
+export function trustlineName(route: Route, usdcId: string): "USDC" | "USDT0" | undefined {
+  const delivers = route.deliveredAtLeast.asset.id;
+  if (delivers === usdcId) return "USDC";
+  if (delivers.startsWith("USDT0:")) return "USDT0";
+  return undefined;
+}
+
 /** Move the routes no sponsor could settle into the declines, with the reason. */
-export function declineUnsettleable(set: RouteSet, usdcId: string): RouteSet {
+export function declineUnsettleable(
+  set: RouteSet,
+  usdcId: string,
+  reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
+): RouteSet {
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [...set.rejected];
   for (const route of set.routes) {
-    const why = settlementBlocker(route, usdcId);
+    const why = settlementBlocker(route, usdcId, reserveFunding);
     if (why === undefined) {
       routes.push(route);
       continue;
@@ -455,8 +484,10 @@ export function runQuote(
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
+        // An unreadable answer is declined by the sponsor terms anyway.
+        const funding = check.terms instanceof Error ? "sponsor" : check.terms.reserveFunding;
         const settle = (set: RouteSet): RouteSet =>
-          applySponsorTerms(declineUnsettleable(set, usdc), check);
+          applySponsorTerms(declineUnsettleable(set, usdc, funding), check);
         return raceAdapters(
           adapters,
           {

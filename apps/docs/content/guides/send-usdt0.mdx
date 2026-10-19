@@ -31,8 +31,13 @@ hand.
 
 ## The receiving account
 
-The recipient needs a Stellar account that already holds a USDT0 trustline. If it
-does not, the screen tells you before anything is signed.
+The recipient needs a Stellar account that can hold USDT0. When the sponsor runs
+with reserves paid by the account itself (`MAVNA_RESERVE_FUNDING=self`), an existing
+account without a USDT0 trustline opens one before the send: the recipient signs a
+`changeTrust` in their Stellar wallet and pays its 0.5 XLM reserve and fee from their
+own XLM. The widget checks that transaction opens exactly the USDT0 the route
+delivers before asking for the signature. When the sponsor fronts reserves, an
+account without the trustline is declined, for the reason below.
 
 A brand-new account cannot receive USDT0 through Mavna yet. Setting one up is paid
 back in USDC from what arrives, and USDC is the only asset the sponsor curates, so a

@@ -2,6 +2,7 @@ import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
+import { Account, Asset, Networks, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Address, Hash } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -36,11 +37,29 @@ let deliverReplies: Array<[number, unknown]>;
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
 let funding: "sponsor" | "self";
+/** The self-funded preparation the sponsor last built. */
+let preparation: string;
+/** What a self-funded preparation opens and who sources it, when a test makes it wrong. */
+let preparedLine: string | undefined;
+let preparedSource: string | undefined;
+/** The assets each /prepare asked for. */
+let askedAssets: string[][];
+
+const STELLAR_USDT0 = {
+  ...STELLAR_USDC,
+  id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+  symbol: "USDT0",
+  curatedBy: "LayerZero",
+};
 
 beforeEach(() => {
   log = [];
   lane = "ready";
   funding = "sponsor";
+  preparation = "";
+  preparedLine = undefined;
+  preparedSource = undefined;
+  askedAssets = [];
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
   settleReplies = [
@@ -69,15 +88,28 @@ beforeEach(() => {
           signedXdr: "signed SETTLEMENT",
         });
         return reply(200, { held: true });
-      case "/prepare":
-        return reply(
-          200,
-          funding === "self"
-            ? { xdr: "PREPARATION", selfFunded: true }
-            : { xdr: "PREPARATION", sponsor: "GSPONSOR" },
-        );
+      case "/prepare": {
+        const asked = JSON.parse(String(init?.body)) as { assets: string[] };
+        askedAssets.push(asked.assets);
+        if (funding === "sponsor") return reply(200, { xdr: "PREPARATION", sponsor: "GSPONSOR" });
+        // the real shape of a self-funded preparation: one changeTrust the account sources
+        const [code] = asked.assets;
+        const line = preparedLine ?? (code === "USDT0" ? STELLAR_USDT0.id : STELLAR_USDC.id);
+        const [lineCode, lineIssuer] = line.split(":");
+        preparation = new TransactionBuilder(new Account(preparedSource ?? DESTINATION, "1"), {
+          fee: "1000",
+          networkPassphrase: Networks.TESTNET,
+        })
+          .addOperation(Operation.changeTrust({ asset: new Asset(lineCode ?? "", lineIssuer) }))
+          .setTimeout(300)
+          .build()
+          .toXDR();
+        return reply(200, { xdr: preparation, selfFunded: true });
+      }
       case "/submit":
-        expect(JSON.parse(String(init?.body))).toEqual({ signedXdr: "signed PREPARATION" });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          signedXdr: `signed ${funding === "self" ? preparation : "PREPARATION"}`,
+        });
         return reply(200, { txHash: "9e9", ledger: 1 });
       case "/deliver": {
         const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
@@ -158,7 +190,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         return DESTINATION;
       },
       sign: async (xdr: string) => {
-        log.push(`stellar sign ${xdr}`);
+        log.push(`stellar sign ${xdr === preparation ? "PREPARATION" : xdr}`);
         return `signed ${xdr}`;
       },
       disconnect: async () => {},
@@ -377,7 +409,8 @@ describe("runTransfer over a relayed rail", () => {
     const route = routeFor("layerzero", { newAccount: true, delivers: STELLAR_XLM });
 
     await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
-    expect(log).toEqual([]);
+    // who pays the reserve decides what can be set up, so only that is asked
+    expect(log).toEqual(["sponsor /health"]);
     expect(adapter.built).toBe(0);
   });
 
@@ -520,5 +553,73 @@ describe("runTransfer when the account pays its own reserve", () => {
     const route = { ...routeFor("layerzero", { newAccount: true }), destination: SENDER_STELLAR };
     await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
     expect(adapter.built).toBe(0);
+  });
+
+  it("opens a USDT0 trustline from the account itself before a USDT0 send", async () => {
+    funding = "self";
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await run(
+      adapter,
+      routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }),
+      patches().patch,
+    );
+
+    expect(log.filter((l) => !l.startsWith("status"))).toEqual([
+      "sponsor /health",
+      "stellar connect",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "evm send value=777",
+      `history ${SEND_HASH}`,
+      "deliver pending",
+      "deliver done",
+    ]);
+    expect(askedAssets).toEqual([["USDT0"]]);
+  });
+
+  it("refuses to sign a preparation for another asset or account than the route needs", async () => {
+    funding = "self";
+    for (const wrong of [
+      () => {
+        preparedLine = `USDT0:${SENDER_STELLAR}`;
+      },
+      () => {
+        preparedSource = SENDER_STELLAR;
+      },
+    ]) {
+      log = [];
+      preparedLine = undefined;
+      preparedSource = undefined;
+      wrong();
+      const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+        transactions: [layerZeroSend("777")],
+      });
+      await expect(
+        run(
+          adapter,
+          routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }),
+          patches().patch,
+        ),
+      ).rejects.toThrow(/not the trustline this transfer needs.*Nothing has been sent/);
+      expect(log.some((l) => l.startsWith("stellar sign"))).toBe(false);
+      expect(adapter.built).toBe(0);
+    }
+  });
+
+  it("still refuses a USDT0 trustline the sponsor would have to front", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(
+        adapter,
+        routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }),
+        patches().patch,
+      ),
+    ).rejects.toThrow(/the sponsor curates/);
+    expect(log.some((l) => l.startsWith("sponsor /prepare"))).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import { CCTP_CONTRACTS, sourceUsdcFor } from "@mavna/adapter-cctp";
 import {
   type Asset,
+  type BridgeAdapter,
   MavnaError,
   type QuoteRequest,
   type RouteRejection,
@@ -9,7 +10,7 @@ import {
 import { createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { routeFor, ScriptedAdapter, SOURCE_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
 import {
   applySponsorTerms,
@@ -18,6 +19,7 @@ import {
   declineUnsettleable,
   runQuote,
   toRouteView,
+  trustlineName,
 } from "./quote";
 
 const stellar = (id: string, symbol: string, decimals: number): Asset => ({
@@ -404,5 +406,118 @@ describe("sending USDT0", () => {
     };
     expect(toRouteView(charged).feeSymbol).toBe("USD₮0");
     expect(toRouteView(route).feeSymbol).toBe("USDC");
+  });
+});
+
+describe("a trustline an account opens with its own XLM", () => {
+  const usdt0: Asset = {
+    chainId: "stellar",
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+    decimals: 7,
+    curatedBy: "LayerZero",
+  };
+  const eurc: Asset = { ...usdt0, id: `EURC:${CCTP_CONTRACTS.testnet.usdcIssuer}`, symbol: "EURC" };
+
+  it("keeps a USDT0 trustline when the account pays its own reserve, and declines it when the sponsor would", () => {
+    const route = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
+    const set = { routes: [route], rejected: [], complete: true };
+    expect(declineUnsettleable(set, engine.usdcOnStellar.id, "self").routes).toEqual([route]);
+    expect(declineUnsettleable(set, engine.usdcOnStellar.id, "sponsor").routes).toEqual([]);
+  });
+
+  it("still declines one to an asset the sponsor does not curate", () => {
+    const route = routeFor("layerzero", { newAccount: true, delivers: eurc });
+    const set = declineUnsettleable(
+      { routes: [route], rejected: [], complete: true },
+      engine.usdcOnStellar.id,
+      "self",
+    );
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/USDC or USDT0.*delivers EURC\.$/);
+  });
+
+  it("names the curated asset the preparation asks for", () => {
+    const usdc = engine.usdcOnStellar.id;
+    expect(trustlineName(routeFor("layerzero", { newAccount: true }), usdc)).toBe("USDC");
+    expect(trustlineName(routeFor("layerzero", { newAccount: true, delivers: usdt0 }), usdc)).toBe(
+      "USDT0",
+    );
+    expect(
+      trustlineName(routeFor("layerzero", { newAccount: true, delivers: eurc }), usdc),
+    ).toBeUndefined();
+  });
+
+  /** A rail that quotes one route, the way a real one answers. */
+  const quoting = (route: ReturnType<typeof routeFor>): BridgeAdapter => {
+    const scripted = new ScriptedAdapter(route.source, [{ phase: "idle" }]);
+    return {
+      id: route.source,
+      trustModel: scripted.trustModel,
+      supportedChains: () => scripted.supportedChains(),
+      quote: async () => route,
+      buildTransactions: (r, context) => scripted.buildTransactions(r, context),
+      status: (handle) => scripted.status(handle),
+    };
+  };
+
+  it("offers a USDT0 route to an existing account without the trustline when it pays its own reserve", async () => {
+    const route = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
+    const rpc = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    const account = {
+      val: {
+        switch: () => ({ name: "account" }),
+        account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 0 }),
+      },
+    };
+    vi.spyOn(rpc.server, "getLedgerEntries").mockResolvedValue({
+      entries: [account],
+      latestLedger: 1,
+    } as never);
+    const quoted = (reserveFunding: "self" | "sponsor") =>
+      new Promise<RouteSet>((resolve) => {
+        runQuote(
+          {
+            ...engine,
+            adapters: [quoting(route)],
+            breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
+            xlmSwap: {
+              provider: new SdexProvider("testnet"),
+              delivered: engine.usdcOnStellar,
+              deliveredContract: engine.usdcOnStellar.id,
+              wanted: engine.xlmOnStellar,
+              wantedContract: "native",
+            },
+            integratorFee: undefined,
+            rpc,
+            usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+            sponsorTerms: async () => ({
+              network: "testnet",
+              reserveFunding,
+              minDeliveryBaseUnits: 0n,
+            }),
+            usdt0Assets: async () => ({ from: SOURCE_USDC, to: usdt0 }),
+          },
+          {
+            chainId: "arbitrum",
+            wanted: "USDT0",
+            amount: "5",
+            destination: route.destination,
+            priority: "best",
+            rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+            send: "USDT0",
+          },
+          () => {},
+          resolve,
+        );
+      });
+    expect((await quoted("self")).routes).toEqual([route]);
+    const sponsored = await quoted("sponsor");
+    expect(sponsored.routes).toEqual([]);
+    expect(sponsored.rejected[0]?.explanation).toMatch(/the sponsor curates/);
   });
 });

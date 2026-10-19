@@ -56,6 +56,8 @@ export interface SponsorClient {
   requestPreparation(
     destination: string,
     sourceChainId: string,
+    /** The curated name of the trustline to open; USDC unless the account pays for it. */
+    asset?: "USDC" | "USDT0",
   ): Promise<{ xdr: string; sponsor?: string; selfFunded?: boolean }>;
   /** The user has signed; the sponsor countersigns, pays and submits. */
   submitPreparation(signedXdr: string): Promise<{ txHash: string; ledger: number }>;
@@ -132,8 +134,8 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
   }
 
   return {
-    requestPreparation(destination, sourceChainId) {
-      return post("/prepare", { destination, assets: ["USDC"], sourceChainId });
+    requestPreparation(destination, sourceChainId, asset = "USDC") {
+      return post("/prepare", { destination, assets: [asset], sourceChainId });
     },
     submitPreparation(signedXdr) {
       return post("/submit", { signedXdr });
