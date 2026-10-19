@@ -115,3 +115,24 @@ describe("signedBy", () => {
     expect(signedBy(target, user.publicKey())).toBe(false);
   });
 });
+
+describe("a ledger written down and read back", () => {
+  it("still knows what it built, and nothing it already handed out", () => {
+    const ledger = new BuiltLedger();
+    const kept = buildTx("1");
+    const taken = buildTx("2");
+    ledger.record(recordFor(kept), 0);
+    ledger.record(recordFor(taken), 0);
+    ledger.take(taken.hash().toString("hex"), "preparation", 0);
+
+    const restored = BuiltLedger.fromSnapshot(ledger.snapshot(), 0);
+    expect(restored.size).toBe(1);
+    expect(restored.take(kept.hash().toString("hex"), "preparation", 0)).toBeDefined();
+  });
+
+  it("does not bring back a record that expired while the process was down", () => {
+    const ledger = new BuiltLedger();
+    ledger.record(recordFor(buildTx("1"), { expiresAtUnix: 100 }), 0);
+    expect(BuiltLedger.fromSnapshot(ledger.snapshot(), 200).size).toBe(0);
+  });
+});

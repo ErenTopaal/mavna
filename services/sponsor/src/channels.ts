@@ -1,5 +1,5 @@
 import { MavnaError } from "@mavna/core";
-import type { Keypair } from "@stellar/stellar-sdk";
+import { Keypair } from "@stellar/stellar-sdk";
 
 /**
  * A pool of accounts that exist only to carry sequence numbers for pre-signed
@@ -24,6 +24,22 @@ export interface Channel {
 
 export interface ChannelPoolOptions {
   readonly channels: readonly Keypair[];
+}
+
+/** One lease as it is written down: who holds which channel, until when. */
+export interface LeaseRecord {
+  readonly owner: string;
+  readonly channel: string;
+  readonly untilUnix: number;
+}
+
+/**
+ * A pool as it is written down. Carries secret keys, so it belongs only in
+ * storage the operator keeps private, never in a log or a response.
+ */
+export interface ChannelPoolSnapshot {
+  readonly secrets: readonly string[];
+  readonly leases: readonly LeaseRecord[];
 }
 
 interface Lease {
@@ -55,6 +71,46 @@ export class ChannelPool {
       keypair,
       address: keypair.publicKey(),
     }));
+  }
+
+  /** Rebuild a pool from what `snapshot` wrote, keys and live leases both. */
+  static fromSnapshot(snapshot: ChannelPoolSnapshot, nowUnix: number): ChannelPool {
+    const pool = new ChannelPool({
+      channels: snapshot.secrets.map((secret) => Keypair.fromSecret(secret)),
+    });
+    pool.restoreLeases(snapshot.leases, nowUnix);
+    return pool;
+  }
+
+  /** Everything needed to rebuild this pool after a restart. */
+  snapshot(): ChannelPoolSnapshot {
+    const leased = [...this.leased.values()].map((lease) => lease.channel);
+    return {
+      secrets: [...this.available, ...leased].map((channel) => channel.keypair.secret()),
+      leases: [...this.leased.values()].map((lease) => ({
+        owner: lease.heldFor,
+        channel: lease.channel.address,
+        untilUnix: lease.untilUnix,
+      })),
+    };
+  }
+
+  /**
+   * Put back leases written before a restart. Without them every channel looks
+   * free, and the next settlement would be built on a sequence a held one
+   * already occupies. A lease on a channel this pool does not have is ignored,
+   * since nothing here could sign for it; one already past its bound is
+   * dropped as reclaim would drop it.
+   */
+  restoreLeases(leases: readonly LeaseRecord[], nowUnix: number): void {
+    for (const lease of leases) {
+      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) continue;
+      const index = this.available.findIndex((channel) => channel.address === lease.channel);
+      const channel = this.available[index];
+      if (channel === undefined) continue;
+      this.available.splice(index, 1);
+      this.leased.set(lease.owner, { channel, heldFor: lease.owner, untilUnix: lease.untilUnix });
+    }
   }
 
   /**

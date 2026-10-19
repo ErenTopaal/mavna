@@ -29,6 +29,11 @@ export interface BuiltRecord {
    * this, or the settlement leaves part of the loan unpaid.
    */
   readonly repays?: Repayment;
+  /**
+   * A preparation the account pays for out of its own XLM. It is submitted as
+   * the user signed it: no sponsor signature, and no settlement to wait for.
+   */
+  readonly selfFunded?: boolean;
 }
 
 export interface Repayment {
@@ -38,6 +43,19 @@ export interface Repayment {
 
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
+
+  /** Rebuild a ledger from what `snapshot` wrote, less what expired meanwhile. */
+  static fromSnapshot(records: readonly BuiltRecord[], nowUnix: number): BuiltLedger {
+    const ledger = new BuiltLedger();
+    for (const record of records) ledger.records.set(record.hash, record);
+    ledger.prune(nowUnix);
+    return ledger;
+  }
+
+  /** Every record still open, for writing down. */
+  snapshot(): readonly BuiltRecord[] {
+    return [...this.records.values()];
+  }
 
   /**
    * Expired records are pruned here as well as in take. Building is open to
