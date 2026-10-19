@@ -783,10 +783,27 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       return;
     }
 
-    const iris = await fetch(
-      `${options.irisUrl}/v2/messages/${domain}?transactionHash=${encodeURIComponent(body.txHash)}`,
-      { signal: AbortSignal.timeout(30_000) },
-    );
+    const unavailable = (): void =>
+      reply(
+        res,
+        502,
+        { error: "Circle's attestation service did not answer usefully.", retryable: true },
+        origin,
+      );
+    let iris: Response;
+    try {
+      iris = await fetch(
+        `${options.irisUrl}/v2/messages/${domain}?transactionHash=${encodeURIComponent(body.txHash)}`,
+        { signal: AbortSignal.timeout(30_000) },
+      );
+    } catch (cause) {
+      console.error(
+        "[sponsor] iris could not be reached:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      unavailable();
+      return;
+    }
     if (iris.status === 404) {
       reply(
         res,
@@ -796,13 +813,6 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
       );
       return;
     }
-    const unavailable = (): void =>
-      reply(
-        res,
-        502,
-        { error: "Circle's attestation service did not answer usefully.", retryable: true },
-        origin,
-      );
     if (!iris.ok) {
       console.error("[sponsor] iris answered", iris.status);
       unavailable();

@@ -218,14 +218,14 @@ function skipPastSettlementWindow(): void {
  * Stand in for Circle's attestation service, and only it: every other request,
  * including the tests' own calls to the server, goes to the real fetch.
  */
-function stubIris(answer: (url: URL) => Response): URL[] {
+function stubIris(answer: (url: URL) => Response | Promise<Response>): URL[] {
   const asked: URL[] = [];
   const realFetch = globalThis.fetch;
   vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (url.origin !== IRIS) return realFetch(input, init);
     asked.push(url);
-    return Promise.resolve(answer(url));
+    return Promise.resolve().then(() => answer(url));
   });
   return asked;
 }
@@ -685,6 +685,20 @@ describe("the sponsor only asks Circle about well-formed deliveries", () => {
     const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
     expect(response.status).toBe(502);
     expect(response.body.retryable).toBe(true);
+  });
+
+  it("answers 502 when Circle cannot be reached or does not answer in time", async () => {
+    for (const failure of [
+      new TypeError("fetch failed"),
+      new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    ]) {
+      stubIris(() => Promise.reject(failure));
+      const server = await startServer();
+      const response = await server.post("/deliver", { txHash: EVM_HASH, domain: 0 });
+      expect(response.status, failure.name).toBe(502);
+      expect(response.body.retryable).toBe(true);
+      vi.unstubAllGlobals();
+    }
   });
 
   it("answers 502 when Circle answers with something that is not JSON", async () => {
