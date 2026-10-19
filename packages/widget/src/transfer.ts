@@ -13,7 +13,7 @@
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { stroopsToXlm } from "@mavna/stellar";
+import { inspectDestination, stroopsToXlm } from "@mavna/stellar";
 import {
   FeeBumpTransaction,
   Asset as StellarAsset,
@@ -28,7 +28,7 @@ import {
   OWN_TRUSTLINE_FEE_STROOPS,
   type OwnDelivery,
 } from "./own-delivery";
-import { type RouteView, settlementBlocker, trustlineName, type Wanted } from "./quote";
+import { type RouteView, settlementBlocker, trustlineNameOf, type Wanted } from "./quote";
 import {
   adapterFor,
   destinationBlocker,
@@ -212,9 +212,10 @@ async function openOwnTrustline(
   address: string,
   /** What to tell the user about their funds if this is refused. */
   funds: string,
+  /** The asset to hold: what the rail delivers, unless a conversion needs another. */
+  holds: Route["deliveredAtLeast"]["asset"] = route.deliveredAtLeast.asset,
 ): Promise<void> {
-  const holds = route.deliveredAtLeast.asset;
-  const name = trustlineName(route, engine.usdcOnStellar.id);
+  const name = trustlineNameOf(holds.id, engine.usdcOnStellar.id);
   if (name === undefined) {
     throw new Error(`The sponsor curates no trustline for ${holds.symbol}. ${funds}`);
   }
@@ -513,12 +514,17 @@ async function termsOf(engine: TransferEngine, needs: string): Promise<SponsorTe
  * The connected Stellar wallet, when it is the receiving account. An account
  * that pays for its own delivery signs it, so this is known before anything burns.
  */
-async function ownWallet(engine: TransferEngine, route: Route): Promise<string> {
+async function ownWallet(
+  engine: TransferEngine,
+  route: Route,
+  /** What the receiving account pays for and signs itself. */
+  pays = "its own delivery on Stellar",
+): Promise<string> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
     throw new Error(
-      "Right now the receiving account pays for its own delivery on Stellar, so only its " +
-        "owner can sign it. Connect that wallet, or pick another route. Nothing has been sent.",
+      `Right now the receiving account pays for ${pays}, so only its owner can sign it. ` +
+        "Connect that wallet, or pick another route. Nothing has been sent.",
     );
   }
   return address;
@@ -564,6 +570,30 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
       patch("prepare", { phase: "blocked" });
       await prepareNow(engine, route, chainId, owner);
       patch("prepare", { phase: "done" });
+    }
+  }
+
+  // A conversion on Stellar into anything but XLM needs that trustline too. An
+  // account paying its own way opens it now, before any money moves, so a user
+  // short of XLM learns before the send rather than after the arrival.
+  const convertsTo = route.steps.find((s) => s.kind === "swap")?.to.asset;
+  if (convertsTo !== undefined && convertsTo.id !== "native") {
+    const [code, issuer] = convertsTo.id.split(":");
+    const state = await inspectDestination(
+      engine.rpc,
+      route.destination,
+      new StellarAsset(code ?? "", issuer),
+    );
+    if (state.lane.kind === "needs-trustline") {
+      const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
+      if (terms.reserveFunding !== "self") {
+        throw new Error(
+          `The receiving account cannot hold ${convertsTo.symbol} yet, so the conversion would ` +
+            "fail after the money arrives. Add that trustline first. Nothing has been sent.",
+        );
+      }
+      owner ??= await ownWallet(engine, route, `the trustline it converts into`);
+      await openOwnTrustline(engine, route, chainId, owner, "Nothing has been sent.", convertsTo);
     }
   }
 

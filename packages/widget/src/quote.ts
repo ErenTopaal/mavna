@@ -266,9 +266,13 @@ export function settlementBlocker(
  * preparation it gets back against the delivered asset before anyone signs.
  */
 export function trustlineName(route: Route, usdcId: string): "USDC" | "USDT0" | undefined {
-  const delivers = route.deliveredAtLeast.asset.id;
-  if (delivers === usdcId) return "USDC";
-  if (delivers.startsWith("USDT0:")) return "USDT0";
+  return trustlineNameOf(route.deliveredAtLeast.asset.id, usdcId);
+}
+
+/** The curated name for an asset id, as above, for any asset a route needs held. */
+export function trustlineNameOf(assetId: string, usdcId: string): "USDC" | "USDT0" | undefined {
+  if (assetId === usdcId) return "USDC";
+  if (assetId.startsWith("USDT0:")) return "USDT0";
   return undefined;
 }
 

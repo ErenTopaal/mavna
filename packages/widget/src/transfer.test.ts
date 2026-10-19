@@ -8,6 +8,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  StrKey,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -85,6 +86,7 @@ beforeEach(() => {
   preparedLine = undefined;
   preparedSource = undefined;
   preparedShape = {};
+  heldOnly = undefined;
   askedAssets = [];
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
@@ -223,6 +225,9 @@ function ledgerEntries(): unknown[] {
   return [account, trustline];
 }
 
+/** The trustlines the destination holds, by CODE:ISSUER, when a test asks per asset. */
+let heldOnly: Set<string> | undefined;
+
 /** What the delivery costs once simulated, as the node prepares it. */
 let preparedFee: string;
 /** What simulating the delivery answers instead, in turn, when a test makes it fail. */
@@ -238,9 +243,36 @@ function stellarNode(): RpcClient {
     baseDelayMs: 0,
     sleep: async () => {},
   });
-  vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async () => {
+  vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => {
     log.push("stellar read destination");
-    return { entries: ledgerEntries(), latestLedger: 100 } as never;
+    if (heldOnly === undefined) return { entries: ledgerEntries(), latestLedger: 100 } as never;
+    // asked key by key: the account, and only the trustlines it holds
+    const [account] = ledgerEntries();
+    const entries = keys.flatMap((key) => {
+      if (key.switch().name === "account") return account === undefined ? [] : [account];
+      if (key.switch().name !== "trustline") return [];
+      const line = key.trustLine().asset();
+      const held =
+        line.switch().name === "assetTypeCreditAlphanum12"
+          ? `${line.alphaNum12().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum12().issuer().ed25519())}`
+          : `${line.alphaNum4().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum4().issuer().ed25519())}`;
+      if (!heldOnly?.has(held)) return [];
+      return [
+        {
+          val: xdr.LedgerEntryData.trustline(
+            new xdr.TrustLineEntry({
+              accountId: key.trustLine().accountId(),
+              asset: line,
+              balance: xdr.Int64.fromString("0"),
+              limit: xdr.Int64.fromString((10n ** 15n).toString()),
+              flags: 1,
+              ext: new xdr.TrustLineEntryExt(0),
+            }),
+          ),
+        },
+      ];
+    });
+    return { entries, latestLedger: 100 } as never;
   });
   vi.spyOn(client.server, "getLatestLedger").mockResolvedValue({ sequence: 100 } as never);
   vi.spyOn(client.server, "prepareTransaction").mockImplementation(async (tx) => {
@@ -843,6 +875,34 @@ describe("runTransfer when the account pays its own reserve", () => {
       run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
     ).rejects.toThrow(/not the trustline this transfer needs/);
     expect(log).not.toContain("stellar sign PREPARATION");
+  });
+
+  it("opens the trustline a conversion on Stellar needs from the account itself, before the send", async () => {
+    funding = "self";
+    // USDT0 arrives and is converted into USDC; the account holds USDT0 and no USDC
+    heldOnly = new Set([STELLAR_USDT0.id]);
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      deliveredAtLeast: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+              to: { asset: STELLAR_USDC, baseUnits: "49000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await run(adapter, route, patches().patch).catch(() => undefined);
+    expect(askedAssets).toEqual([["USDC"]]);
+    const signed = log.indexOf("stellar sign PREPARATION");
+    expect(signed).toBeGreaterThan(-1);
+    expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
   });
 
   it("still refuses a USDT0 trustline the sponsor would have to front", async () => {
