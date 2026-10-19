@@ -30,6 +30,7 @@ import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
 import {
+  DeliveredAsCame,
   finishDelivery,
   runTransfer,
   StillMoving,
@@ -959,6 +960,23 @@ describe("runTransfer when the account pays its own reserve", () => {
     });
     await expect(run(adapter, route, patches().patch)).rejects.toThrow();
     expect(log).not.toContain("stellar sign PREPARATION");
+  });
+
+  it("ends a conversion on arrival that delivered as it came apart from a failure", async () => {
+    const asCame = {
+      phase: "delivered-as-came" as const,
+      ref: { chainId: "stellar-testnet", txHash: "f00d", explorerUrl: "" },
+      received: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+      because: "The minimum could not be met.",
+    };
+    const adapter = new ScriptedAdapter("layerzero", [asCame], {
+      transactions: [layerZeroSend("777")],
+    });
+    const error = await run(adapter, routeFor("layerzero"), patches().patch).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(DeliveredAsCame);
+    expect(error).toMatchObject({ asset: "USDT0", baseUnits: "50000000" });
   });
 
   it("refuses a conversion for someone else's account before anything is sent", async () => {

@@ -64,6 +64,7 @@ import {
 import { s } from "./style";
 import {
   buildSteps,
+  DeliveredAsCame,
   type FlightRow,
   type FlightStep,
   finishDelivery,
@@ -997,6 +998,17 @@ export class Flow extends React.Component<FlowProps, State> {
       this.stillMoving(error.message);
       return;
     }
+    if (error instanceof DeliveredAsCame) {
+      // the money arrived, unconverted: told apart from a lost transfer
+      this.emit({
+        type: "transferDeliveredAsCame",
+        reason: error.message,
+        asset: error.asset,
+        baseUnits: error.baseUnits,
+      });
+      this.failFlight(error.message, false);
+      return;
+    }
     this.failFlight(msg(error, "The transfer did not go through."));
   }
 
@@ -1022,8 +1034,8 @@ export class Flow extends React.Component<FlowProps, State> {
     );
   }
 
-  failFlight(message: string): void {
-    this.emit({ type: "transferFailed", reason: message });
+  failFlight(message: string, emitFailed = true): void {
+    if (emitFailed) this.emit({ type: "transferFailed", reason: message });
     this.setState(
       (st) => {
         const i = st.steps.findIndex((s) => s.phase === "blocked" || s.phase === "pending");

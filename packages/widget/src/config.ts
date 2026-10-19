@@ -57,7 +57,17 @@ export type MavnaWidgetEvent =
    * the widget's patience, or the widget went away. Not a failure; the money is
    * in flight and can be checked on or finished from Activity.
    */
-  | { readonly type: "transferStillMoving"; readonly reason: string };
+  | { readonly type: "transferStillMoving"; readonly reason: string }
+  /**
+   * A conversion on arrival could not meet the minimum, so what was sent
+   * arrived as it came: not a success, but the money is in the account.
+   */
+  | {
+      readonly type: "transferDeliveredAsCame";
+      readonly reason: string;
+      readonly asset: string;
+      readonly baseUnits: string;
+    };
 
 /**
  * Opt out of the widget's own wallet management. Provide an already-connected EVM

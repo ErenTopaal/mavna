@@ -4,7 +4,7 @@ import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
-import { StillMoving } from "./transfer";
+import { DeliveredAsCame, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
 // runTransfer() are the system under test; nothing here is mounted.
@@ -52,6 +52,20 @@ describe("Flow.endWith", () => {
     flow.endWith(new StillMoving("Taking longer than this page waits."));
     expect(events).toEqual([
       { type: "transferStillMoving", reason: "Taking longer than this page waits." },
+    ]);
+  });
+
+  it("tells the host a conversion delivered as it came apart from a failure, with what arrived", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = new Flow({ engine, emit: (event) => events.push(event) });
+    flow.endWith(new DeliveredAsCame("USDT0 arrived as it came.", "USDT0", "5000000"));
+    expect(events).toEqual([
+      {
+        type: "transferDeliveredAsCame",
+        reason: "USDT0 arrived as it came.",
+        asset: "USDT0",
+        baseUnits: "5000000",
+      },
     ]);
   });
 

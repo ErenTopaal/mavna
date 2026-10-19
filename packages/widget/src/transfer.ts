@@ -58,6 +58,24 @@ export class StillMoving extends Error {
   }
 }
 
+/**
+ * A conversion on arrival that could not meet the minimum, so the arriving
+ * token was delivered as it came. The money arrived, in the asset it was sent
+ * in; not a success, and not a loss either.
+ */
+export class DeliveredAsCame extends Error {
+  /** What arrived, by symbol, and how much in its base units. */
+  readonly asset: string;
+  readonly baseUnits: string;
+
+  constructor(message: string, asset: string, baseUnits: string) {
+    super(message);
+    this.name = "DeliveredAsCame";
+    this.asset = asset;
+    this.baseUnits = baseUnits;
+  }
+}
+
 /** A flight step row, shaped for the flight screen's markup. */
 export interface FlightRow {
   key: string;
@@ -638,6 +656,13 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
       tracked.error === undefined
         ? STILL_MOVING
         : `${STILL_MOVING} The last check failed: ${tracked.error}`,
+    );
+  }
+  if (tracked.phase.phase === "delivered-as-came") {
+    throw new DeliveredAsCame(
+      endedNote(tracked.phase),
+      tracked.phase.received.asset.symbol,
+      tracked.phase.received.baseUnits,
     );
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));

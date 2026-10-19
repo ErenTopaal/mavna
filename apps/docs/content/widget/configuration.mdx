@@ -99,7 +99,10 @@ this page.
 many declined), `routeSelected` (the source and the amount received),
 `walletConnected` (the ecosystem and address), `transferStarted`,
 `transferStepUpdated` (a step id and its phase), `transferCompleted`,
-`transferFailed` (with a reason), and `transferStillMoving` (with a reason). The
+`transferFailed` (with a reason), `transferStillMoving` (with a reason), and
+`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived: a
+conversion on arrival could not meet the minimum, so the money arrived in the asset
+it was sent in, which is neither a success nor a loss). The
 last one means the widget stopped watching a transfer that is still on its way: it
 outlived the widget's patience, or the widget went away. It is not a failure; the
 transfer can be checked on and finished from Activity. Each event is backed by a
