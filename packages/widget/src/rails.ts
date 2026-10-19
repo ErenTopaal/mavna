@@ -7,6 +7,8 @@
  * the route itself, and the runner never has to know which rail it holds.
  */
 import type { BridgeAdapter, Route, StepPhase, TransferHandle } from "@mavna/core";
+import { inspectDestination, type RpcClient } from "@mavna/stellar";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { amountValue, fmt } from "./format";
 import { remedyNote } from "./found";
@@ -118,6 +120,51 @@ export function stepsFor(route: Route): readonly StepTemplate[] {
     },
     ...(converts ? [swap] : []),
   ];
+}
+
+/**
+ * Why the destination cannot take what this route delivers, or undefined when
+ * it can.
+ *
+ * A route that sets the account up has its own lane for this. One that does not
+ * is trusting the rail's quote that the account is ready, and a rail that never
+ * looked would have the user sign away funds that cannot land. So the widget
+ * looks for itself, on Stellar, before the first signature.
+ */
+export async function destinationBlocker(
+  rpc: RpcClient,
+  route: Route,
+): Promise<string | undefined> {
+  if (route.steps.some((s) => s.kind === "prepare-account")) return undefined;
+  const delivers = route.deliveredAtLeast.asset;
+  const [code, issuer] = delivers.id.split(":");
+  let asset: StellarAsset;
+  if (delivers.id === "native") {
+    asset = StellarAsset.native();
+  } else if (code !== undefined && issuer !== undefined && issuer !== "") {
+    asset = new StellarAsset(code, issuer);
+  } else {
+    return `This route delivers ${delivers.symbol} as ${delivers.id}, which is not a Stellar asset this page can check the destination for.`;
+  }
+
+  const { lane } = await inspectDestination(rpc, route.destination, asset);
+  switch (lane.kind) {
+    case "ready":
+    case "contract-ready":
+      return undefined;
+    case "needs-account":
+      return (
+        "That Stellar account does not exist yet, and this route cannot set it up, so the " +
+        `${delivers.symbol} would not arrive. Choose a route that sets the account up.`
+      );
+    case "needs-trustline":
+      return (
+        `That Stellar account cannot hold ${delivers.symbol} yet, and this route cannot add ` +
+        "that. Add it in the account's wallet, or choose a route that sets the account up."
+      );
+    case "unusable":
+      return lane.reason;
+  }
 }
 
 export interface TrackOptions {

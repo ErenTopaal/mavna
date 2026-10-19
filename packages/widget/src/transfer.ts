@@ -20,6 +20,7 @@ import { remember } from "./history";
 import { type RouteView, settlementBlocker, type Wanted } from "./quote";
 import {
   adapterFor,
+  destinationBlocker,
   endedNote,
   pollSettlement,
   STILL_MOVING,
@@ -333,6 +334,9 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   const route = view.route;
   const wait = deps.wait ?? sleep;
   let owner: string | undefined;
+
+  const unready = await destinationBlocker(engine.rpc, route);
+  if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
 
   if (view.newAccount) {
     await assertSponsorable(engine, route);

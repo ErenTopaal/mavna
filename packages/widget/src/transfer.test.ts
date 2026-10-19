@@ -1,3 +1,4 @@
+import type { BridgeAdapter } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
 import type { Address, Hash } from "viem";
@@ -27,9 +28,12 @@ const HISTORY_KEY = "test.transfers";
 let log: string[];
 let stored: Map<string, string>;
 let settleReplies: Array<[number, unknown]>;
+/** What the Stellar node says the destination holds. */
+let lane: "ready" | "needs-account" | "needs-trustline";
 
 beforeEach(() => {
   log = [];
+  lane = "ready";
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -84,7 +88,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function engineWith(adapter: ScriptedAdapter): TransferEngine {
+/** Ledger entries the way the Stellar node returns them, as far as they are read. */
+function ledgerEntries(): unknown[] {
+  const account = {
+    val: {
+      switch: () => ({ name: "account" }),
+      account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 1 }),
+    },
+  };
+  const trustline = {
+    val: {
+      switch: () => ({ name: "trustline" }),
+      trustLine: () => ({ balance: () => 0n, limit: () => 10n ** 15n, flags: () => 1 }),
+    },
+  };
+  if (lane === "needs-account") return [];
+  if (lane === "needs-trustline") return [account];
+  return [account, trustline];
+}
+
+/** A real client whose node is a double, so the destination check reads what a test says. */
+function stellarNode(): RpcClient {
+  const client = new RpcClient({
+    url: "https://example.invalid",
+    baseDelayMs: 0,
+    sleep: async () => {},
+  });
+  vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async () => {
+    log.push("stellar read destination");
+    return { entries: ledgerEntries(), latestLedger: 100 } as never;
+  });
+  return client;
+}
+
+function engineWith(adapter: BridgeAdapter): TransferEngine {
   return {
     network: "testnet",
     adapters: [adapter],
@@ -104,7 +141,7 @@ function engineWith(adapter: ScriptedAdapter): TransferEngine {
     historyKey: HISTORY_KEY,
     sourceDomain: () => 3,
     sdex: new SdexProvider("testnet"),
-    rpc: new RpcClient({ url: "https://soroban-testnet.stellar.org" }),
+    rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
   };
 }
@@ -142,7 +179,7 @@ function patches() {
 const instant = async (): Promise<void> => {};
 
 function run(
-  adapter: ScriptedAdapter,
+  adapter: BridgeAdapter,
   route: ReturnType<typeof routeFor>,
   patch: ReturnType<typeof patches>["patch"],
   conn = connection(),
@@ -221,12 +258,32 @@ describe("runTransfer over a relayed rail", () => {
     expect(seen.at(-1)?.patch.note).toMatch(/^Delivered on Stellar\. .*not gone through yet/);
   });
 
-  it("does not touch the sponsor for an account that can already receive", async () => {
+  it("does not touch the sponsor for an account that can already receive, and checks it first", async () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
     });
     await run(adapter, routeFor("layerzero"), patches().patch);
-    expect(log.filter((l) => l.startsWith("sponsor") || l.startsWith("stellar"))).toEqual([]);
+    expect(log.filter((l) => l.startsWith("sponsor") || l.startsWith("stellar"))).toEqual([
+      "stellar read destination",
+    ]);
+    expect(log.indexOf("stellar read destination")).toBeLessThan(log.indexOf("evm send value=777"));
+  });
+
+  it("refuses a destination the route does not set up and that cannot hold what arrives, before any signature", async () => {
+    const cases = [
+      ["needs-account", /does not exist yet.*Nothing has been sent\./],
+      ["needs-trustline", /cannot hold USDC yet.*Nothing has been sent\./],
+    ] as const;
+    for (const [state, said] of cases) {
+      log = [];
+      lane = state;
+      const adapter = new ScriptedAdapter("axelar", [delivered()], {
+        transactions: [layerZeroSend("1")],
+      });
+      await expect(run(adapter, routeFor("axelar"), patches().patch)).rejects.toThrow(said);
+      expect(log).toEqual(["stellar read destination"]);
+      expect(adapter.built).toBe(0);
+    }
   });
 
   it("refuses a new account the sponsor cannot settle in what the rail delivers, before any signature", async () => {
