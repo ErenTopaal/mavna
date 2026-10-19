@@ -58,6 +58,7 @@ export {
   buildSolanaBurn,
   SOLANA_PROGRAMS,
   SOLANA_USDC,
+  solanaAddressToBytes32,
   solanaInstructionDataHex,
 } from "./solana.js";
 export type {

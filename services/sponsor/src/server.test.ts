@@ -1,5 +1,15 @@
 import type { AddressInfo } from "node:net";
-import { buildBurn, buildDelivery } from "@mavna/adapter-cctp";
+import {
+  buildBurn,
+  buildDelivery,
+  CCTP_CONTRACTS,
+  contractAddressToBytes32,
+  EVM_DEPLOYMENTS,
+  SOLANA_PROGRAMS,
+  STARKNET_DEPLOYMENTS,
+  solanaAddressToBytes32,
+  toHex,
+} from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
@@ -623,12 +633,24 @@ describe("the sponsor only asks Circle about well-formed deliveries", () => {
   });
 });
 
+/** Fields of a CCTP message a test may forge, as hex. Anything left out is honest. */
+interface MessageOverrides {
+  readonly sourceDomain?: number;
+  readonly destinationDomain?: number;
+  readonly sender?: string;
+  readonly headerRecipient?: string;
+  readonly destinationCaller?: string;
+  readonly mintRecipient?: string;
+}
+
 /**
- * A CCTP v2 message as Iris returns it, laid out per Circle's MessageV2 and
- * BurnMessageV2 (header body at byte 148, hook data at byte 228 of the body),
- * carrying the fields this repository's own burn builder produces.
+ * A CCTP v2 message as Iris returns it for a burn on Ethereum Sepolia, laid out
+ * per Circle's MessageV2 (body at byte 148) and BurnMessageV2 (hook data at byte
+ * 228 of the body). The burn fields come from this repository's own builder;
+ * the header names the source TokenMessenger as sender and Stellar's
+ * TokenMessengerMinter as recipient, as Circle's transmitter writes them.
  */
-function cctpMessage(recipient: string, destinationDomain = 27): string {
+function cctpMessage(recipient: string, overrides: MessageOverrides = {}): string {
   const burn = buildBurn({
     amount: 1_000_000n,
     stellarRecipient: recipient,
@@ -643,19 +665,24 @@ function cctpMessage(recipient: string, destinationDomain = 27): string {
 
   const header = Buffer.alloc(148);
   header.writeUInt32BE(1, 0);
-  header.writeUInt32BE(0, 4);
-  header.writeUInt32BE(destinationDomain, 8);
+  header.writeUInt32BE(overrides.sourceDomain ?? 0, 4);
+  header.writeUInt32BE(overrides.destinationDomain ?? 27, 8);
   Buffer.from(Keypair.random().rawPublicKey()).copy(header, 12);
-  word(burn.contract).copy(header, 44);
-  word(mintRecipient).copy(header, 76);
-  word(destinationCaller).copy(header, 108);
+  word(
+    overrides.sender ?? EVM_DEPLOYMENTS.testnet["ethereum-sepolia"]?.tokenMessengerV2 ?? "",
+  ).copy(header, 44);
+  word(
+    overrides.headerRecipient ??
+      toHex(contractAddressToBytes32(CCTP_CONTRACTS.testnet.tokenMessengerMinter)),
+  ).copy(header, 76);
+  word(overrides.destinationCaller ?? destinationCaller).copy(header, 108);
   header.writeUInt32BE(finality, 140);
   header.writeUInt32BE(finality, 144);
 
   const body = Buffer.alloc(228);
   body.writeUInt32BE(1, 0);
   word(burnToken).copy(body, 4);
-  word(mintRecipient).copy(body, 36);
+  word(overrides.mintRecipient ?? mintRecipient).copy(body, 36);
   word(amount.toString(16)).copy(body, 68);
   word(maxFee.toString(16)).copy(body, 132);
 
@@ -713,11 +740,70 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(own.body.settled).toBe(true);
   });
 
+  it("settles for honest burns from Solana and Starknet, whose senders are not EVM addresses", async () => {
+    const server = await startServer({ buildDelivery });
+    const solanaUser = Keypair.random();
+    const starknetUser = Keypair.random();
+
+    // One channel in the harness, so one held settlement at a time.
+    await holdSettlementFor(server, solanaUser);
+    irisReturns(
+      cctpMessage(solanaUser.publicKey(), {
+        sourceDomain: 5,
+        sender: toHex(solanaAddressToBytes32(SOLANA_PROGRAMS.tokenMessengerMinterV2)),
+      }),
+    );
+    const fromSolana = await server.post("/deliver", {
+      txHash:
+        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+      domain: 5,
+    });
+    expect(fromSolana.body.settled).toBe(true);
+
+    await holdSettlementFor(server, starknetUser);
+    irisReturns(
+      cctpMessage(starknetUser.publicKey(), {
+        sourceDomain: 25,
+        sender: STARKNET_DEPLOYMENTS.testnet.tokenMessengerMinterV2,
+      }),
+    );
+    const fromStarknet = await server.post("/deliver", { txHash: "0x4a5b", domain: 25 });
+    expect(fromStarknet.body.settled).toBe(true);
+  });
+
+  // Each of these is a message Circle would sign for somebody's burn, but not a
+  // burn that pays the named recipient through the forwarder. Settling on one
+  // would fire the recipient's settlement before their money exists.
+  const forged: readonly [string, MessageOverrides][] = [
+    ["no destination caller", { destinationCaller: `0x${"00".repeat(32)}` }],
+    ["a mint recipient other than the forwarder", { mintRecipient: `0x${"11".repeat(32)}` }],
+    ["a sender that is not the source TokenMessenger", { sender: `0x${"22".repeat(20)}` }],
+    [
+      "a header recipient that is not Stellar's TokenMessenger",
+      { headerRecipient: `0x${"33".repeat(32)}` },
+    ],
+    ["a source domain other than the one asked about", { sourceDomain: 6 }],
+  ];
+  for (const [name, overrides] of forged) {
+    it(`delivers but settles nothing on a message with ${name}`, async () => {
+      const server = await startServer({ buildDelivery });
+      const user = Keypair.random();
+      await holdSettlementFor(server, user);
+      irisReturns(cctpMessage(user.publicKey(), overrides));
+
+      const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+      expect(response.status).toBe(200);
+      expect(response.body.kind).toBe("delivered");
+      expect(response.body.settled).not.toBe(true);
+      expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+    });
+  }
+
   it("settles nothing on a message not bound for Stellar", async () => {
     const server = await startServer({ buildDelivery });
     const user = Keypair.random();
     await holdSettlementFor(server, user);
-    irisReturns(cctpMessage(user.publicKey(), 6));
+    irisReturns(cctpMessage(user.publicKey(), { destinationDomain: 6 }));
 
     const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
     expect(response.body.settled).not.toBe(true);

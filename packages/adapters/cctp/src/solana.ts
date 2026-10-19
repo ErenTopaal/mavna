@@ -85,6 +85,14 @@ const encoder = getAddressEncoder();
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 const key = (value: string): Uint8Array => new Uint8Array(encoder.encode(address(value)));
 
+/**
+ * A Solana address as the 32 bytes CCTP writes into a message, which is how a
+ * reader of an attested message compares it against a known program.
+ */
+export function solanaAddressToBytes32(value: string): Uint8Array {
+  return key(value);
+}
+
 async function pda(seeds: readonly Uint8Array[], programId: string): Promise<string> {
   const [derived] = await getProgramDerivedAddress({
     programAddress: address(programId),

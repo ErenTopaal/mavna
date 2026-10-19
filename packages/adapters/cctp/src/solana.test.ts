@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { contractAddressToBytes32, toHex } from "./hook.js";
-import { associatedTokenAddress, buildSolanaBurn, SOLANA_PROGRAMS, SOLANA_USDC } from "./solana.js";
+import {
+  associatedTokenAddress,
+  buildSolanaBurn,
+  SOLANA_PROGRAMS,
+  SOLANA_USDC,
+  solanaAddressToBytes32,
+} from "./solana.js";
 
 /**
  * MERGE PREREQUISITE, same standing as the EVM burn.
@@ -98,5 +104,19 @@ describe("the Solana burn", () => {
 
   it("refuses a fee ceiling that would eat the whole transfer", async () => {
     await expect(buildSolanaBurn({ ...base, maxFee: 25_000_000n })).rejects.toThrow(/fee ceiling/);
+  });
+});
+
+describe("a Solana address as CCTP carries it", () => {
+  it("is the 32 raw bytes of the base58 key", () => {
+    // The system program is the all-zero key, so its encoding is known exactly.
+    expect(toHex(solanaAddressToBytes32(SOLANA_PROGRAMS.systemProgram))).toBe(
+      `0x${"00".repeat(32)}`,
+    );
+    expect(solanaAddressToBytes32(SOLANA_PROGRAMS.tokenMessengerMinterV2)).toHaveLength(32);
+  });
+
+  it("refuses something that is not a Solana address", () => {
+    expect(() => solanaAddressToBytes32("not-an-address")).toThrow();
   });
 });

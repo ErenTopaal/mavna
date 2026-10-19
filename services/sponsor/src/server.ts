@@ -1,9 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+  CCTP_CONTRACTS,
+  contractAddressToBytes32,
   EVM_DEPLOYMENTS,
   fromHex,
   NON_EVM_CHAINS,
   parseForwarderHookData,
+  SOLANA_PROGRAMS,
+  STARKNET_DEPLOYMENTS,
+  solanaAddressToBytes32,
   stellarDomainFor,
 } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
@@ -175,6 +180,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
    * caller chose proves only that the caller can sign.
    */
   const built = new BuiltLedger();
+  const expected = expectedMessageFields(options.networkId);
   /** Circle domains this network routes into Stellar from, and nothing else. */
   const sourceDomains = new Set(
     [
@@ -789,7 +795,7 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     // sponsor's capital in the same breath. Only for the account Circle
     // attested: a destination named in the request is the caller's claim, and
     // settling on it would spend a stranger's arrival on someone else's loan.
-    const recipient = attestedRecipient(message.message, stellarDomainFor(options.networkId));
+    const recipient = attestedRecipient(message.message, domain, expected);
     const settled =
       (outcome.kind === "delivered" || outcome.kind === "already-delivered") &&
       recipient !== undefined
@@ -882,6 +888,58 @@ function parseTransaction(
 
 const nowUnix = (): number => Math.floor(Date.now() / 1000);
 
+/**
+ * What an honest burn into Stellar through the forwarder looks like, as the
+ * 32-byte fields Circle's transmitter writes. Source TokenMessengers are keyed
+ * by domain; a domain with none in the adapter's config is absent, and a
+ * message from it settles nothing.
+ */
+interface ExpectedMessageFields {
+  readonly stellarDomain: number;
+  readonly sourceMessengers: ReadonlyMap<number, Uint8Array>;
+  readonly stellarMessenger: Uint8Array;
+  readonly forwarder: Uint8Array;
+}
+
+function expectedMessageFields(networkId: "testnet" | "mainnet"): ExpectedMessageFields {
+  const sourceMessengers = new Map<number, Uint8Array>();
+  for (const deployment of Object.values(EVM_DEPLOYMENTS[networkId])) {
+    sourceMessengers.set(deployment.domain, leftPad32(fromHex(deployment.tokenMessengerV2)));
+  }
+  for (const chain of Object.values(NON_EVM_CHAINS[networkId])) {
+    if (chain.family === "solana") {
+      sourceMessengers.set(
+        chain.domain,
+        solanaAddressToBytes32(SOLANA_PROGRAMS.tokenMessengerMinterV2),
+      );
+    }
+    if (chain.family === "starknet") {
+      sourceMessengers.set(
+        chain.domain,
+        leftPad32(fromHex(STARKNET_DEPLOYMENTS[networkId].tokenMessengerMinterV2)),
+      );
+    }
+  }
+  return {
+    stellarDomain: stellarDomainFor(networkId),
+    sourceMessengers,
+    stellarMessenger: contractAddressToBytes32(CCTP_CONTRACTS[networkId].tokenMessengerMinter),
+    forwarder: contractAddressToBytes32(CCTP_CONTRACTS[networkId].cctpForwarder),
+  };
+}
+
+/** An address shorter than a word, as CCTP carries it: zeros on the left. */
+function leftPad32(bytes: Uint8Array): Uint8Array {
+  if (bytes.length > 32) {
+    throw new MavnaError("An address longer than 32 bytes cannot be a CCTP word.", {
+      retryable: false,
+    });
+  }
+  const out = new Uint8Array(32);
+  out.set(bytes, 32 - bytes.length);
+  return out;
+}
+
 /** Where the body starts in a CCTP v2 message, per Circle's MessageV2. */
 const MESSAGE_BODY_INDEX = 148;
 /** Where the hook data starts in a v2 burn body, per Circle's BurnMessageV2. */
@@ -889,19 +947,34 @@ const HOOK_DATA_INDEX = 228;
 
 /**
  * The Stellar recipient Circle attested to, read from the hook data at the end
- * of the burn body. Undefined for anything that is not a burn into Stellar with
- * forwarder hook data, which settles nothing; delivery does not depend on this.
+ * of the burn body, for a message that is provably a burn by the source
+ * TokenMessenger, to Stellar's TokenMessenger, minted to and callable only by
+ * the forwarder. Anything else is undefined and settles nothing: Circle signs
+ * every message, including a burn whose hook data names someone else's account
+ * while paying somewhere it cannot reach them. Delivery does not depend on this.
  */
-function attestedRecipient(messageHex: string, stellarDomain: number): string | undefined {
+function attestedRecipient(
+  messageHex: string,
+  sourceDomain: number,
+  expected: ExpectedMessageFields,
+): string | undefined {
   try {
     const message = fromHex(messageHex);
     if (message.length < MESSAGE_BODY_INDEX + HOOK_DATA_INDEX) return undefined;
-    const destinationDomain = new DataView(
-      message.buffer,
-      message.byteOffset,
-      message.byteLength,
-    ).getUint32(8, false);
-    if (destinationDomain !== stellarDomain) return undefined;
+    const view = new DataView(message.buffer, message.byteOffset, message.byteLength);
+    const word = (at: number): Uint8Array => message.subarray(at, at + 32);
+    const sourceMessenger = expected.sourceMessengers.get(sourceDomain);
+    if (
+      sourceMessenger === undefined ||
+      view.getUint32(4, false) !== sourceDomain ||
+      view.getUint32(8, false) !== expected.stellarDomain ||
+      !sameBytes(word(44), sourceMessenger) ||
+      !sameBytes(word(76), expected.stellarMessenger) ||
+      !sameBytes(word(108), expected.forwarder) ||
+      !sameBytes(word(MESSAGE_BODY_INDEX + 36), expected.forwarder)
+    ) {
+      return undefined;
+    }
     return parseForwarderHookData(message.subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX)).recipient;
   } catch (cause) {
     console.error(
@@ -910,6 +983,10 @@ function attestedRecipient(messageHex: string, stellarDomain: number): string | 
     );
     return undefined;
   }
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
 /**
