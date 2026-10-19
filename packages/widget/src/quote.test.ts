@@ -637,7 +637,7 @@ describe("a trustline an account opens with its own XLM", () => {
     expect((await quoted("self")).routes).toEqual([route]);
     const sponsored = await quoted("sponsor");
     expect(sponsored.routes).toEqual([]);
-    expect(sponsored.rejected[0]?.explanation).toMatch(/the sponsor curates/);
+    expect(sponsored.rejected[0]?.explanation).toMatch(/cannot hold USDT0 yet/);
   });
 });
 
@@ -1012,5 +1012,33 @@ describe("a quote that fails as a whole", () => {
         retryable: true,
       },
     ]);
+  });
+});
+
+describe("the reason a sponsor-funded route cannot set up a trustline", () => {
+  const usdt0: Asset = {
+    chainId: "stellar",
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+    decimals: 7,
+    curatedBy: "LayerZero",
+  };
+  const set = () => ({
+    routes: [routeFor("layerzero", { newAccount: true, delivers: usdt0 })],
+    rejected: [],
+    complete: true,
+  });
+
+  it("speaks of the account that exists as one that cannot hold the asset yet", () => {
+    const why = declineUnsettleable(set(), engine.usdcOnStellar.id, "sponsor", "exists").rejected[0]
+      ?.explanation;
+    expect(why).toMatch(/cannot hold USDT0 yet/);
+    expect(why).not.toMatch(/new Stellar account/);
+  });
+
+  it("speaks of a new account only when there is none", () => {
+    const why = declineUnsettleable(set(), engine.usdcOnStellar.id, "sponsor", "missing")
+      .rejected[0]?.explanation;
+    expect(why).toMatch(/new Stellar account/);
   });
 });

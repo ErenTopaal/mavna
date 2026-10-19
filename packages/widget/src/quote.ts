@@ -253,6 +253,8 @@ export function settlementBlocker(
   route: Route,
   usdcId: string,
   reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
+  /** Whether the destination account exists, when that was read. */
+  destination?: "exists" | "missing" | Error,
 ): string | undefined {
   if (!route.steps.some((s) => s.kind === "prepare-account")) return undefined;
   const delivers = route.deliveredAtLeast.asset;
@@ -266,6 +268,14 @@ export function settlementBlocker(
     );
   }
   if (delivers.id === usdcId) return undefined;
+  if (destination === "exists") {
+    // the account is there; it is the trustline the sponsor will not open
+    return (
+      `This account cannot hold ${delivers.symbol} yet, and the sponsor only opens a USDC ` +
+      "trustline, the one asset its deposit is repaid in. Add a " +
+      `${delivers.symbol} trustline to the account first, or send USDC.`
+    );
+  }
   return (
     "A new Stellar account can only be set up on a route that delivers USDC, the one asset " +
     "the sponsor curates, because its deposit is repaid in USDC from what arrives, and this " +
@@ -294,11 +304,12 @@ export function declineUnsettleable(
   set: RouteSet,
   usdcId: string,
   reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
+  destination?: "exists" | "missing" | Error,
 ): RouteSet {
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [...set.rejected];
   for (const route of set.routes) {
-    const why = settlementBlocker(route, usdcId, reserveFunding);
+    const why = settlementBlocker(route, usdcId, reserveFunding, destination);
     if (why === undefined) {
       routes.push(route);
       continue;
@@ -601,6 +612,19 @@ async function checkSponsor(
   let found: SponsorCheck["destination"] = "exists";
   let spare: bigint | undefined;
   const { baseReserveStroops } = engine;
+  if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
+    // read too, so a decline can say whether the account or only the trustline is missing
+    try {
+      const state = await inspectDestination(
+        engine.rpc,
+        destination,
+        new StellarAsset("USDC", engine.usdcIssuer),
+      );
+      found = state.lane.kind === "needs-account" ? "missing" : "exists";
+    } catch (cause) {
+      found = cause instanceof Error ? cause : new Error(String(cause));
+    }
+  }
   if (!(terms instanceof Error) && terms.reserveFunding === "self") {
     try {
       const state = await inspectDestination(
@@ -742,7 +766,7 @@ export function runQuote(
         // An unreadable answer is declined by the sponsor terms anyway.
         const funding = check.terms instanceof Error ? "sponsor" : check.terms.reserveFunding;
         const settle = (set: RouteSet): RouteSet =>
-          applySponsorTerms(declineUnsettleable(set, usdc, funding), check);
+          applySponsorTerms(declineUnsettleable(set, usdc, funding, check.destination), check);
         return raceAdapters(
           adapters,
           {
