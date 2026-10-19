@@ -917,9 +917,15 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (!covered) return { settled: false, settlementRetryable: true };
 
+    // The answer can arrive after this settlement was dropped as expired and
+    // a newer one held for the account. That one, and its lease, are not this
+    // call's to clear.
+    const stillHeld = (): boolean => heldSettlements.get(destination) === held;
     const settled = (txHash: string): Record<string, unknown> => {
-      heldSettlements.delete(destination);
-      pool.release(destination, transaction.source);
+      if (stillHeld()) {
+        heldSettlements.delete(destination);
+        pool.release(destination, transaction.source);
+      }
       pruneSettled();
       recentlySettled.set(destination, { txHash, untilUnix: held.maxTimeUnix });
       return { settled: true, settlementTxHash: txHash };
@@ -927,9 +933,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const stranded = async (): Promise<Record<string, unknown>> => {
       // The held transaction can never land. The capital it would have
       // released is now the §6.1 loss, counted where the brake can see it.
-      await caps.recordStranded();
-      heldSettlements.delete(destination);
-      pool.release(destination, transaction.source);
+      // One no longer held was counted when it was dropped as expired.
+      if (stillHeld()) {
+        await caps.recordStranded();
+        heldSettlements.delete(destination);
+        pool.release(destination, transaction.source);
+      }
       return { settled: false, settlementRetryable: false };
     };
 

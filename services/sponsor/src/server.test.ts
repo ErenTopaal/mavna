@@ -2104,6 +2104,48 @@ describe("the held settlement stays put while a preparation lands against it", (
     expect(logged.mock.calls.flat().join(" ")).toMatch(/landed after its settlement was dropped/);
     logged.mockRestore();
   });
+
+  it("does not let a settlement that lands late drop the newer one held after it", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    vi.setSystemTime(start + 1_000_000);
+    const newer = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(newer.status).toBe(200);
+
+    const stall = server.rpc.stallNext("settlement");
+    const late = server.post("/settle", { destination: user.publicKey() });
+    await stall.reached;
+    // The first settlement passes its bound with its submission still out, and
+    // the newer one is held in its place.
+    vi.setSystemTime(start + 86_400_000 + 10_000);
+    const committed = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(newer.body.xdr as string, user),
+    });
+    stall.release();
+    expect(committed.status).toBe(200);
+    expect((await late).body.settled).toBe(true);
+
+    // The newer settlement is still held, waiting on its own preparation...
+    const again = await server.post("/settle", { destination: user.publicKey() });
+    expect(again.status).toBe(200);
+    expect(again.body.settled).toBe(false);
+    expect(again.body.settlementRetryable).toBe(true);
+    // ...and still holds its channel.
+    const other = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+  });
 });
 
 describe("a settlement slot is held for a day only once the settlement is signed", () => {
