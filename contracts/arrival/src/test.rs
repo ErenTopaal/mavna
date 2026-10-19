@@ -1202,3 +1202,19 @@ fn a_path_through_a_token_off_the_list_is_not_attempted() {
     assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
     assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
 }
+
+#[test]
+fn a_fee_above_the_cap_is_not_converted() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let fee_to = Address::generate(&w.env);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 1_001;
+    ask.fee_recipient = fee_to.clone();
+    ask.min_out = 1;
+    let (guid, message) = w.arrive(1_000_000, &encode(&w.env, &ask));
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&fee_to), 0);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+}

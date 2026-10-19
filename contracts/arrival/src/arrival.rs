@@ -18,6 +18,9 @@ use crate::{
 };
 
 pub const BPS: i128 = 10_000;
+/// The most an integrator fee may take, the same cap the SDK applies. A message
+/// asking for more is not converted.
+pub const MAX_FEE_BPS: u32 = 1_000;
 
 /// What this contract may convert into and route through, fixed at construction.
 /// Nothing outside these lists is ever called: a sender cannot make the contract
@@ -163,7 +166,7 @@ fn convert(
 ) -> Option<Delivery> {
     let router = &venue.router;
     let recipient = &arrival.instructions.recipient;
-    if conversion.min_out <= 0 || conversion.fee_bps as i128 >= BPS {
+    if conversion.min_out <= 0 || conversion.fee_bps > MAX_FEE_BPS {
         return None;
     }
     if conversion.wanted == arrival.token || !path_is_sound(&arrival.token, conversion) {
