@@ -1,9 +1,8 @@
 # Mavna
 
-Cross-chain delivery into Stellar. Mavna moves money from another chain onto
-Stellar and shows exactly what arrives before anything is sent. It is
-non-custodial: it builds transactions, the user signs them, and no package ever
-holds a key.
+Cross-chain delivery into Stellar. Mavna moves money from another chain onto Stellar and shows
+exactly what arrives before anything is sent. It is non-custodial: it builds transactions, the user
+signs them, and no package ever holds a key.
 
 It ships in three forms that share one engine:
 
@@ -30,8 +29,7 @@ pnpm test        # unit tests
 pnpm typecheck
 ```
 
-Copy `.env.example` to `.env` and set the values before running against a live
-network.
+Copy `.env.example` to `.env` and set the values before running against a live network.
 
 ## License
 
