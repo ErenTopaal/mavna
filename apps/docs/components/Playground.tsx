@@ -8,7 +8,7 @@
  * playground.mavna.app. The configurator (variant, rails, theme, event log) lives
  * there; this is the proof it is real, not a second copy of it.
  */
-import { type ReactElement } from "react";
+import type { ReactElement } from "react";
 import { LiveWidget } from "./LiveWidget";
 
 export function Playground(): ReactElement {

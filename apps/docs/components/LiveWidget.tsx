@@ -1,5 +1,6 @@
 "use client";
 
+import type { Variant } from "@mavna/widget";
 /**
  * A real Mavna widget, mounted inside a docs page.
  *
@@ -13,7 +14,6 @@
  * server renders a placeholder until the client mounts it.
  */
 import dynamic from "next/dynamic";
-import type { Variant } from "@mavna/widget";
 import "@mavna/widget/widget.css";
 import { type ReactElement, useEffect, useState } from "react";
 

@@ -36,6 +36,7 @@ const HIDEABLE: readonly HiddenUIElement[] = [
   "railToggles",
   "poweredBy",
 ];
+const DOCK_MIN = 160;
 const DEFAULT_ACCENT = "#e5484d";
 const INTEGRATOR = "playground.mavna.app";
 
@@ -72,7 +73,7 @@ export function Playground(): ReactElement {
     if (d === null) return;
     // Dragging the handle up grows the dock, down shrinks it.
     const next = d.h + (d.y - e.clientY);
-    setDockHeight(Math.max(160, Math.min(next, window.innerHeight - 220)));
+    setDockHeight(Math.max(DOCK_MIN, Math.min(next, window.innerHeight - 220)));
   };
   const onHandleUp = (e: ReactPointerEvent): void => {
     drag.current = null;
@@ -366,10 +367,17 @@ export function Playground(): ReactElement {
               onPointerMove={onHandleMove}
               onPointerUp={onHandleUp}
               onPointerCancel={onHandleUp}
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Resize panel"
             >
+              <input
+                className="pg-dock-range"
+                type="range"
+                min={DOCK_MIN}
+                max={Math.max(DOCK_MIN, window.innerHeight - 220)}
+                step={20}
+                value={dockHeight}
+                onChange={(e) => setDockHeight(Number(e.target.value))}
+                aria-label="Resize panel"
+              />
               <span className="pg-dock-grip" />
             </div>
             <div className="pg-tabs">

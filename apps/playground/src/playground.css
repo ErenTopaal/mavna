@@ -382,8 +382,25 @@ button {
   margin-top: -6px;
   display: grid;
   place-items: center;
+  position: relative;
   cursor: ns-resize;
   touch-action: none;
+}
+/* the native range is the keyboard and screen reader control; pointer drag
+   stays on the handle itself, so the input is invisible but focusable. */
+.pg-dock-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.pg-dock-handle:has(.pg-dock-range:focus-visible) .pg-dock-grip {
+  background: var(--pg-muted);
+  outline: 2px solid var(--pg-muted);
+  outline-offset: 3px;
 }
 .pg-dock-grip {
   width: 40px;
