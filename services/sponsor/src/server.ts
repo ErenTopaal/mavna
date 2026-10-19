@@ -126,11 +126,6 @@ export interface SponsorServerOptions {
    * venue.
    */
   readonly soroswap?: SoroswapProxy;
-  /**
-   * Whether X-Forwarded-For names the client, for per-client limits. True only
-   * behind a reverse proxy that sets it; otherwise any caller can forge it.
-   */
-  readonly trustForwardedFor?: boolean;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -724,11 +719,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         method: req.method ?? "",
         path: url.pathname,
         originAllowed: origin !== undefined,
-        client: clientAddress(
-          req.socket.remoteAddress,
-          req.headers["x-forwarded-for"],
-          options.trustForwardedFor === true,
-        ),
+        client,
         // An origin that will be refused costs nothing to read.
         body: req.method === "POST" && origin !== undefined ? await readJson(req) : undefined,
       });

@@ -8,6 +8,7 @@ import {
   soroswapQuoteRequest,
 } from "@mavna/swap";
 import { z } from "zod";
+import { RequestLimiter } from "./ratelimit.js";
 
 /**
  * Soroswap, proxied, so its key never leaves this process.
@@ -62,8 +63,6 @@ export interface SoroswapProxy {
   handle(request: ProxyRequest): Promise<ProxyAnswer>;
 }
 
-const WINDOW_MS = 60_000;
-
 const upstreamHealth = z.object({
   status: z.object({ indexer: z.record(z.string(), z.array(z.string())) }),
   aggregator: z
@@ -90,8 +89,10 @@ export function createSoroswapProxy(options: SoroswapProxyOptions): SoroswapProx
   const healthCacheMs = options.healthCacheMs ?? 30_000;
   const now = options.now ?? Date.now;
 
-  const clients = new Map<string, { start: number; count: number }>();
-  let totalWindow = { start: 0, count: 0 };
+  // the sponsor's one limiter, twice: per client, and for everyone together,
+  // since every call here spends the operator's Soroswap quota
+  const perClientLimit = new RequestLimiter(perClient);
+  const totalLimit = new RequestLimiter(total);
   let health: { at: number; answer: ProxyAnswer } | undefined;
 
   const refuse = (status: number, error: string, retryable: boolean): ProxyAnswer => ({
@@ -99,19 +100,10 @@ export function createSoroswapProxy(options: SoroswapProxyOptions): SoroswapProx
     body: { error, retryable },
   });
 
-  /** Fixed one-minute windows. Pruned on every call, so the map holds one window's clients. */
   function admit(client: string): boolean {
     const at = now();
-    for (const [key, window] of clients) {
-      if (at - window.start >= WINDOW_MS) clients.delete(key);
-    }
-    if (at - totalWindow.start >= WINDOW_MS) totalWindow = { start: at, count: 0 };
-    const mine = clients.get(client) ?? { start: at, count: 0 };
-    if (mine.count >= perClient || totalWindow.count >= total) return false;
-    mine.count += 1;
-    totalWindow.count += 1;
-    clients.set(client, mine);
-    return true;
+    // the client is asked first so a refused client does not spend the total
+    return perClientLimit.allow(client, at) && totalLimit.allow("all", at);
   }
 
   async function upstream(

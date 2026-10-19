@@ -2937,11 +2937,11 @@ describe("the soroswap proxy, mounted on the sponsor", () => {
     };
   }
 
-  async function mounted(trustForwardedFor = false) {
+  async function mounted(trustProxy = false) {
     const soroswap = await upstream();
     const server = await startServer({
       allowedOrigins: [APP],
-      trustForwardedFor,
+      trustProxy,
       soroswap: createSoroswapProxy({
         apiKey: "sk_test_key",
         network: "testnet",
@@ -2980,7 +2980,7 @@ describe("the soroswap proxy, mounted on the sponsor", () => {
     expect(response.status).toBe(404);
   });
 
-  it("limits by the forwarded client only when told to trust the header", async () => {
+  it("limits by the forwarded client only behind a trusted proxy, like every other endpoint", async () => {
     const trusting = await mounted(true);
     expect((await trusting.health({ origin: APP, "x-forwarded-for": "198.51.100.1" })).status).toBe(
       200,

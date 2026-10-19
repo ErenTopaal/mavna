@@ -69,7 +69,6 @@ const server = createSponsorServer({
     ? {}
     : { settleSweepSeconds: config.settleSweepSeconds }),
   ...(soroswap === undefined ? {} : { soroswap }),
-  trustForwardedFor: env("MAVNA_TRUST_FORWARDED_FOR") === "1",
 });
 
 try {

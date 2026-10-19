@@ -67,8 +67,6 @@ services:
       MAVNA_TRUST_PROXY: ${MAVNA_TRUST_PROXY:-}
       # Optional. With it, the sponsor proxies Soroswap so the key stays here.
       SOROSWAP_API_KEY: ${SOROSWAP_API_KEY:-}
-      # 1 only behind a reverse proxy that sets X-Forwarded-For.
-      MAVNA_TRUST_FORWARDED_FOR: ${MAVNA_TRUST_FORWARDED_FOR:-}
       PORT: "8787"
 
 volumes:
