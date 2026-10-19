@@ -405,6 +405,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
   }
 
+  /** What each document held when it was last written, to skip unchanged writes. */
+  const written = new Map<string, string>();
+
   /**
    * Write everything a restart must not lose. Called before any answer that
    * depends on it and before any submission whose outcome it must survive.
@@ -418,14 +421,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const pool: ChannelPoolSnapshot = channels?.snapshot() ?? { secrets: [], leases: [] };
     const channelDocument: ChannelDocument =
       pendingChannel === undefined ? pool : { ...pool, pending: pendingChannel.secret() };
-    return Promise.all([
-      state.write("built", built.snapshot()),
-      state.write("held", {
-        held,
-        settled: Object.fromEntries(recentlySettled),
-      } satisfies HeldDocument),
-      state.write("channels", channelDocument),
-    ]).then(() => undefined);
+    const documents: Record<string, unknown> = {
+      built: built.snapshot(),
+      held: { held, settled: Object.fromEntries(recentlySettled) } satisfies HeldDocument,
+      channels: channelDocument,
+    };
+    // Most answers change nothing, and rewriting every file (secrets included)
+    // for each anonymous refusal is wasted disk and a wider window for a
+    // half-finished write, so only a document that differs is written.
+    const writes: Promise<void>[] = [];
+    for (const [name, value] of Object.entries(documents)) {
+      const text = JSON.stringify(value);
+      if (written.get(name) === text) continue;
+      written.set(name, text);
+      writes.push(
+        state.write(name, value).catch((cause: unknown) => {
+          // not written after all, so the next persist tries again
+          if (written.get(name) === text) written.delete(name);
+          throw cause;
+        }),
+      );
+    }
+    return Promise.all(writes).then(() => undefined);
   }
   /**
    * What this server built and has not yet seen signed. The funded key signs
@@ -529,10 +546,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   /**
-   * Answer once what the answer depends on is written down. A write that
-   * fails is the operator's to hear about, not the caller's: what happened on
-   * the network happened, and saying otherwise invites a retry of something
-   * that worked.
+   * Write down what changed, then answer. A write that fails is logged and
+   * the answer still goes out: what happened on the network happened, and
+   * saying otherwise invites a retry of something that worked. So an answer
+   * can outlive its record; what is lost then fails closed (a forgotten
+   * settlement or preparation is refused at /submit, not paid for).
    */
   async function answer(
     res: ServerResponse,

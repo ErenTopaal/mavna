@@ -2435,6 +2435,44 @@ describe("the sponsor funds its own channel once", () => {
   });
 });
 
+describe("the sponsor writes its state only when it changed", () => {
+  /** A memory store that counts what it is asked to write. */
+  class CountingStore extends MemoryDocumentStore {
+    readonly writes: string[] = [];
+    override async write(name: string, value: unknown): Promise<void> {
+      this.writes.push(name);
+      await super.write(name, value);
+    }
+  }
+
+  it("writes nothing to answer a request it refuses", async () => {
+    const state = new CountingStore();
+    const server = await startServer({ state });
+    await server.post("/settlement", { destination: Keypair.random().publicKey() });
+    state.writes.length = 0;
+    for (let i = 0; i < 3; i += 1) {
+      expect((await server.post("/prepare", { destination: "not an address" })).status).toBe(400);
+      expect((await fetch(`${server.url}/health`)).status).toBe(200);
+    }
+    expect(state.writes).toEqual([]);
+  });
+
+  it("writes only the document a request changed", async () => {
+    const state = new CountingStore();
+    const server = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    state.writes.length = 0;
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+    expect(state.writes).toEqual(["built"]);
+  });
+});
+
 describe("what the sponsor holds survives a restart", () => {
   it("still holds a settlement committed before the restart", async () => {
     const state = new MemoryDocumentStore();
