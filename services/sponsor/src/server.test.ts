@@ -2861,6 +2861,16 @@ describe("the sponsor pays for no delivery smaller than its minimum", () => {
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
   });
 
+  it("pays for no delivery at all when accounts fund themselves, since they deliver their own", async () => {
+    const server = await startServer({ buildDelivery, reserveFunding: "self" });
+    irisReturns(cctpMessage(Keypair.random().publicKey(), { amount: 5_000_000n }));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(409);
+    expect(response.body.retryable).toBe(false);
+    expect(response.body.error).toMatch(/does not pay for deliveries/);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
   it("counts what is minted after Circle's fee, not what was burned", async () => {
     const server = await startServer({ buildDelivery, minDeliveryBaseUnits: 2_000_000n });
     irisReturns(cctpMessage(Keypair.random().publicKey(), { amount: 2_000_000n, feeExecuted: 1n }));

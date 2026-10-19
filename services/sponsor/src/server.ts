@@ -1745,6 +1745,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     res: ServerResponse,
     origin: string | undefined,
   ): Promise<void> {
+    // An account paying its own reserve also signs and pays its own delivery,
+    // so a sponsor in that mode spends nothing here, whoever asks.
+    if (reserveFunding === "self") {
+      await answer(
+        res,
+        409,
+        {
+          error:
+            "This sponsor does not pay for deliveries right now: the receiving account " +
+            "signs and pays its own.",
+          retryable: false,
+        },
+        origin,
+      );
+      return;
+    }
     if (
       typeof body.txHash !== "string" ||
       !TX_HASH.some((form) => form.test(body.txHash as string))

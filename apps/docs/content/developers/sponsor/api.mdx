@@ -72,8 +72,9 @@ switch for running without a funded sponsor key:
   sponsor with no XLM can still serve Circle transfers. A Circle route is declined
   at quote time unless the receiving account is an ordinary `G` account that can
   spare 0.1 XLM for the delivery (plus 0.5 XLM when it opens its USDC trustline
-  first), and the connected Stellar wallet must be that account. `/deliver` itself
-  is unchanged, and is still what a sponsor-funded deployment uses.
+  first), and the connected Stellar wallet must be that account. `POST /deliver`
+  answers `409` in this mode, so the sponsor pays for no delivery whoever asks; a
+  sponsor-funded deployment still uses it.
 
 ## `POST /prepare`
 
@@ -218,6 +219,10 @@ burn's transaction on the source chain: an EVM hash, a Solana signature in base5
 or a Starknet transaction hash. `domain` is Circle's domain for the source chain
 and must be one this network routes into Stellar from. Either one malformed answers
 `400` before Circle is asked anything.
+
+With `MAVNA_RESERVE_FUNDING=self` it answers `409` with `retryable: false` before
+anything else: the receiving account delivers its own transfer, and the sponsor pays
+for none.
 
 A delivery costs the sponsor the same whatever it carries, so it pays for none
 smaller than `MAVNA_MIN_DELIVERY_USDC`. The minted amount (amount burned less the
