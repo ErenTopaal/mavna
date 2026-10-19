@@ -421,10 +421,11 @@ describe("two ways this adapter could lie", () => {
     await expect(adapter.buildTransactions(borrowed)).rejects.toThrow(/came from axelar/);
   });
 
-  it("calls a transfer done on what Circle attested, not on a balance", async () => {
+  it("calls a transfer done on the forwarder's delivery of it, not on a balance", async () => {
     // The real transfer moved 5 USDC into an account that ended up holding 6.
     // Reading the balance would report 6 as "received", and would have reported
     // done before the money arrived, because the account already held some.
+    // August is far outside RPC retention, so this is proven through Horizon.
     const phase = await adapter.status({
       sourceTxHash: "0x8b05173c947f416c508d783139e1cf2083ebb005e727d1c12a2845ca38254a2d",
       sourceChainId: "ethereum-sepolia",
@@ -436,13 +437,29 @@ describe("two ways this adapter could lie", () => {
     if (phase.phase !== "done") return;
     expect(phase.received.baseUnits).toBe("50000000");
   });
+
+  it("proves a delivery inside RPC retention from the transmitter's event", async () => {
+    // Delivered at ledger 5261151 on 2026-10-18. This leaves RPC's seven-day
+    // window around 2026-10-25, after which the same answer comes from Horizon.
+    const phase = await adapter.status({
+      sourceTxHash: "0x2811c73382906496ddcef99121fa54713e8482e73767b56dd5ab517d0ed927a8",
+      sourceChainId: "ethereum-sepolia",
+      depositAddress: undefined,
+      destinationAddress: "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO",
+    });
+
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    expect(phase.received.baseUnits).toBe("10000000");
+  });
 });
 
 describe("finding a transfer from nothing but the address it went to", () => {
-  it("recognises the real delivery, from the address alone", async () => {
+  it("points at the real delivery without calling any transfer done", async () => {
     // The prior art refuses a destination address as a lookup key outright.
-    // This is the claim that we do not, checked against the transfer that
-    // actually happened rather than a fixture.
+    // An address alone cannot say which transfer arrived, so this finds the
+    // delivery that actually happened and offers it, while only a burn hash
+    // can prove a particular transfer is done.
     const phase = await adapter.status({
       sourceTxHash: undefined,
       sourceChainId: undefined,
@@ -450,9 +467,8 @@ describe("finding a transfer from nothing but the address it went to", () => {
       destinationAddress: FUNDED,
     });
 
-    expect(phase.phase).toBe("done");
-    if (phase.phase !== "done") return;
-    expect(phase.received.baseUnits).toBe("50000000");
+    expect(phase.phase).toBe("pending");
+    if (phase.phase !== "pending") return;
     expect(phase.ref.txHash).toBe(
       "1d7a7e152bf95193d2933971deb712de682e862da15beb8631e89a5c96a17174",
     );
