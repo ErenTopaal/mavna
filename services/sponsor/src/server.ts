@@ -508,8 +508,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
   }
 
-  /** What each document held when it was last written, to skip unchanged writes. */
-  const written = new Map<string, string>();
+  /** What each document was last asked to hold, and that write, to skip unchanged ones. */
+  const written = new Map<string, { readonly text: string; readonly done: Promise<void> }>();
 
   /**
    * Write everything a restart must not lose. Called before any answer that
@@ -535,15 +535,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const writes: Promise<void>[] = [];
     for (const [name, value] of Object.entries(documents)) {
       const text = JSON.stringify(value);
-      if (written.get(name) === text) continue;
-      written.set(name, text);
-      writes.push(
-        state.write(name, value).catch((cause: unknown) => {
-          // not written after all, so the next persist tries again
-          if (written.get(name) === text) written.delete(name);
-          throw cause;
-        }),
-      );
+      const last = written.get(name);
+      if (last?.text === text) {
+        // the same state may still be on its way to disk: waited on, so this
+        // answer goes out no sooner than that write lands, and hears if it fails
+        writes.push(last.done);
+        continue;
+      }
+      const done = state.write(name, value).catch((cause: unknown) => {
+        // not written after all, so the next persist tries again
+        if (written.get(name)?.text === text) written.delete(name);
+        throw cause;
+      });
+      written.set(name, { text, done });
+      writes.push(done);
     }
     return Promise.all(writes).then(() => undefined);
   }

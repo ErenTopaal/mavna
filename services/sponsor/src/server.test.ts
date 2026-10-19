@@ -2505,6 +2505,37 @@ describe("the sponsor writes its state only when it changed", () => {
     expect(state.writes).toEqual([]);
   });
 
+  it("answers no sooner than a write of the same state still on its way to disk", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    class GatedStore extends MemoryDocumentStore {
+      override async write(name: string, value: unknown): Promise<void> {
+        if (name === "built") await gate;
+        await super.write(name, value);
+      }
+    }
+    const server = await startServer({ state: new GatedStore() });
+    // changes what was built, and waits on its write
+    const changing = server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // changes nothing, so it has the same state to write down
+    let answered = false;
+    const same = server.post("/prepare", { destination: "not an address" }).then((r) => {
+      answered = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(answered).toBe(false);
+    release();
+    expect((await same).status).toBe(400);
+    expect((await changing).status).toBe(200);
+  });
+
   it("writes only the document a request changed", async () => {
     const state = new CountingStore();
     const server = await startServer({ state });
