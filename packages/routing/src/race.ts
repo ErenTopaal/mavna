@@ -76,6 +76,9 @@ export async function raceAdapters(
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [];
   let settled = 0;
+  // grows when a rail with a compose route is asked for one, so `complete`
+  // waits for that answer too
+  let expected = adapters.length;
 
   // The rails are asked for what they can actually deliver. The conversion into
   // what the user wants is attached afterwards, per route, so a rail never has
@@ -90,7 +93,7 @@ export async function raceAdapters(
       // while slower rails are still answering.
       routes: rankRoutes(routes, options.ranking ?? "best-received"),
       rejected: [...rejected],
-      complete: settled === adapters.length,
+      complete: settled === expected,
     });
   };
 
@@ -104,6 +107,51 @@ export async function raceAdapters(
       out = applyIntegratorFee(out, options.integratorFee);
     }
     return out;
+  };
+
+  const composes: Promise<void>[] = [];
+
+  // The same send, delivered to a contract that converts on arrival. Asked only
+  // when a conversion is wanted at all, and only of a rail that has one, with
+  // the rail's own plain route in hand. Its answer lands on its own, so a slow
+  // conversion quote never holds back the plain route beside it.
+  const askCompose = (adapter: BridgeAdapter, plain: Route): void => {
+    const swap = options.swap;
+    if (swap === undefined || adapter.quoteCompose === undefined) return;
+    const quoteCompose = adapter.quoteCompose.bind(adapter);
+    const fee = options.integratorFee;
+    expected += 1;
+    composes.push(
+      (async () => {
+        try {
+          const result = await withTimeout(
+            quoteCompose({
+              ...request,
+              plain,
+              arriving: swap.delivered,
+              arrivingContract: swap.deliveredContract,
+              wantedContract: swap.wantedContract,
+              // the converting contract pays this out itself, so it is collected
+              // on every venue and is never subject to `collects`
+              integratorFee:
+                fee === undefined || fee.bps === 0
+                  ? undefined
+                  : { bps: fee.bps, recipient: fee.recipient, recipientName: fee.recipientName },
+            }),
+            timeoutMs,
+            adapter.id,
+          );
+          if (result === undefined) return;
+          if (isRejection(result)) rejected.push(result);
+          else routes.push(result);
+        } catch (error) {
+          rejected.push(toRejection(adapter.id, error));
+        } finally {
+          settled++;
+          publish();
+        }
+      })(),
+    );
   };
 
   await Promise.all(
@@ -122,9 +170,11 @@ export async function raceAdapters(
         // One bound over the quote and the swap leg together: a hung exchange
         // must cost this rail its route, not stall the whole race.
         const result = await withTimeout(
-          adapter
-            .quote(railRequest)
-            .then((quoted) => (isRejection(quoted) ? quoted : enrich(quoted))),
+          adapter.quote(railRequest).then((quoted) => {
+            if (isRejection(quoted)) return quoted;
+            askCompose(adapter, quoted);
+            return enrich(quoted);
+          }),
           timeoutMs,
           adapter.id,
         );
@@ -141,6 +191,8 @@ export async function raceAdapters(
       }
     }),
   );
+
+  await Promise.all(composes);
 
   return {
     routes: rankRoutes(routes, options.ranking ?? "best-received"),
