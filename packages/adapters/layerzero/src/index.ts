@@ -1,5 +1,31 @@
 export type { LayerZeroAdapterOptions } from "./adapter.js";
 export { LayerZeroAdapter } from "./adapter.js";
+export type { ArrivalConfig, ArrivalEvent, OftComposePayload } from "./compose.js";
+export {
+  arrivalAccepts,
+  arrivalRecipientOf,
+  arrivalWantedOf,
+  COMPOSE_RECEIVED,
+  composeExtraOptions,
+  composeMessageHash,
+  decodeOftComposePayload,
+  encodeArrivalMessage,
+  encodeOftComposeMsg,
+  executorLzComposeOption,
+  executorOptionTypes,
+  findArrivalEvent,
+  readArrivalConfig,
+  readComposeQueue,
+  readTokenName,
+} from "./compose.js";
+export type { ArrivalSetup, ComposeContext, PathVenue } from "./compose-route.js";
+export {
+  assertArrivalServes,
+  composeOptionsFor,
+  composePhase,
+  composeSendFor,
+  quoteComposeRoute,
+} from "./compose-route.js";
 export type {
   EvmSource,
   NativeCurrency,

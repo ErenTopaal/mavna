@@ -20,7 +20,9 @@ import {
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const RECIPIENT = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
-const ARRIVAL = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
+const ARRIVAL = "CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252";
+// the vector below was written with the first testnet id as fee recipient
+const VECTOR_FEE_TO = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
 
 const compose: ComposeArrival = {
   contract: ARRIVAL,
@@ -31,7 +33,7 @@ const compose: ComposeArrival = {
   wantedContract: USDC,
   minOut: "990000",
   path: [{ tokens: [USDT0, USDC], poolIndex: "07".repeat(32), tokenOut: USDC }],
-  fee: { bps: 30, recipient: ARRIVAL },
+  fee: { bps: 30, recipient: VECTOR_FEE_TO },
   trust: "",
   walletNote: "",
 };
@@ -174,7 +176,7 @@ describe("proof of arrival from the contract's own event", () => {
     vi.restoreAllMocks();
   });
 
-  // recorded from testnet: CB4B235W..., the harness runs in the arrival report
+  // recorded from testnet: CBSWBSEL..., the harness runs in the arrival report
   const client = (events: { result: { events: unknown[]; latestLedger: number } }) => {
     const c = new RpcClient({ url: "https://rpc.invalid" });
     vi.spyOn(c.server, "getHealth").mockResolvedValue({
@@ -193,17 +195,17 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(converted),
       ARRIVAL,
-      "4a23c6546733bd95599d56972f5a804b85999e8e4d10d61f634bb99d9f865991",
-      5_281_336,
+      "5e10ae34a80c088f29a7a7c9efe8d64f5a24a1ef2f46834403e59b534df0ebcc",
+      5_281_548,
     );
     expect(event).toMatchObject({
       outcome: "converted",
       recipient: RECIPIENT,
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-      amount: 855_760_891n,
+      amount: 719_684_384n,
       fee: 0n,
       arrivedAmount: 100_000_000n,
-      txHash: "02897a65262cf78040c29721441c603e42bd7b653d7712097731c2986178dd75",
+      txHash: "f465283c233bc4f245b2f251bc421c6a3e00ac5e096dabe7b9f0930cc0b2a306",
     });
   });
 
@@ -211,8 +213,8 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(asCame),
       ARRIVAL,
-      "8334c977958c9eb4dcd556dcedfcac3d439712ffdcdfa81475ee942b311fbccc",
-      5_281_341,
+      "4da45bffcf9b3338763a2d45f767683d3a18a527499d87704e64fbd8895e7a40",
+      5_281_557,
     );
     expect(event).toMatchObject({
       outcome: "as_came",

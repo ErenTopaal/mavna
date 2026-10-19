@@ -3,6 +3,8 @@ import type {
   Asset,
   BridgeAdapter,
   ChainRef,
+  ComposeArrival,
+  ComposeQuoteRequest,
   NetworkId,
   QuoteRequest,
   Route,
@@ -26,6 +28,13 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
+import {
+  type ArrivalSetup,
+  type ComposeContext,
+  composePhase,
+  composeSendFor,
+  quoteComposeRoute,
+} from "./compose-route.js";
 import {
   chainIdForLayerZeroKey,
   type EvmSource,
@@ -106,6 +115,12 @@ export interface LayerZeroAdapterOptions {
   readonly lzReceiveGas?: bigint;
   /** Injectable so a caller can bring their own nodes or their own transport. */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * The Mavna Arrival Contract and the venue it converts through. Without it
+   * this rail offers no compose routes, which is the case on every network
+   * until a contract is deployed there.
+   */
+  readonly arrival?: ArrivalSetup;
 }
 
 export class LayerZeroAdapter implements BridgeAdapter {
@@ -130,6 +145,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
   private readonly discovery: Discovery;
   private readonly scan: ScanService;
   private readonly passphrase: string;
+  private readonly composing: ComposeContext | undefined;
 
   constructor(options: LayerZeroAdapterOptions) {
     this.network = options.network;
@@ -156,6 +172,27 @@ export class LayerZeroAdapter implements BridgeAdapter {
       options.network,
       options.fetch === undefined ? {} : { fetch: options.fetch },
     );
+    this.composing =
+      options.arrival === undefined
+        ? undefined
+        : {
+            network: options.network,
+            rpc: options.rpc,
+            passphrase: this.passphrase,
+            discovery: this.discovery,
+            arrival: options.arrival,
+            lzReceiveGas: options.lzReceiveGas,
+            decline: (reason, explanation) => this.decline(reason, explanation),
+          };
+  }
+
+  /**
+   * The same send, delivered to the Arrival Contract with instructions to
+   * convert on arrival, so the user signs once and needs no Stellar wallet.
+   */
+  async quoteCompose(request: ComposeQuoteRequest): Promise<Route | RouteRejection | undefined> {
+    if (this.composing === undefined) return undefined;
+    return quoteComposeRoute(this.composing, request);
   }
 
   supportedChains(): Promise<readonly string[]> {
@@ -451,12 +488,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
     const sends = BigInt(route.sends.baseUnits);
     const minAmount = minAmountFor(route, resolved);
 
+    const composed =
+      route.compose === undefined ? undefined : await this.composeSend(route, resolved);
     const sendParam = buildSendParam({
       dstEid: STELLAR_SIDE[this.network].eid,
-      stellarRecipient: route.destination,
+      stellarRecipient: composed?.to ?? route.destination,
       amount: sends,
       minAmount,
-      extraOptions: this.optionsFor(resolved),
+      extraOptions: composed?.extraOptions ?? this.optionsFor(resolved),
+      composeMsg: composed?.composeMsg,
     });
 
     // Priced again rather than taken from the quote. `send` reverts when the
@@ -496,8 +536,10 @@ export class LayerZeroAdapter implements BridgeAdapter {
       }),
       format: "evm-tx",
       describes:
-        `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} to ` +
-        `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln)}`,
+        route.compose === undefined
+          ? `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} to ` +
+            `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln)}`
+          : describeComposeSend(route.compose, route.destination, sends, resolved),
       ephemeralSigners: [],
       unnecessaryWhen: undefined,
     };
@@ -604,6 +646,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
     }
 
     const deliveredTx = message.destination?.tx?.txHash;
+    if (this.composing !== undefined && chainId !== undefined) {
+      const composed = await composePhase(this.composing, message, chainId, {
+        chainId: STELLAR_SIDE[this.network].chainId,
+        txHash: deliveredTx ?? handle.sourceTxHash,
+        explorerUrl:
+          deliveredTx === undefined ? scanUrl : stellarExplorerTxUrl(this.network, deliveredTx),
+      });
+      if (composed !== undefined) return composed;
+    }
     const received = await this.receivedFrom(message.source?.tx, chainId);
     if (received === undefined) {
       // Delivered, but the payload was not indexed with it, so the amount cannot
@@ -621,6 +672,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
       },
       received,
     };
+  }
+
+  private composeSend(route: Route, resolved: ResolvedRoute): ReturnType<typeof composeSendFor> {
+    const compose = route.compose;
+    if (this.composing === undefined || compose === undefined) {
+      throw new MavnaError(
+        "This route converts on arrival, and this adapter has no Arrival Contract configured " +
+          "to send it to.",
+        { retryable: false },
+      );
+    }
+    return composeSendFor(this.composing, { ...route, compose }, resolved);
   }
 
   /**
@@ -784,4 +847,19 @@ function stellarAssetFor(asset: { readonly id: string; readonly symbol: string }
   const [code, issuer] = asset.id.split(":");
   if (issuer === undefined || issuer === "") return StellarAsset.native();
   return new StellarAsset(code ?? asset.symbol, issuer);
+}
+
+function describeComposeSend(
+  compose: ComposeArrival,
+  destination: string,
+  sends: bigint,
+  resolved: ResolvedRoute,
+): string {
+  const atLeast = readableAmount(BigInt(compose.minOut), compose.wanted.decimals);
+  return (
+    `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} via ` +
+    `LayerZero to the Mavna Arrival Contract on Stellar, which converts it for ${destination} ` +
+    `into at least ${atLeast} ${compose.wanted.symbol}, or sends ${compose.arriving.symbol} on ` +
+    `as it came if it cannot. ${describeDvnStack(resolved.uln)}`
+  );
 }

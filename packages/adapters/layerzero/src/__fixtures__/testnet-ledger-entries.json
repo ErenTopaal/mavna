@@ -1,0 +1,56 @@
+{
+  "arrival": {
+    "key": "AAAABgAAAAFlYMiLbgg7wO7iR3wn5ysnIK6nApEPKKLTcZpPrzjkjwAAABQAAAAB",
+    "entries": [
+      {
+        "key": "AAAABgAAAAFlYMiLbgg7wO7iR3wn5ysnIK6nApEPKKLTcZpPrzjkjwAAABQAAAAB",
+        "xdr": "AAAABgAAAAAAAAABZWDIi24IO8Du4kd8J+crJyCupwKRDyii03GaT6845I8AAAAUAAAAAQAAABMAAAAAVuKsxcK/5B/5MfAN8uYJL/ZY6JM8HjE1N/qiahKW418AAAABAAAAAQAAABAAAAABAAAAAQAAAA8AAAAGQ29uZmlnAAAAAAARAAAAAQAAAAMAAAAPAAAACGVuZHBvaW50AAAAEgAAAAEXMIOy8aKSHBcr+dWYy1WsAvzzyJ7aBokuj2tGK4NrvgAAAA8AAAAEb2Z0cwAAABAAAAABAAAAAQAAABAAAAABAAAAAgAAABIAAAAAAAAAAFor5pWVeGEGeFCo9XPXl2mxEG/xe8blFocM3crD7oe2AAAAEgAAAAHXkotywnA8z+r365/0701QSlWouXn8m0UOoshCtNHOYQAAAA8AAAAGcm91dGVyAAAAAAASAAAAAURZwk8YQIz6PnpgqULKaqx9QRXaOJ/qR7BQrYBxiBnQ",
+        "lastModifiedLedgerSeq": 5281523,
+        "liveUntilLedgerSeq": 5799948,
+        "extXdr": "AAAAAA=="
+      }
+    ],
+    "latestLedger": 5283090
+  },
+  "recipientAccount": {
+    "key": "AAAAAAAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQ==",
+    "entries": [
+      {
+        "key": "AAAAAAAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQ==",
+        "xdr": "AAAAAAAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQAAABdaWIioAFCS1gAAAAYAAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAADAAAAAABQlxAAAAAAatZU8w==",
+        "lastModifiedLedgerSeq": 5281557,
+        "extXdr": "AAAAAA=="
+      }
+    ],
+    "latestLedger": 5283090
+  },
+  "recipientUsdc": {
+    "key": "AAAAAQAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQAAAAFVU0RDAAAAAEI+fQXy7K+/7BkrIVo/G+lq7bjY5wJUq+NBPgIH3lay",
+    "entries": [
+      {
+        "key": "AAAAAQAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQAAAAFVU0RDAAAAAEI+fQXy7K+/7BkrIVo/G+lq7bjY5wJUq+NBPgIH3lay",
+        "xdr": "AAAAAQAAAACF6MZ6O844nSRgN0PhonTFBMrBOppecfLSISYJ9UQwQQAAAAFVU0RDAAAAAEI+fQXy7K+/7BkrIVo/G+lq7bjY5wJUq+NBPgIH3layAAAAAJxXTN5//////////wAAAAEAAAAA",
+        "lastModifiedLedgerSeq": 5281552,
+        "extXdr": "AAAAAA=="
+      }
+    ],
+    "latestLedger": 5283091
+  },
+  "noTrustAccount": {
+    "key": "AAAAAAAAAADH9/x9gb/gy5Rp5mEvlHIOoEslU8b9zhw0wfS6LPTwRw==",
+    "entries": [
+      {
+        "key": "AAAAAAAAAADH9/x9gb/gy5Rp5mEvlHIOoEslU8b9zhw0wfS6LPTwRw==",
+        "xdr": "AAAAAAAAAADH9/x9gb/gy5Rp5mEvlHIOoEslU8b9zhw0wfS6LPTwRwAAAAAA9CM4AD5cVgAAAAMAAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAADAAAAAAA+XNMAAAAAansn2g==",
+        "lastModifiedLedgerSeq": 4086995,
+        "extXdr": "AAAAAA=="
+      }
+    ],
+    "latestLedger": 5283091
+  },
+  "noTrustUsdc": {
+    "key": "AAAAAQAAAADH9/x9gb/gy5Rp5mEvlHIOoEslU8b9zhw0wfS6LPTwRwAAAAFVU0RDAAAAAEI+fQXy7K+/7BkrIVo/G+lq7bjY5wJUq+NBPgIH3lay",
+    "entries": [],
+    "latestLedger": 5283091
+  }
+}

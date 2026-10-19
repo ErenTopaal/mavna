@@ -478,6 +478,19 @@ export class Discovery {
   }
 
   /**
+   * What the OFT enforces for another message type on the Stellar pathway. A
+   * compose send is SEND_AND_CALL, which the OApp configures separately.
+   */
+  async enforcedOptionsFor(route: ResolvedRoute, msgType: number): Promise<`0x${string}`> {
+    const stellar = await this.stellar();
+    const reader = this.readerFor(route.chainId, route.source);
+    return (await this.require(reader, route.oft, OFT_ABI, "enforcedOptions", [
+      stellar.eid,
+      msgType,
+    ])) as `0x${string}`;
+  }
+
+  /**
    * A route already resolved, without going near the network.
    *
    * Status is read after a transfer has been built, so the route it was built

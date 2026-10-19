@@ -23,7 +23,7 @@ import { readableAmount, STELLAR_DECIMALS } from "./config.js";
 
 /** OFTCore.SEND. The message type enforced options and quoting are keyed by. */
 export const MSG_TYPE_SEND = 1;
-/** OFTCore.SEND_AND_CALL. Not used here; a compose message is a different product. */
+/** OFTCore.SEND_AND_CALL, the message type of a send that carries a compose. */
 export const MSG_TYPE_SEND_AND_CALL = 2;
 
 /** OptionsBuilder.TYPE_3. Legacy types 1 and 2 are not accepted by the ULN. */
@@ -231,6 +231,11 @@ export interface SendParamInputs {
    * stand. Never invented: the caller passes what discovery read off the chain.
    */
   readonly extraOptions: `0x${string}`;
+  /**
+   * Instructions for a composer at `stellarRecipient`, or absent for a plain
+   * delivery. Only ever the Arrival Contract's own message.
+   */
+  readonly composeMsg?: `0x${string}` | undefined;
 }
 
 /**
@@ -270,10 +275,10 @@ export function buildSendParam(inputs: SendParamInputs): SendParam {
     // is an unbounded loss the user never agreed to.
     minAmountLD: inputs.minAmount,
     extraOptions: inputs.extraOptions,
-    // No compose message. Delivering tokens and then calling a contract is a
-    // different product with a different failure mode, and quoting for one and
-    // sending the other is how a transfer lands somewhere unexpected.
-    composeMsg: "0x",
+    // Empty unless the caller built a compose route. Delivering tokens and then
+    // calling a contract is a different product with a different failure mode,
+    // so it is only ever asked for explicitly, never defaulted into.
+    composeMsg: inputs.composeMsg ?? "0x",
     oftCmd: "0x",
   };
 }
