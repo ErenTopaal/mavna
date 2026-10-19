@@ -1227,16 +1227,16 @@ export function Landing(): ReactNode {
             </div>
             {[
               {
-                name: "Stellar's own order book",
-                note: "Built into the network. No third party, and it is always there.",
+                name: "Soroswap",
+                note: "Looks across Stellar’s pools and its order book at once, and takes the best of them.",
               },
               {
-                name: "Soroswap",
-                note: "Looks across Stellar’s pools at once and takes the best of them.",
+                name: "SushiSwap",
+                note: "Its own pools on Stellar, for trades that start in USDT0.",
               },
               {
                 name: "Aquarius",
-                note: "Its own pools, as a second opinion on every price.",
+                note: "Its own pools, for when the others cannot price the pair.",
                 last: true,
               },
             ].map((v) => (
@@ -1261,8 +1261,7 @@ export function Landing(): ReactNode {
                 "margin: clamp(18px, 2.2vw, 24px) 0 0; font-size: 15px; line-height: 1.6; color: oklch(0.48 0.012 250); max-width: 40ch",
               )}
             >
-              We check which of them can actually serve your pair, then use the one that leaves you
-              with more.
+              We ask them in that order and use the first that can actually price your pair.
             </p>
           </div>
         </div>
