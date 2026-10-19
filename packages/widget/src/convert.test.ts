@@ -36,28 +36,53 @@ function respond(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
+/** A route whose conversion step turns the USDC that arrived into XLM, as attachSwapLeg builds it. */
+function usdcIntoXlm() {
+  const base = routeFor("layerzero", { swap: true });
+  return {
+    ...base,
+    steps: base.steps.map((step) =>
+      step.kind === "swap"
+        ? {
+            ...step,
+            from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+            to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+          }
+        : step,
+    ),
+  };
+}
+
 describe("converting on Stellar", () => {
   /** The network doubles and a real venue chain; what crossed the boundary is returned. */
   function setUp() {
     const simulated: string[] = [];
+    const pathsAsked: string[] = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       // The testnet sponsor holds no Soroswap key, so it has no proxy.
       if (url.startsWith(`${SPONSOR}/swap/soroswap/health`)) return respond({}, 404);
       if (url.startsWith(`${AQUA}/api/external/v1/pools/`)) return respond({ count: 3 });
       if (url.startsWith(`${AQUA}/api/external/v1/find-path/`)) {
+        // one pool straight between whatever was asked, as Aquarius encodes a chain
+        const asked = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+          token_in_address: string;
+          token_out_address: string;
+        };
+        pathsAsked.push(`${asked.token_in_address} ${asked.token_out_address}`);
+        const tokenIn = asked.token_in_address;
+        const tokenOut = asked.token_out_address;
         return respond({
           success: true,
-          // one pool straight from USDC to XLM, as Aquarius encodes a chain
           swap_chain_xdr: xdr.ScVal.scvVec([
             xdr.ScVal.scvVec([
-              xdr.ScVal.scvVec([new Address(USDC).toScVal(), new Address(XLM).toScVal()]),
+              xdr.ScVal.scvVec([new Address(tokenIn).toScVal(), new Address(tokenOut).toScVal()]),
               xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
-              new Address(XLM).toScVal(),
+              new Address(tokenOut).toScVal(),
             ]),
           ]).toXDR("base64"),
           pools: ["CD3LFMMLBQ6RBJUD3Z2LFDFE6544WDRMWHEZYPI5YDVESYRSO2TT32BX"],
-          tokens_addresses: [USDC, XLM],
+          tokens_addresses: [tokenIn, tokenOut],
           amount: 26_000_000,
         });
       }
@@ -125,12 +150,12 @@ describe("converting on Stellar", () => {
       usdcOnStellar: STELLAR_USDC,
     };
 
-    return { engine, simulated, signed, sent };
+    return { engine, simulated, signed, sent, pathsAsked };
   }
 
   it("quotes through the venue chain, builds with the venue that quoted, and submits", async () => {
     const { engine, simulated, signed, sent } = setUp();
-    await convertOnStellar(engine, routeFor("layerzero", { swap: true }), DESTINATION);
+    await convertOnStellar(engine, usdcIntoXlm(), DESTINATION);
 
     expect(simulated).toEqual([`${ROUTER} swap_chained`]);
     expect(signed).toHaveLength(1);
@@ -139,10 +164,32 @@ describe("converting on Stellar", () => {
     expect("source" in tx && tx.source).toBe(DESTINATION);
   });
 
+  it("converts what the route delivered into what it promised, not always USDC into XLM", async () => {
+    // a conversion step from XLM into USDC, the other way round
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      receivesAtLeast: { asset: STELLAR_USDC, baseUnits: "1" },
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_XLM, baseUnits: "50000000" },
+              to: { asset: STELLAR_USDC, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const run = setUp();
+    await convertOnStellar(run.engine, route, DESTINATION);
+    expect(run.pathsAsked).toEqual([`${XLM} ${USDC}`]);
+    expect(run.sent).toHaveLength(1);
+  });
+
   it("will not convert below the least XLM the user was shown", async () => {
     // Aquarius now quotes 26 XLM, so 50 bps of slippage floors it at 25.87
     const shown = (baseUnits: string) => ({
-      ...routeFor("layerzero", { swap: true }),
+      ...usdcIntoXlm(),
       receivesAtLeast: { asset: STELLAR_XLM, baseUnits },
     });
     const held = setUp();

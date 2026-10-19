@@ -285,30 +285,35 @@ export async function convertOnStellar(
   route: Route,
   owner: string | undefined,
 ): Promise<void> {
+  const swapStep = route.steps.find((s) => s.kind === "swap");
+  // what the rail delivered and what the user asked to hold: USDC into XLM, or
+  // the USDT0 LayerZero delivers into USDC or XLM
+  const arrived = swapStep?.from.asset ?? engine.usdcOnStellar;
+  const wanted = swapStep?.to.asset ?? route.receivesAtLeast.asset;
   const account = owner ?? (await engine.stellar.connect());
   if (account !== route.destination) {
     throw new Error(
       "The conversion spends from the receiving account, so only its owner can " +
-        "sign it. The USDC has arrived and is theirs either way.",
+        `sign it. The ${arrived.symbol} has arrived and is theirs either way.`,
     );
   }
-  const swapStep = route.steps.find((s) => s.kind === "swap");
   // Quoted again now rather than reused from the route: the route's quote is as
   // old as the bridge leg, and the venue that serves now is the one that builds.
   const quote = await engine.swapVenues.quote({
-    assetIn: engine.usdcOnStellar.id,
-    assetOut: "native",
+    assetIn: arrived.id,
+    assetOut: wanted.id,
     amountIn: swapStep?.from.baseUnits ?? route.sends.baseUnits,
     maxSlippageBps: 50,
     destinationKind: "account",
   });
-  // The route showed the user a least amount of XLM; a quote taken now that
-  // cannot promise it is not what they agreed to.
+  // The route showed the user a least amount of what they wanted; a quote
+  // taken now that cannot promise it is not what they agreed to.
   const shown = route.receivesAtLeast;
-  if (shown.asset.id === "native" && BigInt(quote.amountOutMinimum) < BigInt(shown.baseUnits)) {
+  if (shown.asset.id === wanted.id && BigInt(quote.amountOutMinimum) < BigInt(shown.baseUnits)) {
     throw new Error(
       "The price moved since this transfer was quoted, and converting now could give less " +
-        "XLM than you were shown. The USDC has arrived and is yours; convert it later.",
+        `${wanted.symbol} than you were shown. The ${arrived.symbol} has arrived and is yours; ` +
+        "convert it later.",
     );
   }
   const stellarAccount = await engine.rpc.loadAccount(account);
