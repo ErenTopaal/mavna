@@ -1,6 +1,7 @@
 import { buildDelivery } from "@mavna/adapter-cctp";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/stellar";
 import { Asset } from "@stellar/stellar-sdk";
+import { env } from "./env.js";
 import { createSponsorServer } from "./server.js";
 
 /**
@@ -12,16 +13,16 @@ import { createSponsorServer } from "./server.js";
  * requirement that an integrator can run all of it themselves.
  */
 
-const networkId = process.env.MAVNA_NETWORK === "mainnet" ? "mainnet" : "testnet";
-const sponsorSecret = process.env.SPONSOR_SECRET_KEY;
-if (sponsorSecret === undefined || sponsorSecret === "") {
+const networkId = env("MAVNA_NETWORK") === "mainnet" ? "mainnet" : "testnet";
+const sponsorSecret = env("SPONSOR_SECRET_KEY");
+if (sponsorSecret === undefined) {
   console.error("SPONSOR_SECRET_KEY is not set. The sponsor cannot pay without it.");
   process.exit(2);
 }
 
 const network = createNetworkConfig({
   id: networkId,
-  rpcUrl: process.env.STELLAR_RPC_URL ?? (networkId === "mainnet" ? "" : PUBLIC_TESTNET_RPC_URL),
+  rpcUrl: env("STELLAR_RPC_URL") ?? (networkId === "mainnet" ? "" : PUBLIC_TESTNET_RPC_URL),
 });
 if (network.rpcUrl === "") {
   console.error("STELLAR_RPC_URL is not set and mainnet has no public default worth trusting.");
@@ -50,19 +51,17 @@ const server = createSponsorServer({
   curatedAssets: CURATED,
   buildDelivery,
   irisUrl:
-    process.env.MAVNA_IRIS_URL ??
+    env("MAVNA_IRIS_URL") ??
     (networkId === "mainnet"
       ? "https://iris-api.circle.com"
       : "https://iris-api-sandbox.circle.com"),
-  allowedOrigins: (
-    process.env.MAVNA_ALLOWED_ORIGINS ?? "http://localhost:5173,http://localhost:4319"
-  )
+  allowedOrigins: (env("MAVNA_ALLOWED_ORIGINS") ?? "http://localhost:5173,http://localhost:4319")
     .split(",")
     .map((origin) => origin.trim())
     .filter((origin) => origin !== ""),
 });
 
-const port = Number(process.env.PORT ?? 8787);
+const port = Number(env("PORT") ?? 8787);
 server.listen(port, () => {
   // The one line an operator needs at start-up, on stderr with the rest of the
   // process's own reporting; stdout stays clean for anything piped through it.

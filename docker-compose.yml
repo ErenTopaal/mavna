@@ -47,4 +47,5 @@ services:
       STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
       SPONSOR_SECRET_KEY: ${SPONSOR_SECRET_KEY:?the sponsor cannot pay without its key}
       MAVNA_ALLOWED_ORIGINS: ${MAVNA_ALLOWED_ORIGINS:-http://localhost:4319}
+      MAVNA_IRIS_URL: ${MAVNA_IRIS_URL:-}
       PORT: "8787"
