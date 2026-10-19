@@ -43,8 +43,11 @@ services:
              pnpm install --frozen-lockfile &&
              pnpm --filter @mavna/sponsor-service build &&
              node services/sponsor/dist/main.mjs"
+    # Loopback only. Clients reach it through the reverse proxy in front, which
+    # is what MAVNA_TRUST_PROXY=true assumes: a port open to the world would let
+    # anyone set X-Forwarded-For and choose their own rate-limit identity.
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     # Caps, held settlements and channel keys. It holds secret keys, so it is a
     # named volume rather than a directory in the checkout.
     volumes:

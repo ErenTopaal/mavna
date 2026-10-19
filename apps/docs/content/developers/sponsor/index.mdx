@@ -51,7 +51,7 @@ Everything is environment variables, read once at start.
 | `MAVNA_CAP_VOLUME_CHEAP_PER_DAY` | no | `200` | Sponsorships a day from chains where gas costs cents |
 | `MAVNA_MIN_DELIVERY_USDC` | no | `1` | The smallest Circle mint, in USDC (up to six decimals), the sponsor pays to deliver. `0` delivers any amount |
 | `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. `0` turns it off |
-| `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. This also counts clients for the Soroswap proxy's limits. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
+| `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. This also counts clients for the Soroswap proxy's limits. Set it only when the sponsor's port is reachable from the proxy alone (the compose file binds it to `127.0.0.1`); a port open to the world lets anyone send their own `X-Forwarded-For`. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
 | `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
 | `PORT` | no | `8787` | Where to listen |
 
