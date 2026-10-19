@@ -281,6 +281,19 @@ describe("lookupAcross", () => {
     expect(second.errors).toEqual([{ source: "layerzero", message: "registry down" }]);
   });
 
+  it("bounds a rail that never answers, and records it as that rail's error", async () => {
+    const silent = new ScriptedAdapter("axelar", [pending()], { hang: true });
+    const fine = new ScriptedAdapter("cctp", [pending()]);
+    const answer = await lookupAcross([silent, fine], handle, { timeoutMs: 20 });
+    expect(answer.phase.phase).toBe("pending");
+    expect(answer.rails).toEqual(["cctp"]);
+    expect(answer.errors).toEqual([{ source: "axelar", message: "Did not answer in time." }]);
+
+    await expect(lookupAcross([silent], handle, { timeoutMs: 20 })).rejects.toThrow(
+      "Axelar: Did not answer in time.",
+    );
+  });
+
   it("rejects with every rail's error when no rail answered", async () => {
     const lookup = lookupAcross(
       [

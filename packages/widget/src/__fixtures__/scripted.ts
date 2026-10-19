@@ -15,6 +15,8 @@ interface ScriptOptions {
   readonly chains?: readonly string[] | Error;
   readonly transactions?: readonly UnsignedTransaction[];
   readonly onStatus?: () => void;
+  /** Never answer status, like an indexer that accepted the connection and went quiet. */
+  readonly hang?: boolean;
 }
 
 /**
@@ -59,6 +61,7 @@ export class ScriptedAdapter implements BridgeAdapter {
   async status(handle: TransferHandle): Promise<StepPhase> {
     this.asked.push(handle);
     this.options.onStatus?.();
+    if (this.options.hang === true) return new Promise<StepPhase>(() => {});
     const next = this.script.length > 1 ? this.script.shift() : this.script[0];
     if (next === undefined) throw new Error("the script is empty");
     if (next instanceof Error) throw next;

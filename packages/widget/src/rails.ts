@@ -304,7 +304,18 @@ export interface LookupAnswer {
 export async function lookupAcross(
   adapters: readonly BridgeAdapter[],
   handle: TransferHandle,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<LookupAnswer> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  // One rail whose indexer accepts the connection and never answers must not
+  // hold the whole lookup, so each question gets its own bound.
+  const bounded = <T>(asked: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Did not answer in time.")), timeoutMs);
+    });
+    return Promise.race([asked, late]).finally(() => clearTimeout(timer));
+  };
   const errors: Array<{ source: string; message: string }> = [];
   const chain = handle.sourceChainId;
 
@@ -313,7 +324,7 @@ export async function lookupAcross(
       adapters.map(async (adapter) => {
         if (chain === undefined) return adapter;
         try {
-          return (await adapter.supportedChains()).includes(chain) ? adapter : undefined;
+          return (await bounded(adapter.supportedChains())).includes(chain) ? adapter : undefined;
         } catch (cause) {
           errors.push({ source: adapter.id, message: message(cause) });
           return undefined;
@@ -356,8 +367,7 @@ export async function lookupAcross(
 
     if (left === 0) finish();
     for (const adapter of asked) {
-      adapter
-        .status(handle)
+      bounded(adapter.status(handle))
         .then(
           (phase) => {
             if (phase.phase === "pending") pending.push({ source: adapter.id, phase });
