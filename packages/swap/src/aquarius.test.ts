@@ -17,7 +17,21 @@ const ROUTER = "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD";
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 const XLM = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const POOL = "CD3LFMMLBQ6RBJUD3Z2LFDFE6544WDRMWHEZYPI5YDVESYRSO2TT32BX";
-const CHAIN = xdr.ScVal.scvVec([xdr.ScVal.scvU32(7)]).toXDR("base64");
+const OTHER = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
+
+/** A swap chain as Aquarius encodes it: (pool tokens, pool hash, token out) per step. */
+function chainOf(...steps: Array<[string[], string]>): string {
+  return xdr.ScVal.scvVec(
+    steps.map(([tokens, out]) =>
+      xdr.ScVal.scvVec([
+        xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal())),
+        xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
+        new Address(out).toScVal(),
+      ]),
+    ),
+  ).toXDR("base64");
+}
+const CHAIN = chainOf([[USDC, XLM], XLM]);
 
 const request = {
   assetIn: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
@@ -101,6 +115,55 @@ describe("aquarius quotes", () => {
     );
     const down = await new AquariusProvider("testnet").quote(request).catch((e: unknown) => e);
     expect((down as MavnaError).retryable).toBe(true);
+  });
+});
+
+describe("the swap chain Aquarius sends back", () => {
+  const quoting = (chain: string) => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json({ ...found, swap_chain_xdr: chain }),
+      }).fetch,
+    );
+    return new AquariusProvider("testnet").quote(request).catch((e: unknown) => e);
+  };
+
+  it("is taken when it starts at the asked token and ends at the asked one, over hops that connect", async () => {
+    expect(await quoting(chainOf([[USDC, OTHER], OTHER], [[OTHER, XLM], XLM]))).not.toBeInstanceOf(
+      Error,
+    );
+  });
+
+  it.each([
+    ["ends in another token", chainOf([[USDC, OTHER], OTHER])],
+    ["starts at a pool without the asked token", chainOf([[OTHER, XLM], XLM])],
+    ["skips a token between hops", chainOf([[USDC, OTHER], OTHER], [[USDC, XLM], XLM])],
+    ["is empty", chainOf()],
+    ["does not decode as a chain", xdr.ScVal.scvVec([xdr.ScVal.scvU32(7)]).toXDR("base64")],
+  ])("is refused when it %s, whatever the answer's token list says", async (_what, chain) => {
+    const error = await quoting(chain);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/swap path/);
+    expect((error as MavnaError).retryable).toBe(false);
+  });
+
+  it("is checked again at build, so a quote carrying another chain is not built", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ [`${API}/api/external/v1/find-path/`]: () => json(found) }).fetch,
+    );
+    const provider = new AquariusProvider("testnet", undefined, { rpcUrl: RPC });
+    const quote = await provider.quote(request);
+    const swapped = {
+      ...quote,
+      raw: { ...(quote.raw as object), swapChainXdr: chainOf([[USDC, OTHER], OTHER]) },
+    };
+    const error = await provider
+      .build({ quote: swapped, account: new Account(Keypair.random().publicKey(), "1") })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/swap path/);
   });
 });
 

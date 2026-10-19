@@ -1,5 +1,5 @@
 import { MavnaError } from "@mavna/core";
-import { Account, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+import { Account, Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, routedFetch, sorobanNode } from "./__fixtures__/network.js";
 import { selectSwapProvider } from "./select.js";
@@ -35,7 +35,18 @@ const soroswapQuote = {
 
 const aquariusFound = (tokens: string[]) => ({
   success: true,
-  swap_chain_xdr: xdr.ScVal.scvVec([]).toXDR("base64"),
+  // one pool from the first token straight to the last, as Aquarius encodes it
+  swap_chain_xdr: xdr.ScVal.scvVec(
+    tokens.length === 0
+      ? []
+      : [
+          xdr.ScVal.scvVec([
+            xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal())),
+            xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
+            new Address(tokens.at(-1) as string).toScVal(),
+          ]),
+        ],
+  ).toXDR("base64"),
   pools: ["CBBMQBNHB2FYVZYV7VNHOJHUMTFJLR4PUMRVQYNW6RHIKZO2NQMIBUCV"],
   tokens_addresses: tokens,
   amount: 565_000_000,

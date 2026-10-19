@@ -1,6 +1,6 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
-import { Address, nativeToScVal, type Transaction, xdr } from "@stellar/stellar-sdk";
+import { Address, nativeToScVal, scValToNative, type Transaction, xdr } from "@stellar/stellar-sdk";
 import { z } from "zod";
 import {
   applySlippage,
@@ -63,8 +63,42 @@ const findPath = z.object({
 /** What build needs from a quote, kept as the quote's raw payload. */
 const aquariusRaw = z.object({
   tokenIn: z.string().regex(/^C[A-Z2-7]{55}$/),
+  tokenOut: z.string().regex(/^C[A-Z2-7]{55}$/),
   swapChainXdr: z.string(),
 });
+
+/**
+ * The swap chain decoded and walked, or why it cannot be used.
+ *
+ * `swap_chained` executes this chain, not the answer's token list, so the
+ * chain itself has to start where we asked, connect hop to hop, and end in the
+ * asked token: `out_min` is enforced in whatever the last step produces. Each
+ * step is (pool's token set, pool hash, token out of this step).
+ */
+export function swapChainMismatch(
+  chainXdr: string,
+  tokenIn: string,
+  tokenOut: string,
+): string | undefined {
+  let steps: unknown;
+  try {
+    steps = scValToNative(xdr.ScVal.fromXDR(chainXdr, "base64"));
+  } catch {
+    return "does not decode";
+  }
+  if (!Array.isArray(steps) || steps.length === 0) return "is empty";
+  let holding = tokenIn;
+  for (const step of steps) {
+    if (!Array.isArray(step) || step.length !== 3) return "has a step that is not a pool swap";
+    const [tokens, , out] = step as [unknown, unknown, unknown];
+    if (!Array.isArray(tokens) || typeof out !== "string") return "has a step that cannot be read";
+    if (!tokens.includes(holding) || !tokens.includes(out) || out === holding) {
+      return "has a step that does not take what the one before produced";
+    }
+    holding = out;
+  }
+  return holding === tokenOut ? undefined : "ends in another token";
+}
 
 const poolsPage = z.object({ count: z.number().int() });
 
@@ -137,6 +171,13 @@ export class AquariusProvider implements SwapProvider {
       });
     }
 
+    const chainWhy = swapChainMismatch(body.swap_chain_xdr, tokenIn, tokenOut);
+    if (chainWhy !== undefined) {
+      throw new MavnaError(`Aquarius returned a swap path that ${chainWhy}.`, {
+        retryable: false,
+      });
+    }
+
     const amountOut = BigInt(body.amount).toString();
 
     return {
@@ -150,7 +191,7 @@ export class AquariusProvider implements SwapProvider {
       // Aquarius routes through Soroban pools, so this is never a classic path
       // payment and can therefore deliver to a contract address.
       isClassicPathPayment: false,
-      raw: { tokenIn, swapChainXdr: body.swap_chain_xdr },
+      raw: { tokenIn, tokenOut, swapChainXdr: body.swap_chain_xdr },
     };
   }
 
@@ -166,6 +207,19 @@ export class AquariusProvider implements SwapProvider {
       });
     }
     const raw = validated("Aquarius", aquariusRaw, request.quote.raw);
+    // the quote travelled through the caller, so what executes is checked again
+    if (
+      raw.tokenIn !== toContractId(request.quote.assetIn, this.network) ||
+      raw.tokenOut !== toContractId(request.quote.assetOut, this.network)
+    ) {
+      throw new MavnaError("Aquarius returned a swap path for other tokens.", { retryable: false });
+    }
+    const chainWhy = swapChainMismatch(raw.swapChainXdr, raw.tokenIn, raw.tokenOut);
+    if (chainWhy !== undefined) {
+      throw new MavnaError(`Aquarius returned a swap path that ${chainWhy}.`, {
+        retryable: false,
+      });
+    }
     let chain: xdr.ScVal;
     try {
       chain = xdr.ScVal.fromXDR(raw.swapChainXdr, "base64");
