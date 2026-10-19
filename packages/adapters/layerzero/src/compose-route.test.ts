@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import entries from "./__fixtures__/testnet-ledger-entries.json" with { type: "json" };
 import { LayerZeroAdapter } from "./adapter.js";
 import { arrivalRecipientOf } from "./compose.js";
-import { type ComposeContext, composeSendFor, quoteComposeRoute } from "./compose-route.js";
+import {
+  COMPOSE_FINISH_BASE_STROOPS,
+  type ComposeContext,
+  composeSendFor,
+  quoteComposeRoute,
+} from "./compose-route.js";
 import { ARRIVAL_CONTRACTS } from "./config.js";
 import type { Discovery, ResolvedRoute } from "./discovery.js";
 import type { SendParam } from "./oft.js";
@@ -397,6 +402,33 @@ describe("building a compose send", () => {
     expect(built.to).toBe(ARRIVAL);
     expect(built.extraOptions).toBe("0x");
     expect(arrivalRecipientOf(built.composeMsg)).toBe(READY);
+  });
+});
+
+describe("what finishing a compose route by hand would cost", () => {
+  it("carries the simulated renewal of the contract's storage plus the run itself", async () => {
+    const { ctx } = context();
+    // the recording carries no TTLs, so both entries read as due for renewal
+    vi.spyOn(ctx.rpc.server, "simulateTransaction").mockResolvedValue({
+      latestLedger: entries.arrival.latestLedger,
+      minResourceFee: "307009123",
+    } as never);
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route)) throw new Error(JSON.stringify(route));
+    expect(route.compose?.finishCostStroops).toBe(
+      (307_009_123n + COMPOSE_FINISH_BASE_STROOPS).toString(),
+    );
+  });
+
+  it("says nothing rather than a guess when the renewal cannot be priced", async () => {
+    const { ctx } = context();
+    vi.spyOn(ctx.rpc.server, "simulateTransaction").mockResolvedValue({
+      latestLedger: entries.arrival.latestLedger,
+      error: "HostError: something",
+    } as never);
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route)) throw new Error(JSON.stringify(route));
+    expect(route.compose?.finishCostStroops).toBeUndefined();
   });
 });
 

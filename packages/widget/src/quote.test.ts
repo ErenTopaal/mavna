@@ -927,3 +927,28 @@ describe("a conversion on Stellar the recipient must be able to hold", () => {
     });
   });
 });
+
+describe("a conversion on arrival's cost to finish by hand", () => {
+  it("is carried to the route view in XLM, and left out when it could not be priced", () => {
+    const base = routeFor("layerzero");
+    const compose = {
+      contract: "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+      venue: "aquarius",
+      arriving: base.receives.asset,
+      arrivingContract: "C1",
+      wanted: base.receives.asset,
+      wantedContract: "C2",
+      minOut: "1",
+      path: [],
+      fee: undefined,
+      trust: "t",
+      walletNote: "w",
+      fallback: "f",
+    };
+    expect(
+      toRouteView({ ...base, compose: { ...compose, finishCostStroops: "2070159" } }).compose
+        ?.finishXlm,
+    ).toBe("0.2070159");
+    expect(toRouteView({ ...base, compose }).compose?.finishXlm).toBeUndefined();
+  });
+});

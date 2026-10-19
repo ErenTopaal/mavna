@@ -936,6 +936,15 @@ export function renderReview(
             name: r.exact ? "You receive" : "Minimum received",
             value: `${fmt(r.floor)} ${sym}`,
           },
+          ...(c.state.reserveFunding === "self" && r.compose?.finishXlm !== undefined
+            ? [
+                {
+                  key: "finish",
+                  name: "If you finish it yourself",
+                  value: `Up to ${r.compose.finishXlm} XLM, simulated now`,
+                },
+              ]
+            : []),
           { key: "sig", name: "Approvals", value: `${r.sigs} steps` },
           { key: "eta", name: "Estimated time", value: `About ${r.minutes} minutes` },
         ];
@@ -1473,7 +1482,13 @@ export function renderRoutes(
             fastest.id !== best.id;
           const badged = isBest || isFastest;
           const open = st.expanded === x.id;
-          const detail = routeDetail(x, sym, xlm, c.amountNumber());
+          const detail = routeDetail(
+            x,
+            sym,
+            xlm,
+            c.amountNumber(),
+            c.state.reserveFunding === "self",
+          );
           const cardStyle: CSSProperties = {
             position: "relative",
             width: "100%",
@@ -1842,6 +1857,8 @@ function routeDetail(
   sym: string,
   xlm: boolean,
   amount: number,
+  /** The account pays its own way, so finishing a conversion by hand is its cost. */
+  selfFunded = false,
 ): { key: string; name: string; value: string }[] {
   const net = amount - x.fee;
   const perUsdc = net > 0 ? x.receives / net : 0;
@@ -1869,6 +1886,16 @@ function routeDetail(
           { key: "wallet", name: "Stellar wallet", value: x.compose.walletNote },
           { key: "fallback", name: "If it cannot convert", value: x.compose.fallback },
           { key: "trust", name: "Who is trusted", value: x.compose.trust },
+          // paying its own way, the account finishes an overdue conversion itself
+          ...(selfFunded && x.compose.finishXlm !== undefined
+            ? [
+                {
+                  key: "finish",
+                  name: "If you finish it yourself",
+                  value: `Up to ${x.compose.finishXlm} XLM from your account, simulated now`,
+                },
+              ]
+            : []),
         ]
       : []),
     ...(x.newAccount && x.reserveXlm !== undefined

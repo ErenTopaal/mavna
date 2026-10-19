@@ -1,6 +1,6 @@
 import type { ComposeArrival } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
-import { rpc } from "@stellar/stellar-sdk";
+import { Address, Networks, rpc, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import asCame from "./__fixtures__/arrival-event-as-came-testnet.json" with { type: "json" };
 import converted from "./__fixtures__/arrival-event-converted-testnet.json" with { type: "json" };
@@ -13,6 +13,7 @@ import {
   decodeOftComposePayload,
   encodeArrivalMessage,
   encodeOftComposeMsg,
+  estimateFinishRent,
   executorLzComposeOption,
   executorOptionTypes,
   findArrivalEvent,
@@ -244,5 +245,82 @@ describe("proof of arrival from the contract's own event", () => {
       asset: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
       amount: 100_000_000n,
     });
+  });
+});
+
+describe("what finishing a compose would pay to renew the contract's storage", () => {
+  const CONTRACT = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+  const WASM = Buffer.from(
+    "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+    "hex",
+  );
+  const LATEST = 1_000_000;
+
+  function node(instanceLeft: number, codeLeft: number, rentFee: string) {
+    const client = new RpcClient({
+      url: "https://rpc.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    const simulated: string[] = [];
+    vi.spyOn(client.server, "getLedgerEntries").mockImplementation(
+      async (...keys) =>
+        ({
+          latestLedger: LATEST,
+          entries: keys.map((key) =>
+            key.switch().name === "contractCode"
+              ? {
+                  key,
+                  val: xdr.LedgerEntryData.contractCode(
+                    new xdr.ContractCodeEntry({
+                      ext: new xdr.ContractCodeEntryExt(0),
+                      hash: WASM,
+                      code: Buffer.alloc(1),
+                    }),
+                  ),
+                  lastModifiedLedgerSeq: 1,
+                  liveUntilLedgerSeq: LATEST + codeLeft,
+                }
+              : {
+                  key,
+                  val: xdr.LedgerEntryData.contractData(
+                    new xdr.ContractDataEntry({
+                      ext: new xdr.ExtensionPoint(0),
+                      contract: new Address(CONTRACT).toScAddress(),
+                      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+                      durability: xdr.ContractDataDurability.persistent(),
+                      val: xdr.ScVal.scvContractInstance(
+                        new xdr.ScContractInstance({
+                          executable: xdr.ContractExecutable.contractExecutableWasm(WASM),
+                          storage: null,
+                        }),
+                      ),
+                    }),
+                  ),
+                  lastModifiedLedgerSeq: 1,
+                  liveUntilLedgerSeq: LATEST + instanceLeft,
+                },
+          ),
+        }) as never,
+    );
+    vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
+      const data = (tx as { toEnvelope(): xdr.TransactionEnvelope }).toEnvelope().v1().tx().ext();
+      const keys = data.switch() === 1 ? data.sorobanData().resources().footprint().readOnly() : [];
+      simulated.push(keys.map((k) => k.switch().name).join(","));
+      return { latestLedger: LATEST, minResourceFee: rentFee, transactionData: undefined } as never;
+    });
+    return { client, simulated };
+  }
+
+  it("is nothing while the contract and its code have half their 30 days left or more", async () => {
+    const { client, simulated } = node(17_280 * 20, 17_280 * 16, "999");
+    expect(await estimateFinishRent(client, Networks.TESTNET, CONTRACT)).toBe(0n);
+    expect(simulated).toEqual([]);
+  });
+
+  it("is the simulated renewal of whatever has less, which the next run pays", async () => {
+    const { client, simulated } = node(17_280 * 20, 17_280 * 3, "307009123");
+    expect(await estimateFinishRent(client, Networks.TESTNET, CONTRACT)).toBe(307_009_123n);
+    expect(simulated).toEqual(["contractCode"]);
   });
 });

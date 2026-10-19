@@ -7,7 +7,9 @@ import {
   Contract,
   Keypair,
   nativeToScVal,
+  Operation,
   rpc,
+  SorobanDataBuilder,
   StrKey,
   scValToNative,
   TransactionBuilder,
@@ -539,4 +541,85 @@ function parseArrivalEvent(event: rpc.Api.EventResponse): ArrivalEvent {
     arrivedAmount: amount("arrived_amount"),
     unconverted: amount("unconverted"),
   };
+}
+
+/**
+ * The contract's own TTL policy (contracts/arrival lib.rs): every arrival
+ * renews its instance and code to 30 days once either has less than 15 left.
+ */
+export const ARRIVAL_TTL_THRESHOLD: number = 17_280 * 15;
+export const ARRIVAL_TTL_EXTEND_TO: number = 17_280 * 30;
+
+/**
+ * What the next `lz_compose` would pay in rent to renew the contract's storage,
+ * in stroops: nothing while both the instance and its code have at least half
+ * their 30 days left, otherwise the simulated cost of renewing what has less.
+ *
+ * This is almost all of what a finish can cost. A run that renews the wasm
+ * code entry paid 30.7 XLM on testnet, nearly all of it rent, while runs in
+ * between paid a few hundredths of an XLM.
+ */
+export async function estimateFinishRent(
+  rpcClient: RpcClient,
+  passphrase: string,
+  contract: string,
+): Promise<bigint> {
+  const instance = xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Contract(contract).address().toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+  const read = (key: xdr.LedgerKey, label: string) =>
+    rpcClient.read(label, async () => {
+      const response = await rpcClient.server.getLedgerEntries(key);
+      return {
+        value: { entry: response.entries[0], latest: response.latestLedger },
+        ledger: response.latestLedger,
+      };
+    });
+  const held = await read(instance, `Arrival Contract ${contract}`);
+  if (held.entry === undefined) {
+    throw new MavnaError(`There is no Arrival Contract at ${contract}, or it has been archived.`, {
+      retryable: false,
+    });
+  }
+  const code = xdr.LedgerKey.contractCode(
+    new xdr.LedgerKeyContractCode({
+      hash: held.entry.val.contractData().val().instance().executable().wasmHash(),
+    }),
+  );
+  const codeHeld = await read(code, `Arrival Contract code ${contract}`);
+  const due = [
+    [instance, held.entry.liveUntilLedgerSeq, held.latest],
+    [code, codeHeld.entry?.liveUntilLedgerSeq, codeHeld.latest],
+  ]
+    .filter(
+      ([, until, latest]) =>
+        (until as number | undefined) === undefined ||
+        (until as number) - (latest as number) < ARRIVAL_TTL_THRESHOLD,
+    )
+    .map(([key]) => key as xdr.LedgerKey);
+  if (due.length === 0) return 0n;
+
+  const renewal = new TransactionBuilder(new Account(Keypair.random().publicKey(), "0"), {
+    fee: "100",
+    networkPassphrase: passphrase,
+  })
+    .addOperation(Operation.extendFootprintTtl({ extendTo: ARRIVAL_TTL_EXTEND_TO }))
+    .setSorobanData(new SorobanDataBuilder().setReadOnly(due).build())
+    .setTimeout(30)
+    .build();
+  const simulation = await rpcClient.read("renewal simulation", async () => {
+    const answer = await rpcClient.server.simulateTransaction(renewal);
+    return { value: answer, ledger: answer.latestLedger };
+  });
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new MavnaError(
+      `The contract's storage renewal could not be priced: ${simulation.error.split("\n")[0] ?? ""}`,
+      { retryable: true },
+    );
+  }
+  return BigInt(simulation.minResourceFee);
 }

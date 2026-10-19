@@ -2,6 +2,8 @@ export type { LayerZeroAdapterOptions } from "./adapter.js";
 export { LayerZeroAdapter } from "./adapter.js";
 export type { ArrivalConfig, ArrivalEvent, OftComposePayload } from "./compose.js";
 export {
+  ARRIVAL_TTL_EXTEND_TO,
+  ARRIVAL_TTL_THRESHOLD,
   arrivalAccepts,
   arrivalRecipientOf,
   arrivalWantedOf,
@@ -11,6 +13,7 @@ export {
   decodeOftComposePayload,
   encodeArrivalMessage,
   encodeOftComposeMsg,
+  estimateFinishRent,
   executorLzComposeOption,
   executorOptionTypes,
   findArrivalEvent,

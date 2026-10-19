@@ -100,6 +100,8 @@ export interface RouteView {
         readonly trust: string;
         readonly walletNote: string;
         readonly fallback: string;
+        /** What finishing it by hand would cost, in XLM, when it was priced. */
+        readonly finishXlm?: string;
       }
     | undefined;
 }
@@ -183,6 +185,9 @@ export function toRouteView(route: Route): RouteView {
             trust: route.compose.trust,
             walletNote: route.compose.walletNote,
             fallback: route.compose.fallback,
+            ...(route.compose.finishCostStroops === undefined
+              ? {}
+              : { finishXlm: stroopsToXlm(BigInt(route.compose.finishCostStroops)) }),
           },
   };
 }

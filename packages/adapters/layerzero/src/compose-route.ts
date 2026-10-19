@@ -24,6 +24,7 @@ import {
   decodeOftComposePayload,
   encodeArrivalMessage,
   encodeOftComposeMsg,
+  estimateFinishRent,
   findArrivalEvent,
   readArrivalConfig,
   readComposeQueue,
@@ -50,6 +51,13 @@ import type { ScanMessage } from "./scan.js";
  */
 
 /** A venue that can price a conversion as hops a contract can run itself. */
+/**
+ * A finish's own cost beyond any storage renewal, in stroops: the 0.01 XLM
+ * inclusion bid plus the measured resource fee of a run that renews nothing
+ * (18,440 to 31,353 stroops on testnet), with room to spare.
+ */
+export const COMPOSE_FINISH_BASE_STROOPS = 150_000n;
+
 export interface PathVenue {
   readonly id: string;
   quotePath(request: {
@@ -347,6 +355,17 @@ export async function quoteComposeRoute(
     );
   }
 
+  // What finishing it by hand would cost whoever does it, should LayerZero's
+  // executor not: the run itself plus any renewal of the contract's storage
+  // that falls due. Unpriceable is left unsaid rather than guessed.
+  let finishCostStroops: string | undefined;
+  try {
+    const rent = await estimateFinishRent(ctx.rpc, ctx.passphrase, ctx.arrival.contract);
+    finishCostStroops = (rent + COMPOSE_FINISH_BASE_STROOPS).toString();
+  } catch {
+    finishCostStroops = undefined;
+  }
+
   const compose: ComposeArrival = {
     contract: ctx.arrival.contract,
     venue: venue.provider,
@@ -368,6 +387,7 @@ export async function quoteComposeRoute(
     fallback:
       `If ${wanted.symbol} cannot be bought for at least your minimum, you receive ` +
       `${arriving.symbol} as it came instead.`,
+    ...(finishCostStroops === undefined ? {} : { finishCostStroops }),
   };
 
   const sendParam = buildSendParam({

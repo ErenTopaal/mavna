@@ -133,6 +133,12 @@ export interface ComposeArrival {
   readonly walletNote: string;
   /** Says plainly that the conversion can fall back to delivering the token as it came. */
   readonly fallback: string;
+  /**
+   * What finishing the conversion by hand would cost, in stroops, if LayerZero's
+   * executor does not run it: the run plus any renewal of the contract's storage
+   * then due, simulated at quote time. Absent when it could not be priced.
+   */
+  readonly finishCostStroops?: string;
 }
 
 /**
