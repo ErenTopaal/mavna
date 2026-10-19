@@ -1,5 +1,6 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import { assertFeeIsPlausible } from "./discovery.js";
+import { requestJson } from "./http.js";
 
 /**
  * What Axelar charges to carry a message.
@@ -29,32 +30,39 @@ export interface GasEstimate {
  *    than JSON, so parsing it as an object yields nothing useful.
  * 2. Errors come back as HTTP 200 with `{"error": true}` in the body, so
  *    branching on the status code alone treats failures as successes.
+ *
+ * The answer is in the smallest unit of `sourceTokenSymbol`, whatever that is:
+ * wei for "ETH", stroops for "XLM". Axelar converts at its own USD prices and
+ * does not check that the token belongs to the source chain, so asking for the
+ * wrong one returns a number that is right in the wrong currency. The caller
+ * passes the sending chain's native symbol, because that is what pays.
  */
 export async function estimateGasFee(
   network: NetworkId,
   sourceChain: string,
   destinationChain: string,
+  sourceTokenSymbol: string,
   gasLimit = "200000",
 ): Promise<GasEstimate> {
-  const response = await fetch(`${GMP_API[network]}/estimateGasFee`, {
+  const reply = await requestJson("Axelar's fee estimator", `${GMP_API[network]}/estimateGasFee`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       sourceChain,
       destinationChain,
-      sourceTokenSymbol: "XLM",
+      sourceTokenSymbol,
       gasLimit,
       showDetailedFees: true,
     }),
   });
 
-  if (!response.ok) {
-    throw new MavnaError(`Axelar's fee estimator returned HTTP ${response.status}.`, {
-      retryable: response.status >= 500,
+  if (!reply.ok) {
+    throw new MavnaError(`Axelar's fee estimator returned HTTP ${reply.status}.`, {
+      retryable: reply.status >= 500,
     });
   }
 
-  const body = (await response.json()) as Record<string, unknown>;
+  const body = reply.body as Record<string, unknown>;
 
   // Branch on the body, never the status: this API answers failures with a 200.
   if (body.error === true) {
@@ -93,18 +101,24 @@ export async function estimateGasFee(
  *
  * So the name is checked with the one that fails closed, and the payment comes
  * from the one that knows the real shape of the journey. Measured together on
- * base-sepolia to Stellar: 840796 against 1048188, and 0 against 803988 for a
- * name that does not exist.
+ * base-sepolia to Stellar on 2026-10-19, in wei of ETH: 5661583247892 against
+ * 10543325497105, and 0 against 8543325497105 for a name that does not exist.
+ *
+ * Both are in the smallest unit of `sourceTokenSymbol`, and the result is paid as
+ * the native value of a transaction on the sending chain, so the symbol has to be
+ * that chain's own token. Priced in XLM the same route came back as 1085720 and
+ * 1387448, which are stroops; sent as wei they pay a few billionths of a dollar.
  */
 export async function priceTransfer(
   network: NetworkId,
   sourceChain: string,
   destinationChain: string,
+  sourceTokenSymbol: string,
 ): Promise<string> {
   // Runs first and on its own. Its zero is the only thing either endpoint offers
   // that catches a stale or misspelled chain name.
-  const single = await estimateGasFee(network, sourceChain, destinationChain);
-  const both = await estimateItsFee(network, sourceChain, destinationChain);
+  const single = await estimateGasFee(network, sourceChain, destinationChain, sourceTokenSymbol);
+  const both = await estimateItsFee(network, sourceChain, destinationChain, sourceTokenSymbol);
 
   // The larger of the two. Overpaying is returned by the gas service after
   // delivery; underpaying strands the transfer with no automatic recovery, so
@@ -122,33 +136,40 @@ export async function priceTransfer(
  *
  * Same trap as its sibling, and worse: the response is a BARE NUMBER with no
  * JSON object around it at all, so anything reading a field off it gets nothing.
+ *
+ * Denominated the same way as its sibling: the smallest unit of `sourceTokenSymbol`.
  */
 export async function estimateItsFee(
   network: NetworkId,
   sourceChain: string,
   destinationChain: string,
+  sourceTokenSymbol: string,
   gasLimit = "200000",
   gasMultiplier = 1.1,
 ): Promise<string> {
-  const response = await fetch(`${GMP_API[network]}/estimateITSFee`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sourceChain,
-      destinationChain,
-      sourceTokenSymbol: "XLM",
-      gasLimit,
-      gasMultiplier,
-    }),
-  });
+  const reply = await requestJson(
+    "Axelar's transfer fee estimator",
+    `${GMP_API[network]}/estimateITSFee`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceChain,
+        destinationChain,
+        sourceTokenSymbol,
+        gasLimit,
+        gasMultiplier,
+      }),
+    },
+  );
 
-  if (!response.ok) {
-    throw new MavnaError(`Axelar's transfer fee estimator returned HTTP ${response.status}.`, {
-      retryable: response.status >= 500,
+  if (!reply.ok) {
+    throw new MavnaError(`Axelar's transfer fee estimator returned HTTP ${reply.status}.`, {
+      retryable: reply.status >= 500,
     });
   }
 
-  const body: unknown = await response.json();
+  const body = reply.body;
 
   // An object here means an error, because a success is a bare number.
   if (typeof body === "object" && body !== null) {

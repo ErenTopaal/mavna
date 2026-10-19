@@ -413,15 +413,36 @@ describe("building the transactions", () => {
 describe("pricing, and the zero that means something else", () => {
   it("prices the transfer above zero for a chain it knows", async () => {
     const { stellarChain } = await testnetReaders();
-    const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id);
+    const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id, "ETH");
     expect(BigInt(fee)).toBeGreaterThan(0n);
+  });
+
+  it("prices in the sending chain's own currency, at a size that pays for gas there", async () => {
+    // The fee is sent as wei. Priced in XLM it came back in stroops, around a
+    // million, which is less than one unit of gas on base-sepolia. A plain value
+    // transfer there costs 21000 gas, so any real delivery payment exceeds that.
+    const { stellarChain } = await testnetReaders();
+    const base = await chainConfig("testnet", "base-sepolia");
+    const symbol = base.nativeCurrency?.symbol;
+    expect(symbol).toBe("ETH");
+    const response = await fetch(base.rpcUrl ?? "", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_gasPrice", params: [] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const gasPrice = BigInt(((await response.json()) as { result: string }).result);
+    const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id, symbol ?? "");
+    expect(BigInt(fee)).toBeGreaterThan(21_000n * gasPrice);
   });
 
   it("fails closed on a chain name it does not know, rather than quoting free", async () => {
     // "stellar" is the MAINNET name and does not exist on testnet. Paying for a
     // name nobody recognises strands the message with no automatic recovery.
-    await expect(priceTransfer("testnet", "base-sepolia", "stellar")).rejects.toThrow();
-    await expect(priceTransfer("testnet", "base-sepolia", "made-up-chain")).rejects.toThrow();
+    await expect(priceTransfer("testnet", "base-sepolia", "stellar", "ETH")).rejects.toThrow();
+    await expect(
+      priceTransfer("testnet", "base-sepolia", "made-up-chain", "ETH"),
+    ).rejects.toThrow();
   });
 
   it("shows WHY the transfer estimator alone cannot be trusted to catch that", async () => {
@@ -430,7 +451,7 @@ describe("pricing, and the zero that means something else", () => {
     // checked with the estimator that does return zero, and this one only says
     // how much to pay. Left as a test because if Axelar ever fixes it, the
     // reason for the two-call arrangement has gone and someone should know.
-    const bogus = await estimateItsFee("testnet", "base-sepolia", "made-up-chain");
+    const bogus = await estimateItsFee("testnet", "base-sepolia", "made-up-chain", "ETH");
     expect(BigInt(bogus)).toBeGreaterThan(0n);
   });
 
@@ -440,8 +461,8 @@ describe("pricing, and the zero that means something else", () => {
     const { estimateGasFee } = await import("./fees.js");
     const { stellarChain } = await testnetReaders();
     const [single, paid] = await Promise.all([
-      estimateGasFee("testnet", "base-sepolia", stellarChain.id),
-      priceTransfer("testnet", "base-sepolia", stellarChain.id),
+      estimateGasFee("testnet", "base-sepolia", stellarChain.id, "ETH"),
+      priceTransfer("testnet", "base-sepolia", stellarChain.id, "ETH"),
     ]);
     expect(BigInt(paid)).toBeGreaterThan(BigInt(single.totalFee));
   });

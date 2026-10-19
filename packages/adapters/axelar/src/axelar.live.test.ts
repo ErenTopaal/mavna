@@ -35,7 +35,8 @@ describe("runtime discovery, because these identifiers rot", () => {
 describe("the silent failure modes", () => {
   it("prices a real route", async () => {
     const chain = await discoverStellarChain("testnet");
-    const estimate = await estimateGasFee("testnet", chain.id, "ethereum-sepolia");
+    // Sent from Stellar, so priced in its own token.
+    const estimate = await estimateGasFee("testnet", chain.id, "ethereum-sepolia", "XLM");
     // Flat and component-based, not a percentage.
     expect(BigInt(estimate.totalFee)).toBeGreaterThan(0n);
     expect(BigInt(estimate.baseFee)).toBeGreaterThan(0n);
@@ -52,6 +53,6 @@ describe("the silent failure modes", () => {
   it("catches the unversioned name that LOOKS right and quietly is not", async () => {
     // "stellar" is the mainnet name. On testnet it is not recognised, and the
     // estimator says so with a zero rather than an error.
-    await expect(estimateGasFee("testnet", "stellar", "ethereum-sepolia")).rejects.toThrow();
+    await expect(estimateGasFee("testnet", "stellar", "ethereum-sepolia", "XLM")).rejects.toThrow();
   });
 });

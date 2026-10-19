@@ -1,4 +1,5 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
+import { requestJson } from "./http.js";
 
 /**
  * Where Axelar's contracts are, read from Axelar rather than from memory.
@@ -107,15 +108,15 @@ export function forgetChains(): void {
 }
 
 async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, AxelarChain>> {
-  const response = await fetch(CONFIG_URL[network]);
-  if (!response.ok) {
+  const reply = await requestJson("Axelar's deployment configuration", CONFIG_URL[network]);
+  if (!reply.ok) {
     throw new MavnaError(
-      `Could not read Axelar's published deployment configuration (HTTP ${response.status}).`,
-      { retryable: response.status >= 500 },
+      `Could not read Axelar's published deployment configuration (HTTP ${reply.status}).`,
+      { retryable: reply.status >= 500 },
     );
   }
 
-  const body = (await response.json()) as { chains?: Record<string, RawChain> };
+  const body = (reply.body ?? {}) as { chains?: Record<string, RawChain> };
   const raw = body.chains;
   if (raw === undefined || typeof raw !== "object") {
     throw new MavnaError("Axelar's deployment configuration had no chains in it.", {

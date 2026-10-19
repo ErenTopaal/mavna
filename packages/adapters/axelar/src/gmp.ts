@@ -1,4 +1,5 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
+import { requestJson } from "./http.js";
 
 /**
  * Where a message stands, and what to do when it stops.
@@ -126,20 +127,23 @@ export class GmpApi {
   }
 
   private async search(query: Record<string, unknown>): Promise<readonly GmpRecord[]> {
-    const response = await fetch(`${GMP_API[this.network]}/searchGMP`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(query),
-    });
+    const reply = await requestJson(
+      "Axelar's message search",
+      `${GMP_API[this.network]}/searchGMP`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(query),
+      },
+    );
 
-    if (!response.ok) {
-      throw new MavnaError(`Axelar's message search answered HTTP ${response.status}.`, {
-        retryable: response.status >= 500,
+    if (!reply.ok) {
+      throw new MavnaError(`Axelar's message search answered HTTP ${reply.status}.`, {
+        retryable: reply.status >= 500,
       });
     }
 
-    const body = (await response.json()) as { data?: RawRecord[] };
-    const rows = body.data;
+    const rows = (reply.body as { data?: RawRecord[] }).data;
     if (!Array.isArray(rows)) return [];
     return rows.map(read);
   }

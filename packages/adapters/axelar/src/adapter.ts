@@ -15,7 +15,7 @@ import type {
 import { MavnaError, rejectionIsRetryable } from "@mavna/core";
 import { classifyAddress, type RpcClient } from "@mavna/stellar";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
-import { type AxelarStellarChain, discoverLiveChains, discoverStellarChain } from "./discovery.js";
+import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
 import { priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
@@ -68,12 +68,14 @@ export class AxelarAdapter implements BridgeAdapter {
   private readonly rpc: RpcClient;
   private readonly ethCall: EthCall;
   private readonly gmp: GmpApi;
+  private readonly registry: ChainRegistry;
 
   constructor(options: AxelarAdapterOptions) {
     this.network = options.network;
     this.rpc = options.rpc;
     this.ethCall = options.ethCall ?? fetchEthCall;
     this.gmp = new GmpApi(options.network);
+    this.registry = new ChainRegistry(options.network);
   }
 
   /**
@@ -86,7 +88,7 @@ export class AxelarAdapter implements BridgeAdapter {
    */
   async supportedChains(): Promise<readonly string[]> {
     const [live, deployed] = await Promise.all([
-      discoverLiveChains(this.network),
+      this.registry.liveChains(),
       loadChains(this.network),
     ]);
 
@@ -123,7 +125,7 @@ export class AxelarAdapter implements BridgeAdapter {
     let source: { chain: AxelarChain; address: string; rpcUrl: string };
     try {
       [stellar, source] = await Promise.all([
-        discoverStellarChain(this.network),
+        this.registry.stellarChain(),
         evmTokenService(this.network, request.from.chainId),
       ]);
     } catch (cause) {
@@ -186,7 +188,7 @@ export class AxelarAdapter implements BridgeAdapter {
     let stellarDecimals: number;
     try {
       const [fee, decimals] = await Promise.all([
-        priceTransfer(this.network, source.chain.id, stellar.id),
+        priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
         stellarIts.tokenDecimals(token.stellarToken),
       ]);
       deliveryFee = BigInt(fee);
@@ -293,7 +295,7 @@ export class AxelarAdapter implements BridgeAdapter {
    */
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
     const [stellar, source] = await Promise.all([
-      discoverStellarChain(this.network),
+      this.registry.stellarChain(),
       evmTokenService(this.network, route.fromChain.id),
     ]);
 
@@ -327,7 +329,9 @@ export class AxelarAdapter implements BridgeAdapter {
 
     // Priced now, not at quote time, and asserted positive on the way through.
     // Zero here would be accepted by the contract and the message emitted anyway.
-    const gasValue = BigInt(await priceTransfer(this.network, source.chain.id, stellar.id));
+    const gasValue = BigInt(
+      await priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
+    );
 
     const amount = BigInt(route.sends.baseUnits);
     const transfer = buildInterchainTransfer({
@@ -553,14 +557,19 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
-    const stellar = await discoverStellarChain(this.network);
+    const stellar = await this.registry.stellarChain();
     // The current full price rather than a shortfall. Axelar publishes no
     // shortfall, and what it does publish about the original payment are
     // floating-point display figures. Doing arithmetic on those to decide a
     // payment is the one thing this codebase never does with money. Paying the
     // full price cannot underpay, and the gas service returns what is not spent.
     const amount = BigInt(
-      await priceTransfer(this.network, chainId, first.finalDestinationChain ?? stellar.id),
+      await priceTransfer(
+        this.network,
+        chainId,
+        first.finalDestinationChain ?? stellar.id,
+        gasToken(chain),
+      ),
     );
 
     const call = buildAddGas({
@@ -590,7 +599,7 @@ export class AxelarAdapter implements BridgeAdapter {
   }
 
   private async stellarReader(): Promise<StellarItsReader> {
-    const stellar = await discoverStellarChain(this.network);
+    const stellar = await this.registry.stellarChain();
     const chain = await chainConfig(this.network, stellar.id);
     if (chain.interchainTokenService === undefined) {
       throw new MavnaError(
@@ -722,6 +731,26 @@ function chainRefFor(chain: AxelarChain): ChainRef {
     explorerTxUrl: (hash) =>
       chain.explorerUrl === undefined ? "" : `${chain.explorerUrl}/tx/${hash}`,
   };
+}
+
+/**
+ * The token Axelar is asked to price delivery in.
+ *
+ * Its estimators answer in the smallest unit of whatever symbol they are given,
+ * and the answer is paid as the native value of a transaction on this chain, so
+ * it has to be this chain's own token. A chain whose configuration does not name
+ * one is refused rather than priced in a guess.
+ */
+function gasToken(chain: AxelarChain): string {
+  const symbol = chain.nativeCurrency?.symbol;
+  if (symbol === undefined || symbol.length === 0) {
+    throw new MavnaError(
+      `Axelar's configuration names no native token for ${chain.name}, so delivery ` +
+        "there cannot be priced in the currency that pays for it.",
+      { retryable: false },
+    );
+  }
+  return symbol;
 }
 
 function nativeAsset(chain: AxelarChain): Asset {

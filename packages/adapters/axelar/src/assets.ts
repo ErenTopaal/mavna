@@ -1,4 +1,5 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
+import { requestJson } from "./http.js";
 
 /**
  * Axelar's published list of interchain tokens.
@@ -52,14 +53,14 @@ export function forgetItsAssets(): void {
 }
 
 async function fetchAssets(network: NetworkId): Promise<readonly ItsAsset[]> {
-  const response = await fetch(ASSETS_API[network]);
-  if (!response.ok) {
-    throw new MavnaError(`Axelar's interchain token list answered HTTP ${response.status}.`, {
-      retryable: response.status >= 500,
+  const reply = await requestJson("Axelar's interchain token list", ASSETS_API[network]);
+  if (!reply.ok) {
+    throw new MavnaError(`Axelar's interchain token list answered HTTP ${reply.status}.`, {
+      retryable: reply.status >= 500,
     });
   }
 
-  const rows = (await response.json()) as RawAsset[];
+  const rows = reply.body as RawAsset[];
   if (!Array.isArray(rows)) {
     throw new MavnaError("Axelar's interchain token list came back in an unexpected shape.", {
       retryable: false,

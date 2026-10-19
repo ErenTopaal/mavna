@@ -21,6 +21,7 @@ export type { AxelarStellarChain } from "./discovery.js";
 export {
   assertChainAgrees,
   assertFeeIsPlausible,
+  ChainRegistry,
   discoverLiveChains,
   discoverStellarChain,
 } from "./discovery.js";

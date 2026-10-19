@@ -11,6 +11,7 @@ import {
   encodeStringCall,
   SELECTORS,
 } from "./abi.js";
+import { requestJson } from "./http.js";
 
 /**
  * Asking an EVM chain a question, over its published node.
@@ -46,7 +47,7 @@ export class EvmRevert extends MavnaError {
 }
 
 export const fetchEthCall: EthCall = async (rpcUrl, to, data) => {
-  const response = await fetch(rpcUrl, {
+  const reply = await requestJson("An EVM node", rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -57,13 +58,13 @@ export const fetchEthCall: EthCall = async (rpcUrl, to, data) => {
     }),
   });
 
-  if (!response.ok) {
-    throw new MavnaError(`An EVM node answered HTTP ${response.status}.`, {
-      retryable: response.status >= 500 || response.status === 429,
+  if (!reply.ok) {
+    throw new MavnaError(`An EVM node answered HTTP ${reply.status}.`, {
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
 
-  const body = (await response.json()) as JsonRpcResponse;
+  const body = reply.body as JsonRpcResponse;
 
   // A revert arrives as a JSON-RPC error with a 200, so branching on the status
   // code alone would read every revert as a success with no result.

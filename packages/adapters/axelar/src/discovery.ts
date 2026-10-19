@@ -1,4 +1,5 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
+import { requestJson } from "./http.js";
 
 /**
  * Finding out where Axelar actually is, at runtime.
@@ -43,20 +44,10 @@ interface ChainRow {
  * deployment.
  */
 export async function discoverStellarChain(network: NetworkId): Promise<AxelarStellarChain> {
-  const response = await fetch(CHAINS_API[network]);
-  if (!response.ok) {
-    throw new MavnaError(`Could not reach Axelar's chain registry (HTTP ${response.status}).`, {
-      retryable: response.status >= 500,
-    });
-  }
+  return stellarChainIn(await fetchRegistry(network));
+}
 
-  const rows = (await response.json()) as ChainRow[];
-  if (!Array.isArray(rows)) {
-    throw new MavnaError("Axelar's chain registry returned an unexpected shape.", {
-      retryable: false,
-    });
-  }
-
+function stellarChainIn(rows: readonly ChainRow[]): AxelarStellarChain {
   const stellar = rows.filter(
     (row) => row.chain_type === "vm" && typeof row.id === "string" && row.id.startsWith("stellar"),
   );
@@ -95,23 +86,75 @@ export async function discoverStellarChain(network: NetworkId): Promise<AxelarSt
  * build for, from the deployment configuration where the distinction is honest.
  */
 export async function discoverLiveChains(network: NetworkId): Promise<readonly string[]> {
-  const response = await fetch(CHAINS_API[network]);
-  if (!response.ok) {
-    throw new MavnaError(`Could not reach Axelar's chain registry (HTTP ${response.status}).`, {
-      retryable: response.status >= 500,
+  return liveChainsIn(await fetchRegistry(network));
+}
+
+function liveChainsIn(rows: readonly ChainRow[]): readonly string[] {
+  return rows
+    .filter((row) => typeof row.id === "string" && row.deprecated !== true)
+    .map((row) => row.id as string);
+}
+
+async function fetchRegistry(network: NetworkId): Promise<readonly ChainRow[]> {
+  const reply = await requestJson("Axelar's chain registry", CHAINS_API[network]);
+  if (!reply.ok) {
+    throw new MavnaError(`Could not reach Axelar's chain registry (HTTP ${reply.status}).`, {
+      retryable: reply.status >= 500,
     });
   }
-
-  const rows = (await response.json()) as ChainRow[];
-  if (!Array.isArray(rows)) {
+  if (!Array.isArray(reply.body)) {
     throw new MavnaError("Axelar's chain registry returned an unexpected shape.", {
       retryable: false,
     });
   }
+  return reply.body as ChainRow[];
+}
 
-  return rows
-    .filter((row) => typeof row.id === "string" && row.deprecated !== true)
-    .map((row) => row.id as string);
+/**
+ * The registry, read once per adapter rather than once per question.
+ *
+ * A quote asks for the Stellar chain twice, for routing and again for the
+ * Stellar-side reader, a build does the same, and the live list is another read
+ * of the same document. Each read is the whole registry. Held per adapter rather than per process, so a fresh adapter is a
+ * way to pick up a rotation without restarting anything.
+ */
+export class ChainRegistry {
+  private readonly network: NetworkId;
+  private rows: Promise<readonly ChainRow[]> | undefined;
+
+  constructor(network: NetworkId) {
+    this.network = network;
+  }
+
+  async stellarChain(): Promise<AxelarStellarChain> {
+    const rows = this.load();
+    try {
+      return stellarChainIn(await rows);
+    } catch (cause) {
+      // A registry with no Stellar chain, or two during a rotation, is a reading
+      // that should be taken again, not kept until the adapter is replaced.
+      this.forget(rows);
+      throw cause;
+    }
+  }
+
+  async liveChains(): Promise<readonly string[]> {
+    return liveChainsIn(await this.load());
+  }
+
+  private load(): Promise<readonly ChainRow[]> {
+    if (this.rows !== undefined) return this.rows;
+    const pending = fetchRegistry(this.network);
+    this.rows = pending;
+    // A failed read must not be cached, or one bad minute disables the rail for
+    // as long as this adapter lives.
+    pending.catch(() => this.forget(pending));
+    return pending;
+  }
+
+  private forget(rows: Promise<readonly ChainRow[]>): void {
+    if (this.rows === rows) this.rows = undefined;
+  }
 }
 
 /**
