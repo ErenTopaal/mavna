@@ -7,8 +7,9 @@ import { SoroswapProvider } from "./soroswap.js";
  *
  * The load-bearing assertion here is the one about Soroswap and testnet. The
  * project specification names it as the sole swap dependency and says testnet is
- * selected with a query parameter. It is not: there is nothing behind it, and
- * this test is what stops that being quietly re-assumed later.
+ * selected with a query parameter. Its health endpoint now lists testnet markets,
+ * but it still cannot price the conversion Mavna needs there, and this test is
+ * what stops "usable on testnet" being quietly re-assumed later.
  */
 
 describe("Aquarius, live", () => {
@@ -49,12 +50,30 @@ describe("Aquarius, live", () => {
 describe("Soroswap, live", () => {
   const key = process.env.SOROSWAP_API_KEY ?? "";
 
-  it("reports itself UNUSABLE on testnet, contradicting the project specification", async () => {
-    // Their own health endpoint lists indexed markets per network, and testnet is
-    // empty. This is the finding the whole two-provider design rests on.
-    const provider = new SoroswapProvider({ network: "testnet", apiKey: key || "sk_placeholder" });
-    expect(await provider.isUsable()).toBe(false);
+  // Checked 2026-10-19: /health lists testnet as indexed (soroswap, sdex), and
+  // every testnet quote for Circle's test USDC against XLM answers 400, with
+  // "No path found" or "Invalid Stellar address". Indexed is not the same as
+  // able to serve, which is the finding the two-provider design rests on.
+  it("lists testnet as indexed, so the health check alone cannot rule it out", async () => {
+    const provider = new SoroswapProvider({ network: "testnet", apiKey: key || "sk_unused" });
+    expect(await provider.isUsable()).toBe(true);
   });
+
+  it.skipIf(key === "")(
+    "cannot price the USDC to XLM conversion Mavna needs on testnet",
+    async () => {
+      const provider = new SoroswapProvider({ network: "testnet", apiKey: key });
+      await expect(
+        provider.quote({
+          assetIn: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+          assetOut: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+          amountIn: "10000000",
+          maxSlippageBps: 50,
+          destinationKind: "account",
+        }),
+      ).rejects.toThrow(/could not price this swap \(HTTP 400\)/);
+    },
+  );
 
   it.skipIf(key === "")("reports itself usable on mainnet", async () => {
     const provider = new SoroswapProvider({ network: "mainnet", apiKey: key });
