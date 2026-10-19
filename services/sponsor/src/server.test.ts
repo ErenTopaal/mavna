@@ -1480,6 +1480,54 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     expect(later.status).toBe(404);
   });
 
+  it("gives up on an account whose RPC call hangs, releases it, and keeps sweeping", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let attempts = 0;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build) => {
+      attempts += 1;
+      // The first call never answers, the way a node that accepts the
+      // connection and then says nothing behaves.
+      if (attempts === 1) return new Promise<never>(() => {});
+      return submit(label, build);
+    };
+
+    // Faked only now, with no HTTP left to make, so the deadline's timer is held too.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    expect(attempts).toBe(1);
+
+    // The next tick runs and retries the same account, so neither the sweep
+    // nor the account's in-flight claim was left stuck behind the hung call.
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+    expect(attempts).toBe(2);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/did not finish/);
+    logged.mockRestore();
+  });
+
+  it("leaves no deadline timer behind after an account settles in time", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(SWEEP_MS);
+    await server.server.stopSweep();
+
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("refuses an interval that is not a whole number of seconds", async () => {
     for (const settleSweepSeconds of [-1, 1.5, Number.NaN]) {
       await expect(startServer({ settleSweepSeconds })).rejects.toThrow(/sweep/);

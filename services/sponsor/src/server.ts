@@ -109,6 +109,13 @@ export interface SponsorServer extends Server {
 
 const DEFAULT_SETTLE_SWEEP_SECONDS = 120;
 
+/**
+ * How long the sweep waits on one account. A settlement normally lands in a few
+ * ledgers; past this the call is left to finish on its own and the sweep moves
+ * on, so one hung node cannot stall every later tick.
+ */
+const SWEEP_ACCOUNT_DEADLINE_MS = 60_000;
+
 interface PrepareBody {
   readonly destination?: string;
   readonly assets?: readonly string[];
@@ -213,7 +220,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * of the same transaction fails on its sequence, which would read as a
    * stranding and drop a settlement that in fact landed.
    */
-  const settling = new Set<string>();
+  const settling = new Map<string, symbol>();
 
   /**
    * Settlements that landed, kept until their own time bound so a page asking
@@ -333,7 +340,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       const held = liveSettlement(destination);
       if (held === undefined || !held.prepared) continue;
       try {
-        const outcome = await settleIfHeld(destination);
+        const outcome = await settleIfHeld(destination, SWEEP_ACCOUNT_DEADLINE_MS);
         if (outcome.settled === true) {
           console.error(`[sponsor] sweep settled a held settlement for ${destination}`);
         }
@@ -713,14 +720,56 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * transaction until its time bound. A permanent failure is recorded against
    * the stranding cap, which is the exposure brake.
    */
-  async function settleIfHeld(destination: string): Promise<Record<string, unknown>> {
+  async function settleIfHeld(
+    destination: string,
+    deadlineMs?: number,
+  ): Promise<Record<string, unknown>> {
     if (settling.has(destination)) return { settled: false, settlementRetryable: true };
-    settling.add(destination);
+    // A claim of its own, so a call abandoned at its deadline that finishes
+    // later cannot release a newer call's claim on the same account.
+    const claim = Symbol(destination);
+    settling.set(destination, claim);
+    const release = (): void => {
+      if (settling.get(destination) === claim) settling.delete(destination);
+    };
+    const work = settleHeld(destination).finally(release);
+    if (deadlineMs === undefined) return work;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<"expired">((resolve) => {
+      timer = setTimeout(() => resolve("expired"), deadlineMs);
+    });
     try {
-      return await settleHeld(destination);
+      const outcome = await Promise.race([work, expired]);
+      if (outcome !== "expired") return outcome;
     } finally {
-      settling.delete(destination);
+      clearTimeout(timer);
     }
+
+    // Released so the next sweep can try again. Submitting the same signed
+    // transaction twice is safe: the network answers the second as a duplicate
+    // of the first, or refuses it on sequence once the first has landed.
+    release();
+    console.error(
+      `[sponsor] settling for ${destination} did not finish within ${deadlineMs} ms; ` +
+        "the sweep moved on and will try again",
+    );
+    void work.then(
+      (late) => {
+        if (late.settled === true) {
+          console.error(
+            `[sponsor] a settlement for ${destination} landed after the sweep moved on`,
+          );
+        }
+      },
+      (cause: unknown) => {
+        console.error(
+          `[sponsor] a settlement for ${destination} failed after the sweep moved on:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+      },
+    );
+    return { settled: false, settlementRetryable: true };
   }
 
   async function settleHeld(destination: string): Promise<Record<string, unknown>> {
