@@ -982,10 +982,9 @@ describe("runTransfer when the account pays its own reserve", () => {
     funding = "self";
     // USDT0 arrives and is converted into USDC; the account holds USDT0 and no USDC
     heldOnly = new Set([STELLAR_USDT0.id]);
-    const base = routeFor("layerzero", { swap: true });
+    const base = routeFor("layerzero", { swap: true, delivers: STELLAR_USDT0 });
     const route = {
       ...base,
-      deliveredAtLeast: { asset: STELLAR_USDT0, baseUnits: "50000000" },
       steps: base.steps.map((step) =>
         step.kind === "swap"
           ? {
@@ -1016,10 +1015,9 @@ describe("runTransfer when the account pays its own reserve", () => {
     funding = "self";
     // the account holds nothing yet: USDT0 must be opened, and USDC for the conversion
     heldOnly = new Set();
-    const base = routeFor("layerzero", { newAccount: true, swap: true });
+    const base = routeFor("layerzero", { newAccount: true, swap: true, delivers: STELLAR_USDT0 });
     const route = {
       ...base,
-      deliveredAtLeast: { asset: STELLAR_USDT0, baseUnits: "50000000" },
       steps: base.steps.map((step) =>
         step.kind === "swap"
           ? {
@@ -1156,6 +1154,41 @@ describe("runTransfer when the account pays its own reserve", () => {
         note: expect.stringMatching(/stays in USDC/),
       });
     });
+  });
+
+  it("converts no more than the bridge quoted, so a payment landing alongside stays as it came", async () => {
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "49000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      // the 5 USDC quoted, and 2 USDC someone else sent during transit
+      onStatus: () => {
+        usdcHeld = 70_000_000n;
+      },
+    });
+    await run(adapter, route, patches().patch).catch(() => undefined);
+    expect(conversionAmounts).toEqual(["50000000"]);
+  });
+
+  it("will not start a conversion it could not tell apart from other arrivals", async () => {
+    const base = routeFor("layerzero", { swap: true });
+    const route = { ...base, steps: base.steps.filter((step) => step.kind !== "bridge") };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
+    expect(adapter.built).toBe(0);
   });
 
   it("still refuses a USDT0 trustline the sponsor would have to front", async () => {

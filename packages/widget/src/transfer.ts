@@ -740,6 +740,15 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   // a conversion on Stellar spends what this transfer adds, so the balance is
   // read before anything moves
   const swapFrom = route.steps.find((s) => s.kind === "swap")?.from.asset;
+  // and never more than the bridge quoted for it, so a payment from someone else
+  // that lands while this one is in transit is not converted along with it
+  const bridged = route.steps.find((s) => s.kind === "bridge")?.to;
+  if (swapFrom !== undefined && bridged?.asset.id !== swapFrom.id) {
+    throw new Error(
+      `This route does not say how much ${swapFrom.symbol} its bridge brings in, so the ` +
+        "conversion could not tell it apart from other funds. Nothing has been sent.",
+    );
+  }
   // the recipient signs the conversion, so a wallet that is not theirs is
   // turned away now, not after the money has arrived
   if (swapFrom !== undefined) owner = await ownWallet(engine, route, "its conversion on Stellar");
@@ -789,7 +798,9 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
     // exactly what this transfer brought in, so nothing the account held before is spent
     const heldAfter = await balanceOf(engine, route.destination, swapFrom);
     // the sponsor's repayment, if it has not been taken yet, keeps its share
-    const convertible = heldAfter - heldBefore - unrepaid;
+    const brought = heldAfter - heldBefore;
+    const quoted = BigInt(bridged?.baseUnits ?? "0");
+    const convertible = (brought < quoted ? brought : quoted) - unrepaid;
     const stays = `so it stays in ${swapFrom.symbol}, in your account.`;
     if (convertible <= 0n) {
       patch("swap", {
