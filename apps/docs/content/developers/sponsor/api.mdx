@@ -17,6 +17,12 @@ reaches the wire: a caller learns that it failed and whether to retry, and the
 operator reads the rest from the process log. Browser calls are limited to the
 configured origin allowlist.
 
+Every `POST` takes a JSON object of at most 64 KiB. A larger body answers `413`, a
+body that is not JSON or not an object answers `400`, and a transaction field that
+does not decode as a Stellar transaction answers `400`, all with `retryable: false`.
+An unexpected failure inside the server, including a Stellar read that did not
+answer, is `500` with `retryable: true`: nothing was spent, and asking again is safe.
+
 ## `GET /health`
 
 Answers `200` with the network and the sponsor's public address:
@@ -48,16 +54,33 @@ Answers:
 Takes back the signed preparation; the sponsor countersigns, pays, and submits.
 This is where money moves, so this is where the gates are:
 
-- the transaction's source must be the sponsor itself
-- its operations must be only `beginSponsoringFutureReserves`,
-  `endSponsoringFutureReserves`, `createAccount`, `changeTrust`
-- fee-bump envelopes are refused
-- a signed settlement must already be held for the account being prepared, or the
-  answer is `409`
+- the transaction must be one this server built and has not countersigned before,
+  identified by its hash, and not past its time bound
+- it must carry a valid signature from the account being prepared
+- a signed settlement must already be held for that account, and the preparation
+  must sponsor exactly what that settlement repays: the account itself if the
+  settlement revokes the account's sponsorship, and the same set of trustlines
+- the daily caps are checked again
+- as defence in depth, the source must be the sponsor itself, the operations must
+  be only `beginSponsoringFutureReserves`, `endSponsoringFutureReserves`,
+  `createAccount`, `changeTrust`, and fee-bump envelopes are refused
 
-Request: `{ "signedXdr": "..." }`. Answers `200` `{ "txHash": "...", "ledger": 123 }`,
-the `400` / `409` refusals above, or `502` when Stellar would not accept the
-submission.
+Request: `{ "signedXdr": "..." }`.
+
+Answers:
+
+- `200` `{ "txHash": "...", "ledger": 123 }`. A preparation that landed is reported
+  as landed even if the cap counter could not be saved afterwards; the operator
+  hears about the undercount in the log
+- `400` when `signedXdr` is missing or is not a transaction, for a fee bump, a
+  source other than the sponsor, an operation outside the list, or a missing or
+  invalid signature from the account being prepared
+- `409` when the preparation was not built here or has expired ("Ask for a new
+  one"), when no settlement is held for the account, or when the preparation does
+  not match the settlement held for it
+- `429` when a cap refuses at submission, retryable
+- `502` when Stellar would not accept the submission. The preparation is not
+  offered again; build a new one
 
 ## `POST /settlement`
 
@@ -67,12 +90,18 @@ path payment buys exactly the XLM the reserve needs and spends at most twice its
 value at the live orderbook rate, so the signer's exposure is a number they can
 read.
 
+Building takes a channel for five minutes. Committing the signed settlement extends
+that to the settlement's own time bound, a day; a settlement left unsigned gives its
+channel back once the five minutes are up.
+
 Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
 
 Answers:
 
 - `200` `{ "xdr": "...", "channel": "G..." }`
 - `400` for a missing or unusable destination, or one that needs no settling
+- `409`, retryable, while the account's previous settlement is still being
+  submitted
 - `429` on a cap refusal
 - `503` when every settlement slot is in use: one channel carries one in-flight
   settlement
@@ -80,21 +109,72 @@ Answers:
 ## `POST /settlement/commit`
 
 Holds what the user signed until their money lands. The server signs nothing here;
-what sits in memory can move nothing on its own. The envelope is refused unless its
-operations are only a strict-receive path payment and sponsorship-revocation
-operations, and fee bumps are refused.
+what sits in memory can move nothing on its own. Only a settlement this server
+built, signed by the account it was built for, is held, and only under that
+account. The envelope is also refused unless its operations are only a
+strict-receive path payment and sponsorship-revocation operations, and fee bumps
+are refused. A new commit replaces a held settlement whose preparation has not
+landed yet.
 
-Request: `{ "destination": "G...", "signedXdr": "..." }`. Answers `200` `{ "held": true }`.
+Request: `{ "destination": "G...", "signedXdr": "..." }`. `destination` is
+optional and only checked against the account the settlement was built for.
+
+Answers:
+
+- `200` `{ "held": true }`
+- `400` when `signedXdr` is missing or is not a transaction, for a fee bump or an
+  operation outside the list, when `destination` names a different account than
+  the settlement was built for, or when the account's signature is missing or
+  invalid
+- `409` when the settlement was not built here or has expired ("Ask for a new
+  one"), when the account's preparation has already landed against the
+  settlement held for it, or when the settlement's channel slot lapsed or passed to
+  someone else before it was signed
+
+## `POST /settle`
+
+Submits the held settlement for an account, for rails that deliver without this
+server: LayerZero and Axelar land funds on Stellar by themselves. It submits only
+once the account's preparation has landed and the account's trustline holds the
+most the settlement may spend; until then it answers that it did not settle and
+that asking again can. A sweep does the same for every held settlement on an
+interval, so a closed tab does not leave the reserve unpaid; see
+`MAVNA_SETTLE_SWEEP_SECONDS` in the [configuration](/developers/sponsor#configuration).
+
+Request: `{ "destination": "G..." }`.
+
+Answers:
+
+- `200` `{ "settled": true, "settlementTxHash": "..." }` when it submitted the
+  settlement now, or when the settlement already landed, through an earlier call or
+  the sweep, within its time bound
+- `200` `{ "settled": false, "settlementRetryable": true }` when it is not time
+  yet: the preparation has not landed, the money has not arrived, the settlement
+  is being submitted right now, or its inclusion was not seen within two minutes.
+  Ask again later
+- `200` `{ "settled": false, "settlementRetryable": false }` when the settlement can
+  never land. It is counted against the stranding cap and no longer held
+- `400` when `destination` is not an account or muxed address
+- `404` when no settlement is held for the account and none landed recently
+- `429`, retryable, when the same account was asked about in the last 30 seconds.
+  Only accounts with a held settlement are limited
 
 ## `POST /deliver`
 
 Triggers the mint for an attested burn. Idempotent;
 [retrying is always safe](/developers/concepts/delivery).
 
-Request: `{ "txHash": "0x...", "domain": 0, "destination": "G..." }`. `domain` is
-Circle's domain for the source chain and defaults to `0` (Ethereum). `destination`
-is optional: naming it lets a successful delivery submit the held settlement for
-that account in the same breath.
+Request: `{ "txHash": "0x...", "domain": 0 }`. Both are required. `txHash` is the
+burn's transaction on the source chain: an EVM hash, a Solana signature in base58,
+or a Starknet transaction hash. `domain` is Circle's domain for the source chain
+and must be one this network routes into Stellar from. Either one malformed answers
+`400` before Circle is asked anything.
+
+Who the transfer is for is read from Circle's attested message, the one source a
+caller cannot choose. A `destination` field is accepted from older clients and
+ignored. When the delivery lands, or had already landed, the settlement held for
+the recipient Circle attested is submitted in the same breath, and only for a burn
+that provably pays that recipient through Circle's forwarder on Stellar.
 
 The server fetches the attestation, simulates the delivery, and answers `200` with
 one of:
@@ -106,8 +186,11 @@ one of:
 ```
 
 or `404` when Circle has no attested record of the transaction yet (retryable:
-nothing is wrong, ask again in a minute), or `409` with
+nothing is wrong, ask again in a minute), `502` when Circle's attestation service
+could not be reached or did not answer usefully (retryable), or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
 [the cue to prepare it](/developers/concepts/sponsorship). When a held settlement is
-submitted alongside a delivery, the response carries the settlement's result too.
+submitted alongside a delivery, the response carries the settlement's result too,
+in the same `settled`, `settlementTxHash` and `settlementRetryable` fields
+`/settle` uses.

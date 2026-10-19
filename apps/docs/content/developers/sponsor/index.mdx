@@ -75,12 +75,17 @@ Settlements ride on channel accounts, one in-flight settlement per channel. With
 pool configured, the server creates and funds one channel from the sponsor on first
 use, which is a capacity of one concurrent settlement: enough to run everything
 yourself, and the pool is the knob when it is not. A full pool answers `503`.
+Building a settlement holds a channel for five minutes, and only a settlement the
+user has signed holds it for its whole day, so an unsigned request cannot keep a
+slot for long.
 
 Two daily caps bound the money at risk, from the
 [sponsorship design](/developers/concepts/sponsorship): a volume cap per source-chain
 class (300 a day from chains where gas is expensive, 200 from chains where gas costs
 cents and an attack is nearly free) and 75 strandings a day, after which sponsorship
-pauses globally for the day. Cap refusals answer `429` with a user-readable reason.
+pauses globally for the day. A stranding is a sponsorship whose settlement can never
+land: one the network refuses for good, and one whose preparation landed and whose
+time bound passed with nothing settled. Cap refusals answer `429` with a user-readable reason.
 The counters live in memory by default and behind a storage interface: a cap that
 does not survive a restart is not a cap, so back it with something durable in
 production.

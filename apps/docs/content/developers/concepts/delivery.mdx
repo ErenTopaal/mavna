@@ -21,20 +21,24 @@ Stellar destination that sets a destination caller, which Stellar requires. The
 recipient is fixed inside the attested message, so the sponsor cannot redirect
 anything.
 
-A transfer is proven delivered two ways:
+A transfer is proven delivered from the delivery itself, never from a balance.
+Starting from the burn transaction, Mavna reads the attested message from Circle
+and looks on Stellar for the mint that consumed that exact message: the message
+transmitter's `message_received` event, emitted with Circle's forwarder as the
+caller and this message's nonce as a topic, together with the forwarder's own event
+in the same operation, which says how much was forwarded and to whom. Stellar RPC
+keeps events for a limited window, so an older delivery is found through Horizon
+instead, in the recipient's operations, by the forwarder invocation that carried
+this message.
 
-- **From the burn transaction**: the attestation must be complete, and the
-  destination's trustline balance must be at least the exact amount Circle
-  attested, converted from six decimals to seven.
-- **From the destination address alone**: Mavna reads Stellar's history and
-  requires the crediting transaction to come from Circle's forwarder, compared
-  byte for byte against the forwarder's own address. A credit from anywhere else,
-  an exchange, a friend, or an imitation asset, does not count. This is the lookup
-  Circle's own index cannot do, because it is keyed on the burn.
+An address alone does not name a transfer. Circle's index is keyed on the burn,
+and the forwarder's past deliveries to an address may belong to any transfer at
+all, so a lookup by address answers `idle` rather than reporting someone else's
+delivery as this one.
 
-An un-indexed burn stays `pending` and an address with no history is `idle`.
-Neither is reported as `failed`, because reporting failure without evidence is how
-a user is talked into sending a second payment.
+An un-indexed burn, or an attested one whose delivery cannot be found yet, stays
+`pending`. Neither is reported as `failed`, because reporting failure without
+evidence is how a user is talked into sending a second payment.
 
 Delivery is idempotent: Circle's transmitter records a used nonce, so a second
 delivery of the same message fails rather than minting twice. That is why
