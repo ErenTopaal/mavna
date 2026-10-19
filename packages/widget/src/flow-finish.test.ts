@@ -5,14 +5,17 @@ import type { Engine } from "./engine";
 const finished: string[] = [];
 let priced = 0;
 vi.mock("./own-compose", () => ({
-  finishCompose: async () => ({
-    kind: "priced" as const,
-    feeStroops: BigInt(2_070_159 + 0 * ++priced),
-    finish: async () => {
-      finished.push("signed");
-      return { kind: "composed" as const, txHash: "c0de", ledger: 7 };
-    },
-  }),
+  finishCompose: async () => {
+    priced += 1;
+    return {
+      kind: "priced" as const,
+      feeStroops: 2_070_159n,
+      finish: async () => {
+        finished.push("signed");
+        return { kind: "composed" as const, txHash: "c0de", ledger: 7 };
+      },
+    };
+  },
 }));
 
 const { Flow } = await import("./flow");
