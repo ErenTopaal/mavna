@@ -87,6 +87,7 @@ beforeEach(() => {
   preparedSource = undefined;
   preparedShape = {};
   heldOnly = undefined;
+  unreadable = undefined;
   usdcHeld = 0n;
   conversionAmounts = [];
   askedAssets = [];
@@ -240,6 +241,9 @@ let conversionAmounts: string[];
 /** The destination's USDC balance, in base units, as the node reports it now. */
 let usdcHeld: bigint;
 
+/** An asset code whose trustline read fails, as a node that stops answering would. */
+let unreadable: string | undefined;
+
 /** The trustlines the destination holds, by CODE:ISSUER, when a test asks per asset. */
 let heldOnly: Set<string> | undefined;
 
@@ -271,6 +275,10 @@ function stellarNode(): RpcClient {
         line.switch().name === "assetTypeCreditAlphanum12"
           ? `${line.alphaNum12().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum12().issuer().ed25519())}`
           : `${line.alphaNum4().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum4().issuer().ed25519())}`;
+      // a node that stops answering for this one asset
+      if (unreadable !== undefined && held.startsWith(`${unreadable}:`)) {
+        throw new Error("the node did not answer");
+      }
       if (!heldOnly?.has(held)) return [];
       return [
         {
@@ -924,6 +932,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     const signed = log.indexOf("stellar sign PREPARATION");
     expect(signed).toBeGreaterThan(-1);
     expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
+  });
+
+  it("checks every trustline it will open before the account signs any of them", async () => {
+    funding = "self";
+    // the account holds nothing yet: USDT0 must be opened, and USDC for the conversion
+    heldOnly = new Set();
+    const base = routeFor("layerzero", { newAccount: true, swap: true });
+    const route = {
+      ...base,
+      deliveredAtLeast: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+              to: { asset: STELLAR_USDC, baseUnits: "49000000" },
+            }
+          : step,
+      ),
+    };
+    // reading whether it can hold USDC fails, so nothing should be signed at all
+    unreadable = "USDC";
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(run(adapter, route, patches().patch)).rejects.toThrow();
+    expect(log).not.toContain("stellar sign PREPARATION");
   });
 
   it("refuses a conversion for someone else's account before anything is sent", async () => {

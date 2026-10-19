@@ -568,6 +568,30 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   const unready = await destinationBlocker(engine.rpc, route);
   if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
 
+  // A conversion on Stellar into anything but XLM needs that trustline too. It
+  // is checked first, so no trustline is signed for a transfer that then
+  // cannot go ahead; an account paying its own way opens it before the send.
+  const convertsTo = route.steps.find((s) => s.kind === "swap")?.to.asset;
+  let opensHold = false;
+  if (convertsTo !== undefined && convertsTo.id !== "native") {
+    const [code, issuer] = convertsTo.id.split(":");
+    const state = await inspectDestination(
+      engine.rpc,
+      route.destination,
+      new StellarAsset(code ?? "", issuer),
+    );
+    if (state.lane.kind !== "ready" && state.lane.kind !== "contract-ready") {
+      const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
+      if (terms.reserveFunding !== "self") {
+        throw new Error(
+          `The receiving account cannot hold ${convertsTo.symbol} yet, so the conversion would ` +
+            "fail after the money arrives. Add that trustline first. Nothing has been sent.",
+        );
+      }
+      opensHold = true;
+    }
+  }
+
   if (view.newAccount) {
     const terms = await assertSponsorable(engine, route);
     if (terms.reserveFunding === "self") {
@@ -585,32 +609,13 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
     }
   }
 
-  // A conversion on Stellar into anything but XLM needs that trustline too. An
-  // account paying its own way opens it now, before any money moves, so a user
-  // short of XLM learns before the send rather than after the arrival.
-  const convertsTo = route.steps.find((s) => s.kind === "swap")?.to.asset;
-  if (convertsTo !== undefined && convertsTo.id !== "native") {
-    const [code, issuer] = convertsTo.id.split(":");
-    const state = await inspectDestination(
-      engine.rpc,
-      route.destination,
-      new StellarAsset(code ?? "", issuer),
-    );
-    if (state.lane.kind === "needs-trustline") {
-      const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
-      if (terms.reserveFunding !== "self") {
-        throw new Error(
-          `The receiving account cannot hold ${convertsTo.symbol} yet, so the conversion would ` +
-            "fail after the money arrives. Add that trustline first. Nothing has been sent.",
-        );
-      }
-      owner ??= await ownWallet(engine, route, `the trustline it converts into`);
-      patch("hold", { phase: "blocked" });
-      await openOwnTrustline(engine, route, chainId, owner, "Nothing has been sent.", convertsTo);
-      patch("hold", { phase: "done" });
-    } else {
-      patch("hold", { phase: "done", note: `It can already hold ${convertsTo.symbol}.` });
-    }
+  if (convertsTo !== undefined && opensHold) {
+    owner ??= await ownWallet(engine, route, `the trustline it converts into`);
+    patch("hold", { phase: "blocked" });
+    await openOwnTrustline(engine, route, chainId, owner, "Nothing has been sent.", convertsTo);
+    patch("hold", { phase: "done" });
+  } else if (convertsTo !== undefined && convertsTo.id !== "native") {
+    patch("hold", { phase: "done", note: `It can already hold ${convertsTo.symbol}.` });
   }
 
   const sendHash = await send(deps, adapter, route);
