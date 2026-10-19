@@ -87,6 +87,21 @@ export class SubmitRejected extends MavnaError {
   }
 }
 
+/**
+ * A node at or past our high-water mark has no such account. Its own class so
+ * callers can tell this answer from a read that failed, which says nothing
+ * about whether the account exists.
+ */
+export class AccountNotFound extends MavnaError {
+  readonly address: string;
+
+  constructor(address: string) {
+    super(`Account ${address} does not exist.`, { retryable: false });
+    this.name = "AccountNotFound";
+    this.address = address;
+  }
+}
+
 export class RpcClient {
   readonly server: rpc.Server;
   readonly floor: LedgerFloor;
@@ -160,7 +175,7 @@ export class RpcClient {
     });
 
     if (entry === undefined) {
-      throw new MavnaError(`Account ${address} does not exist.`, { retryable: false });
+      throw new AccountNotFound(address);
     }
 
     const parsed = entry.val.account();

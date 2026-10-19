@@ -10,7 +10,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLedgerFloor, RpcClient, SubmitRejected } from "./rpc.js";
+import { AccountNotFound, createLedgerFloor, RpcClient, SubmitRejected } from "./rpc.js";
 
 const noSleep = async (): Promise<void> => {};
 
@@ -213,5 +213,28 @@ describe("submission", () => {
     expect(found.status).toBe(rpc.Api.GetTransactionStatus.NOT_FOUND);
     expect(found.latestLedger).toBe(10);
     expect(asked).toBe(2);
+  });
+});
+
+describe("loading an account", () => {
+  it("says plainly when a caught-up node has no such account", async () => {
+    const client = clientForTest();
+    client.server.getLedgerEntries = async () => ({ latestLedger: 5, entries: [] });
+    const missing = await client
+      .loadAccount(Keypair.random().publicKey())
+      .catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(AccountNotFound);
+    expect((missing as AccountNotFound).retryable).toBe(false);
+  });
+
+  it("does not mistake a failed read for a missing account", async () => {
+    const client = clientForTest();
+    client.server.getLedgerEntries = async () => {
+      throw new Error("connection reset");
+    };
+    const failure = await client
+      .loadAccount(Keypair.random().publicKey())
+      .catch((error: unknown) => error);
+    expect(failure).not.toBeInstanceOf(AccountNotFound);
   });
 });

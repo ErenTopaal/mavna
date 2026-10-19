@@ -1956,3 +1956,37 @@ describe("a settlement slot is held for a day only once the settlement is signed
     expect(later.status).toBe(503);
   });
 });
+
+describe("the sponsor does not take a failed read for a missing account", () => {
+  function failAccountReads(server: TestServer, user: Keypair): void {
+    const read = server.rpc.server.getLedgerEntries.bind(server.rpc.server);
+    server.rpc.server.getLedgerEntries = async (...keys) => {
+      const asksForUser = keys.some(
+        (key) =>
+          key.switch().name === "account" &&
+          StrKey.encodeEd25519PublicKey(key.account().accountId().ed25519()) === user.publicKey(),
+      );
+      if (asksForUser) throw new Error("connection reset");
+      return read(...keys);
+    };
+  }
+
+  it("answers a retryable failure, not a settlement for a new account", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startServer();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    failAccountReads(server, user);
+
+    for (const path of ["/settlement", "/prepare"]) {
+      const response = await server.post(path, {
+        destination: user.publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(response.status, path).toBe(500);
+      expect(response.body.retryable, path).toBe(true);
+    }
+    logged.mockRestore();
+  });
+});

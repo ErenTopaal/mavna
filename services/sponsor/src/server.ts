@@ -14,6 +14,7 @@ import {
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import {
+  AccountNotFound,
   buildPreparation,
   buildSettlement,
   classifyAddress,
@@ -503,19 +504,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    let created: boolean;
+    let classified: ReturnType<typeof classifyAddress>;
     try {
-      const classified = classifyAddress(body.destination);
-      if (!classified.needsTrustline) {
-        reply(
-          res,
-          400,
-          { error: "That address can already receive; nothing to prepare.", retryable: false },
-          origin,
-        );
-        return;
-      }
-      created = !(await accountExists(options.rpc, classified.trustlineHolder ?? body.destination));
+      classified = classifyAddress(body.destination);
     } catch {
       reply(
         res,
@@ -525,6 +516,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    if (!classified.needsTrustline) {
+      reply(
+        res,
+        400,
+        { error: "That address can already receive; nothing to prepare.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    const created = !(await accountExists(
+      options.rpc,
+      classified.trustlineHolder ?? body.destination,
+    ));
 
     const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
     const transaction = buildPreparation({
@@ -598,21 +602,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    let createdAccount: boolean;
+    let classified: ReturnType<typeof classifyAddress>;
     try {
-      const classified = classifyAddress(body.destination);
-      if (!classified.needsTrustline) {
-        reply(res, 400, { error: "That address needs no settling.", retryable: false }, origin);
-        return;
-      }
-      createdAccount = !(await accountExists(
-        options.rpc,
-        classified.trustlineHolder ?? body.destination,
-      ));
+      classified = classifyAddress(body.destination);
     } catch {
       reply(res, 400, { error: "That is not a usable Stellar address.", retryable: false }, origin);
       return;
     }
+    if (!classified.needsTrustline) {
+      reply(res, 400, { error: "That address needs no settling.", retryable: false }, origin);
+      return;
+    }
+    const createdAccount = !(await accountExists(
+      options.rpc,
+      classified.trustlineHolder ?? body.destination,
+    ));
 
     const pool = await ensureChannels();
     const now = nowUnix();
@@ -1501,11 +1505,18 @@ function stroopsToDecimal(stroops: bigint): string {
   return `${whole}.${fraction}`;
 }
 
+/**
+ * Whether an account exists, from a node that has caught up. Only a definite
+ * absence is false: a read that failed is thrown, because guessing "missing"
+ * would build a settlement and preparation for an account creation that is not
+ * needed.
+ */
 async function accountExists(rpc: RpcClient, address: string): Promise<boolean> {
   try {
     await rpc.loadAccount(address);
     return true;
-  } catch {
-    return false;
+  } catch (cause) {
+    if (cause instanceof AccountNotFound) return false;
+    throw cause;
   }
 }
