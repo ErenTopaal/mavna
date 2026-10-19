@@ -374,8 +374,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           executorSecret: options.arrivalExecutorSecret,
         });
   // the chain refuses a second finish anyway; these keep repeated or spammed asks
-  // from costing simulations and fees. Per message and overall, not per address:
-  // behind the reverse proxy every caller has the proxy's address.
+  // from costing simulations and fees: per message, per client address (the same
+  // one every limit uses, so MAVNA_TRUST_PROXY decides it), and overall.
   const composing = new Set<string>();
   const lastComposeCall = new Map<string, number>();
   const recentComposes: number[] = [];

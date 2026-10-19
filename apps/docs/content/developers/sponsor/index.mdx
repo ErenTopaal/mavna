@@ -14,7 +14,7 @@ Mavna's limits are yours.
 
 ## Its entire authority
 
-The sponsor signs exactly three kinds of transaction, and each is gated:
+The sponsor signs these kinds of transaction, and each is gated:
 
 1. **Preparations it built itself.** It countersigns and pays for account-setup
    transactions whose source is its own account and whose operations are only
@@ -27,6 +27,16 @@ The sponsor signs exactly three kinds of transaction, and each is gated:
 3. **Its half of a settlement.** The spending operation carries the user's own
    signature; the server adds the channel and sponsor signatures at submission
    time, so what it holds in memory can move nothing on its own.
+4. **Finishes of a conversion on arrival** (`/compose`, sponsor mode only). It pays
+   the fee as the source; a separate executor key signs the one `lz_compose`
+   authorization, after the simulation shows nothing nested under it. The fee is
+   bounded by any storage renewal due plus 1 XLM.
+5. **Its own housekeeping, with nothing a caller chooses in it:** funding its
+   settlement channels, creating the executor account with 1 XLM, and the daily
+   renewal of the Arrival Contract's storage (sponsor mode only, at most 100 XLM).
+
+In self mode (`MAVNA_RESERVE_FUNDING=self`) it signs none of these that spend: the
+accounts pay their own way, and it only builds unsigned trustlines and relays them.
 
 It never holds user funds, never signs a user's transfer, and never sees a user's
 key. The gates are enforced in code you can read: operation allowlists per

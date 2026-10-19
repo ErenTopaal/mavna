@@ -32,9 +32,11 @@ services:
       VITE_MAVNA_MAINNET_RPC_URL: ${MAVNA_MAINNET_RPC_URL:-}
       VITE_MAVNA_MAINNET_SPONSOR_URL: ${MAVNA_MAINNET_SPONSOR_URL:-}
 
-  # The only process holding a key. It prepares accounts it pays for and
-  # triggers deliveries whose recipient Circle's attestation already fixed.
-  # It cannot touch user funds; that is checkable by reading services/sponsor.
+  # The only process holding a key. It prepares accounts it pays for, triggers
+  # deliveries whose recipient Circle's attestation already fixed, finishes
+  # overdue conversions on arrival as fee source, and funds its own channels,
+  # executor and the Arrival Contract's renewal. It cannot touch user funds;
+  # that is checkable by reading services/sponsor.
   sponsor:
     image: node:24.19.0-alpine
     working_dir: /repo

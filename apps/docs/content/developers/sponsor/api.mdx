@@ -348,8 +348,9 @@ against the hash LayerZero's endpoint holds for it before submitting; any other
 bytes answer `400`. The endpoint runs a queued message once, so a second call
 answers `already-composed` and never delivers twice.
 
-The sponsor pays the fee as the transaction's source and names a separate,
-unfunded key as the executor. Before that key signs, the simulated run must ask for
+The sponsor pays the fee as the transaction's source and names a separate key as
+the executor, holding only its 1 XLM minimum (the sponsor creates it with that on
+first use). Before that key signs, the simulated run must ask for
 exactly one authorization: the executor's, for `lz_compose` on the configured
 contract with these arguments, and nothing nested under it. Anything more (a token
 in the message trying to spend the executor's authority, for example) is refused
