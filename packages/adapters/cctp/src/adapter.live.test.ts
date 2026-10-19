@@ -3,6 +3,7 @@ import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/s
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { CctpAdapter } from "./adapter.js";
+import { sourceUsdcFor } from "./assets.js";
 import { CCTP_CONTRACTS } from "./config.js";
 
 /**
@@ -31,6 +32,13 @@ const USDC_SEPOLIA: Asset = {
   curatedBy: "Circle",
 };
 
+/** The canonical USDC on a source chain, since the adapter matches by address. */
+const usdcOn = (chainId: string): Asset => {
+  const usdc = sourceUsdcFor("testnet", chainId);
+  if (usdc === undefined) throw new Error(`no USDC known for ${chainId}`);
+  return { ...USDC_SEPOLIA, chainId, id: usdc.address };
+};
+
 const USDC_STELLAR: Asset = {
   chainId: "stellar-testnet",
   id: `USDC:${CCTP_CONTRACTS.testnet.usdcIssuer}`,
@@ -44,14 +52,17 @@ const FUNDED = "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU";
 /** Valid, well-formed, and has never existed. */
 const UNFUNDED = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 
-const ask = (over: Partial<QuoteRequest> = {}): QuoteRequest => ({
-  from: USDC_SEPOLIA,
-  to: USDC_STELLAR,
-  sends: { asset: USDC_SEPOLIA, baseUnits: "25000000" },
-  destination: FUNDED,
-  maxSlippageBps: 50,
-  ...over,
-});
+const ask = (over: Partial<QuoteRequest> = {}): QuoteRequest => {
+  const from = over.from ?? USDC_SEPOLIA;
+  return {
+    from,
+    to: USDC_STELLAR,
+    sends: { asset: from, baseUnits: "25000000" },
+    destination: FUNDED,
+    maxSlippageBps: 50,
+    ...over,
+  };
+};
 
 const isRoute = (result: Route | RouteRejection): result is Route => "receives" in result;
 
@@ -190,9 +201,7 @@ describe("CctpAdapter", () => {
    * domain; only building differs.
    */
   it("quotes from Solana and builds an instruction rather than a contract call", async () => {
-    const result = await adapter.quote(
-      ask({ from: { ...USDC_SEPOLIA, chainId: "solana-devnet" } }),
-    );
+    const result = await adapter.quote(ask({ from: usdcOn("solana-devnet") }));
     if (!isRoute(result)) throw new Error(result.explanation);
     expect(result.fromChain.name).toBe("Solana Devnet");
 
@@ -212,9 +221,7 @@ describe("CctpAdapter", () => {
   });
 
   it("refuses to invent a Solana keypair, and says what it needs instead", async () => {
-    const result = await adapter.quote(
-      ask({ from: { ...USDC_SEPOLIA, chainId: "solana-devnet" } }),
-    );
+    const result = await adapter.quote(ask({ from: usdcOn("solana-devnet") }));
     if (!isRoute(result)) throw new Error(result.explanation);
     // The SDK does not hold keys. Asking for them is better than making one.
     await expect(adapter.buildTransactions(result)).rejects.toThrow(
@@ -223,9 +230,7 @@ describe("CctpAdapter", () => {
   });
 
   it("quotes from Starknet and builds an invoke rather than a contract call", async () => {
-    const result = await adapter.quote(
-      ask({ from: { ...USDC_SEPOLIA, chainId: "starknet-sepolia" } }),
-    );
+    const result = await adapter.quote(ask({ from: usdcOn("starknet-sepolia") }));
     if (!isRoute(result)) throw new Error(result.explanation);
     expect(result.fromChain.name).toBe("Starknet Sepolia");
 
@@ -306,7 +311,7 @@ describe("CctpAdapter", () => {
     // guard working, not a chain failing, so the test does not provoke it.
     const outcomes = [];
     for (const chainId of chains) {
-      const result = await quoteRetrying(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+      const result = await quoteRetrying(ask({ from: usdcOn(chainId) }));
       outcomes.push({
         chainId,
         ok: isRoute(result),
@@ -330,7 +335,7 @@ describe("CctpAdapter", () => {
     for (const chainId of chains.filter(
       (c) => !c.startsWith("solana") && !c.startsWith("starknet"),
     )) {
-      const result = await quoteRetrying(ask({ from: { ...USDC_SEPOLIA, chainId } }));
+      const result = await quoteRetrying(ask({ from: usdcOn(chainId) }));
       if (!isRoute(result)) throw new Error(`${chainId}: ${result.explanation}`);
       // Index 1 is the burn; index 0 is its approval.
       const [, burn] = await adapter.buildTransactions(result);
@@ -346,7 +351,7 @@ describe("CctpAdapter", () => {
   });
 
   it("quotes from a chain other than the one it was built against", async () => {
-    const result = await adapter.quote(ask({ from: { ...USDC_SEPOLIA, chainId: "base-sepolia" } }));
+    const result = await adapter.quote(ask({ from: usdcOn("base-sepolia") }));
     if (!isRoute(result)) throw new Error(result.explanation);
     expect(result.fromChain.id).toBe("base-sepolia");
     expect(result.fromChain.name).toContain("Base");

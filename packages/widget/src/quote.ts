@@ -6,6 +6,8 @@
  * counts and decline reasons. Nothing here is fabricated: every figure the UI
  * shows comes out of a Route or a RouteRejection.
  */
+
+import { sourceUsdcFor } from "@mavna/adapter-cctp";
 import type { Asset, Route, RouteRejection, RouteSet, TrustModel } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import type { Engine } from "./engine";
@@ -140,10 +142,22 @@ export function toRouteView(route: Route): RouteView {
   };
 }
 
-function buildAssets(engine: Engine, chainId: string, wanted: Wanted): { from: Asset; to: Asset } {
+/**
+ * The asset ids are token addresses, which is what the rails match on. The
+ * source id used to be the chain id, which names no token at all.
+ */
+export function buildAssets(
+  engine: Pick<Engine, "network" | "usdcOnStellar" | "xlmOnStellar">,
+  chainId: string,
+  wanted: Wanted,
+): { from: Asset; to: Asset } {
+  const usdc = sourceUsdcFor(engine.network, chainId);
+  if (usdc === undefined) {
+    throw new Error(`No USDC deployment is known for ${chainId}.`);
+  }
   const from: Asset = {
     chainId,
-    id: chainId,
+    id: usdc.address,
     symbol: "USDC",
     decimals: USDC_DECIMALS_ON_EVM,
     curatedBy: "Circle",

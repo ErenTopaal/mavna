@@ -1,6 +1,7 @@
 import { createNetworkConfig, PUBLIC_MAINNET_RPC_URLS, RpcClient } from "@mavna/stellar";
 import { describe, expect, it } from "vitest";
 import { CctpAdapter } from "./adapter.js";
+import { sourceUsdcFor } from "./assets.js";
 import { buildApproval, buildBurn } from "./burn.js";
 import { deploymentFor, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS } from "./config.js";
@@ -93,7 +94,7 @@ describe("promoting to mainnet", () => {
 
     const usdcOnEthereum = {
       chainId: "ethereum",
-      id: "ethereum",
+      id: sourceUsdcFor("mainnet", "ethereum")?.address ?? "",
       symbol: "USDC",
       decimals: 6,
       curatedBy: "Circle",

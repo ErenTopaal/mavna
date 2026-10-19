@@ -26,6 +26,7 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { assetsAreCanonical, sourceUsdcFor } from "./assets.js";
 import { type Attestation, AttestationService } from "./attestation.js";
 import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } from "./burn.js";
 import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
@@ -136,8 +137,18 @@ export class CctpAdapter implements BridgeAdapter {
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
     }
-    if (request.from.symbol !== "USDC" || request.to.symbol !== "USDC") {
-      return this.decline("asset-unsupported", "Circle moves USDC only.");
+    // By address and issuer, never symbol: the burn spends the canonical USDC
+    // whatever the request names, so a lookalike would be quoted as one asset
+    // and move another.
+    const sourceUsdc = sourceUsdcFor(this.network, request.from.chainId);
+    if (
+      sourceUsdc === undefined ||
+      !assetsAreCanonical(request, sourceUsdc, `USDC:${CCTP_CONTRACTS[this.network].usdcIssuer}`)
+    ) {
+      return this.decline(
+        "asset-unsupported",
+        "Circle moves Circle's own USDC only, and that is not the token this request names.",
+      );
     }
 
     // A destination that cannot receive is ordinary user input, not an exceptional

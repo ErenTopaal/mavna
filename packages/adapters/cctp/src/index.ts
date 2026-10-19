@@ -1,5 +1,7 @@
 export type { BuildOptions, CctpAdapterOptions } from "./adapter.js";
 export { CctpAdapter } from "./adapter.js";
+export type { SourceUsdc } from "./assets.js";
+export { assetsAreCanonical, sourceUsdcFor } from "./assets.js";
 export type { Attestation, AttestationStatus } from "./attestation.js";
 export { AttestationService, HASH_FORMAT } from "./attestation.js";
 export type { ApprovalCall, BurnCall, BurnParams } from "./burn.js";
