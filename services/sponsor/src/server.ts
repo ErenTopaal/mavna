@@ -1096,6 +1096,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
+    // Answered before the limit: with nothing to submit the answer costs a map
+    // lookup, and a page asking right after a repayment should hear about it.
+    if ((await liveSettlement(destination)) === undefined) {
+      const settledHash = settledRecently(destination);
+      if (settledHash !== undefined) {
+        reply(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
+        return;
+      }
+      reply(
+        res,
+        404,
+        { error: "No settlement is held for that account.", retryable: false },
+        origin,
+      );
+      return;
+    }
+
     const now = nowUnix();
     for (const [account, at] of lastSettleCall) {
       if (at + SETTLE_INTERVAL_SECONDS <= now) lastSettleCall.delete(account);
@@ -1111,20 +1128,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     lastSettleCall.set(destination, now);
 
-    if ((await liveSettlement(destination)) === undefined) {
-      const settledHash = settledRecently(destination);
-      if (settledHash !== undefined) {
-        reply(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
-        return;
-      }
-      reply(
-        res,
-        404,
-        { error: "No settlement is held for that account.", retryable: false },
-        origin,
-      );
-      return;
-    }
     reply(res, 200, await settleIfHeld(destination), origin);
   }
 

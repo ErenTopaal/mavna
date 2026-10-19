@@ -1185,6 +1185,24 @@ describe("any rail can trigger a held settlement", () => {
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
   });
 
+  it("limits only accounts with a settlement to submit", async () => {
+    const server = await startServer();
+    const stranger = Keypair.random();
+    // Nothing held: the answer is a map lookup, so asking again is not refused.
+    expect((await server.post("/settle", { destination: stranger.publicKey() })).status).toBe(404);
+    expect((await server.post("/settle", { destination: stranger.publicKey() })).status).toBe(404);
+
+    // Settled: a page asking again at once hears that it was repaid.
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    const first = await server.post("/settle", { destination: user.publicKey() });
+    expect(first.body.settled).toBe(true);
+    const again = await server.post("/settle", { destination: user.publicKey() });
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ settled: true, settlementTxHash: first.body.settlementTxHash });
+  });
+
   it("answers 404 for an account with no held settlement", async () => {
     const server = await startServer();
     const response = await server.post("/settle", { destination: Keypair.random().publicKey() });
