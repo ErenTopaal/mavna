@@ -689,14 +689,26 @@ export function createSponsorServer(options: SponsorServerOptions): Server {
     }
 
     transaction.sign(keypair);
+    let result: Awaited<ReturnType<RpcClient["submit"]>>;
     try {
-      const result = await options.rpc.submit("sponsored preparation", async () => transaction);
-      await caps.recordStarted(source);
-      reply(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
+      result = await options.rpc.submit("sponsored preparation", async () => transaction);
     } catch (cause) {
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
       reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
+      return;
     }
+    try {
+      await caps.recordStarted(source);
+    } catch (cause) {
+      // The preparation is on the ledger whatever the count says. Reporting a
+      // failure would invite the user to retry something that worked, so the
+      // operator hears about the undercount and the user hears the truth.
+      console.error(
+        "[sponsor] a sponsorship landed but was not counted against the cap:",
+        cause instanceof Error ? cause.message : cause,
+      );
+    }
+    reply(res, 200, { txHash: result.txHash, ledger: result.ledger }, origin);
   }
 
   /** Trigger the mint for an attested burn. Idempotent; retrying is always safe. */

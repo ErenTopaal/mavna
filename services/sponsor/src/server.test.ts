@@ -20,7 +20,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedBy } from "./built.js";
-import { CapLedger, InMemoryCapStore } from "./caps.js";
+import { CapLedger, type CapUsage, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServerOptions } from "./server.js";
 
@@ -767,5 +767,30 @@ describe("the sponsor forgets a held settlement once it can no longer land", () 
     expect(response.status).toBe(200);
     expect(response.body.settled).toBe(false);
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+});
+
+describe("the sponsor reports a submission that landed", () => {
+  it("answers with the hash even when the cap count cannot be saved", async () => {
+    // A durable store that is down. The preparation is already on the ledger, so
+    // telling the user it failed would invite a retry of something that worked.
+    class UnwritableStore extends InMemoryCapStore {
+      override async save(_usage: CapUsage): Promise<void> {
+        throw new Error("cap store is unreachable");
+      }
+    }
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startServer({ caps: new CapLedger(new UnwritableStore()) });
+    const user = Keypair.random();
+
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    const response = await server.post("/submit", { signedXdr: prepared });
+
+    expect(response.status).toBe(200);
+    const submitted = server.rpc.submissions[0]?.tx as Transaction;
+    expect(response.body.txHash).toBe(submitted.hash().toString("hex"));
+    expect(logged.mock.calls.flat().join(" ")).toContain("cap store is unreachable");
+    logged.mockRestore();
   });
 });
