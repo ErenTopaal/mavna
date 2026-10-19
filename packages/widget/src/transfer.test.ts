@@ -57,6 +57,8 @@ let preparation: string;
 /** What a self-funded preparation opens and who sources it, when a test makes it wrong. */
 let preparedLine: string | undefined;
 let preparedSource: string | undefined;
+/** Fee, trust limit and timeout of a self-funded preparation, when a test makes them odd. */
+let preparedShape: { fee?: string; limit?: string; timeout?: number };
 /** What Circle's attestation service answers, in turn; the last one repeats. */
 let irisReplies: Array<[number, unknown]>;
 const attested = {
@@ -82,6 +84,7 @@ beforeEach(() => {
   irisReplies = [[200, attested]];
   preparedLine = undefined;
   preparedSource = undefined;
+  preparedShape = {};
   askedAssets = [];
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
@@ -126,11 +129,16 @@ beforeEach(() => {
         const line = preparedLine ?? (code === "USDT0" ? STELLAR_USDT0.id : STELLAR_USDC.id);
         const [lineCode, lineIssuer] = line.split(":");
         preparation = new TransactionBuilder(new Account(preparedSource ?? DESTINATION, "1"), {
-          fee: "1000",
+          fee: preparedShape.fee ?? "1000",
           networkPassphrase: Networks.TESTNET,
         })
-          .addOperation(Operation.changeTrust({ asset: new Asset(lineCode ?? "", lineIssuer) }))
-          .setTimeout(300)
+          .addOperation(
+            Operation.changeTrust({
+              asset: new Asset(lineCode ?? "", lineIssuer),
+              ...(preparedShape.limit === undefined ? {} : { limit: preparedShape.limit }),
+            }),
+          )
+          .setTimeout(preparedShape.timeout ?? 300)
           .build()
           .toXDR();
         return reply(200, { xdr: preparation, selfFunded: true });
@@ -818,6 +826,23 @@ describe("runTransfer when the account pays its own reserve", () => {
       expect(log.some((l) => l.startsWith("stellar sign"))).toBe(false);
       expect(adapter.built).toBe(0);
     }
+  });
+
+  it.each([
+    ["a fee above what the sponsor bids", { fee: "1001" }],
+    ["a trust limit below the default", { limit: "1000" }],
+    ["no time bound", { timeout: 0 }],
+    ["a time bound far in the future", { timeout: 86_400 }],
+  ])("refuses to sign a self-funded trustline with %s", async (_what, shape) => {
+    funding = "self";
+    preparedShape = shape;
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/not the trustline this transfer needs/);
+    expect(log).not.toContain("stellar sign PREPARATION");
   });
 
   it("still refuses a USDT0 trustline the sponsor would have to front", async () => {

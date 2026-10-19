@@ -21,7 +21,12 @@ import {
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute } from "./execute";
 import { remember } from "./history";
-import { deliverOwn, OWN_DELIVERY_FEE_BUDGET_STROOPS, type OwnDelivery } from "./own-delivery";
+import {
+  deliverOwn,
+  OWN_DELIVERY_FEE_BUDGET_STROOPS,
+  OWN_TRUSTLINE_FEE_STROOPS,
+  type OwnDelivery,
+} from "./own-delivery";
 import { type RouteView, settlementBlocker, trustlineName, type Wanted } from "./quote";
 import {
   adapterFor,
@@ -236,17 +241,30 @@ function opensOnly(xdr: string, passphrase: string, account: string, assetId: st
     return false;
   }
   if (parsed instanceof FeeBumpTransaction || parsed.source !== account) return false;
+  // The account pays the fee and the trustline lasts, so both are bounded:
+  // the sponsor's own bid, the default (largest) limit, and a short time bound.
+  const ops = parsed.operations.length;
+  if (BigInt(parsed.fee) > OWN_TRUSTLINE_FEE_STROOPS * BigInt(ops)) return false;
+  const maxTime = Number(parsed.timeBounds?.maxTime ?? 0);
+  const now = Math.floor(Date.now() / 1000);
+  if (maxTime === 0 || maxTime > now + OWN_TRUSTLINE_MAX_SECONDS) return false;
   return (
-    parsed.operations.length > 0 &&
+    ops > 0 &&
     parsed.operations.every(
       (op) =>
         op.type === "changeTrust" &&
         (op.source === undefined || op.source === account) &&
         op.line instanceof StellarAsset &&
-        op.line.toString() === assetId,
+        op.line.toString() === assetId &&
+        op.limit === DEFAULT_TRUST_LIMIT,
     )
   );
 }
+
+/** What a changeTrust with no limit given reads back as: the largest Int64 in stroops. */
+const DEFAULT_TRUST_LIMIT = "922337203685.4775807";
+/** The sponsor builds with a 300 second bound; anything far longer is refused. */
+const OWN_TRUSTLINE_MAX_SECONDS = 600;
 
 /** Prepare the account, only once the attestation exists. */
 async function prepareNow(
