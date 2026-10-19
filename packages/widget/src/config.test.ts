@@ -119,3 +119,14 @@ describe("the Arrival Contract a network converts through", () => {
     expect(resolveConfig(own, "mainnet").engineConfig.arrivalContract).toBe("CAMAIN");
   });
 });
+
+describe("what the form starts out receiving", () => {
+  it("refuses USDT0 to receive when the form sends USDC, which cannot arrive as USDT0", () => {
+    expect(() => resolveConfig({ integrator: "t", wanted: "USDT0" })).toThrow(
+      /wanted.*USDT0.*fromAsset/,
+    );
+    expect(() =>
+      resolveConfig({ integrator: "t", wanted: "USDT0", fromAsset: "USDT0" }),
+    ).not.toThrow();
+  });
+});

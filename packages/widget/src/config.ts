@@ -129,7 +129,10 @@ export interface MavnaWidgetConfig {
   // ---- form initialisation ----
   /** The chain the form starts on, by its Mavna slug (e.g. "ethereum"). */
   readonly fromChain?: string;
-  /** Whether the recipient receives USDC or XLM. A USDT0 send always lands as USDT0. */
+  /**
+   * What the recipient arrives holding: USDC or XLM when sending USDC, and
+   * USDT0, USDC or XLM when sending USDT0 (anything but USDT0 is converted).
+   */
   readonly wanted?: Wanted;
   /** What the form starts out sending. Defaults to USDC. */
   readonly fromAsset?: SendAsset;
@@ -253,6 +256,11 @@ export function resolveConfig(config: MavnaWidgetConfig, active?: NetworkId): Re
   const networks = config.networks ?? [defaultNetwork];
   if (!networks.includes(defaultNetwork)) {
     throw configError(`network is ${defaultNetwork}, which networks does not offer.`);
+  }
+  if (config.wanted === "USDT0" && (config.fromAsset ?? "USDC") !== "USDT0") {
+    throw configError(
+      'wanted is "USDT0", which only a USDT0 send can deliver; set fromAsset to "USDT0" too.',
+    );
   }
   const network = active ?? defaultNetwork;
   if (!networks.includes(network)) {
