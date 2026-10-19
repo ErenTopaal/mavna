@@ -961,3 +961,56 @@ describe("the rails status line", () => {
     expect(railsLabel({ ...all, Axelar: false }, ["Circle", "Axelar", "LayerZero"])).toBe("2 of 3");
   });
 });
+
+describe("a quote that fails as a whole", () => {
+  it("says why for every rail rather than ending in an empty list", async () => {
+    const broken = {
+      reasonFor: () => {
+        throw new Error("the breaker could not be read");
+      },
+    };
+    const set = await new Promise<RouteSet>((resolve) => {
+      runQuote(
+        {
+          ...engine,
+          adapters: [new ScriptedAdapter("cctp", [{ phase: "idle" }])],
+          breaker: broken as never,
+          xlmSwap: undefined as never,
+          integratorFee: undefined,
+          rpc: new RpcClient({ url: "https://example.invalid" }),
+          usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+          sponsorTerms: async () => ({
+            network: "testnet",
+            reserveFunding: "sponsor" as const,
+            minDeliveryBaseUnits: 0n,
+          }),
+          usdt0Assets: async () => {
+            throw new Error("not asked");
+          },
+          usdt0Swap: () => {
+            throw new Error("not asked");
+          },
+        },
+        {
+          chainId: "ethereum-sepolia",
+          wanted: "USDC",
+          amount: "5",
+          destination: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+          priority: "best",
+          rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+        },
+        () => {},
+        resolve,
+      );
+    });
+    expect(set.complete).toBe(true);
+    expect(set.rejected).toEqual([
+      {
+        source: "cctp",
+        reason: "temporarily-unavailable",
+        explanation: expect.stringMatching(/breaker could not be read/),
+        retryable: true,
+      },
+    ]);
+  });
+});

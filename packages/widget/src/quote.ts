@@ -772,9 +772,23 @@ export function runQuote(
         (final) => {
           if (live && final !== undefined) onDone(final);
         },
-        () => {
-          // A total failure still resolves to a complete, empty set for the UI.
-          if (live) onDone({ routes: [], rejected: [], complete: true });
+        (cause: unknown) => {
+          // A total failure still ends the quote, and every rail asked is owed
+          // the reason rather than a list that quietly stays empty.
+          if (!live) return;
+          const explanation = cause instanceof Error ? cause.message : String(cause);
+          const failed: RouteSet = {
+            routes: [],
+            rejected: adapters.map((a) => ({
+              source: a.id,
+              reason: "temporarily-unavailable" as const,
+              explanation: `The quote could not finish: ${explanation}`,
+              retryable: rejectionIsRetryable("temporarily-unavailable"),
+            })),
+            complete: true,
+          };
+          onUpdate(failed);
+          onDone(failed);
         },
       );
   };
