@@ -199,3 +199,62 @@ receive yet, which in the designed flow is
 submitted alongside a delivery, the response carries the settlement's result too,
 in the same `settled`, `settlementTxHash` and `settlementRetryable` fields
 `/settle` uses.
+
+## Soroswap proxy
+
+Present only when the server holds `SOROSWAP_API_KEY`; without it these paths answer
+`404`, and the browser's swap leg moves on to the next venue. The proxy adds the key
+on the way to Soroswap and nothing else: the key never appears in an answer, and
+Soroswap's own error text is never relayed.
+
+Because every call spends the operator's key, these endpoints are stricter than the
+rest. A request whose `Origin` is not on the allowlist answers `403` without reaching
+Soroswap. Each client may make 30 calls a minute and all clients together 300; past
+either, `429` with `retryable: true`. Behind a reverse proxy, set
+`MAVNA_TRUST_FORWARDED_FOR=1` so the client is the last `X-Forwarded-For` hop.
+
+### `GET /swap/soroswap/health`
+
+Whether Soroswap has indexed markets on this server's network and, on mainnet, its
+aggregator is up. Cached for 30 seconds.
+
+```json
+{ "network": "mainnet", "usable": true, "protocols": ["soroswap", "aqua", "sushi", "comet", "sdex"] }
+```
+
+### `POST /swap/soroswap/quote`
+
+Request:
+
+```json
+{
+  "network": "mainnet",
+  "assetIn": "C...",
+  "assetOut": "C...",
+  "amount": "100000000",
+  "slippageBps": 50,
+  "protocols": ["soroswap", "phoenix", "aqua", "sushi", "comet", "sdex"],
+  "feeBps": 30
+}
+```
+
+Assets are contract addresses, the amount is positive integer base units,
+`slippageBps` is 0 to 10000, and `network` must be the server's. `feeBps` is
+optional and must be 0 or 25 to 300, the range Soroswap accepts. Soroswap records it
+but charges the rate in the partner profile behind the key, so it seeds that profile
+rather than setting the fee per request.
+
+Answers `200` with Soroswap's quote, checked against the same schema the browser
+checks and otherwise passed through unchanged, because it is sent back to build.
+`400` when the request fails validation (nothing reached Soroswap), `422` when
+Soroswap has no route (`retryable: false`), `429` when Soroswap is busy, `502` when
+it could not be reached or answered with something unusable.
+
+### `POST /swap/soroswap/build`
+
+Request: `{ "network": "mainnet", "quote": { ... }, "from": "G...", "to": "G..." }`,
+where `quote` is one this endpoint's quote returned. Answers `200`
+`{ "xdr": "..." }`, an unsigned transaction for `from` to sign; the browser checks
+that its source is the owner before asking for a signature. `409` with
+`retryable: true` when Soroswap's fee rate changed since the quote, and the other
+statuses as for the quote.

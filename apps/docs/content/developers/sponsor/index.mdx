@@ -44,6 +44,8 @@ Everything is environment variables, read once at start.
 | `MAVNA_IRIS_URL` | no | Circle's sandbox on testnet, production on mainnet | Circle's attestation service |
 | `MAVNA_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:4319` | Browser origins allowed to call this server, comma separated. Never `*`: this server spends money on request |
 | `MAVNA_SETTLE_SWEEP_SECONDS` | no | `120` | How often held settlements are retried without a page asking, for LayerZero and Axelar deliveries whose tab closed. One account at a time, never overlapping. `0` turns it off |
+| `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
+| `MAVNA_TRUST_FORWARDED_FOR` | no | off | `1` when a reverse proxy in front sets `X-Forwarded-For`, so the Soroswap proxy's per-client limit counts clients rather than the reverse proxy. Leave it off otherwise: without a proxy in front, the header is whatever a caller sends |
 | `PORT` | no | `8787` | Where to listen |
 
 The curated asset list, the assets this sponsor opens trustlines for, is written
