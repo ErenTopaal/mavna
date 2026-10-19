@@ -225,3 +225,71 @@ describe("the integrator's cut", () => {
     expect(out.fees.find((f) => f.kind === "integrator")).toBeUndefined();
   });
 });
+
+describe("a conversion beside a reserve the arrival repays", () => {
+  // a new account the sponsor fronts 1.5 XLM for, repaid in USDC out of the arrival
+  const repaying = {
+    ...route,
+    steps: [
+      ...route.steps,
+      {
+        id: "settle",
+        kind: "settle-account" as const,
+        source: "cctp",
+        from: route.receives,
+        to: route.receives,
+        estimatedSeconds: 30,
+        execution: undefined,
+      },
+    ],
+    fees: [
+      {
+        kind: "account-reserve" as const,
+        total: { asset: xlm, baseUnits: "15000000" },
+        recipients: [],
+        includedInQuote: true,
+      },
+    ],
+  };
+  // 5 XLM per USDC, both at seven decimals
+  const asked: string[] = [];
+  const atFive: SwapQuoter = {
+    id: "aquarius",
+    quote: (request) => {
+      asked.push(request.amountIn);
+      const out = (BigInt(request.amountIn) * 5n).toString();
+      return Promise.resolve({ provider: "aquarius", amountOut: out, amountOutMinimum: out });
+    },
+  };
+
+  it("sets aside the most the repayment can take, converts the rest, and itemises it", async () => {
+    asked.length = 0;
+    const out = await attachSwapLeg(repaying, { ...attachment(atFive), repaysReserve: true }, 50);
+    if ("reason" in out) throw new Error(out.explanation);
+    // twice 1.5 XLM at 5 XLM per USDC is 0.6 USDC, the sponsor's own ceiling
+    expect(asked.at(-1)).toBe("43000000");
+    expect(out.steps.find((s) => s.kind === "swap")?.from.baseUnits).toBe("43000000");
+    expect(out.fees).toContainEqual(
+      expect.objectContaining({
+        kind: "reserve-repayment",
+        total: { asset: usdc, baseUnits: "6000000" },
+      }),
+    );
+  });
+
+  it("converts the whole guaranteed arrival when nothing is repaid from it", async () => {
+    asked.length = 0;
+    const out = await attachSwapLeg(repaying, attachment(atFive), 50);
+    if ("reason" in out) throw new Error(out.explanation);
+    expect(asked).toEqual(["49000000"]);
+  });
+
+  it("declines plainly when the repayment would leave nothing to convert", async () => {
+    const big = {
+      ...repaying,
+      fees: [{ ...repaying.fees[0], total: { asset: xlm, baseUnits: "1225000000" } }],
+    } as typeof repaying;
+    const out = await attachSwapLeg(big, { ...attachment(atFive), repaysReserve: true }, 50);
+    expect("reason" in out && out.explanation).toMatch(/stays in USDC/);
+  });
+});

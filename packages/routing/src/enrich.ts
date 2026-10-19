@@ -2,6 +2,7 @@ import {
   type Amount,
   type Asset,
   amountOf,
+  type Fee,
   MavnaError,
   type Route,
   type RouteRejection,
@@ -54,6 +55,25 @@ export interface SwapAttachment {
   /** What the user asked to end up holding. */
   readonly wanted: Asset;
   readonly wantedContract: string;
+  /**
+   * The sponsor fronts a new account's reserve and is repaid out of the
+   * arrival, so the conversion leaves the most that repayment can take.
+   */
+  readonly repaysReserve?: boolean;
+}
+
+/**
+ * The most a held settlement may spend of the arrival to repay a reserve, in
+ * the arriving asset's base units: twice the reserve at this rate, the same
+ * ceiling the sponsor builds its settlement with.
+ */
+export function reserveSetAside(
+  reserveStroops: bigint,
+  rate: { readonly amountIn: bigint; readonly amountOut: bigint },
+): bigint {
+  if (rate.amountOut <= 0n) return rate.amountIn;
+  const numerator = 2n * reserveStroops * rate.amountIn;
+  return (numerator + rate.amountOut - 1n) / rate.amountOut;
 }
 
 /**
@@ -71,17 +91,46 @@ export async function attachSwapLeg(
   maxSlippageBps: number,
 ): Promise<Route | RouteRejection> {
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;
-  try {
-    // Priced on what the bridge guarantees lands, not its estimate: a rail that
-    // settles anywhere between the two must never leave the conversion short,
-    // or spending money the account already held to make up the difference.
-    quote = await attachment.provider.quote({
+  const ask = (amountIn: bigint) =>
+    attachment.provider.quote({
       assetIn: attachment.deliveredContract,
       assetOut: attachment.wantedContract,
-      amountIn: route.deliveredAtLeast.baseUnits,
+      amountIn: amountIn.toString(),
       maxSlippageBps,
       destinationKind: route.destination.startsWith("C") ? "contract" : "account",
     });
+  // Priced on what the bridge guarantees lands, not its estimate: a rail that
+  // settles anywhere between the two must never leave the conversion short,
+  // or spending money the account already held to make up the difference.
+  const guaranteed = BigInt(route.deliveredAtLeast.baseUnits);
+  const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  const repays =
+    attachment.repaysReserve === true &&
+    reserve !== undefined &&
+    route.steps.some((s) => s.kind === "settle-account");
+  let setAside = 0n;
+  try {
+    if (repays) {
+      // the repayment comes out of the same arrival, so it is left aside first,
+      // priced at the venue's own rate for the whole amount
+      const rate = await ask(guaranteed);
+      setAside = reserveSetAside(BigInt(reserve.total.baseUnits), {
+        amountIn: guaranteed,
+        amountOut: BigInt(rate.amountOut),
+      });
+      if (guaranteed - setAside <= 0n) {
+        return {
+          source: route.source,
+          reason: "amount-too-small",
+          retryable: false,
+          explanation:
+            `After the sponsor's reserve is repaid from it, too little would be left to convert ` +
+            `into ${attachment.wanted.symbol}, so it stays in ${attachment.delivered.symbol}. ` +
+            `Receive ${attachment.delivered.symbol}, or send more.`,
+        };
+      }
+    }
+    quote = await ask(guaranteed - setAside);
   } catch (cause) {
     return {
       source: route.source,
@@ -97,18 +146,29 @@ export async function attachSwapLeg(
 
   const receives: Amount = amountOf(attachment.wanted, quote.amountOut);
   const receivesAtLeast: Amount = amountOf(attachment.wanted, quote.amountOutMinimum);
+  const repayment: Fee | undefined =
+    setAside > 0n
+      ? {
+          kind: "reserve-repayment",
+          total: amountOf(attachment.delivered, setAside.toString()),
+          recipients: [],
+          // left in the arrival, so the conversion above never counted it
+          includedInQuote: true,
+        }
+      : undefined;
 
   return {
     ...route,
     receives,
     receivesAtLeast,
+    fees: repayment === undefined ? route.fees : [...route.fees, repayment],
     steps: [
       ...route.steps,
       {
         id: `${route.id}-swap`,
         kind: "swap",
         source: quote.provider,
-        from: route.deliveredAtLeast,
+        from: amountOf(route.deliveredAtLeast.asset, (guaranteed - setAside).toString()),
         to: receives,
         // A Stellar transaction settles in one ledger close; the estimate covers
         // building and signing it, not waiting for a network.

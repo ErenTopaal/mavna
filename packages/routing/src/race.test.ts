@@ -30,6 +30,8 @@ const route = (source: string, receivesBaseUnits = "1"): Route =>
     source,
     receives: { asset: { symbol: "USDC", decimals: 7 }, baseUnits: receivesBaseUnits },
     deliveredAtLeast: { asset: { symbol: "USDC", decimals: 7 }, baseUnits: receivesBaseUnits },
+    fees: [] as Route["fees"],
+    steps: [] as Route["steps"],
     estimatedSeconds: 60,
     signaturesRequired: 1,
   }) as Route;

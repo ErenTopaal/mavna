@@ -75,7 +75,13 @@ export type FeeKind =
    * their own account as their reserve, returning to them if they ever close it.
    * Named separately so the interface can say so rather than overstating the cost.
    */
-  | "account-reserve";
+  | "account-reserve"
+  /**
+   * The most a held settlement may take of the arrival to repay a reserve the
+   * sponsor fronted. Left aside from any conversion, in the arriving asset; what
+   * the repayment does not use stays with the user.
+   */
+  | "reserve-repayment";
 
 export interface Fee {
   readonly kind: FeeKind;
