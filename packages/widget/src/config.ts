@@ -283,10 +283,12 @@ export function resolveConfig(config: MavnaWidgetConfig, active?: NetworkId): Re
       chains: config.chains,
       rails,
       stellar: config.walletConfig?.stellar,
-      // keyPrefix namespaces the browser transfer history per integrator.
+      // keyPrefix namespaces the browser transfer history per integrator, and
+      // the network per network: a record carries no network, and Activity
+      // looks it up on the adapters of whichever network is showing.
       historyKey: config.keyPrefix
-        ? `${config.keyPrefix}:mavna.transfers.v1`
-        : "mavna.transfers.v1",
+        ? `${config.keyPrefix}:mavna.transfers.v1.${network}`
+        : `mavna.transfers.v1.${network}`,
     },
   };
 }

@@ -46,6 +46,23 @@ describe("resolveConfig, the network", () => {
     expect(onMainnet.networks).toEqual(["testnet", "mainnet"]);
   });
 
+  it("keeps each network's transfer history apart, so Activity never looks one up on the other", () => {
+    const config = {
+      integrator: "t",
+      network: "testnet" as const,
+      networks: ["testnet", "mainnet"] as const,
+      sponsorUrl: "https://t.example",
+      endpoints: { mainnet: { sponsorUrl: "https://m.example" } },
+    };
+    const testnet = resolveConfig(config).engineConfig.historyKey;
+    const mainnet = resolveConfig(config, "mainnet").engineConfig.historyKey;
+    expect(testnet).not.toBe(mainnet);
+    expect(mainnet).toBe("mavna.transfers.v1.mainnet");
+    expect(resolveConfig({ ...config, keyPrefix: "acme" }, "mainnet").engineConfig.historyKey).toBe(
+      "acme:mavna.transfers.v1.mainnet",
+    );
+  });
+
   it("refuses to offer a second network without its own sponsor, since a sponsor serves one network", () => {
     expect(() => resolveConfig({ integrator: "t", networks: ["testnet", "mainnet"] })).toThrow(
       /mainnet.*sponsorUrl/,
