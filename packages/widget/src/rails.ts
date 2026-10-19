@@ -37,7 +37,10 @@ export function adapterFor(engine: Pick<Engine, "adapters">, route: Route): Brid
  * Axelar deliver on their own and cannot deliver to an account that does not
  * exist, so the account is prepared before the send and there is no attest step.
  */
-export function stepsFor(route: Route): readonly StepTemplate[] {
+export function stepsFor(
+  route: Route,
+  reserveFunding: "sponsor" | "self" = "sponsor",
+): readonly StepTemplate[] {
   const newAccount = route.steps.some((s) => s.kind === "prepare-account");
   const converts = route.steps.some((s) => s.kind === "swap");
   const chainName = route.fromChain.name;
@@ -53,10 +56,13 @@ export function stepsFor(route: Route): readonly StepTemplate[] {
     user: true,
     actor: "Your wallet",
   };
+  const selfFunded = reserveFunding === "self";
   const prepare: StepTemplate = {
     id: "prepare",
     label: "Set the account up",
-    note: "Approve in your Stellar wallet. Costs you nothing.",
+    note: selfFunded
+      ? "Approve in your Stellar wallet. The reserve comes from this account's own XLM."
+      : "Approve in your Stellar wallet. Costs you nothing.",
     user: true,
     actor: "Your wallet",
   };
@@ -81,6 +87,31 @@ export function stepsFor(route: Route): readonly StepTemplate[] {
     user: true,
     actor: "Your wallet",
   };
+
+  // An account paying its own reserve borrows nothing, so there is no
+  // repayment to sign and no reason to wait for the money before preparing.
+  if (circle && selfFunded) {
+    return [
+      ...(newAccount ? [prepare] : []),
+      approve,
+      send,
+      {
+        id: "attest",
+        label: "Circle attests the transfer",
+        note: "A few minutes. Safe to close this page.",
+        user: false,
+        actor: "Circle",
+      },
+      {
+        id: "deliver",
+        label: "Deliver on Stellar",
+        note: "Delivered on Stellar.",
+        user: false,
+        actor: "Mavna",
+      },
+      ...(converts ? [swap] : []),
+    ];
+  }
 
   if (circle) {
     return [
@@ -108,7 +139,7 @@ export function stepsFor(route: Route): readonly StepTemplate[] {
 
   const approves = route.steps.some((s) => s.kind === "approve-source");
   return [
-    ...(newAccount ? [settle, prepare] : []),
+    ...(newAccount ? (selfFunded ? [prepare] : [settle, prepare]) : []),
     ...(approves ? [approve] : []),
     send,
     {

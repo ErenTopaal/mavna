@@ -30,9 +30,22 @@ import {
   stepsFor,
   trackDelivery,
 } from "./rails";
+import type { SponsorTerms } from "./sponsor";
 import type { Connection } from "./wallet";
 
 export type StepPhase = "idle" | "blocked" | "pending" | "done" | "failed";
+
+/**
+ * The transfer is still on its way and this page has stopped watching it: it
+ * outlived the page's patience, or the page went away. Not a failure, and
+ * never shown as one: the money is in flight and Activity can finish it.
+ */
+export class StillMoving extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StillMoving";
+  }
+}
 
 /** A flight step row, shaped for the flight screen's markup. */
 export interface FlightRow {
@@ -93,8 +106,11 @@ function shortHash(hash: string): string {
  * `prepare-account` step, and the swap step only when it carries a `swap` step.
  * Which steps sit between them depends on the rail; see `stepsFor`.
  */
-export function buildSteps(view: RouteView): FlightStep[] {
-  return stepsFor(view.route).map((step) => ({ ...step, phase: "idle" }));
+export function buildSteps(
+  view: RouteView,
+  reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
+): FlightStep[] {
+  return stepsFor(view.route, reserveFunding).map((step) => ({ ...step, phase: "idle" }));
 }
 
 /** How the runner reports progress back to the flight screen. */
@@ -112,6 +128,7 @@ export type TransferEngine = Pick<
   | "sdex"
   | "rpc"
   | "usdcOnStellar"
+  | "sponsorTerms"
 >;
 
 export interface TransferDeps {
@@ -127,6 +144,8 @@ export interface TransferDeps {
   readonly onEvmEvent: (event: ExecutionEvent) => void;
   /** How the runner waits between polls. A test passes one that does not. */
   readonly wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** The clock the delivery watch measures its patience by. A test passes its own. */
+  readonly now?: () => number;
   /**
    * Aborted when the page goes away. It stops watching a relayed delivery, and
    * nothing else: the sponsor is still asked to take its repayment.
@@ -153,6 +172,24 @@ async function collectSettlement(
   const built = await engine.sponsor.requestSettlement(route.destination, chainId);
   const signed = await engine.stellar.sign(built.xdr, address);
   await engine.sponsor.commitSettlement(route.destination, signed);
+  return address;
+}
+
+/**
+ * Open the trustline from the account's own XLM, for a sponsor that does not
+ * front reserves. Nothing is lent, so nothing has to wait for the money: it
+ * goes first, and an account short of XLM hears so before anything is sent.
+ */
+async function prepareOwn(engine: TransferEngine, route: Route, chainId: string): Promise<string> {
+  const address = await engine.stellar.connect();
+  if (address !== route.destination) {
+    throw new Error(
+      "Only the owner of the receiving account can allow it to hold USDC. " +
+        "Connect that wallet, or send to an address that can already receive. " +
+        "Nothing has been sent.",
+    );
+  }
+  await prepareNow(engine, route, chainId, address);
   return address;
 }
 
@@ -230,10 +267,11 @@ async function deliverToStellar(
   route: Route,
   chainId: string,
   patch: Patch,
+  alreadyPrepared: boolean,
 ): Promise<void> {
   const domain = engine.sourceDomain(chainId);
   patch("attest", { phase: "pending" });
-  let prepared = false;
+  let prepared = alreadyPrepared;
   for (let attempt = 0; attempt < 90; attempt += 1) {
     const outcome = await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
     if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
@@ -265,7 +303,7 @@ async function deliverToStellar(
     }
     await new Promise((resolve) => setTimeout(resolve, 20_000));
   }
-  throw new Error(
+  throw new StillMoving(
     "Circle has not attested this transfer yet. Your funds are safe and this page " +
       "can finish the delivery later: find the transfer under Activity.",
   );
@@ -318,14 +356,20 @@ async function send(
   return sendHash;
 }
 
-/** Refuse a new account the sponsor cannot reach or cannot be repaid for. */
-async function assertSponsorable(engine: TransferEngine, route: Route): Promise<void> {
+/**
+ * Refuse a new account the sponsor cannot reach or cannot be repaid for, and
+ * learn who pays its reserve.
+ */
+async function assertSponsorable(engine: TransferEngine, route: Route): Promise<SponsorTerms> {
   const blocked = settlementBlocker(route, engine.usdcOnStellar.id);
   if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
-  if (!(await engine.sponsor.sponsorIsUp())) {
+  try {
+    return await engine.sponsorTerms();
+  } catch (cause) {
     throw new Error(
       "Setting up a new Stellar account needs the sponsor service, which is not " +
-        "reachable right now. Nothing has been sent.",
+        `reachable right now (${cause instanceof Error ? cause.message : String(cause)}). ` +
+        "Nothing has been sent.",
     );
   }
 }
@@ -340,18 +384,26 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   const route = view.route;
   const wait = deps.wait ?? sleep;
   let owner: string | undefined;
+  let selfFunded = false;
 
   const unready = await destinationBlocker(engine.rpc, route);
   if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
 
   if (view.newAccount) {
-    await assertSponsorable(engine, route);
-    patch("settle", { phase: "blocked" });
-    owner = await collectSettlement(engine, route, chainId);
-    patch("settle", { phase: "done" });
-    patch("prepare", { phase: "blocked" });
-    await prepareNow(engine, route, chainId, owner);
-    patch("prepare", { phase: "done" });
+    const terms = await assertSponsorable(engine, route);
+    if (terms.reserveFunding === "self") {
+      patch("prepare", { phase: "blocked" });
+      owner = await prepareOwn(engine, route, chainId);
+      patch("prepare", { phase: "done" });
+      selfFunded = true;
+    } else {
+      patch("settle", { phase: "blocked" });
+      owner = await collectSettlement(engine, route, chainId);
+      patch("settle", { phase: "done" });
+      patch("prepare", { phase: "blocked" });
+      await prepareNow(engine, route, chainId, owner);
+      patch("prepare", { phase: "done" });
+    }
   }
 
   const sendHash = await send(deps, adapter, route);
@@ -365,11 +417,12 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   };
   const tracked = await trackDelivery(adapter, handle, patch, {
     wait,
+    ...(deps.now === undefined ? {} : { now: deps.now }),
     ...(deps.signal === undefined ? {} : { signal: deps.signal }),
   });
-  if (tracked.outcome === "stopped") throw new Error(STOPPED_WATCHING);
+  if (tracked.outcome === "stopped") throw new StillMoving(STOPPED_WATCHING);
   if (tracked.outcome === "timed-out") {
-    throw new Error(
+    throw new StillMoving(
       tracked.error === undefined
         ? STILL_MOVING
         : `${STILL_MOVING} The last check failed: ${tracked.error}`,
@@ -377,7 +430,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
   }
   if (tracked.phase.phase !== "done") throw new Error(endedNote(tracked.phase));
 
-  if (owner !== undefined) {
+  if (owner !== undefined && !selfFunded) {
     // The funds are on Stellar whatever the sponsor says next, so nothing here
     // can fail the transfer; it can only change what the deliver step says.
     let note: string;
@@ -405,15 +458,23 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   let owner: string | undefined;
 
   if (adapter.id === "cctp") {
+    let prepared = false;
     if (view.newAccount) {
-      await assertSponsorable(engine, route);
-      patch("settle", { phase: "blocked" });
-      owner = await collectSettlement(engine, route, chainId);
-      patch("settle", { phase: "done" });
+      const terms = await assertSponsorable(engine, route);
+      if (terms.reserveFunding === "self") {
+        patch("prepare", { phase: "blocked" });
+        owner = await prepareOwn(engine, route, chainId);
+        patch("prepare", { phase: "done" });
+        prepared = true;
+      } else {
+        patch("settle", { phase: "blocked" });
+        owner = await collectSettlement(engine, route, chainId);
+        patch("settle", { phase: "done" });
+      }
     }
     const burnHash = await send(deps, adapter, route);
     if (burnHash !== undefined) {
-      await deliverToStellar(engine, burnHash, owner, route, chainId, patch);
+      await deliverToStellar(engine, burnHash, owner, route, chainId, patch, prepared);
     }
   } else {
     owner = await runRelayed(deps, adapter);

@@ -4,10 +4,12 @@ import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
+import { StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
 // runTransfer() are the system under test; nothing here is mounted.
 const engine = {
+  network: "testnet",
   defaultSourceChain: "arbitrum-sepolia",
   ranking: "best-received",
   historyKey: "test.transfers",
@@ -40,5 +42,58 @@ describe("Flow.start", () => {
     await flow.runTransfer(view, { kind: "other", name: "Somewhere", family: "move" });
     flow.start();
     expect(started()).toBe(2);
+  });
+});
+
+describe("Flow.endWith", () => {
+  it("tells the host a transfer it stopped watching is still moving, not that it failed", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = new Flow({ engine, emit: (event) => events.push(event) });
+    flow.endWith(new StillMoving("Taking longer than this page waits."));
+    expect(events).toEqual([
+      { type: "transferStillMoving", reason: "Taking longer than this page waits." },
+    ]);
+  });
+
+  it("tells the host anything else failed", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = new Flow({ engine, emit: (event) => events.push(event) });
+    flow.endWith(new Error("The network refused it."));
+    expect(events).toEqual([{ type: "transferFailed", reason: "The network refused it." }]);
+  });
+});
+
+describe("Flow.setNetwork", () => {
+  it("asks the host to switch to a network it offers", () => {
+    const asked: string[] = [];
+    const flow = new Flow({
+      engine,
+      networks: ["testnet", "mainnet"],
+      onNetworkChange: (network) => asked.push(network),
+    });
+    flow.setNetwork("mainnet");
+    expect(asked).toEqual(["mainnet"]);
+  });
+
+  it("does nothing for a network it does not offer, or the one it is on", () => {
+    const asked: string[] = [];
+    const flow = new Flow({ engine, onNetworkChange: (network) => asked.push(network) });
+    flow.setNetwork("mainnet");
+    flow.setNetwork("testnet");
+    expect(asked).toEqual([]);
+  });
+
+  it("does not switch while a transfer is running", () => {
+    const asked: string[] = [];
+    const flow = new Flow({
+      engine,
+      networks: ["testnet", "mainnet"],
+      onNetworkChange: (network) => asked.push(network),
+    });
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, routes: [view], selected: view.id };
+    flow.start();
+    flow.setNetwork("mainnet");
+    expect(asked).toEqual([]);
   });
 });

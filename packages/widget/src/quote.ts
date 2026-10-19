@@ -17,8 +17,11 @@ import {
   type TrustModel,
 } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
+import { inspectDestination } from "@mavna/stellar";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { amountValue, fromBaseUnits, toBaseUnits } from "./format";
+import type { SponsorTerms } from "./sponsor";
 
 /** USDC carries six decimals on every source chain the rails start from. */
 const USDC_DECIMALS_ON_EVM = 6;
@@ -210,6 +213,132 @@ export function declineUnsettleable(set: RouteSet, usdcId: string): RouteSet {
   return { routes, rejected, complete: set.complete };
 }
 
+/** What quoting learned about the sponsor and the destination, once per quote. */
+export interface SponsorCheck {
+  /** The network this page runs on, which the sponsor must run on too. */
+  readonly network: string;
+  /** The sponsor's terms, or why they could not be read. */
+  readonly terms: SponsorTerms | Error;
+  /**
+   * Whether the destination account exists. Only looked up when accounts fund
+   * their own reserve, since that is the only case it changes; an error when
+   * the lookup failed.
+   */
+  readonly destination: "exists" | "missing" | Error;
+}
+
+const message = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
+
+/**
+ * Why the sponsor cannot carry this route, or undefined when it can.
+ *
+ * Two kinds of route lean on the sponsor: a Circle transfer, which the sponsor
+ * delivers on Stellar at its own cost, and a route that sets an account up. A
+ * route that does neither never touches it and is never held to its terms.
+ */
+function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | undefined {
+  const circle = route.source === "cctp";
+  const setsUp = route.steps.some((s) => s.kind === "prepare-account");
+  if (!circle && !setsUp) return undefined;
+  const decline = (reason: RouteRejection["reason"], explanation: string): RouteRejection => ({
+    source: route.source,
+    reason,
+    explanation,
+    retryable: rejectionIsRetryable(reason),
+  });
+
+  const { terms } = check;
+  if (terms instanceof Error) {
+    return decline(
+      "temporarily-unavailable",
+      `This route needs the sponsor service, which could not be asked just now: ${message(terms)}`,
+    );
+  }
+  if (terms.network !== check.network) {
+    return decline(
+      "chain-unsupported",
+      `The sponsor this page is set up with runs on ${terms.network}, and this page runs on ` +
+        `${check.network}, so it cannot carry this route.`,
+    );
+  }
+
+  if (setsUp && terms.reserveFunding === "self") {
+    if (check.destination instanceof Error) {
+      return decline(
+        "temporarily-unavailable",
+        `Whether the receiving account exists could not be checked: ${message(check.destination)}`,
+      );
+    }
+    if (check.destination === "missing") {
+      return decline(
+        "destination-unsupported",
+        "That Stellar account does not exist yet, and right now an account pays its own " +
+          "reserve, which an address with nothing in it cannot do. Send it at least 1.5 XLM " +
+          "first (1 to exist, 0.5 to hold USDC), or send to an account that already exists.",
+      );
+    }
+  }
+
+  if (circle && terms.minDeliveryBaseUnits > 0n) {
+    // What the sponsor will see minted: what is sent less Circle's fee, in the
+    // source token's units, against a minimum stated at six decimals.
+    const decimals = route.sends.asset.decimals;
+    const scale = (units: bigint): bigint =>
+      decimals >= 6 ? units * 10n ** BigInt(decimals - 6) : units / 10n ** BigInt(6 - decimals);
+    const fee = route.fees.find((f) => f.kind === "bridge")?.total.baseUnits ?? "0";
+    const minted = BigInt(route.sends.baseUnits) - BigInt(fee);
+    if (minted < scale(terms.minDeliveryBaseUnits)) {
+      const minimum = fromBaseUnits(terms.minDeliveryBaseUnits.toString(), 6);
+      return decline(
+        "amount-too-small",
+        `The sponsor delivers Circle transfers that arrive as at least ${minimum} USDC, ` +
+          "since delivering costs it the same whatever the amount. Send a little more.",
+      );
+    }
+  }
+  return undefined;
+}
+
+/** Move the routes the sponsor cannot carry into the declines, with the reason. */
+export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet {
+  const routes: Route[] = [];
+  const rejected: RouteRejection[] = [...set.rejected];
+  for (const route of set.routes) {
+    const blocked = sponsorBlocker(route, check);
+    if (blocked === undefined) routes.push(route);
+    else rejected.push(blocked);
+  }
+  return { routes, rejected, complete: set.complete };
+}
+
+/** Ask the sponsor for its terms, and the network for the destination if they need it. */
+async function checkSponsor(
+  engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms">,
+  destination: string,
+): Promise<SponsorCheck> {
+  let terms: SponsorTerms | Error;
+  try {
+    terms = await engine.sponsorTerms();
+  } catch (cause) {
+    terms = cause instanceof Error ? cause : new Error(String(cause));
+  }
+  let found: SponsorCheck["destination"] = "exists";
+  if (!(terms instanceof Error) && terms.reserveFunding === "self") {
+    try {
+      const state = await inspectDestination(
+        engine.rpc,
+        destination,
+        new StellarAsset("USDC", engine.usdcIssuer),
+      );
+      found = state.lane.kind === "needs-account" ? "missing" : "exists";
+    } catch (cause) {
+      found = cause instanceof Error ? cause : new Error(String(cause));
+    }
+  }
+  return { network: engine.network, terms, destination: found };
+}
+
 export interface QuoteRun {
   cancel(): void;
 }
@@ -229,10 +358,15 @@ export function runQuote(
     | "breaker"
     | "xlmSwap"
     | "integratorFee"
+    | "rpc"
+    | "usdcIssuer"
+    | "sponsorTerms"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,
   onDone: (set: RouteSet) => void,
+  /** Told what the sponsor said, before any route arrives. */
+  onSponsor?: (check: SponsorCheck) => void,
 ): QuoteRun {
   let live = true;
   const amountBase = toBaseUnits(inputs.amount, USDC_DECIMALS_ON_EVM);
@@ -277,39 +411,50 @@ export function runQuote(
   }
   const { from, to } = assets;
   const usdc = engine.usdcOnStellar.id;
+  const destination = inputs.destination.trim();
 
-  void raceAdapters(
-    adapters,
-    {
-      from,
-      to,
-      sends: { asset: from, baseUnits: amountBase },
-      destination: inputs.destination.trim(),
-      maxSlippageBps: 50,
-    },
-    {
-      onUpdate: (partial) => {
-        if (live) onUpdate(declineUnsettleable(partial, usdc));
+  // The sponsor's terms come first, so no route it cannot carry is ever shown
+  // and then taken back. They are cached on the engine after the first answer.
+  void checkSponsor(engine, destination)
+    .then((check) => {
+      if (!live) return undefined;
+      onSponsor?.(check);
+      const settle = (set: RouteSet): RouteSet =>
+        applySponsorTerms(declineUnsettleable(set, usdc), check);
+      return raceAdapters(
+        adapters,
+        {
+          from,
+          to,
+          sends: { asset: from, baseUnits: amountBase },
+          destination,
+          maxSlippageBps: 50,
+        },
+        {
+          onUpdate: (partial) => {
+            if (live) onUpdate(settle(partial));
+          },
+          breaker: engine.breaker,
+          swap: inputs.wanted === "XLM" ? engine.xlmSwap : undefined,
+          ranking: inputs.priority === "fast" ? "fastest" : "best-received",
+          // No transaction builder pays a fee out yet, so nothing may be shown as
+          // taken. Revisit when a collector exists for a route.
+          integratorFee:
+            engine.integratorFee === undefined
+              ? undefined
+              : { ...engine.integratorFee, collects: () => false },
+        },
+      ).then((final) => settle(final));
+    })
+    .then(
+      (final) => {
+        if (live && final !== undefined) onDone(final);
       },
-      breaker: engine.breaker,
-      swap: inputs.wanted === "XLM" ? engine.xlmSwap : undefined,
-      ranking: inputs.priority === "fast" ? "fastest" : "best-received",
-      // No transaction builder pays a fee out yet, so nothing may be shown as
-      // taken. Revisit when a collector exists for a route.
-      integratorFee:
-        engine.integratorFee === undefined
-          ? undefined
-          : { ...engine.integratorFee, collects: () => false },
-    },
-  ).then(
-    (final) => {
-      if (live) onDone(declineUnsettleable(final, usdc));
-    },
-    () => {
-      // A total failure still resolves to a complete, empty set for the UI.
-      if (live) onDone({ routes: [], rejected: [], complete: true });
-    },
-  );
+      () => {
+        // A total failure still resolves to a complete, empty set for the UI.
+        if (live) onDone({ routes: [], rejected: [], complete: true });
+      },
+    );
 
   return handle;
 }

@@ -1,3 +1,4 @@
+import type { NetworkId } from "@mavna/core";
 import {
   type CSSProperties,
   type ForwardRefExoticComponent,
@@ -53,7 +54,12 @@ export const MavnaWidget: ForwardRefExoticComponent<
   { config, open, onClose },
   ref,
 ): ReactElement {
-  const resolved = useMemo(() => resolveConfig(config), [config]);
+  // The network the user switched to, if any. A host that changes the
+  // configured network starts the widget over on that one.
+  const [active, setActive] = useState<NetworkId | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new configured network resets the choice.
+  useEffect(() => setActive(undefined), [config.network]);
+  const resolved = useMemo(() => resolveConfig(config, active), [config, active]);
   const ec = resolved.engineConfig;
   const engineKey = [
     ec.network,
@@ -126,6 +132,8 @@ export const MavnaWidget: ForwardRefExoticComponent<
     menuLinks: resolved.menuLinks,
     walletConfig: resolved.walletConfig,
     emit: resolved.onEvent,
+    networks: resolved.networks,
+    onNetworkChange: setActive,
   } as const;
 
   if (resolved.variant === "drawer") {
@@ -140,14 +148,18 @@ export const MavnaWidget: ForwardRefExoticComponent<
         themeAttr={themeAttr}
         themeStyle={themeStyle}
       >
-        <Flow {...flowProps} variant="compact" />
+        <Flow key={engine.network} {...flowProps} variant="compact" />
       </DrawerChrome>
     );
   }
 
   return (
     <div className="mv-root" data-mv-theme={themeAttr} style={themeStyle}>
-      <Flow {...flowProps} variant={resolved.variant === "compact" ? "compact" : "wide"} />
+      <Flow
+        key={engine.network}
+        {...flowProps}
+        variant={resolved.variant === "compact" ? "compact" : "wide"}
+      />
     </div>
   );
 });

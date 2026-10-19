@@ -16,7 +16,7 @@ import {
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
-import { createSponsorClient, type SponsorClient } from "./sponsor.js";
+import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
 
 /**
@@ -101,6 +101,11 @@ export interface Engine {
   sourceChainDetail(chainId: string): SourceDetail;
   /** The USDC contract address on a source chain, for reading a balance. */
   sourceUsdc(chainId: string): string | undefined;
+  /**
+   * The sponsor's terms, asked once and kept. A failed ask is not kept, so the
+   * next quote asks again rather than repeating an outage forever.
+   */
+  sponsorTerms(): Promise<SponsorTerms>;
 }
 
 const STELLAR_USDC_ISSUER: Readonly<Record<NetworkId, string>> = {
@@ -199,6 +204,9 @@ export function createEngine(config: EngineConfig): Engine {
       ? allAdapters
       : allAdapters.filter((a) => config.rails?.some((r) => railToSource[r] === a.id));
 
+  const sponsor = createSponsorClient(config.sponsorUrl);
+  let terms: Promise<SponsorTerms> | undefined;
+
   return {
     network,
     rpc,
@@ -214,7 +222,7 @@ export function createEngine(config: EngineConfig): Engine {
     defaultSourceChain,
     ranking: config.ranking,
     integratorFee: config.integratorFee,
-    sponsor: createSponsorClient(config.sponsorUrl),
+    sponsor,
     // A host can bring its own Stellar signer; otherwise the built-in wallet kit.
     stellar: config.stellar ?? createStellarWallet(network),
     historyKey: config.historyKey,
@@ -238,6 +246,13 @@ export function createEngine(config: EngineConfig): Engine {
     },
     sourceUsdc(chainId) {
       return EVM_DEPLOYMENTS[network][chainId]?.usdc;
+    },
+    sponsorTerms() {
+      terms ??= sponsor.terms().catch((cause: unknown) => {
+        terms = undefined;
+        throw cause;
+      });
+      return terms;
     },
   };
 }
