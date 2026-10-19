@@ -13,13 +13,21 @@ import type { SendParam } from "./oft.js";
 // for an OFT, crediting native XLM. Ledger entries are recorded from testnet;
 // the EVM side (Discovery's reads) and the venue are the network boundaries
 // replaced here.
-const ARRIVAL = "CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252";
+const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
 const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const SENDER = "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB";
 const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const USDC_SAC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 const READY = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
 const NO_TRUSTLINE = "GDD7P7D5QG76BS4UNHTGCL4UOIHKASZFKPDP3TQ4GTA7JORM6TYEOK4Y";
+// on the testnet contract's path list, but not a wanted asset
+const AQUA = "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE";
+// a testnet token on neither list (an arbitrary custom token Aquarius routes through)
+const STRANGER = "CC52SIPHNMTBMHSBYTUI3R53PPMBGTEOJ566GFMSREBFA3KVJ4MY7OBT";
+const OFF_LIST = [
+  { tokens: [XLM_SAC, STRANGER], poolIndex: "07".repeat(32), tokenOut: STRANGER },
+  { tokens: [STRANGER, USDC_SAC], poolIndex: "08".repeat(32), tokenOut: USDC_SAC },
+];
 
 // USDT0's Arbitrum OFT, enforcedOptions(30600, 2) and (30600, 1), read 2026-10-19
 const SEND_AND_CALL =
@@ -274,6 +282,34 @@ describe("a compose route", () => {
     expect((result as RouteRejection).explanation).toMatch(/lzComposeGas/);
   });
 
+  it("is refused for a wanted asset the contract does not convert into", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, {
+      ...request(),
+      to: { ...usdc, id: "AQUA:GAHPYWLK6YRN7CVYZOO4H3VDRZ7PVF5UJGLZCSPAEIKJE2XSWF5LAGER" },
+      wantedContract: AQUA,
+    });
+    expect(result).toMatchObject({ reason: "asset-unsupported" });
+    expect((result as RouteRejection).explanation).toMatch(/does not convert into/);
+  });
+
+  it("is refused when the venue's path runs through a token off the contract's list", async () => {
+    const { ctx } = context({
+      venue: {
+        id: "aquarius",
+        quotePath: async () => ({
+          provider: "aquarius",
+          amountOut: "1000000",
+          amountOutMinimum: "990000",
+          path: OFF_LIST,
+        }),
+      },
+    });
+    const result = await quoteComposeRoute(ctx, request());
+    expect(result).toMatchObject({ reason: "no-liquidity" });
+    expect((result as RouteRejection).explanation).toMatch(/does not use/);
+  });
+
   it("says when there is no liquidity to convert", async () => {
     const { ctx } = context({
       venue: {
@@ -307,6 +343,9 @@ describe("building a compose send", () => {
         resolved,
       ),
     ).rejects.toThrow(/not the Arrival Contract/);
+    await expect(
+      composeSendFor(ctx, { ...route, compose: { ...route.compose, path: OFF_LIST } }, resolved),
+    ).rejects.toThrow(/would not convert/);
     const built = await composeSendFor(ctx, { ...route, compose: route.compose }, resolved);
     expect(built.to).toBe(ARRIVAL);
     expect(built.extraOptions).toBe("0x");

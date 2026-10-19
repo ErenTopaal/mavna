@@ -6,6 +6,7 @@ import asCame from "./__fixtures__/arrival-event-as-came-testnet.json" with { ty
 import converted from "./__fixtures__/arrival-event-converted-testnet.json" with { type: "json" };
 import {
   arrivalAccepts,
+  arrivalConverts,
   arrivalRecipientOf,
   arrivalWantedOf,
   composeExtraOptions,
@@ -20,7 +21,7 @@ import {
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const RECIPIENT = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
-const ARRIVAL = "CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252";
+const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
 // the vector below was written with the first testnet id as fee recipient
 const VECTOR_FEE_TO = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
 
@@ -156,6 +157,8 @@ describe("the contract's allowlist", () => {
     endpoint: "CENDPOINT",
     router: "CROUTER",
     ofts: [["COFT", "CTOKEN"]] as const,
+    wanted: ["CWANT"],
+    pathTokens: ["CVIA"],
   };
   it("accepts only an allowlisted OFT and token on the same endpoint", () => {
     expect(arrivalAccepts(config, { oft: "COFT", token: "CTOKEN", endpoint: "CENDPOINT" })).toBe(
@@ -169,6 +172,25 @@ describe("the contract's allowlist", () => {
     );
     expect(arrivalAccepts(config, { oft: "COFT", token: "CTOKEN", endpoint: "COLD" })).toBe(false);
   });
+
+  it("converts only into listed assets, through listed tokens, within the caps", () => {
+    const hop = (a: string, b: string) => ({ tokens: [a, b], tokenOut: b });
+    expect(arrivalConverts(config, "CTOKEN", "CWANT", [hop("CTOKEN", "CWANT")])).toBe(true);
+    expect(
+      arrivalConverts(config, "CTOKEN", "CWANT", [hop("CTOKEN", "CVIA"), hop("CVIA", "CWANT")]),
+    ).toBe(true);
+    expect(arrivalConverts(config, "CTOKEN", "CEVIL", [hop("CTOKEN", "CEVIL")])).toBe(false);
+    expect(
+      arrivalConverts(config, "CTOKEN", "CWANT", [hop("CTOKEN", "CEVIL"), hop("CEVIL", "CWANT")]),
+    ).toBe(false);
+    expect(
+      arrivalConverts(config, "CTOKEN", "CWANT", [
+        { tokens: ["CTOKEN", "CVIA", "CWANT", "CVIA"], tokenOut: "CWANT" },
+      ]),
+    ).toBe(false);
+    const five = [1, 2, 3, 4, 5].map(() => hop("CTOKEN", "CWANT"));
+    expect(arrivalConverts(config, "CTOKEN", "CWANT", five)).toBe(false);
+  });
 });
 
 describe("proof of arrival from the contract's own event", () => {
@@ -176,7 +198,7 @@ describe("proof of arrival from the contract's own event", () => {
     vi.restoreAllMocks();
   });
 
-  // recorded from testnet: CBSWBSEL..., the harness runs in the arrival report
+  // recorded from testnet: CD5M6IBU..., the harness runs in the arrival report
   const client = (events: { result: { events: unknown[]; latestLedger: number } }) => {
     const c = new RpcClient({ url: "https://rpc.invalid" });
     vi.spyOn(c.server, "getHealth").mockResolvedValue({
@@ -195,17 +217,17 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(converted),
       ARRIVAL,
-      "5e10ae34a80c088f29a7a7c9efe8d64f5a24a1ef2f46834403e59b534df0ebcc",
-      5_281_548,
+      "517eee98d207b5d27c37496b9d8c37eb8f6361c39926e854f9743112be763657",
+      5_283_546,
     );
     expect(event).toMatchObject({
       outcome: "converted",
       recipient: RECIPIENT,
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-      amount: 719_684_384n,
+      amount: 54_073_737n,
       fee: 0n,
       arrivedAmount: 100_000_000n,
-      txHash: "f465283c233bc4f245b2f251bc421c6a3e00ac5e096dabe7b9f0930cc0b2a306",
+      txHash: "f11ebdf24b7451d8dac44c71e0e9d9f5ed3e19597c1ca781a1f0a3ff5621f13c",
     });
   });
 
@@ -213,8 +235,8 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(asCame),
       ARRIVAL,
-      "4da45bffcf9b3338763a2d45f767683d3a18a527499d87704e64fbd8895e7a40",
-      5_281_557,
+      "a765d836d335bf87b9f833220c2dd432290f1417111205389223a6c7dbe357e9",
+      5_283_554,
     );
     expect(event).toMatchObject({
       outcome: "as_came",

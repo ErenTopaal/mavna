@@ -15,7 +15,9 @@ import { amountOf, MavnaError } from "@mavna/core";
 import { AccountNotFound, inspectDestination, type RpcClient } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import {
+  type ArrivalConfig,
   arrivalAccepts,
+  arrivalConverts,
   COMPOSE_RECEIVED,
   composeExtraOptions,
   composeMessageHash,
@@ -176,7 +178,7 @@ export async function assertArrivalServes(
   ctx: ComposeContext,
   contract: string,
   route: ResolvedRoute,
-): Promise<void> {
+): Promise<ArrivalConfig> {
   if (contract !== ctx.arrival.contract) {
     throw new MavnaError(
       `${contract} is not the Arrival Contract this app sends to, so nothing will be built for it.`,
@@ -197,6 +199,7 @@ export async function assertArrivalServes(
       { retryable: false },
     );
   }
+  return config;
 }
 
 export async function quoteComposeRoute(
@@ -235,8 +238,9 @@ export async function quoteComposeRoute(
   }
 
   let options: `0x${string}`;
+  let config: ArrivalConfig;
   try {
-    await assertArrivalServes(ctx, ctx.arrival.contract, resolved);
+    config = await assertArrivalServes(ctx, ctx.arrival.contract, resolved);
     options = await composeOptionsFor(ctx, resolved);
   } catch (cause) {
     return ctx.decline(
@@ -244,6 +248,14 @@ export async function quoteComposeRoute(
         ? "temporarily-unavailable"
         : "asset-unsupported",
       cause instanceof MavnaError ? cause.message : "The Arrival Contract could not be read.",
+    );
+  }
+
+  if (!config.wanted.includes(request.wantedContract)) {
+    return ctx.decline(
+      "asset-unsupported",
+      `The Arrival Contract on this network does not convert into ${wanted.symbol}. The plain ` +
+        "route still delivers what arrives.",
     );
   }
 
@@ -299,6 +311,14 @@ export async function quoteComposeRoute(
       "no-liquidity",
       `There is no way to convert ${arriving.symbol} into ${wanted.symbol} on arrival right now.` +
         (cause instanceof MavnaError ? ` ${cause.message}` : ""),
+    );
+  }
+
+  if (!arrivalConverts(config, request.arrivingContract, request.wantedContract, venue.path)) {
+    return ctx.decline(
+      "no-liquidity",
+      `The only way to convert ${arriving.symbol} into ${wanted.symbol} right now passes ` +
+        "through pools the Arrival Contract does not use. The plain route still delivers it.",
     );
   }
 
@@ -418,7 +438,20 @@ export async function composeSendFor(
   readonly extraOptions: `0x${string}`;
 }> {
   // a route is data the caller hands back, so what it names is checked again
-  await assertArrivalServes(ctx, route.compose.contract, resolved);
+  const config = await assertArrivalServes(ctx, route.compose.contract, resolved);
+  if (
+    !arrivalConverts(
+      config,
+      route.compose.arrivingContract,
+      route.compose.wantedContract,
+      route.compose.path,
+    )
+  ) {
+    throw new MavnaError(
+      "The Arrival Contract would not convert along this route's path, so it is not sent.",
+      { retryable: false },
+    );
+  }
   if (route.compose.arrivingContract !== resolved.stellar.token) {
     throw new MavnaError(
       "This route's conversion starts from a token the route does not deliver.",

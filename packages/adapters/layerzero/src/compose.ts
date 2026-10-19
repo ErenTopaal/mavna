@@ -36,6 +36,10 @@ const MESSAGE_VERSION = 1;
 const KIND_ACCOUNT = 0;
 const KIND_CONTRACT = 1;
 
+/** The longest path the contract converts along, and the most tokens per hop. */
+export const MAX_HOPS = 4;
+export const MAX_HOP_TOKENS = 3;
+
 /** What the endpoint leaves in a compose slot once it has been run. */
 export const COMPOSE_RECEIVED: `0x${string}` = `0x${"00".repeat(31)}01`;
 
@@ -87,8 +91,8 @@ export function encodeArrivalMessage(recipient: string, compose: ComposeArrival)
   // with no fee the contract never pays the fee recipient, so the recipient
   // stands in rather than an address nobody chose
   const feeTo = addressBytes(compose.fee?.recipient ?? recipient);
-  if (compose.path.length === 0 || compose.path.length > 255) {
-    throw new MavnaError("A conversion needs between one and 255 pool hops.", {
+  if (compose.path.length === 0 || compose.path.length > MAX_HOPS) {
+    throw new MavnaError(`A conversion needs between one and ${MAX_HOPS} pool hops.`, {
       retryable: false,
     });
   }
@@ -110,7 +114,11 @@ export function encodeArrivalMessage(recipient: string, compose: ComposeArrival)
     ),
   ];
   for (const hop of compose.path) {
-    if (hop.tokens.length < 2 || hop.tokens.length > 255 || !/^[0-9a-f]{64}$/.test(hop.poolIndex)) {
+    if (
+      hop.tokens.length < 2 ||
+      hop.tokens.length > MAX_HOP_TOKENS ||
+      !/^[0-9a-f]{64}$/.test(hop.poolIndex)
+    ) {
       throw new MavnaError("A pool hop in this conversion is not one the venue can run.", {
         retryable: false,
       });
@@ -255,6 +263,10 @@ export interface ArrivalConfig {
   readonly endpoint: string;
   readonly router: string;
   readonly ofts: readonly (readonly [oft: string, token: string])[];
+  /** What it converts into. */
+  readonly wanted: readonly string[];
+  /** What else a path may pass through. */
+  readonly pathTokens: readonly string[];
 }
 
 /**
@@ -289,10 +301,16 @@ export async function readArrivalConfig(
       endpoint?: unknown;
       router?: unknown;
       ofts?: unknown;
+      wanted?: unknown;
+      path_tokens?: unknown;
     };
+    const strings = (v: unknown): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === "string");
     if (
       typeof config.endpoint === "string" &&
       typeof config.router === "string" &&
+      strings(config.wanted) &&
+      strings(config.path_tokens) &&
       Array.isArray(config.ofts) &&
       config.ofts.every(
         (pair: unknown) =>
@@ -303,6 +321,8 @@ export async function readArrivalConfig(
         endpoint: config.endpoint,
         router: config.router,
         ofts: (config.ofts as [string, string][]).map(([oft, token]) => [oft, token] as const),
+        wanted: config.wanted,
+        pathTokens: config.path_tokens,
       };
     }
   }
@@ -319,6 +339,27 @@ export function arrivalAccepts(
   return (
     config.endpoint === stellar.endpoint &&
     config.ofts.some(([oft, token]) => oft === stellar.oft && token === stellar.token)
+  );
+}
+
+/**
+ * Whether the contract will convert along this path: the wanted asset and every
+ * token a hop touches are on the lists it was built with, and the path is within
+ * its caps. Anything else it delivers as it came, so no route is offered for it.
+ */
+export function arrivalConverts(
+  config: ArrivalConfig,
+  arriving: string,
+  wanted: string,
+  path: readonly { readonly tokens: readonly string[]; readonly tokenOut: string }[],
+): boolean {
+  if (!config.wanted.includes(wanted)) return false;
+  if (path.length === 0 || path.length > MAX_HOPS) return false;
+  const allowed = (t: string): boolean =>
+    t === arriving || config.wanted.includes(t) || config.pathTokens.includes(t);
+  return path.every(
+    (hop) =>
+      hop.tokens.length <= MAX_HOP_TOKENS && allowed(hop.tokenOut) && hop.tokens.every(allowed),
   );
 }
 
