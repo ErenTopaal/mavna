@@ -1,3 +1,4 @@
+import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
@@ -28,12 +29,14 @@ const HISTORY_KEY = "test.transfers";
 let log: string[];
 let stored: Map<string, string>;
 let settleReplies: Array<[number, unknown]>;
+let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 
 beforeEach(() => {
   log = [];
   lane = "ready";
+  deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -61,6 +64,11 @@ beforeEach(() => {
       case "/submit":
         expect(JSON.parse(String(init?.body))).toEqual({ signedXdr: "signed PREPARATION" });
         return reply(200, { txHash: "9e9", ledger: 1 });
+      case "/deliver": {
+        const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
+        if (next === undefined) throw new Error("no deliver reply scripted");
+        return reply(next[0], next[1]);
+      }
       case "/settle": {
         const next = settleReplies.length > 1 ? settleReplies.shift() : settleReplies[0];
         if (next === undefined) throw new Error("no settle reply scripted");
@@ -147,7 +155,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
 }
 
 /** The EVM wallet, at its boundary: it signs, the node answers. */
-function connection(options: { reject?: boolean } = {}): Connection {
+function connection(options: { reject?: boolean; allowance?: bigint } = {}): Connection {
   return {
     address: SENDER,
     chainId: ARBITRUM_SEPOLIA,
@@ -160,6 +168,10 @@ function connection(options: { reject?: boolean } = {}): Connection {
     },
     reader: {
       getBalance: async () => 10n ** 18n,
+      readContract: async (call: { functionName: string }) => {
+        log.push(`evm read ${call.functionName}`);
+        return call.functionName === "allowance" ? (options.allowance ?? 0n) : 10n ** 12n;
+      },
       waitForTransactionReceipt: async () => ({ status: "success" }),
     },
   } as unknown as Connection;
@@ -316,5 +328,62 @@ describe("runTransfer over a relayed rail", () => {
     await expect(
       run(adapter, routeFor("layerzero"), patches().patch, connection({ reject: true })),
     ).rejects.toThrow("You did not confirm the transfer, so nothing was sent.");
+  });
+});
+
+describe("runTransfer over Circle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("settles, approves, burns, records, then asks for delivery until it lands, preparing the account when told to", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true }],
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9, settled: true }],
+    ];
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const { seen, patch } = patches();
+
+    const done = run(cctp, routeFor("cctp", { newAccount: true }), patch);
+    // the first ask finds no attestation, and the next waits twenty seconds
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await done;
+
+    expect(log).toEqual([
+      "sponsor /health",
+      "stellar connect",
+      "sponsor /settlement",
+      "stellar sign SETTLEMENT",
+      "sponsor /settlement/commit",
+      "evm read balanceOf",
+      "evm read allowance",
+      "evm approve value=undefined",
+      "evm depositForBurnWithHook value=undefined",
+      `history ${SEND_HASH}`,
+      "sponsor /deliver",
+      "sponsor /deliver",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "sponsor /deliver",
+      "deliver done",
+    ]);
+    expect(seen.at(-1)).toEqual({
+      id: "deliver",
+      patch: {
+        phase: "done",
+        ref: "d311",
+        refUrl: "https://stellar.expert/explorer/testnet/tx/d311",
+        note: "Delivered, and the deposit repaid itself from the arrival.",
+      },
+    });
   });
 });
