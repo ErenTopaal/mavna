@@ -24,6 +24,21 @@ has deployed its own OFT names it to the adapter and quotes over it. Each chain 
 the list is only a candidate: every quote re-derives the endpoint, the OFT, the
 peer, and the verifier set from the chain and declines when anything is missing.
 
+`sendableAssets(chainId)` answers what a quote request should name, from the
+deployment rather than from a symbol:
+
+```ts
+const { from, to } = await layerzero.sendableAssets("arbitrum");
+// from.id: the token the chain's OFT moves, from its own token()
+// to.id:   "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q"
+```
+
+The Stellar side is read from the token the Stellar OFT credits. When that token is
+a Stellar asset contract, its `AssetInfo` storage gives the code and issuer, and the
+adapter checks that this asset derives the contract's own address before using it.
+Routes and delivered status are labelled with that classic asset. A token with no
+code and issuer is refused by `sendableAssets` with the reason.
+
 ## Who could lie to you
 
 The verifier set is the answer to "who could lie to you," so the adapter refuses to

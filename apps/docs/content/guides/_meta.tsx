@@ -3,6 +3,7 @@ import { nav } from "../../components/nav-icons";
 export default {
   index: { title: nav("guide-start", "Your first transfer") },
   send: { title: nav("send", "Send USDC to Stellar") },
+  "send-usdt0": { title: nav("send", "Send USDT0 to Stellar") },
   "receive-xlm": { title: nav("receive", "Arrive as XLM") },
   "new-account": { title: nav("new-account", "Send to a new address") },
   track: { title: nav("track", "Find a transfer") },
