@@ -1,4 +1,5 @@
-import { MavnaError, type NetworkId } from "@mavna/core";
+import { type ComposeHop, MavnaError, type NetworkId } from "@mavna/core";
+import { Address, xdr } from "@stellar/stellar-sdk";
 import {
   applySlippage,
   type SwapProvider,
@@ -118,6 +119,36 @@ export class AquariusProvider implements SwapProvider {
       raw: body,
     };
   }
+
+  /**
+   * The same quote with the route as hops, for a contract that calls the router
+   * itself (the Arrival Contract). The hops are checked to start from what is
+   * sold and end in what is bought, so a chain for some other pair is refused.
+   */
+  async quotePath(request: Omit<SwapQuoteRequest, "destinationKind">): Promise<PathQuote> {
+    const quote = await this.quote({ ...request, destinationKind: "contract" });
+    const path = decodeSwapChain((quote.raw as FindPathResponse).swap_chain_xdr);
+    let holding = request.assetIn;
+    for (const hop of path) {
+      if (!hop.tokens.includes(holding) || !hop.tokens.includes(hop.tokenOut)) {
+        throw new MavnaError("Aquarius returned a swap chain that does not connect.", {
+          retryable: false,
+        });
+      }
+      holding = hop.tokenOut;
+    }
+    if (holding !== request.assetOut) {
+      throw new MavnaError("Aquarius returned a swap chain that ends in another asset.", {
+        retryable: false,
+      });
+    }
+    return {
+      provider: quote.provider,
+      amountOut: quote.amountOut,
+      amountOutMinimum: quote.amountOutMinimum,
+      path,
+    };
+  }
 }
 
 /** A network failure or timeout is the service being briefly unreachable, so it is retryable. */
@@ -127,4 +158,57 @@ async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
   } catch (cause) {
     throw new MavnaError("Aquarius did not answer.", { retryable: true, cause });
   }
+}
+
+/** A venue quote that a contract can execute itself, hop by hop. */
+export interface PathQuote {
+  readonly provider: string;
+  readonly amountOut: string;
+  readonly amountOutMinimum: string;
+  readonly path: readonly ComposeHop[];
+}
+
+/**
+ * Decode Aquarius's swap chain into the hops its router takes.
+ *
+ * The chain is the router's own `swap_chained` argument,
+ * `Vec<(Vec<Address>, BytesN<32>, Address)>`, so a contract that calls the
+ * router with these hops runs exactly the route that was priced. Anything not
+ * in that shape is refused rather than guessed at.
+ */
+export function decodeSwapChain(swapChainXdr: string): readonly ComposeHop[] {
+  let chain: xdr.ScVal;
+  try {
+    chain = xdr.ScVal.fromXDR(swapChainXdr, "base64");
+  } catch (cause) {
+    throw new MavnaError("Aquarius returned a swap chain that is not readable.", {
+      retryable: false,
+      cause,
+    });
+  }
+  const bad = (): never => {
+    throw new MavnaError("Aquarius returned a swap chain in a shape its router does not take.", {
+      retryable: false,
+    });
+  };
+  const vec = (v: xdr.ScVal): xdr.ScVal[] =>
+    v.switch().name === "scvVec" ? (v.vec() ?? []) : bad();
+  const address = (v: xdr.ScVal): string =>
+    v.switch().name === "scvAddress" ? Address.fromScVal(v).toString() : bad();
+
+  const hops = vec(chain).map((hop): ComposeHop => {
+    const [tokens, index, out] = vec(hop);
+    if (tokens === undefined || index === undefined || out === undefined || vec(hop).length !== 3) {
+      return bad();
+    }
+    const indexBytes = index.switch().name === "scvBytes" ? index.bytes() : bad();
+    if (indexBytes.length !== 32) bad();
+    return {
+      tokens: vec(tokens).map(address),
+      poolIndex: Buffer.from(indexBytes).toString("hex"),
+      tokenOut: address(out),
+    };
+  });
+  if (hops.length === 0) bad();
+  return hops;
 }
