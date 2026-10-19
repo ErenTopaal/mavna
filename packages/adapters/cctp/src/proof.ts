@@ -130,16 +130,19 @@ export function deliveredByEvent(
  * it is older than RPC keeps events.
  *
  * Matches the forwarder call whose message argument is these exact bytes, and
- * reads the amount from the USDC the forwarder moved in that operation.
+ * reads the amount from the USDC the forwarder moved in that operation: to the
+ * recipient's account when it is known, so a second transfer in the same
+ * operation cannot be read as the delivery.
  */
 export function deliveredByOperation(
   operations: readonly HorizonOperation[],
   messageHex: string,
   network: NetworkId,
+  recipientAccount?: string,
 ): Delivery | undefined {
   const wanted = fromHex(messageHex);
   for (const operation of operations) {
-    const call = forwarderCall(operation, network);
+    const call = forwarderCall(operation, network, recipientAccount);
     if (call !== undefined && sameBytes(call.message, wanted)) return call.delivery;
   }
   return undefined;
@@ -314,7 +317,7 @@ export class DeliveryProof {
       const body = await horizonOperations(url);
       if (body === undefined) return undefined;
       const records = body._embedded?.records ?? [];
-      const delivery = deliveredByOperation(records, messageHex, this.network);
+      const delivery = deliveredByOperation(records, messageHex, this.network, account);
       if (delivery !== undefined) return delivery;
       if (records.length < HORIZON_PAGE) return undefined;
       url = body._links?.next?.href;
@@ -374,6 +377,7 @@ function isReceiptOf(
 function forwarderCall(
   operation: HorizonOperation,
   network: NetworkId,
+  recipientAccount: string | undefined,
 ): { readonly message: Uint8Array; readonly delivery: Delivery } | undefined {
   const { cctpForwarder, usdcIssuer } = CCTP_CONTRACTS[network];
   if (operation.type !== "invoke_host_function" || operation.transaction_successful !== true) {
@@ -391,7 +395,8 @@ function forwarderCall(
       change.type === "transfer" &&
       change.from === cctpForwarder &&
       change.asset_code === "USDC" &&
-      change.asset_issuer === usdcIssuer,
+      change.asset_issuer === usdcIssuer &&
+      (recipientAccount === undefined || change.to === recipientAccount),
   );
   if (forwarded?.to === undefined || forwarded.amount === undefined) return undefined;
 

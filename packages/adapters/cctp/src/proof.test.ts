@@ -66,6 +66,34 @@ describe("deliveredByOperation", () => {
   it("finds nothing for another message, though the account holds a real delivery", () => {
     expect(deliveredByOperation(records, recent.iris.message, "testnet")).toBeUndefined();
   });
+
+  it("reads the transfer to the recipient when the forwarder moved USDC twice", () => {
+    // The real operation, with a second forwarder transfer to another account
+    // placed ahead of the real one.
+    const delivered = records.find((r) => r.transaction_hash.startsWith("1d7a7e15"));
+    if (delivered === undefined) throw new Error("fixture lost the delivery");
+    const changes = delivered.asset_balance_changes ?? [];
+    const real = changes.find((c) => c.type === "transfer");
+    if (real === undefined) throw new Error("fixture lost the transfer");
+    const twice = {
+      ...delivered,
+      asset_balance_changes: [
+        ...changes.filter((c) => c !== real),
+        {
+          ...real,
+          to: "GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY",
+          amount: "1.0000000",
+        },
+        real,
+      ],
+    };
+    expect(deliveredByOperation([twice], old.iris.message, "testnet", old.recipient)).toMatchObject(
+      {
+        amount: 50_000_000n,
+        recipient: old.recipient,
+      },
+    );
+  });
 });
 
 function hex(bytes: Uint8Array): string {
