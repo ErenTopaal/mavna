@@ -78,7 +78,7 @@ beforeEach(() => {
   funding = "sponsor";
   preparation = "";
   preparedFee = "182612";
-  simulationFailure = undefined;
+  simulationFailures = [];
   irisReplies = [[200, attested]];
   preparedLine = undefined;
   preparedSource = undefined;
@@ -217,8 +217,8 @@ function ledgerEntries(): unknown[] {
 
 /** What the delivery costs once simulated, as the node prepares it. */
 let preparedFee: string;
-/** What simulating the delivery answers instead, when a test makes it fail. */
-let simulationFailure: Error | undefined;
+/** What simulating the delivery answers instead, in turn, when a test makes it fail. */
+let simulationFailures: Error[];
 
 /**
  * A real client whose node is a double, so the destination check reads what a
@@ -237,7 +237,8 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "getLatestLedger").mockResolvedValue({ sequence: 100 } as never);
   vi.spyOn(client.server, "prepareTransaction").mockImplementation(async (tx) => {
     log.push("stellar simulate delivery");
-    if (simulationFailure !== undefined) throw simulationFailure;
+    const failure = simulationFailures.shift();
+    if (failure !== undefined) throw failure;
     return TransactionBuilder.cloneFrom(tx as never, { fee: preparedFee }).build() as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
@@ -693,7 +694,7 @@ describe("runTransfer when the account pays its own reserve", () => {
 
   it("over Circle, counts a delivery that already landed as delivered", async () => {
     funding = "self";
-    simulationFailure = new Error("HostError: Error(Contract, #6908)");
+    simulationFailures = [new Error("HostError: Error(Contract, #6908)")];
     const cctp = new CctpAdapter({
       network: "testnet",
       rpc: stellarNode(),
@@ -717,6 +718,28 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/0\.1000001 XLM.*Activity/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, opens a trustline that went missing after the quote, checked like any other", async () => {
+    funding = "self";
+    const notReady = () => new Error("HostError: Error(Contract, #13) trustline entry is missing");
+    const cctp = () =>
+      new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+
+    simulationFailures = [notReady()];
+    await run(cctp(), routeFor("cctp"), patches().patch);
+    expect(log.filter((l) => l.startsWith("stellar sign"))).toEqual([
+      "stellar sign PREPARATION",
+      "stellar sign DELIVERY",
+    ]);
+
+    log = [];
+    simulationFailures = [notReady()];
+    preparedLine = `USDC:${SENDER_STELLAR}`;
+    await expect(run(cctp(), routeFor("cctp"), patches().patch)).rejects.toThrow(
+      /not the trustline this transfer needs/,
+    );
+    expect(log).not.toContain("stellar sign PREPARATION");
   });
 
   it("over Circle, refuses before the burn when the connected wallet is not the receiving account", async () => {

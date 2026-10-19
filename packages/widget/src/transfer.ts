@@ -190,9 +190,27 @@ async function prepareOwn(engine: TransferEngine, route: Route, chainId: string)
         "Nothing has been sent.",
     );
   }
+  await openOwnTrustline(engine, route, chainId, address, "Nothing has been sent.");
+  return address;
+}
+
+/**
+ * Open the trustline the route delivers into, signed and paid by `address`,
+ * which must be the receiving account. The sponsor builds it from its own
+ * list, so it is checked against the delivered asset before anyone signs.
+ */
+async function openOwnTrustline(
+  engine: TransferEngine,
+  route: Route,
+  chainId: string,
+  address: string,
+  /** What to tell the user about their funds if this is refused. */
+  funds: string,
+): Promise<void> {
+  const holds = route.deliveredAtLeast.asset;
   const name = trustlineName(route, engine.usdcOnStellar.id);
   if (name === undefined) {
-    throw new Error(`The sponsor curates no trustline for ${holds.symbol}. Nothing has been sent.`);
+    throw new Error(`The sponsor curates no trustline for ${holds.symbol}. ${funds}`);
   }
   const preparation = await engine.sponsor.requestPreparation(route.destination, chainId, name);
   // The account pays for this one, and the sponsor names the issuer by its own
@@ -201,12 +219,11 @@ async function prepareOwn(engine: TransferEngine, route: Route, chainId: string)
   if (!opensOnly(preparation.xdr, engine.stellarNetwork.passphrase, route.destination, holds.id)) {
     throw new Error(
       `The sponsor's preparation is not the trustline this transfer needs (${holds.symbol} ` +
-        "for the receiving account), so it was not signed. Nothing has been sent.",
+        `for the receiving account), so it was not signed. ${funds}`,
     );
   }
   const signed = await engine.stellar.sign(preparation.xdr, address);
   await engine.sponsor.submitPreparation(signed);
-  return address;
 }
 
 /** Whether a transaction does nothing but open `assetId` for `account`, from it. */
@@ -338,7 +355,16 @@ async function deliverToStellar(
     if (outcome.kind === "recipient-not-ready") {
       if (owner !== undefined && !prepared) {
         patch("prepare", { phase: "blocked" });
-        await prepareNow(engine, route, chainId, owner);
+        // an account paying for itself gets the same check as at the start
+        if (ownDelivery) {
+          await openOwnTrustline(
+            engine,
+            route,
+            chainId,
+            owner,
+            "The funds are safe on Circle's side and still deliverable once the account can hold them.",
+          );
+        } else await prepareNow(engine, route, chainId, owner);
         patch("prepare", { phase: "done" });
         prepared = true;
         continue;
