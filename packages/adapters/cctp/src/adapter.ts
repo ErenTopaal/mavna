@@ -2,6 +2,7 @@ import type {
   Amount,
   Asset,
   BridgeAdapter,
+  BuildContext,
   ChainRef,
   NetworkId,
   QuoteRequest,
@@ -48,8 +49,13 @@ import { DeliveryProof } from "./proof.js";
 /** Circle quotes `minimumFee` in basis points of the amount burned. */
 const BPS = 10_000n;
 
-/** What a non-EVM chain needs that a route cannot carry on its own. */
-export interface BuildOptions {
+/**
+ * What a non-EVM chain needs that a route cannot carry on its own.
+ *
+ * Also accepts the shared build context, so the generic path that hands every
+ * rail the connected wallet can hand it here too. This rail does not need it.
+ */
+export interface BuildOptions extends Partial<BuildContext> {
   readonly solana?: {
     /** The wallet paying and signing, base58. */
     readonly owner: string;
