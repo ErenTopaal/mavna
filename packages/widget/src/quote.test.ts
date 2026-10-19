@@ -191,13 +191,17 @@ describe("applySponsorTerms", () => {
     ],
   });
 
-  it("leaves everything alone on a sponsor that fronts reserves, above its minimum", () => {
-    const routes = [routeFor("cctp", { newAccount: true }), routeFor("layerzero")];
+  it("declines nothing on a sponsor that fronts reserves, above its minimum", () => {
+    const [fresh, ready] = [routeFor("cctp", { newAccount: true }), routeFor("layerzero")];
     const set = applySponsorTerms(
-      { routes, rejected: [], complete: true },
+      { routes: [fresh, ready], rejected: [], complete: true },
       { network: "testnet", terms: sponsorFunded, destination: "exists" },
     );
-    expect(set.routes).toEqual(routes);
+    // the new account's repayment is one more approval
+    expect(set.routes).toEqual([
+      { ...fresh, signaturesRequired: fresh.signaturesRequired + 1 },
+      ready,
+    ]);
     expect(set.rejected).toEqual([]);
   });
 
@@ -710,6 +714,18 @@ describe("a route whose receiving account opens its own trustline", () => {
 });
 
 describe("how many approvals a route asks for", () => {
+  it("counts the repayment the user signs when the sponsor fronts the reserve, and not otherwise", () => {
+    const fresh = routeFor("layerzero", { newAccount: true });
+    const set = { routes: [fresh], rejected: [], complete: true };
+    expect(applySponsorTerms(set, terms("sponsor")).routes[0]?.signaturesRequired).toBe(
+      fresh.signaturesRequired + 1,
+    );
+    // paying its own reserve, the account signs a trustline and no repayment
+    expect(applySponsorTerms(set, terms("self")).routes[0]?.signaturesRequired).toBe(
+      fresh.signaturesRequired,
+    );
+  });
+
   const terms = (reserveFunding: "self" | "sponsor") => ({
     network: "testnet",
     terms: { network: "testnet", reserveFunding, minDeliveryBaseUnits: 0n },

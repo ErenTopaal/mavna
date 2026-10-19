@@ -443,15 +443,27 @@ function ownDeliveryBlocker(
 export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet {
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [...set.rejected];
-  // an account that pays its own Circle delivery also signs it, one more
-  // approval than the rail counted
-  const ownDelivery = !(check.terms instanceof Error) && check.terms.reserveFunding === "self";
+  // The rails count the source-chain signatures and the account's preparation.
+  // Who funds adds one: an account paying its own way also signs a Circle
+  // delivery, and one the sponsor fronts signs the repayment before the send.
+  const funding = check.terms instanceof Error ? undefined : check.terms.reserveFunding;
   for (const route of set.routes) {
     const blocked = sponsorBlocker(route, check);
-    if (blocked !== undefined) rejected.push(blocked);
-    else if (ownDelivery && route.source === "cctp") {
-      routes.push({ ...route, signaturesRequired: route.signaturesRequired + 1 });
-    } else routes.push(route);
+    if (blocked !== undefined) {
+      rejected.push(blocked);
+      continue;
+    }
+    const extra =
+      funding === "self"
+        ? route.source === "cctp"
+          ? 1
+          : 0
+        : funding === "sponsor" && route.steps.some((s) => s.kind === "settle-account")
+          ? 1
+          : 0;
+    routes.push(
+      extra === 0 ? route : { ...route, signaturesRequired: route.signaturesRequired + extra },
+    );
   }
   return { routes, rejected, complete: set.complete };
 }
