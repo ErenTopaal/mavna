@@ -62,6 +62,7 @@ This is where money moves, so this is where the gates are:
 - a signed settlement must already be held for that account, and the preparation
   must sponsor exactly what that settlement repays: the account itself if the
   settlement revokes the account's sponsorship, and the same set of trustlines
+- no other preparation may have been submitted against that settlement
 - the daily caps are checked again
 - as defence in depth, the source must be the sponsor itself, the operations must
   be only `beginSponsoringFutureReserves`, `endSponsoringFutureReserves`,
@@ -78,8 +79,10 @@ Answers:
   source other than the sponsor, an operation outside the list, or a missing or
   invalid signature from the account being prepared
 - `409` when the preparation was not built here or has expired ("Ask for a new
-  one"), when no settlement is held for the account, or when the preparation does
-  not match the settlement held for it
+  one"), when no settlement is held for the account, when the preparation does
+  not match the settlement held for it, or when another preparation has already
+  been submitted against that settlement, whether it is still on its way or has
+  landed. One settlement repays one preparation
 - `429` when a cap refuses at submission, retryable
 - `502` when Stellar would not accept the submission. The preparation is not
   offered again; build a new one
