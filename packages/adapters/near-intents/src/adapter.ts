@@ -345,6 +345,23 @@ export class NearIntentsAdapter implements BridgeAdapter {
         { retryable: false },
       );
     }
+    // The deposit address is only worth paying if it is for this transfer: to
+    // this recipient, of this token, into this asset. 1Click holds the money
+    // either way, so this is a second look rather than the only one.
+    const echoes: Array<[string | undefined, string, string]> = [
+      [reply.recipient, route.destination, "recipient"],
+      [reply.originAsset, pair.origin.assetId, "token to take"],
+      [reply.destinationAsset, pair.delivery.token.assetId, "asset to deliver"],
+    ];
+    for (const [recorded, asked, what] of echoes) {
+      if (recorded !== asked) {
+        throw new MavnaError(
+          `1Click recorded a different ${what} than this transfer asked for. Refusing to ` +
+            "build a deposit for someone else's quote.",
+          { retryable: false },
+        );
+      }
+    }
     if (BigInt(reply.quote.minAmountOut) < floor) {
       throw new MavnaError(
         "The price moved since this route was quoted, and the least it would now deliver is " +

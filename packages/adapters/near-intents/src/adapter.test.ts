@@ -104,7 +104,11 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
-function quoteReply(body: Record<string, unknown>, over: Record<string, unknown> = {}): Response {
+function quoteReply(
+  body: Record<string, unknown>,
+  over: Record<string, unknown> = {},
+  echoed: Record<string, unknown> = {},
+): Response {
   const dry = body.dry === true;
   return json({
     quote: {
@@ -121,7 +125,7 @@ function quoteReply(body: Record<string, unknown>, over: Record<string, unknown>
       withdrawFee: "20000",
       ...over,
     },
-    quoteRequest: { ...body, appFees: [{ recipient: "fees.near", fee: 25 }] },
+    quoteRequest: { ...body, appFees: [{ recipient: "fees.near", fee: 25 }], ...echoed },
     signature: "ed25519:sig",
     timestamp: "2026-10-19T15:08:12.041Z",
     correlationId: "c0rr",
@@ -561,6 +565,19 @@ describe("building", () => {
     await expect(near.buildTransactions(route, { sender: SENDER })).rejects.toThrow(/price moved/);
   });
 
+  it.each([
+    ["recipient", { recipient: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI" }],
+    ["destination asset", { destinationAsset: "nep141:wrap.near" }],
+    ["origin asset", { originAsset: "nep141:eth.omft.near" }],
+  ])("refuses a real quote 1Click recorded for another %s", async (_what, echoed) => {
+    const near = adapter();
+    const route = routeOf(await near.quote(ask()));
+    oneClick.quote = (body) => quoteReply(body, {}, echoed);
+    await expect(near.buildTransactions(route, { sender: SENDER })).rejects.toThrow(
+      /recorded a different/,
+    );
+  });
+
   it("refuses a deposit that would need a memo, which a token transfer cannot carry", async () => {
     const near = adapter();
     const route = routeOf(await near.quote(ask()));
@@ -683,6 +700,15 @@ describe("status", () => {
         baseUnits: "99600000",
       },
     });
+  });
+
+  it("reports only the quoted floor as received when 1Click does not say what settled", async () => {
+    oneClick.status = () =>
+      statusReply("SUCCESS", { destinationChainTxHashes: [{ hash: "f00d", explorerUrl: "" }] });
+    const phase = await adapter().status(byDeposit);
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    expect(phase.received.baseUnits).toBe("99000000");
   });
 
   it("never reads a short settlement as delivered", async () => {

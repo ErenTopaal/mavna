@@ -76,6 +76,10 @@ export interface QuoteReply {
   /** Fees 1Click recorded against this quote, in basis points of the input. */
   readonly appFeesBps: number;
   readonly refundTo: string;
+  /** What 1Click recorded it is delivering, and to whom, read back to compare. */
+  readonly recipient: string | undefined;
+  readonly originAsset: string | undefined;
+  readonly destinationAsset: string | undefined;
   readonly signature: string;
   readonly correlationId: string;
 }
@@ -356,6 +360,9 @@ export function parseQuoteReply(body: unknown, dry: boolean): QuoteReply {
     quote,
     appFeesBps,
     refundTo: text(request.refundTo, "quoteRequest.refundTo"),
+    recipient: optionalText(request.recipient, "quoteRequest.recipient"),
+    originAsset: optionalText(request.originAsset, "quoteRequest.originAsset"),
+    destinationAsset: optionalText(request.destinationAsset, "quoteRequest.destinationAsset"),
     signature: typeof reply.signature === "string" ? reply.signature : "",
     correlationId: typeof reply.correlationId === "string" ? reply.correlationId : "",
   };

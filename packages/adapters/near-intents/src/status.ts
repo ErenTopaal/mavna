@@ -60,7 +60,9 @@ export function phaseFor(reply: StatusReply, context: StatusContext): StepPhase 
     }
 
     case "SUCCESS": {
-      const arrived = reply.swap.amountOut ?? reply.quote.amountOut;
+      // When 1Click does not say what settled, only the floor is known to have
+      // arrived (SUCCESS settles at or above it), never the quote's estimate.
+      const arrived = reply.swap.amountOut ?? reply.quote.minAmountOut;
       const ref =
         stellarRef(reply.swap.destinationTxs[0], context) ?? deposit ?? addressRef(context);
       const received = { asset: context.delivered, baseUnits: arrived };
