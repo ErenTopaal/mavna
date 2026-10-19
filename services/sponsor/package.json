@@ -12,9 +12,10 @@
     "start": "node dist/main.mjs"
   },
   "dependencies": {
+    "@mavna/adapter-cctp": "workspace:*",
     "@mavna/core": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
-    "@mavna/adapter-cctp": "workspace:*"
+    "zod": "4.4.3"
   }
 }

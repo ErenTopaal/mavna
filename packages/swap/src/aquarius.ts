@@ -1,25 +1,31 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
+import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
+import { Address, nativeToScVal, type Transaction, xdr } from "@stellar/stellar-sdk";
+import { z } from "zod";
 import {
   applySlippage,
+  type SwapBuildRequest,
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
 } from "./provider.js";
+import { buildContractCall } from "./soroban.js";
+import { fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
 
 /**
- * Aquarius. The provider that makes testnet possible.
+ * Aquarius. The fallback venue, on both networks.
  *
- * Needs no key, has real liquidity on testnet, and routes across its own pools.
- * It is used on testnet for exactly that reason, and is a credible fallback on
- * mainnet if Soroswap is degraded.
+ * Needs no key, has real liquidity on testnet (including Circle's testnet USDC
+ * now), and routes across its own pools. Its swaps run through its router
+ * contract, so they can deliver to a contract address, which is what makes it a
+ * venue the Arrival Contract can call.
  *
  * It earns us nothing, and that is a deliberate accepted trade rather than an
  * oversight. Its `provider_fee` parameter is quote ARITHMETIC ONLY: it changes
  * the displayed net figure and moves no money, and there is no recipient field
- * anywhere in its request. Collecting a real fee requires deploying your own
- * fee-collector contract, which this project is forbidden from doing. Verified
- * against the live service: passing a fee changed only the reported
- * `amount_with_fee` and left the actual `amount` identical.
+ * anywhere in its request. Verified against the live service: passing a fee
+ * changed only the reported `amount_with_fee` and left the actual `amount`
+ * identical.
  */
 
 const BASE_URL: Readonly<Record<NetworkId, string>> = {
@@ -27,17 +33,45 @@ const BASE_URL: Readonly<Record<NetworkId, string>> = {
   mainnet: "https://amm-api.aqua.network",
 };
 
+/**
+ * The router every pool trusts, read from the `Router` key of a live pool's
+ * instance storage on each network. Mainnet's also matches Aquarius's docs.
+ */
+const ROUTER: Readonly<Record<NetworkId, string>> = {
+  mainnet: "CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK",
+  testnet: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
+};
+
+const DEFAULT_RPC: Readonly<Record<NetworkId, string>> = {
+  mainnet: PUBLIC_MAINNET_RPC_URLS[0] ?? "",
+  testnet: PUBLIC_TESTNET_RPC_URL,
+};
+
 /** Without a bound, a hung exchange holds the whole route race open. */
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-interface FindPathResponse {
-  readonly success: boolean;
-  readonly swap_chain_xdr: string;
-  readonly pools: readonly string[];
-  readonly tokens: readonly string[];
-  readonly tokens_addresses: readonly string[];
-  readonly amount: number;
-  readonly amount_with_fee: number;
+const findPath = z.object({
+  success: z.boolean(),
+  swap_chain_xdr: z.string(),
+  pools: z.array(z.string()),
+  tokens_addresses: z.array(z.string()),
+  // The service reports amounts as JSON numbers. Anything above what a double
+  // holds exactly was already mangled before it reached us, so it is refused.
+  amount: z.number().refine(Number.isSafeInteger, "not an exact integer amount"),
+});
+
+/** What build needs from a quote, kept as the quote's raw payload. */
+const aquariusRaw = z.object({
+  tokenIn: z.string().regex(/^C[A-Z2-7]{55}$/),
+  swapChainXdr: z.string(),
+});
+
+const poolsPage = z.object({ count: z.number().int() });
+
+export interface AquariusOptions {
+  readonly timeoutMs?: number;
+  /** Stellar RPC used to simulate the swap at build time. */
+  readonly rpcUrl?: string;
 }
 
 export class AquariusProvider implements SwapProvider {
@@ -48,11 +82,13 @@ export class AquariusProvider implements SwapProvider {
 
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly rpcUrl: string;
 
-  constructor(network: NetworkId, baseUrl?: string, options: { readonly timeoutMs?: number } = {}) {
+  constructor(network: NetworkId, baseUrl?: string, options: AquariusOptions = {}) {
     this.network = network;
     this.baseUrl = baseUrl ?? BASE_URL[network];
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.rpcUrl = options.rpcUrl ?? DEFAULT_RPC[network];
   }
 
   async isUsable(): Promise<boolean> {
@@ -61,45 +97,44 @@ export class AquariusProvider implements SwapProvider {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (!response.ok) return false;
-      const body = (await response.json()) as { count?: number };
-      return typeof body.count === "number" && body.count > 0;
+      const parsed = poolsPage.safeParse(await response.json());
+      return parsed.success && parsed.data.count > 0;
     } catch {
+      // isUsable answers a question; an unreachable service is the answer "no".
       return false;
     }
   }
 
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
-    const response = await fetchOrThrow(`${this.baseUrl}/api/external/v1/find-path/`, {
+    const tokenIn = toContractId(request.assetIn, this.network);
+    const tokenOut = toContractId(request.assetOut, this.network);
+    const response = await fetchOrThrow("Aquarius", `${this.baseUrl}/api/external/v1/find-path/`, {
       signal: AbortSignal.timeout(this.timeoutMs),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        token_in_address: request.assetIn,
-        token_out_address: request.assetOut,
+        token_in_address: tokenIn,
+        token_out_address: tokenOut,
         amount: request.amountIn,
       }),
     });
 
     if (!response.ok) {
       throw new MavnaError(`Aquarius could not price this swap (HTTP ${response.status}).`, {
-        retryable: response.status >= 500,
+        retryable: response.status === 429 || response.status >= 500,
       });
     }
 
-    const body = (await response.json()) as FindPathResponse;
+    const body = await readValidated("Aquarius", response, findPath);
 
     if (!body.success || body.pools.length === 0) {
       throw new MavnaError("Aquarius has no route between these assets.", { retryable: false });
     }
-
-    // The service reports amounts as JSON numbers. Anything above what a double
-    // holds exactly would already have been mangled before it reached us, so this
-    // is checked rather than trusted, and converted to a string immediately.
-    if (!Number.isSafeInteger(body.amount)) {
-      throw new MavnaError(
-        "Aquarius returned an amount too large to be exact as a number. Refusing to use it.",
-        { retryable: false },
-      );
+    // The chain is what gets executed, so it has to start and end where we asked.
+    if (body.tokens_addresses[0] !== tokenIn || body.tokens_addresses.at(-1) !== tokenOut) {
+      throw new MavnaError("Aquarius answered a different question than the one asked.", {
+        retryable: false,
+      });
     }
 
     const amountOut = BigInt(body.amount).toString();
@@ -115,16 +150,46 @@ export class AquariusProvider implements SwapProvider {
       // Aquarius routes through Soroban pools, so this is never a classic path
       // payment and can therefore deliver to a contract address.
       isClassicPathPayment: false,
-      raw: body,
+      raw: { tokenIn, swapChainXdr: body.swap_chain_xdr },
     };
   }
-}
 
-/** A network failure or timeout is the service being briefly unreachable, so it is retryable. */
-async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (cause) {
-    throw new MavnaError("Aquarius did not answer.", { retryable: true, cause });
+  /**
+   * `swap_chained(user, swaps_chain, token_in, in_amount, out_min)` on the
+   * router, the call Aquarius documents for a strict-send swap along a found
+   * path. The owner is both payer and recipient.
+   */
+  async build(request: SwapBuildRequest): Promise<Transaction> {
+    if (request.quote.provider !== this.id) {
+      throw new MavnaError("This quote came from another venue; build it there.", {
+        retryable: false,
+      });
+    }
+    const raw = validated("Aquarius", aquariusRaw, request.quote.raw);
+    let chain: xdr.ScVal;
+    try {
+      chain = xdr.ScVal.fromXDR(raw.swapChainXdr, "base64");
+    } catch (cause) {
+      throw new MavnaError("Aquarius returned a swap path that does not decode.", {
+        retryable: false,
+        cause,
+      });
+    }
+    return buildContractCall(
+      this.rpcUrl,
+      this.network,
+      request.account,
+      ROUTER[this.network],
+      "swap_chained",
+      [
+        new Address(request.account.accountId()).toScVal(),
+        chain,
+        new Address(raw.tokenIn).toScVal(),
+        nativeToScVal(BigInt(request.quote.amountIn), { type: "u128" }),
+        nativeToScVal(BigInt(request.quote.amountOutMinimum), { type: "u128" }),
+      ],
+      this.timeoutMs,
+      "Aquarius",
+    );
   }
 }
