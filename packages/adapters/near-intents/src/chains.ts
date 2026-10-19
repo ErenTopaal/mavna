@@ -72,10 +72,7 @@ const MAINNET: readonly OriginChain[] = [
     chainId: "avalanche",
     name: "Avalanche",
     evmChainId: 43114,
-    rpc: [
-      "https://api.avax.network/ext/bc/C/rpc",
-      "https://avalanche-c-chain-rpc.publicnode.com",
-    ],
+    rpc: ["https://api.avax.network/ext/bc/C/rpc", "https://avalanche-c-chain-rpc.publicnode.com"],
     explorer: "https://snowscan.xyz",
   },
   {

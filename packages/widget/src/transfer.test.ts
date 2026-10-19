@@ -283,6 +283,14 @@ describe("runTransfer over a relayed rail", () => {
     expect(log.indexOf("stellar read destination")).toBeLessThan(log.indexOf("evm send value=777"));
   });
 
+  it("tells the rail which wallet is sending, for a rail that must name a refund address", async () => {
+    const adapter = new ScriptedAdapter("near-intents", [delivered()], {
+      transactions: [layerZeroSend("0")],
+    });
+    await run(adapter, routeFor("near-intents"), patches().patch);
+    expect(adapter.contexts).toEqual([{ sender: SENDER }]);
+  });
+
   it("refuses a destination the route does not set up and that cannot hold what arrives, before any signature", async () => {
     const cases = [
       ["needs-account", /does not exist yet.*Nothing has been sent\./],

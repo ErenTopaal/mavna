@@ -2,6 +2,7 @@ import { buildSendParam, OFT_ABI } from "@mavna/adapter-layerzero";
 import {
   type Asset,
   type BridgeAdapter,
+  type BuildContext,
   type Route,
   type RouteRejection,
   SENDER_ADDRESS,
@@ -28,6 +29,8 @@ export class ScriptedAdapter implements BridgeAdapter {
   readonly trustModel: TrustModel = "dvn-stack";
   readonly asked: TransferHandle[] = [];
   built = 0;
+  /** What each build was told, in order. */
+  readonly contexts: Array<BuildContext | undefined> = [];
   private readonly script: Array<StepPhase | Error>;
   private readonly options: ScriptOptions;
 
@@ -52,8 +55,12 @@ export class ScriptedAdapter implements BridgeAdapter {
     };
   }
 
-  async buildTransactions(): Promise<readonly UnsignedTransaction[]> {
+  async buildTransactions(
+    _route: Route,
+    context?: BuildContext,
+  ): Promise<readonly UnsignedTransaction[]> {
     this.built += 1;
+    this.contexts.push(context);
     return this.options.transactions ?? [];
   }
 

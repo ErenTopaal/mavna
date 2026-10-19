@@ -35,7 +35,8 @@ export interface FoundState {
  *
  * The key matters for idle. Looked up by address, idle means the address could
  * not name a transfer, not that nothing arrived: an address may well have had
- * deliveries, and saying otherwise would be false.
+ * deliveries, and saying otherwise would be false. A NEAR Intents deposit
+ * address is the exception, because that rail is searched by it.
  *
  * `rails` are the adapters the answer speaks for. Finishing a delivery is the
  * sponsor's Circle mint, so it is offered only when Circle is among them; the
@@ -79,6 +80,15 @@ export function foundFor(
     case "blocked":
       return { tone: "wait", note: "Waiting on a signature to continue.", canFinish: circle };
     default: {
+      // NEAR Intents knows a transfer by its deposit address, so for that rail
+      // an idle answer means the address was looked up and nothing is there.
+      if (keyKind === "deposit-address" && rails.includes("near-intents")) {
+        return {
+          tone: "wait",
+          note: "Nothing has been found for this deposit address yet.",
+          canFinish: false,
+        };
+      }
       if (keyKind !== "source-tx") {
         const name = rails.length === 1 ? railDisplay(rails[0] ?? "") : undefined;
         const which =

@@ -271,7 +271,8 @@ function optionalText(value: unknown, field: string): string | undefined {
 }
 
 function units(value: unknown, field: string): string {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) throw unusable(`${field} is not base units`);
+  if (typeof value !== "string" || !/^\d+$/.test(value))
+    throw unusable(`${field} is not base units`);
   return value;
 }
 

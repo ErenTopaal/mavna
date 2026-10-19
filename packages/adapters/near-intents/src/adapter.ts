@@ -38,12 +38,6 @@ import {
   type QuoteReply,
 } from "./api.js";
 import {
-  ORIGIN_CHAINS,
-  type OriginChain,
-  originChain,
-  originChainByCode,
-} from "./chains.js";
-import {
   originAsset,
   originToken,
   type StellarDelivery,
@@ -51,6 +45,7 @@ import {
   stellarChainId,
   stellarDeliveries,
 } from "./assets.js";
+import { ORIGIN_CHAINS, type OriginChain, originChain, originChainByCode } from "./chains.js";
 import { fetchJsonRpc, type JsonRpc, readTransfer, transferPayload } from "./evm.js";
 import { phaseFor } from "./status.js";
 
@@ -410,7 +405,8 @@ export class NearIntentsAdapter implements BridgeAdapter {
     if (reply === undefined) return { phase: "idle" };
 
     const originEntry = tokens.find((t) => t.assetId === reply.originAsset);
-    const originOf = chain ?? (originEntry && originChainByCode(this.network, originEntry.blockchain));
+    const originOf =
+      chain ?? (originEntry && originChainByCode(this.network, originEntry.blockchain));
     const deliveredEntry = stellarDeliveries(tokens).find(
       (d) => d.token.assetId === reply.destinationAsset,
     );
@@ -437,7 +433,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
   ): Promise<{ chain: OriginChain; to: string } | undefined> {
     const chains = known === undefined ? ORIGIN_CHAINS[this.network] : [known];
     const results = await Promise.allSettled(
-      chains.map(async (chain) => ({ chain, sent: await readTransfer(chain, txHash, this.jsonRpc) })),
+      chains.map(async (chain) => ({
+        chain,
+        sent: await readTransfer(chain, txHash, this.jsonRpc),
+      })),
     );
 
     for (const result of results) {
@@ -535,7 +534,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
       return this.decline("amount-too-small", "That amount would arrive on Stellar as nothing.");
     }
     if (BigInt(quote.minAmountOut) > BigInt(quote.amountOut)) {
-      return this.decline("errored", "NEAR Intents returned a quote whose floor is above its own price.");
+      return this.decline(
+        "errored",
+        "NEAR Intents returned a quote whose floor is above its own price.",
+      );
     }
     return undefined;
   }

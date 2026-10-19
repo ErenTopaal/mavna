@@ -31,6 +31,20 @@ describe("foundFor", () => {
     }
   });
 
+  it("treats a NEAR Intents deposit address as the key it is, not as an address alone", () => {
+    for (const rails of [["near-intents"], [...ALL, "near-intents"]]) {
+      expect(foundFor({ phase: "idle" }, "deposit-address", rails)).toEqual({
+        tone: "wait",
+        note: "Nothing has been found for this deposit address yet.",
+        canFinish: false,
+      });
+    }
+    // A Stellar address still names no NEAR Intents deposit.
+    expect(foundFor({ phase: "idle" }, "destination-address", ["near-intents"]).note).toBe(
+      "An address alone cannot identify a NEAR Intents transfer. Paste the source transaction hash to check one.",
+    );
+  });
+
   it("speaks about the transaction, not an address, when a hash has nothing yet", () => {
     expect(foundFor({ phase: "idle" }, "source-tx", ALL)).toEqual({
       tone: "wait",

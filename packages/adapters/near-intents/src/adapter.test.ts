@@ -20,15 +20,57 @@ const CIRCLE = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
 const USDC_ID = `USDC:${CIRCLE}`;
 const ARB_USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
 const ARB_USDC_ASSET = `nep141:arb-${ARB_USDC}.omft.near`;
-const STELLAR_USDC_ASSET = "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu";
-const STELLAR_XLM_ASSET = "nep245:v2_1.omni.hot.tg:1100_111bzQBB5v7AhLyPMDwS8uJgQV24KaAPXtwyVWu2KXbbfQU6NXRCz";
+const STELLAR_USDC_ASSET =
+  "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu";
+const STELLAR_XLM_ASSET =
+  "nep245:v2_1.omni.hot.tg:1100_111bzQBB5v7AhLyPMDwS8uJgQV24KaAPXtwyVWu2KXbbfQU6NXRCz";
 
 const TOKENS = [
-  { assetId: ARB_USDC_ASSET, decimals: 6, blockchain: "arb", symbol: "USDC", price: 1, priceUpdatedAt: "2026-10-19T15:04:30.660Z", contractAddress: ARB_USDC },
-  { assetId: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", decimals: 6, blockchain: "base", symbol: "USDC", price: 1, priceUpdatedAt: "2026-10-19T15:04:30.660Z", contractAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" },
-  { assetId: "nep245:v2_1.omni.hot.tg:56_2w93GqMcEmQFDru84j3HZZWt557r", decimals: 18, blockchain: "bsc", symbol: "USDC", price: 1, priceUpdatedAt: "2026-10-19T15:04:30.660Z", contractAddress: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d" },
-  { assetId: STELLAR_XLM_ASSET, decimals: 7, blockchain: "stellar", symbol: "XLM", price: 0.176333, priceUpdatedAt: "2026-10-19T15:04:30.660Z", coingeckoId: "stellar" },
-  { assetId: STELLAR_USDC_ASSET, decimals: 7, blockchain: "stellar", symbol: "USDC", price: 1, priceUpdatedAt: "2026-10-19T15:04:30.660Z", contractAddress: CIRCLE },
+  {
+    assetId: ARB_USDC_ASSET,
+    decimals: 6,
+    blockchain: "arb",
+    symbol: "USDC",
+    price: 1,
+    priceUpdatedAt: "2026-10-19T15:04:30.660Z",
+    contractAddress: ARB_USDC,
+  },
+  {
+    assetId: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+    decimals: 6,
+    blockchain: "base",
+    symbol: "USDC",
+    price: 1,
+    priceUpdatedAt: "2026-10-19T15:04:30.660Z",
+    contractAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  },
+  {
+    assetId: "nep245:v2_1.omni.hot.tg:56_2w93GqMcEmQFDru84j3HZZWt557r",
+    decimals: 18,
+    blockchain: "bsc",
+    symbol: "USDC",
+    price: 1,
+    priceUpdatedAt: "2026-10-19T15:04:30.660Z",
+    contractAddress: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+  },
+  {
+    assetId: STELLAR_XLM_ASSET,
+    decimals: 7,
+    blockchain: "stellar",
+    symbol: "XLM",
+    price: 0.176333,
+    priceUpdatedAt: "2026-10-19T15:04:30.660Z",
+    coingeckoId: "stellar",
+  },
+  {
+    assetId: STELLAR_USDC_ASSET,
+    decimals: 7,
+    blockchain: "stellar",
+    symbol: "USDC",
+    price: 1,
+    priceUpdatedAt: "2026-10-19T15:04:30.660Z",
+    contractAddress: CIRCLE,
+  },
 ];
 
 const ACCOUNT = "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU";
@@ -103,7 +145,11 @@ const oneClickFetch: typeof fetch = async (input, init) => {
 };
 
 function stellarNode(): RpcClient {
-  const client = new RpcClient({ url: "https://soroban.test", baseDelayMs: 0, sleep: async () => {} });
+  const client = new RpcClient({
+    url: "https://soroban.test",
+    baseDelayMs: 0,
+    sleep: async () => {},
+  });
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => {
     const entries: unknown[] = [];
     for (const key of keys) {
@@ -155,9 +201,27 @@ function adapter(network: "mainnet" | "testnet" = "mainnet"): NearIntentsAdapter
   });
 }
 
-const arbUsdc: Asset = { chainId: "arbitrum", id: ARB_USDC, symbol: "USDC", decimals: 6, curatedBy: "Circle" };
-const stellarUsdc: Asset = { chainId: "stellar", id: USDC_ID, symbol: "USDC", decimals: 7, curatedBy: "Circle" };
-const stellarXlm: Asset = { chainId: "stellar", id: "native", symbol: "XLM", decimals: 7, curatedBy: "Stellar" };
+const arbUsdc: Asset = {
+  chainId: "arbitrum",
+  id: ARB_USDC,
+  symbol: "USDC",
+  decimals: 6,
+  curatedBy: "Circle",
+};
+const stellarUsdc: Asset = {
+  chainId: "stellar",
+  id: USDC_ID,
+  symbol: "USDC",
+  decimals: 7,
+  curatedBy: "Circle",
+};
+const stellarXlm: Asset = {
+  chainId: "stellar",
+  id: "native",
+  symbol: "XLM",
+  decimals: 7,
+  curatedBy: "Stellar",
+};
 
 const ask = (over: Partial<QuoteRequest> = {}): QuoteRequest => ({
   from: arbUsdc,
@@ -285,7 +349,13 @@ describe("quoting", () => {
       {
         kind: "bridge",
         total: { asset: arbUsdc, baseUnits: "25000" },
-        recipients: [{ name: "NEAR Intents", amount: { asset: arbUsdc, baseUnits: "25000" }, address: undefined }],
+        recipients: [
+          {
+            name: "NEAR Intents",
+            amount: { asset: arbUsdc, baseUnits: "25000" },
+            address: undefined,
+          },
+        ],
         includedInQuote: true,
       },
       {
@@ -305,9 +375,7 @@ describe("quoting", () => {
 
   it("has nothing on the test network, and says so without asking anyone", async () => {
     const result = rejectionOf(
-      await adapter("testnet").quote(
-        ask({ to: { ...stellarUsdc, chainId: "stellar-testnet" } }),
-      ),
+      await adapter("testnet").quote(ask({ to: { ...stellarUsdc, chainId: "stellar-testnet" } })),
     );
     expect(result.reason).toBe("chain-unsupported");
     expect(result.explanation).toMatch(/main network only/);
@@ -324,8 +392,14 @@ describe("quoting", () => {
   });
 
   it("declines a token 1Click does not carry from that chain", async () => {
-    const other: Asset = { ...arbUsdc, id: "0x1111111111111111111111111111111111111111", symbol: "FOO" };
-    const result = rejectionOf(await adapter().quote(ask({ from: other, sends: { asset: other, baseUnits: "1" } })));
+    const other: Asset = {
+      ...arbUsdc,
+      id: "0x1111111111111111111111111111111111111111",
+      symbol: "FOO",
+    };
+    const result = rejectionOf(
+      await adapter().quote(ask({ from: other, sends: { asset: other, baseUnits: "1" } })),
+    );
     expect(result.reason).toBe("asset-unsupported");
     expect(result.explanation).toBe("NEAR Intents does not take FOO deposits on Arbitrum One.");
   });
@@ -338,7 +412,11 @@ describe("quoting", () => {
       decimals: 6,
       curatedBy: undefined,
     };
-    const result = rejectionOf(await adapter().quote(ask({ from: bscUsdc, sends: { asset: bscUsdc, baseUnits: "10000000" } })));
+    const result = rejectionOf(
+      await adapter().quote(
+        ask({ from: bscUsdc, sends: { asset: bscUsdc, baseUnits: "10000000" } }),
+      ),
+    );
     expect(result.reason).toBe("asset-unsupported");
     expect(result.explanation).toMatch(/18 decimals, not 6/);
   });
@@ -396,7 +474,9 @@ describe("quoting", () => {
   it("refuses to set up an account for less than the reserve it borrows", async () => {
     ledger = { account: false, trustline: false };
     oneClick.quote = (body) => quoteReply(body, { amountOut: "3000000", minAmountOut: "2900000" });
-    const result = rejectionOf(await adapter().quote(ask({ sends: { asset: arbUsdc, baseUnits: "300000" } })));
+    const result = rejectionOf(
+      await adapter().quote(ask({ sends: { asset: arbUsdc, baseUnits: "300000" } })),
+    );
     expect(result.reason).toBe("amount-too-small");
     expect(asked).toContain("horizon order book");
   });
@@ -434,7 +514,12 @@ describe("building", () => {
     const txs = await near.buildTransactions(route, { sender: SENDER });
 
     const real = quoteBodies.at(-1) ?? {};
-    expect(real).toMatchObject({ dry: false, refundTo: SENDER, recipient: ACCOUNT, amount: "10000000" });
+    expect(real).toMatchObject({
+      dry: false,
+      refundTo: SENDER,
+      recipient: ACCOUNT,
+      amount: "10000000",
+    });
     // The gap between price and floor, rounded up: 0.5% of 99500000 is the floor.
     expect(real.slippageTolerance).toBe(51);
 
@@ -467,7 +552,8 @@ describe("building", () => {
   it("refuses a real quote whose floor fell below the route's", async () => {
     const near = adapter();
     const route = routeOf(await near.quote(ask()));
-    oneClick.quote = (body) => quoteReply(body, { amountOut: "99400000", minAmountOut: "98900000" });
+    oneClick.quote = (body) =>
+      quoteReply(body, { amountOut: "99400000", minAmountOut: "98900000" });
     await expect(near.buildTransactions(route, { sender: SENDER })).rejects.toThrow(/price moved/);
   });
 
@@ -492,7 +578,12 @@ describe("building", () => {
 describe("status", () => {
   it("is idle for a deposit address 1Click never issued", async () => {
     expect(
-      await adapter().status({ sourceTxHash: undefined, depositAddress: DEPOSIT, destinationAddress: undefined, sourceChainId: undefined }),
+      await adapter().status({
+        sourceTxHash: undefined,
+        depositAddress: DEPOSIT,
+        destinationAddress: undefined,
+        sourceChainId: undefined,
+      }),
     ).toEqual({ phase: "idle" });
   });
 
@@ -548,11 +639,21 @@ describe("status", () => {
 
   it("is idle by destination address alone, which cannot name a deposit", async () => {
     expect(
-      await adapter().status({ sourceTxHash: undefined, depositAddress: undefined, destinationAddress: ACCOUNT, sourceChainId: undefined }),
+      await adapter().status({
+        sourceTxHash: undefined,
+        depositAddress: undefined,
+        destinationAddress: ACCOUNT,
+        sourceChainId: undefined,
+      }),
     ).toEqual({ phase: "idle" });
   });
 
-  const byDeposit = { sourceTxHash: TX, depositAddress: DEPOSIT, destinationAddress: undefined, sourceChainId: "arbitrum" };
+  const byDeposit = {
+    sourceTxHash: TX,
+    depositAddress: DEPOSIT,
+    destinationAddress: undefined,
+    sourceChainId: "arbitrum",
+  };
 
   it("reports a settled transfer as delivered, linked to the Stellar transaction", async () => {
     oneClick.status = () =>
@@ -568,7 +669,13 @@ describe("status", () => {
         explorerUrl: "https://stellar.expert/explorer/public/tx/f00d",
       },
       received: {
-        asset: { chainId: "stellar", id: USDC_ID, symbol: "USDC", decimals: 7, curatedBy: undefined },
+        asset: {
+          chainId: "stellar",
+          id: USDC_ID,
+          symbol: "USDC",
+          decimals: 7,
+          curatedBy: undefined,
+        },
         baseUnits: "99600000",
       },
     });
@@ -614,9 +721,9 @@ describe("status", () => {
 
   it("reads a deposit address with nothing paid in yet as not started", async () => {
     oneClick.status = () => statusReply("PENDING_DEPOSIT");
-    expect(
-      await adapter().status({ ...byDeposit, sourceTxHash: undefined }),
-    ).toEqual({ phase: "idle" });
+    expect(await adapter().status({ ...byDeposit, sourceTxHash: undefined })).toEqual({
+      phase: "idle",
+    });
     expect((await adapter().status(byDeposit)).phase).toBe("pending");
   });
 });

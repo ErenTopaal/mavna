@@ -30,7 +30,9 @@ export function phaseFor(reply: StatusReply, context: StatusContext): StepPhase 
     case "PENDING_DEPOSIT":
       // Nothing has reached the deposit address yet. With a transaction in hand
       // that is a deposit still being included; without one, nothing has started.
-      return deposit === undefined ? { phase: "idle" } : { phase: "pending", ref: deposit, expectedByUnix };
+      return deposit === undefined
+        ? { phase: "idle" }
+        : { phase: "pending", ref: deposit, expectedByUnix };
 
     case "KNOWN_DEPOSIT_TX":
     case "PROCESSING":
@@ -59,7 +61,8 @@ export function phaseFor(reply: StatusReply, context: StatusContext): StepPhase 
 
     case "SUCCESS": {
       const arrived = reply.swap.amountOut ?? reply.quote.amountOut;
-      const ref = stellarRef(reply.swap.destinationTxs[0], context) ?? deposit ?? addressRef(context);
+      const ref =
+        stellarRef(reply.swap.destinationTxs[0], context) ?? deposit ?? addressRef(context);
       const received = { asset: context.delivered, baseUnits: arrived };
       // A solver settles at or above the floor or not at all, so this should not
       // happen. If 1Click ever reports it, it is said as it is rather than as done.

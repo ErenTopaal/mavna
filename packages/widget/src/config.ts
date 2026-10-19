@@ -158,7 +158,7 @@ export interface ResolvedConfig {
   readonly engineConfig: EngineConfig;
 }
 
-const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
+const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
 
 function resolveRpcUrl(network: NetworkId, rpcUrl: string | undefined): string {
   if (rpcUrl !== undefined) return rpcUrl;

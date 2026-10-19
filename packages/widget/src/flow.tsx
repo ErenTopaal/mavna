@@ -152,7 +152,7 @@ export interface FlowProps {
   readonly emit?: ((event: MavnaWidgetEvent) => void) | undefined;
 }
 
-const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
+const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
 
 export class Flow extends React.Component<FlowProps, State> {
   get engine(): Engine {
@@ -199,6 +199,7 @@ export class Flow extends React.Component<FlowProps, State> {
       Circle: (this.props.rails ?? ALL_RAILS).includes("Circle"),
       Axelar: (this.props.rails ?? ALL_RAILS).includes("Axelar"),
       LayerZero: (this.props.rails ?? ALL_RAILS).includes("LayerZero"),
+      "NEAR Intents": (this.props.rails ?? ALL_RAILS).includes("NEAR Intents"),
     },
     showDeclined: true,
     phase: "quote",

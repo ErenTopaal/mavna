@@ -51,8 +51,7 @@ export function originToken(
 ): OneClickToken | undefined {
   const wanted = contract.toLowerCase();
   return tokens.find(
-    (token) =>
-      token.blockchain === chain.code && token.contractAddress?.toLowerCase() === wanted,
+    (token) => token.blockchain === chain.code && token.contractAddress?.toLowerCase() === wanted,
   );
 }
 

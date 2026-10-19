@@ -34,6 +34,11 @@ sentence for a person, so consent can be informed.
 
 <Transaction />
 
+`buildTransactions` takes an optional second argument, `{ sender }`, the connected
+source wallet. Most rails ignore it. A rail whose service must be told where a
+refund goes before it hands out a deposit address, such as
+[NEAR Intents](/developers/rails/near-intents), refuses to build without it.
+
 `unnecessaryWhen` says when a transaction can be skipped, and how the caller
 checks:
 

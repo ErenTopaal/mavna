@@ -28,7 +28,7 @@ import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark.js";
  * full Mavna app, which lives at mavna.app, so it is not a playground concern.
  */
 
-const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
+const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
 const HIDEABLE: readonly HiddenUIElement[] = [
   "activity",
   "settings",
