@@ -671,7 +671,11 @@ async function runRelayed(
     await openOwnTrustline(engine, route, chainId, owner, "Nothing has been sent.", convertsTo);
     patch("hold", { phase: "done" });
   } else if (convertsTo !== undefined && convertsTo.id !== "native") {
-    patch("hold", { phase: "done", note: `It can already hold ${convertsTo.symbol}.` });
+    // the flight only has this row for an account paying its own way
+    const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
+    if (terms.reserveFunding === "self") {
+      patch("hold", { phase: "done", note: `It can already hold ${convertsTo.symbol}.` });
+    }
   }
 
   const sendHash = await send(deps, adapter, route);

@@ -1011,6 +1011,37 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(signed).toBeLessThan(log.indexOf("evm send value=777"));
   });
 
+  it.each([
+    ["self", [{ phase: "done", note: "It can already hold USDC." }]],
+    ["sponsor", []],
+  ] as const)(
+    "marks the hold row only where the flight has one (%s funding)",
+    async (who, marked) => {
+      funding = who;
+      // USDT0 arrives and is converted into USDC, which the account can already hold
+      heldOnly = new Set([STELLAR_USDT0.id, STELLAR_USDC.id]);
+      const base = routeFor("layerzero", { swap: true, delivers: STELLAR_USDT0 });
+      const route = {
+        ...base,
+        steps: base.steps.map((step) =>
+          step.kind === "swap"
+            ? {
+                ...step,
+                from: { asset: STELLAR_USDT0, baseUnits: "50000000" },
+                to: { asset: STELLAR_USDC, baseUnits: "49000000" },
+              }
+            : step,
+        ),
+      };
+      const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+        transactions: [layerZeroSend("777")],
+      });
+      const { seen, patch } = patches();
+      await run(adapter, route, patch).catch(() => undefined);
+      expect(seen.filter((p) => p.id === "hold").map((p) => p.patch)).toEqual(marked);
+    },
+  );
+
   it("checks every trustline it will open before the account signs any of them", async () => {
     funding = "self";
     // the account holds nothing yet: USDT0 must be opened, and USDC for the conversion
