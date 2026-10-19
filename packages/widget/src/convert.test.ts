@@ -9,7 +9,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DESTINATION, routeFor, STELLAR_USDC } from "./__fixtures__/scripted";
+import { DESTINATION, routeFor, STELLAR_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
 import { convertOnStellar, type TransferEngine } from "./transfer";
 
 /**
@@ -37,7 +37,8 @@ function respond(body: unknown, status = 200): Response {
 }
 
 describe("converting on Stellar", () => {
-  it("quotes through the venue chain, builds with the venue that quoted, and submits", async () => {
+  /** The network doubles and a real venue chain; what crossed the boundary is returned. */
+  function setUp() {
     const simulated: string[] = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -124,6 +125,11 @@ describe("converting on Stellar", () => {
       usdcOnStellar: STELLAR_USDC,
     };
 
+    return { engine, simulated, signed, sent };
+  }
+
+  it("quotes through the venue chain, builds with the venue that quoted, and submits", async () => {
+    const { engine, simulated, signed, sent } = setUp();
     await convertOnStellar(engine, routeFor("layerzero", { swap: true }), DESTINATION);
 
     expect(simulated).toEqual([`${ROUTER} swap_chained`]);
@@ -131,5 +137,22 @@ describe("converting on Stellar", () => {
     expect(sent).toEqual(signed);
     const tx = TransactionBuilder.fromXDR(signed[0] ?? "", Networks.TESTNET);
     expect("source" in tx && tx.source).toBe(DESTINATION);
+  });
+
+  it("will not convert below the least XLM the user was shown", async () => {
+    // Aquarius now quotes 26 XLM, so 50 bps of slippage floors it at 25.87
+    const shown = (baseUnits: string) => ({
+      ...routeFor("layerzero", { swap: true }),
+      receivesAtLeast: { asset: STELLAR_XLM, baseUnits },
+    });
+    const held = setUp();
+    await convertOnStellar(held.engine, shown("25870000"), DESTINATION);
+    expect(held.sent).toHaveLength(1);
+
+    const moved = setUp();
+    await expect(convertOnStellar(moved.engine, shown("25870001"), DESTINATION)).rejects.toThrow(
+      /price moved.*USDC has arrived/,
+    );
+    expect(moved.signed).toEqual([]);
   });
 });

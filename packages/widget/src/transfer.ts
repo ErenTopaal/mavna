@@ -301,6 +301,15 @@ export async function convertOnStellar(
     maxSlippageBps: 50,
     destinationKind: "account",
   });
+  // The route showed the user a least amount of XLM; a quote taken now that
+  // cannot promise it is not what they agreed to.
+  const shown = route.receivesAtLeast;
+  if (shown.asset.id === "native" && BigInt(quote.amountOutMinimum) < BigInt(shown.baseUnits)) {
+    throw new Error(
+      "The price moved since this transfer was quoted, and converting now could give less " +
+        "XLM than you were shown. The USDC has arrived and is yours; convert it later.",
+    );
+  }
   const stellarAccount = await engine.rpc.loadAccount(account);
   const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
   const signed = await engine.stellar.sign(unsigned.toXDR(), account);
