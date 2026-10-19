@@ -958,3 +958,55 @@ fn native_value_from_the_executor_passes_straight_to_the_recipient() {
     assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
     assert_eq!(w.held(), (0, 0));
 }
+
+#[test]
+fn a_message_the_sdk_writes_decodes_to_what_it_says() {
+    // written by encodeArrivalMessage in packages/adapters/layerzero/src/compose.ts,
+    // the same bytes its own test pins
+    let env = Env::default();
+    let hex = "0100\
+        85e8c67a3bce389d24603743e1a274c504cac13a9a5e71f2d2212609f5443041\
+        adefce59aee52968f76061d494c2525b75659fa4296a65f499ef29e56477e496\
+        000000000000000000000000000f1b30\
+        001e\
+        01\
+        781d6fb6bda4655541c0fe7dc154b6204d0783b9ff4e683efb3997e95c559a24\
+        01\
+        02\
+        649c910ee8bea16a45db1526dee995ba6dd66d0df809b15446c3a6478953391d\
+        adefce59aee52968f76061d494c2525b75659fa4296a65f499ef29e56477e496\
+        0707070707070707070707070707070707070707070707070707070707070707\
+        adefce59aee52968f76061d494c2525b75659fa4296a65f499ef29e56477e496";
+    let raw: std::vec::Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let at = |s: &str| Address::from_str(&env, s);
+
+    let read = crate::codec::decode_instructions(&env, &Bytes::from_slice(&env, &raw)).unwrap();
+    assert_eq!(
+        read.recipient,
+        at("GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL")
+    );
+    let c = read.conversion.unwrap();
+    let usdc = at("CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75");
+    assert_eq!(c.wanted, usdc);
+    assert_eq!(c.min_out, 990_000);
+    assert_eq!(c.fee_bps, 30);
+    assert_eq!(
+        c.fee_recipient,
+        at("CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F")
+    );
+    assert_eq!(c.path.len(), 1);
+    let (tokens, index, out) = c.path.get(0).unwrap();
+    assert_eq!(
+        tokens,
+        vec![
+            &env,
+            at("CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF"),
+            usdc.clone()
+        ]
+    );
+    assert_eq!(index, BytesN::from_array(&env, &[7u8; 32]));
+    assert_eq!(out, usdc);
+}
