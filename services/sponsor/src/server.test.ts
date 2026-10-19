@@ -1211,8 +1211,8 @@ describe("any rail can trigger a held settlement", () => {
     });
     const server = await startServer({ caps });
     const victim = Keypair.random();
-    await holdSettlementFor(server, victim);
     server.rpc.holding(victim, PLENTY);
+    await holdSettlementFor(server, victim);
     // How the network would answer a settlement whose revokes have nothing to revoke.
     const onChainFailure = new MavnaError("settlement was rejected: opNoSponsorship", {
       retryable: false,
@@ -1777,5 +1777,91 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(server.rpc.submissions).toHaveLength(1);
     expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
     expect((await caps.usage()).stranded).toBe(0);
+  });
+});
+
+describe("the sponsor prepares only what the held settlement repays", () => {
+  const MISMATCH = "That preparation does not match the settlement held for this account.";
+
+  it("will not swap a prepared account's settlement for one that repays less", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    // A new account: the held settlement repays the account and its trustline.
+    await preparedWithSettlementHeld(server, user);
+
+    // The account exists now, so a fresh settlement would repay one trustline.
+    const smaller = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(smaller.status).toBe(200);
+    const replaced = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(smaller.body.xdr as string, user),
+    });
+    expect(replaced.status).toBe(409);
+
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(landed.operations.map((op) => op.type)).toContain("revokeAccountSponsorship");
+  });
+
+  it("refuses a preparation that creates an account the settlement does not repay", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    await holdSettlementFor(server, user);
+
+    // The account is merged away before the preparation is built.
+    server.rpc.accounts.delete(user.publicKey());
+    const response = await server.post("/submit", {
+      signedXdr: await preparedAndSigned(server, user),
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe(MISMATCH);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("refuses a preparation that creates no account when the settlement revokes one", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+
+    // The account appears before the preparation is built.
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    const response = await server.post("/submit", {
+      signedXdr: await preparedAndSigned(server, user),
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe(MISMATCH);
+    expect(server.rpc.submissions).toHaveLength(0);
+  });
+
+  it("refuses a preparation that opens trustlines the settlement does not repay", async () => {
+    const EURC = new Asset("EURC", Keypair.random().publicKey());
+    const server = await startServer({ curatedAssets: { USDC, EURC } });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+
+    const both = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC", "EURC"],
+      sourceChainId: "1",
+    });
+    expect(both.status).toBe(200);
+    const response = await server.post("/submit", {
+      signedXdr: signXdr(both.body.xdr as string, user),
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe(MISMATCH);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    // The preparation the settlement does repay still goes through.
+    const usdcOnly = await server.post("/submit", {
+      signedXdr: await preparedAndSigned(server, user),
+    });
+    expect(usdcOnly.status).toBe(200);
   });
 });

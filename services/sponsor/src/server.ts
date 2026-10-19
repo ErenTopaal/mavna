@@ -28,7 +28,7 @@ import {
   type Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
-import { BuiltLedger, type BuiltRecord, signedBy } from "./built.js";
+import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
 import {
   CapLedger,
   classifySourceChain,
@@ -199,6 +199,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       sourceChainId: string;
       channel: string | undefined;
       maxTimeUnix: number;
+      /** What this settlement repays, which the preparation must match exactly. */
+      repays: Repayment;
       /**
        * Whether the preparation this settlement repays has landed. Until it
        * has, the revokes have nothing to revoke and the settlement can only
@@ -250,7 +252,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * here: the lease ends on its own at the same bound, and by now the account
    * may hold a newer lease on the same channel for a settlement still live.
    */
-  function liveSettlement(destination: string) {
+  async function liveSettlement(destination: string) {
     const held = heldSettlements.get(destination);
     if (held === undefined) return undefined;
     if (held.maxTimeUnix <= nowUnix()) {
@@ -338,7 +340,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    */
   async function sweepHeld(): Promise<void> {
     for (const destination of [...heldSettlements.keys()]) {
-      const held = liveSettlement(destination);
+      const held = await liveSettlement(destination);
       if (held === undefined || !held.prepared) continue;
       try {
         const outcome = await settleIfHeld(destination, SWEEP_ACCOUNT_DEADLINE_MS);
@@ -651,6 +653,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       sourceChainId: body.sourceChainId ?? "unknown",
       expiresAtUnix: expiryOf(transaction),
       channel: channel.address,
+      repays: { createdAccount, assets: [usdc.toString()] },
     });
 
     reply(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
@@ -717,6 +720,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
+    // Replacing a settlement whose preparation has landed would let the loan be
+    // repaid by a cheaper settlement than the one it was made against.
+    const current = await liveSettlement(record.destination);
+    if (current?.prepared === true) {
+      refuse(
+        record,
+        res,
+        origin,
+        409,
+        "This account's preparation has landed against the settlement already held.",
+      );
+      return;
+    }
+    if (record.repays === undefined) {
+      throw new Error("a built settlement has no record of what it repays");
+    }
+
     // The settlement sits on its channel's next sequence, which is only this
     // account's while it holds the lease. A lease that lapsed or moved on means
     // that sequence now belongs to someone else's settlement, and holding this
@@ -745,6 +765,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       sourceChainId: record.sourceChainId,
       channel: record.channel,
       maxTimeUnix: record.expiresAtUnix,
+      repays: record.repays,
       prepared: false,
     });
     reply(res, 200, { held: true }, origin);
@@ -811,7 +832,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   async function settleHeld(destination: string): Promise<Record<string, unknown>> {
-    const held = liveSettlement(destination);
+    const held = await liveSettlement(destination);
     if (held === undefined) return { settled: false };
     if (!held.prepared) return { settled: false, settlementRetryable: true };
     const pool = await ensureChannels();
@@ -991,7 +1012,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The governing order: no capital commits until the settlement that releases
     // it is already signed and held. Without this the deposit is a gift, which is
     // the model the cost decision explicitly rejected.
-    if (liveSettlement(record.destination) === undefined) {
+    const held = await liveSettlement(record.destination);
+    if (held === undefined) {
       refuse(
         record,
         res,
@@ -999,6 +1021,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         409,
         "No settlement is held for this account. The deposit is a loan, and the " +
           "repayment is signed before the loan is made, not after.",
+      );
+      return;
+    }
+    // Whether the account exists is read separately at each step, and it can
+    // change in between, so the preparation is held to what the settlement
+    // revokes rather than to what was true when each was built.
+    if (!sameRepayment(sponsoredBy(transaction), held.repays)) {
+      refuse(
+        record,
+        res,
+        origin,
+        409,
+        "That preparation does not match the settlement held for this account.",
       );
       return;
     }
@@ -1018,8 +1053,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       reply(res, 502, { error: "The preparation could not be submitted.", retryable }, origin);
       return;
     }
-    const held = liveSettlement(record.destination);
-    if (held !== undefined) held.prepared = true;
+    const landed = await liveSettlement(record.destination);
+    if (landed !== undefined) landed.prepared = true;
     try {
       await caps.recordStarted(source);
     } catch (cause) {
@@ -1069,7 +1104,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     lastSettleCall.set(destination, now);
 
-    if (liveSettlement(destination) === undefined) {
+    if ((await liveSettlement(destination)) === undefined) {
       const settledHash = settledRecently(destination);
       if (settledHash !== undefined) {
         reply(res, 200, { settled: true, settlementTxHash: settledHash }, origin);
@@ -1404,6 +1439,21 @@ function settlesOnStellar(address: string): boolean {
  */
 function signerFor(destination: string): string {
   return classifyAddress(destination).trustlineHolder ?? destination;
+}
+
+/** What a preparation sponsors, in the terms a settlement records what it repays. */
+function sponsoredBy(transaction: Transaction): Repayment {
+  return {
+    createdAccount: transaction.operations.some((op) => op.type === "createAccount"),
+    assets: transaction.operations.flatMap((op) =>
+      op.type === "changeTrust" ? [op.line.toString()] : [],
+    ),
+  };
+}
+
+function sameRepayment(a: Repayment, b: Repayment): boolean {
+  const key = (r: Repayment): string => [...r.assets].sort().join("\n");
+  return a.createdAccount === b.createdAccount && key(a) === key(b);
 }
 
 /**

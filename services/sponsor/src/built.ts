@@ -22,6 +22,18 @@ export interface BuiltRecord {
   readonly sourceChainId: string;
   readonly expiresAtUnix: number;
   readonly channel?: string;
+  /**
+   * For a settlement, what it repays: whether it revokes the account's own
+   * sponsorship, and the trustlines whose sponsorship it revokes, as
+   * `CODE:ISSUER`. A preparation is countersigned only if it sponsors exactly
+   * this, or the settlement leaves part of the loan unpaid.
+   */
+  readonly repays?: Repayment;
+}
+
+export interface Repayment {
+  readonly createdAccount: boolean;
+  readonly assets: readonly string[];
 }
 
 export class BuiltLedger {
