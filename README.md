@@ -24,7 +24,7 @@ Requires Node 24 and pnpm.
 
 ```bash
 pnpm install
-pnpm dev         # run an app (per-app: pnpm --filter @mavna/app dev)
+pnpm --filter @mavna/app dev   # also @mavna/web, @mavna/playground, @mavna/docs
 pnpm build       # build everything
 pnpm test        # unit tests
 pnpm typecheck

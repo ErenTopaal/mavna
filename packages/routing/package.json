@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --project unit --root ../..",
+    "test": "vitest run --project unit --passWithNoTests --root ../.. packages/routing",
     "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
   },
   "dependencies": {

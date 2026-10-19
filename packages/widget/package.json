@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "type": "module",
   "license": "Apache-2.0",
+  "mavna": {
+    "publicIndex": "explicit"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -19,7 +22,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --project unit --root ../..",
+    "test": "vitest run --project unit --passWithNoTests --root ../.. packages/widget",
     "size": "size-limit",
     "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
   },

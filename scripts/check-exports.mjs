@@ -17,6 +17,14 @@ for (const root of roots) {
   for (const pkg of readdirSync(root)) {
     const src = `${root}/${pkg}/src`;
     if (!existsSync(src) || !existsSync(`${src}/index.ts`)) continue;
+    // a package can opt out when its public index is deliberately a hand-picked
+    // surface (the widget exports two components, not every internal module).
+    const manifest = `${root}/${pkg}/package.json`;
+    if (
+      existsSync(manifest) &&
+      JSON.parse(readFileSync(manifest, "utf8")).mavna?.publicIndex === "explicit"
+    )
+      continue;
     const modules = readdirSync(src).filter(
       (f) =>
         // .tsx counts. It was omitted at first, which meant the widget's two

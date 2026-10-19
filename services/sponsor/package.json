@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --project unit --root ../..",
+    "test": "vitest run --project unit --passWithNoTests --root ../.. services/sponsor",
     "publish:check": "echo 'not published'",
     "start": "node dist/main.mjs"
   },
