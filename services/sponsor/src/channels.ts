@@ -33,6 +33,13 @@ interface Lease {
   readonly untilUnix: number;
 }
 
+/**
+ * How long past a lease's bound before its channel is reused. maxTime is
+ * inclusive on the network and this clock is not the ledger's, so a settlement
+ * can still land just after it looks expired from here.
+ */
+const RECLAIM_GRACE_SECONDS = 30;
+
 export class ChannelPool {
   private readonly available: Channel[];
   private readonly leased = new Map<string, Lease>();
@@ -60,7 +67,7 @@ export class ChannelPool {
    */
   acquire(transferId: string, untilUnix: number, nowUnix: number): Channel | undefined {
     for (const [owner, lease] of this.leased) {
-      if (lease.untilUnix <= nowUnix) this.free(owner);
+      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) this.free(owner);
     }
     const existing = this.leased.get(transferId);
     if (existing !== undefined) {

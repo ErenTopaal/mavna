@@ -55,9 +55,19 @@ describe("channel pool", () => {
     const pool = poolOf(1);
     const first = pool.acquire("abandoned", NOW + DAY, NOW);
 
-    const reused = pool.acquire("next", NOW + 2 * DAY, NOW + DAY);
+    const reused = pool.acquire("next", NOW + 2 * DAY, NOW + DAY + 31);
     expect(reused?.address).toBe(first?.address);
     expect(pool.leasedCount).toBe(1);
+  });
+
+  it("waits out clock drift past the bound before reclaiming", () => {
+    // maxTime is inclusive on the network and our clock is not the ledger's,
+    // so a settlement can still land a little after we think it expired.
+    const pool = poolOf(1);
+    pool.acquire("late", NOW + DAY, NOW);
+    expect(pool.acquire("next", NOW + 2 * DAY, NOW + DAY)).toBeUndefined();
+    expect(pool.acquire("next", NOW + 2 * DAY, NOW + DAY + 30)).toBeUndefined();
+    expect(pool.acquire("next", NOW + 2 * DAY, NOW + DAY + 31)).toBeDefined();
   });
 
   it("does not reclaim a lease that is still live", () => {
