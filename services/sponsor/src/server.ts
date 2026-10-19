@@ -37,7 +37,7 @@ import {
   InMemoryCapStore,
 } from "./caps.js";
 import { ChannelPool } from "./channels.js";
-import { ComposeRefused, Composer } from "./compose.js";
+import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 
 /**
@@ -217,9 +217,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           payerSecret: options.sponsorSecret,
           executorSecret: options.arrivalExecutorSecret,
         });
-  // one finish per message at a time; the chain refuses a second anyway, this
-  // only keeps a double click from costing two simulations and two fees
+  // the chain refuses a second finish anyway; these keep repeated or spammed asks
+  // from costing simulations and fees. Per message and overall, not per address:
+  // behind the reverse proxy every caller has the proxy's address.
   const composing = new Set<string>();
+  const lastComposeCall = new Map<string, number>();
+  const recentComposes: number[] = [];
 
   /**
    * Settlements collected before any capital moved, waiting for delivery.
@@ -1296,19 +1299,55 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    const key = typeof body.guid === "string" ? body.guid.toLowerCase() : "";
-    if (composing.has(key)) {
-      reply(
-        res,
-        429,
-        { error: "This conversion is being finished already.", retryable: true },
-        origin,
-      );
-      return;
+    let request: ReturnType<typeof parseComposeRequest>;
+    try {
+      request = parseComposeRequest(body as Parameters<typeof parseComposeRequest>[0]);
+    } catch (cause) {
+      if (cause instanceof ComposeRefused) {
+        reply(res, 400, { error: cause.message, retryable: false }, origin);
+        return;
+      }
+      throw cause;
+    }
+    const key = request.guid;
+    {
+      const now = nowUnix();
+      for (const [guid, at] of lastComposeCall) {
+        if (at + COMPOSE_INTERVAL_SECONDS <= now) lastComposeCall.delete(guid);
+      }
+      while (recentComposes.length > 0 && (recentComposes[0] ?? 0) + 60 <= now) {
+        recentComposes.shift();
+      }
+      if (composing.has(key) || lastComposeCall.has(key)) {
+        reply(
+          res,
+          429,
+          {
+            error: "This conversion was asked about moments ago. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      if (recentComposes.length >= COMPOSES_PER_MINUTE) {
+        reply(
+          res,
+          429,
+          {
+            error: "Too many conversions are being finished right now. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      lastComposeCall.set(key, now);
+      recentComposes.push(now);
     }
     composing.add(key);
     try {
-      const outcome = await composer.finish(body as Parameters<Composer["finish"]>[0]);
+      const outcome = await composer.finish(request);
       reply(res, outcome.kind === "not-queued" ? 404 : 200, { ...outcome }, origin);
     } catch (cause) {
       if (cause instanceof ComposeRefused) {
@@ -1623,6 +1662,9 @@ const SETTLEMENT_WAIT_SECONDS = 120;
 
 /** How often one account's held settlement may be asked for through /settle. */
 const SETTLE_INTERVAL_SECONDS = 30;
+/** How often one message may be asked to finish, and how many finishes a minute in all. */
+const COMPOSE_INTERVAL_SECONDS = 30;
+const COMPOSES_PER_MINUTE = 10;
 
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;

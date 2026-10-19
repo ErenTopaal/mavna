@@ -12,7 +12,12 @@ export {
 export type { Channel, ChannelPoolOptions } from "./channels.js";
 export { ChannelPool } from "./channels.js";
 export type { ComposeOutcome, ComposeRequest, ComposerOptions } from "./compose.js";
-export { ComposeRefused, Composer } from "./compose.js";
+export {
+  assertOnlyExecutorCompose,
+  ComposeRefused,
+  Composer,
+  parseComposeRequest,
+} from "./compose.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
 export { Deliverer } from "./deliver.js";
 export { env } from "./env.js";

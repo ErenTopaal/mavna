@@ -9,7 +9,6 @@ import { AccountNotFound, type NetworkConfig, type RpcClient } from "@mavna/stel
 import {
   Address,
   authorizeEntry,
-  Contract,
   Keypair,
   nativeToScVal,
   Operation,
@@ -173,7 +172,7 @@ export class Composer {
   }
 
   async finish(request: ComposeRequest): Promise<ComposeOutcome> {
-    const { from, guid, index, message } = parse(request);
+    const { from, guid, index, message } = parseComposeRequest(request);
     const { rpc, network, contract } = this.options;
 
     const config = await readArrivalConfig(rpc, contract);
@@ -266,7 +265,8 @@ export class Composer {
 /** The executor's minimum balance, which is all it ever holds. */
 const EXECUTOR_STARTING_XLM = "1";
 
-function parse(request: ComposeRequest): {
+/** Check a request's shape, refusing anything malformed with a reason the caller can read. */
+export function parseComposeRequest(request: ComposeRequest): {
   from: string;
   guid: string;
   index: number;

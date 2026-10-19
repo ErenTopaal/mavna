@@ -2429,6 +2429,31 @@ describe("finishing a conversion on arrival", () => {
     expect(response.body.retryable).toBe(false);
   });
 
+  it("finishes one message at most once in a while, however its guid is written", async () => {
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    await server.post("/compose", good);
+    const again = await server.post("/compose", { ...good, guid: `0x${good.guid.toUpperCase()}` });
+    expect(again.status).toBe(429);
+    expect(again.body.retryable).toBe(true);
+  });
+
+  it("caps how many finishes it will try a minute", async () => {
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const guid = i.toString(16).padStart(64, "0");
+      statuses.push((await server.post("/compose", { ...good, guid })).status);
+    }
+    expect(statuses.slice(0, 10)).not.toContain(429);
+    expect(statuses[10]).toBe(429);
+  });
+
   it("refuses malformed input before reading anything", async () => {
     const server = await startServer({
       arrivalContract: ARRIVAL,
