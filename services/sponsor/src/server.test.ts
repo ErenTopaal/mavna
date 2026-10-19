@@ -15,6 +15,7 @@ import {
   createNetworkConfig,
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
+  type SubmitOptions,
   XlmPriceSource,
 } from "@mavna/stellar";
 import {
@@ -61,18 +62,34 @@ const IRIS = "https://iris.invalid";
 /** A thousand USDC in stroops: far more than any settlement here spends. */
 const PLENTY = 10_000_000_000n;
 
-/** Accounts known to exist, and every transaction handed over for submission. */
+/**
+ * A stand-in for the network, behind the real RpcClient. Accounts carry real
+ * sequence numbers: a transaction lands only on its source's next sequence and
+ * advances it, so a spent sequence is refused the way the network refuses it.
+ */
 class RecordingRpc extends RpcClient {
   readonly accounts = new Map<string, bigint>();
+  /** Every transaction the network accepted, in order. */
   readonly submissions: { label: string; tx: Transaction | FeeBumpTransaction }[] = [];
   /** Set to make the next submission fail the way a network rejection does. */
   rejectNext: MavnaError | undefined;
+  /**
+   * While set, accepted transactions wait unincluded until `includePending`,
+   * the way a busy network leaves them in its queue.
+   */
+  holdInclusion = false;
 
   /** USDC trustline balances in stroops, by account. */
   readonly trustlines = new Map<string, bigint>();
 
+  private readonly landed = new Map<string, rpc.Api.GetSuccessfulTransactionResponse>();
+  private readonly pending = new Map<string, Transaction | FeeBumpTransaction>();
+  /** What each transaction was submitted as, by hash. */
+  private readonly labels = new Map<string, string>();
+
   constructor() {
-    super({ url: NOWHERE });
+    // the pause between polls yields to the event loop and nothing more
+    super({ url: NOWHERE, baseDelayMs: 0, sleep: () => new Promise((r) => setImmediate(r)) });
     // The ledger read every balance check goes through, answered from the maps
     // above instead of a node.
     this.server.getLedgerEntries = async (...keys: xdr.LedgerKey[]) => ({
@@ -82,6 +99,16 @@ class RecordingRpc extends RpcClient {
         return val === undefined ? [] : [{ key, val, lastModifiedLedgerSeq: 1 }];
       }),
     });
+    this.server.sendTransaction = async (tx) => this.send(tx);
+    this.server.getTransaction = async (hash) =>
+      this.landed.get(hash) ?? {
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+        txHash: hash,
+        latestLedger: 1,
+        latestLedgerCloseTime: 0,
+        oldestLedger: 1,
+        oldestLedgerCloseTime: 0,
+      };
   }
 
   private entryFor(key: xdr.LedgerKey): xdr.LedgerEntryData | undefined {
@@ -127,14 +154,8 @@ class RecordingRpc extends RpcClient {
 
   /** The user's account after the preparation landed and a delivery arrived. */
   holding(user: Keypair, usdcStroops: bigint): void {
-    this.accounts.set(user.publicKey(), 1n);
+    if (!this.accounts.has(user.publicKey())) this.accounts.set(user.publicKey(), 1n);
     this.trustlines.set(user.publicKey(), usdcStroops);
-  }
-
-  override async loadAccount(address: string): Promise<Account> {
-    const sequence = this.accounts.get(address);
-    if (sequence === undefined) throw new Error(`account ${address} not found`);
-    return new Account(address, sequence.toString());
   }
 
   /** Simulation is a network call; what it would add does not matter to these tests. */
@@ -145,18 +166,74 @@ class RecordingRpc extends RpcClient {
   override async submit(
     label: string,
     build: () => Promise<Transaction | FeeBumpTransaction>,
+    options?: SubmitOptions,
   ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
-    const tx = await build();
     const rejection = this.rejectNext;
     if (rejection !== undefined) {
+      await build();
       this.rejectNext = undefined;
       throw rejection;
     }
-    this.submissions.push({ label, tx });
-    const now = Math.floor(Date.now() / 1000);
+    const labelled = async () => {
+      const tx = await build();
+      this.labels.set(tx.hash().toString("hex"), label);
+      return tx;
+    };
+    return super.submit(label, labelled, options);
+  }
+
+  /** Let every transaction the network has queued land, in order. */
+  includePending(): void {
+    const queued = [...this.pending.values()];
+    this.pending.clear();
+    for (const tx of queued) this.apply(tx);
+  }
+
+  private send(tx: Transaction | FeeBumpTransaction): rpc.Api.SendTransactionResponse {
+    const hash = tx.hash().toString("hex");
+    const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
+    if (this.pending.has(hash) || this.landed.has(hash)) return { ...base, status: "DUPLICATE" };
+    const inner = "innerTransaction" in tx ? tx.innerTransaction : tx;
+    const current = this.accounts.get(inner.source);
+    if (current === undefined) return this.refused(base, "txNoAccount");
+    if (BigInt(inner.sequence) !== current + 1n) return this.refused(base, "txBadSeq");
+    this.submissions.push({ label: this.labels.get(hash) ?? "unlabelled", tx });
+    if (this.holdInclusion) this.pending.set(hash, tx);
+    else this.apply(tx);
+    return { ...base, status: "PENDING" };
+  }
+
+  private refused(
+    base: { hash: string; latestLedger: number; latestLedgerCloseTime: number },
+    code: "txBadSeq" | "txNoAccount",
+  ): rpc.Api.SendTransactionResponse {
     return {
+      ...base,
+      status: "ERROR",
+      errorResult: new xdr.TransactionResult({
+        feeCharged: xdr.Int64.fromString("100"),
+        result: xdr.TransactionResultResult[code](),
+        ext: new xdr.TransactionResultExt(0),
+      }),
+    };
+  }
+
+  /** What landing means here: the sequence is spent and any new account exists. */
+  private apply(tx: Transaction | FeeBumpTransaction): void {
+    const inner = "innerTransaction" in tx ? tx.innerTransaction : tx;
+    const current = this.accounts.get(inner.source);
+    if (current === undefined || BigInt(inner.sequence) !== current + 1n) return;
+    this.accounts.set(inner.source, BigInt(inner.sequence));
+    for (const op of inner.operations) {
+      if (op.type === "createAccount" && !this.accounts.has(op.destination)) {
+        this.accounts.set(op.destination, 1n << 32n);
+      }
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const hash = tx.hash().toString("hex");
+    this.landed.set(hash, {
       status: rpc.Api.GetTransactionStatus.SUCCESS,
-      txHash: tx.hash().toString("hex"),
+      txHash: hash,
       latestLedger: 1,
       latestLedgerCloseTime: now,
       oldestLedger: 1,
@@ -173,7 +250,7 @@ class RecordingRpc extends RpcClient {
       }),
       resultMetaXdr: new xdr.TransactionMeta(0, []),
       events: { transactionEventsXdr: [], contractEventsXdr: [] },
-    };
+    });
   }
 }
 
@@ -1279,12 +1356,12 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     let inFlight = 0;
     let most = 0;
     const submit = server.rpc.submit.bind(server.rpc);
-    server.rpc.submit = async (label, build) => {
+    server.rpc.submit = async (label, build, options) => {
       inFlight += 1;
       most = Math.max(most, inFlight);
       try {
         await new Promise((resolve) => setImmediate(resolve));
-        return await submit(label, build);
+        return await submit(label, build, options);
       } finally {
         inFlight -= 1;
       }
@@ -1315,10 +1392,10 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     });
     let attempts = 0;
     const submit = server.rpc.submit.bind(server.rpc);
-    server.rpc.submit = async (label, build) => {
+    server.rpc.submit = async (label, build, options) => {
       attempts += 1;
       await gate;
-      return submit(label, build);
+      return submit(label, build, options);
     };
 
     server.server.startSweep();
@@ -1347,10 +1424,10 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     });
     let attempts = 0;
     const submit = server.rpc.submit.bind(server.rpc);
-    server.rpc.submit = async (label, build) => {
+    server.rpc.submit = async (label, build, options) => {
       attempts += 1;
       await gate;
-      return submit(label, build);
+      return submit(label, build, options);
     };
 
     server.server.startSweep();
@@ -1441,9 +1518,9 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
       release = resolve;
     });
     const submit = server.rpc.submit.bind(server.rpc);
-    server.rpc.submit = async (label, build) => {
+    server.rpc.submit = async (label, build, options) => {
       await gate;
-      return submit(label, build);
+      return submit(label, build, options);
     };
 
     server.server.startSweep();
@@ -1489,12 +1566,12 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
 
     let attempts = 0;
     const submit = server.rpc.submit.bind(server.rpc);
-    server.rpc.submit = async (label, build) => {
+    server.rpc.submit = async (label, build, options) => {
       attempts += 1;
       // The first call never answers, the way a node that accepts the
       // connection and then says nothing behaves.
       if (attempts === 1) return new Promise<never>(() => {});
-      return submit(label, build);
+      return submit(label, build, options);
     };
 
     // Faked only now, with no HTTP left to make, so the deadline's timer is held too.
