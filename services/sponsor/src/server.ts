@@ -18,6 +18,7 @@ import {
   buildSettlement,
   classifyAddress,
   inspectDestination,
+  SubmitRejected,
   XlmPriceSource,
 } from "@mavna/stellar";
 import {
@@ -844,26 +845,62 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (!covered) return { settled: false, settlementRetryable: true };
 
-    try {
-      transaction.sign(channelKeypair);
-      transaction.sign(keypair);
-      const result = await options.rpc.submit("settlement", async () => transaction);
+    const settled = (txHash: string): Record<string, unknown> => {
       heldSettlements.delete(destination);
       pool.release(destination, transaction.source);
       pruneSettled();
-      recentlySettled.set(destination, { txHash: result.txHash, untilUnix: held.maxTimeUnix });
-      return { settled: true, settlementTxHash: result.txHash };
+      recentlySettled.set(destination, { txHash, untilUnix: held.maxTimeUnix });
+      return { settled: true, settlementTxHash: txHash };
+    };
+    const stranded = async (): Promise<Record<string, unknown>> => {
+      // The held transaction can never land. The capital it would have
+      // released is now the §6.1 loss, counted where the brake can see it.
+      await caps.recordStranded();
+      heldSettlements.delete(destination);
+      pool.release(destination, transaction.source);
+      return { settled: false, settlementRetryable: false };
+    };
+
+    try {
+      transaction.sign(channelKeypair);
+      transaction.sign(keypair);
+      const result = await options.rpc.submit("settlement", async () => transaction, {
+        presigned: true,
+      });
+      return settled(result.txHash);
     } catch (cause) {
-      const retryable = cause instanceof MavnaError ? cause.retryable : true;
-      if (!retryable) {
-        // The held transaction can never land. The capital it would have
-        // released is now the §6.1 loss, counted where the brake can see it.
-        await caps.recordStranded();
-        heldSettlements.delete(destination);
-        pool.release(destination, transaction.source);
+      if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
+        return await spentSequence(transaction.hash().toString("hex"), settled, stranded);
       }
+      const retryable = cause instanceof MavnaError ? cause.retryable : true;
+      if (!retryable) return await stranded();
       return { settled: false, settlementRetryable: retryable };
     }
+  }
+
+  /**
+   * The channel's sequence is past this settlement's. Either this settlement
+   * landed already, from an earlier attempt whose answer never arrived, or
+   * something else took the sequence and it never can. Only the ledger knows
+   * which, so it is asked by hash.
+   */
+  async function spentSequence(
+    hash: string,
+    settled: (txHash: string) => Record<string, unknown>,
+    stranded: () => Promise<Record<string, unknown>>,
+  ): Promise<Record<string, unknown>> {
+    let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+    try {
+      found = await options.rpc.findTransaction(hash);
+    } catch (cause) {
+      console.error(
+        "[sponsor] could not look up a settlement whose sequence is spent:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      return { settled: false, settlementRetryable: true };
+    }
+    if (found.status === "SUCCESS") return settled(hash);
+    return await stranded();
   }
 
   /**

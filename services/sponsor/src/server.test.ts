@@ -1716,4 +1716,66 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(signedBy(landed[0] as Transaction, next.publicKey())).toBe(true);
     logged.mockRestore();
   });
+
+  it("counts a settlement whose sequence something else spent as stranded, and frees its channel", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    // Some other transaction took the channel's next sequence.
+    server.rpc.accounts.set(server.channel.publicKey(), 201n);
+
+    const response = await server.post("/settle", { destination: user.publicKey() });
+    expect(response.status).toBe(200);
+    expect(response.body.settled).toBe(false);
+    expect(response.body.settlementRetryable).toBe(false);
+    expect((await caps.usage()).stranded).toBe(1);
+    expect(server.rpc.submissions).toHaveLength(0);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).status).toBe(404);
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("reports a settlement that landed unheard as settled when its sequence comes back spent", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    // The settlement lands, but the answer is lost on the way back.
+    let lost = true;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, options) => {
+      const result = await submit(label, build, options);
+      if (label === "settlement" && lost) {
+        lost = false;
+        throw new MavnaError("the connection dropped before the answer came back", {
+          retryable: true,
+        });
+      }
+      return result;
+    };
+
+    const first = await server.post("/settle", { destination: user.publicKey() });
+    expect(first.body.settled).toBe(false);
+    expect(first.body.settlementRetryable).toBe(true);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    const again = await server.post("/settle", { destination: user.publicKey() });
+    expect(again.status).toBe(200);
+    expect(again.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(server.rpc.submissions).toHaveLength(1);
+    expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+    expect((await caps.usage()).stranded).toBe(0);
+  });
 });
