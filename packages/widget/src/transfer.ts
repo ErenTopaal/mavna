@@ -324,6 +324,13 @@ async function deliverToStellar(
   /** The account pays for its own delivery: `owner` signs it, the sponsor is not asked. */
   ownDelivery: boolean,
 ): Promise<void> {
+  // an account that pays for its own delivery is the one that signs it; asking
+  // the sponsor instead would quietly spend the money self mode exists to save
+  if (ownDelivery && owner === undefined) {
+    throw new Error(
+      "This delivery is the receiving account's to sign, and no Stellar wallet is connected for it.",
+    );
+  }
   const domain = engine.sourceDomain(chainId);
   patch("attest", { phase: "pending" });
   let prepared = alreadyPrepared;
