@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAdvance, isTerminal, type StepPhase } from "./execution.js";
+import { canAdvance, isSuccess, isTerminal, type StepPhase } from "./execution.js";
 import { type Asset, amountOf } from "./money.js";
 
 const usdc: Asset = {
@@ -31,6 +31,42 @@ describe("terminal states", () => {
         remedy: { kind: "retry", because: "some of it arrived" },
       }),
     ).toBe(true);
+  });
+
+  it("treats a compose arrival delivered as it came as terminal, and not as done", () => {
+    const asCame: StepPhase = {
+      phase: "delivered-as-came",
+      ref,
+      received: amountOf(usdc, "1000"),
+      because: "the conversion could not meet your minimum",
+    };
+    expect(isTerminal(asCame)).toBe(true);
+    expect(isSuccess(asCame)).toBe(false);
+    expect(canAdvance(asCame, done)).toBe(false);
+    expect(canAdvance(pending, asCame)).toBe(true);
+  });
+
+  it("keeps a conversion still to run apart from both endings", () => {
+    const converting: StepPhase = {
+      phase: "delivered-conversion-pending",
+      ref,
+      deliveredAtUnix: 100,
+      finish: undefined,
+    };
+    const converted: StepPhase = {
+      phase: "delivered-and-converted",
+      ref,
+      received: amountOf(usdc, "990"),
+      fee: amountOf(usdc, "10"),
+    };
+    expect(isTerminal(converting)).toBe(false);
+    expect(isSuccess(converting)).toBe(false);
+    expect(canAdvance(converting, converted)).toBe(true);
+    expect(isTerminal(converted)).toBe(true);
+    expect(isSuccess(converted)).toBe(true);
+    expect(isSuccess(done)).toBe(true);
+    // a late poll that still sees the step queued must not undo the conversion
+    expect(canAdvance(converted, converting)).toBe(false);
   });
 
   it("does not treat waiting states as terminal", () => {

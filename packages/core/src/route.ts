@@ -23,7 +23,14 @@ export type TrustModel =
 
 export interface StepQuote {
   readonly id: string;
-  readonly kind: "approve-source" | "bridge" | "swap" | "prepare-account" | "settle-account";
+  readonly kind:
+    | "approve-source"
+    | "bridge"
+    | "swap"
+    | "prepare-account"
+    | "settle-account"
+    // the conversion an on-chain contract performs on arrival; nobody signs it
+    | "compose";
   /** Which route source produced this. Errors must be attributable. */
   readonly source: string;
   readonly from: Amount;
@@ -78,6 +85,52 @@ export interface Route {
   readonly signaturesRequired: number;
   /** When this quote stops being honoured. */
   readonly expiresAtUnix: number;
+  /**
+   * Present on a compose route: the bridged token is delivered to a contract
+   * that converts it on arrival in the same flow, so the conversion is not a
+   * user prompt. Absent on every plain route.
+   */
+  readonly compose?: ComposeArrival | undefined;
+}
+
+/** One pool hop of a venue's swap chain, in the order the venue runs them. */
+export interface ComposeHop {
+  /** The pool's token contracts. */
+  readonly tokens: readonly string[];
+  /** The venue's identifier for the pool, as 64 hex characters. */
+  readonly poolIndex: string;
+  /** The token contract this hop pays out. */
+  readonly tokenOut: string;
+}
+
+/**
+ * What a compose route asks the arrival contract to do, all of it signed by the
+ * user on the source chain as part of the send. Nobody completing the delivery
+ * later can change any of it.
+ */
+export interface ComposeArrival {
+  /** The contract the bridge delivers to and that performs the arrival steps. */
+  readonly contract: string;
+  /** The venue the contract converts through. */
+  readonly venue: string;
+  /** What the bridge delivers to the contract, and its Stellar contract id. */
+  readonly arriving: Asset;
+  readonly arrivingContract: string;
+  /** What the recipient is meant to end up holding. */
+  readonly wanted: Asset;
+  readonly wantedContract: string;
+  /**
+   * The least the recipient accepts after every fee, in base units of `wanted`.
+   * Enforced by the contract; below it the arriving token is delivered as it came.
+   */
+  readonly minOut: string;
+  readonly path: readonly ComposeHop[];
+  /** The integrator fee the contract takes from the converted amount, if any. */
+  readonly fee: { readonly bps: number; readonly recipient: string } | undefined;
+  /** Who is trusted for the conversion step, in plain words. */
+  readonly trust: string;
+  /** Says that no Stellar wallet is needed for this route. */
+  readonly walletNote: string;
 }
 
 /**

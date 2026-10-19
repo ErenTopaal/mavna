@@ -83,13 +83,75 @@ export type StepPhase =
       readonly cause: string;
       readonly remedy: Remedy;
       readonly ref: OnChainRef | undefined;
+    }
+  /**
+   * Delivered to the contract that converts on arrival, and the conversion has
+   * not run yet. Not a failure: the funds are on Stellar, held by a step anyone
+   * may complete, and `finish` is what completing it takes.
+   */
+  | {
+      readonly phase: "delivered-conversion-pending";
+      readonly ref: OnChainRef;
+      readonly deliveredAtUnix: number;
+      readonly finish: ComposeFinish | undefined;
+    }
+  /** Converted on arrival and sent on, proven by the converting contract's own event. */
+  | {
+      readonly phase: "delivered-and-converted";
+      readonly ref: OnChainRef;
+      readonly received: Amount;
+      readonly fee: Amount | undefined;
+    }
+  /**
+   * A conversion on arrival that could not meet the user's minimum, so the
+   * arriving token was delivered unchanged. The user has their money, but not
+   * in the asset they asked for, so it is its own ending and never a success.
+   */
+  | {
+      readonly phase: "delivered-as-came";
+      readonly ref: OnChainRef;
+      readonly received: Amount;
+      readonly because: string;
     };
 
-export const TERMINAL_PHASES = ["done", "refunded", "partial", "failed"] as const;
+/**
+ * What anyone needs to complete a conversion on arrival that is overdue, read
+ * from the rail's own record of the message rather than from the user. The
+ * contract refuses any other bytes, so none of this has to be trusted.
+ */
+export interface ComposeFinish {
+  /** The contract that converts on arrival. */
+  readonly contract: string;
+  /** The token contract that queued the step. */
+  readonly from: string;
+  /** Message identity, 64 hex characters. */
+  readonly guid: string;
+  readonly index: number;
+  /** The exact queued message, hex. */
+  readonly message: string;
+}
+
+export const TERMINAL_PHASES = [
+  "done",
+  "refunded",
+  "partial",
+  "failed",
+  "delivered-and-converted",
+  "delivered-as-came",
+] as const;
 export type TerminalPhase = (typeof TERMINAL_PHASES)[number];
 
 export function isTerminal(phase: StepPhase): boolean {
   return (TERMINAL_PHASES as readonly string[]).includes(phase.phase);
+}
+
+/**
+ * Whether the user got what they asked for. Narrower than terminal on purpose:
+ * delivered-as-came is an ending, and treating it as success is exactly how a
+ * transfer in the wrong asset ends up shown as a plain tick.
+ */
+export function isSuccess(phase: StepPhase): boolean {
+  return phase.phase === "done" || phase.phase === "delivered-and-converted";
 }
 
 /**
@@ -115,4 +177,7 @@ export const PHASE_ORDER: Readonly<Record<StepPhase["phase"], number>> = {
   refunded: 4,
   partial: 4,
   failed: 4,
+  "delivered-conversion-pending": 3,
+  "delivered-and-converted": 4,
+  "delivered-as-came": 4,
 };

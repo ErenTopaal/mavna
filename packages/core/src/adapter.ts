@@ -152,6 +152,35 @@ export interface BridgeAdapter {
    * third-party explorer, documentation or support.
    */
   recover?(handle: TransferHandle): Promise<readonly UnsignedTransaction[]>;
+
+  /**
+   * A compose route beside the plain one: the same send, delivered to a contract
+   * that converts on arrival, so the conversion is not a user prompt. Undefined
+   * when this rail has no such contract on this network, so a rail without one
+   * adds nothing to the rejected list; a rejection when it has one but cannot
+   * serve this request. Its status comes back through `status` like any other.
+   */
+  quoteCompose?(request: ComposeQuoteRequest): Promise<Route | RouteRejection | undefined>;
+}
+
+/**
+ * A compose quote. `to` is what the user wants to end up holding; `plain` is
+ * the rail's own route for the same send, delivering `arriving`.
+ */
+export interface ComposeQuoteRequest extends QuoteRequest {
+  readonly plain: Route;
+  /** What the rail delivers on Stellar, and the contract id venues trade it under. */
+  readonly arriving: Asset;
+  readonly arrivingContract: string;
+  /** The contract id of `to`. */
+  readonly wantedContract: string;
+  /**
+   * The integrator's cut, taken on-chain by the converting contract and so
+   * collected on every venue. Absent means none.
+   */
+  readonly integratorFee?:
+    | { readonly bps: number; readonly recipient: string; readonly recipientName: string }
+    | undefined;
 }
 
 /** How long a single adapter gets before the race moves on without it. */

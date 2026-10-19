@@ -127,6 +127,49 @@ describe("outcomes are named, not inferred", () => {
   });
 });
 
+describe("a conversion on arrival is its own phase", () => {
+  const converting: StepPhase = {
+    phase: "delivered-conversion-pending",
+    ref,
+    deliveredAtUnix: 0,
+    finish: undefined,
+  };
+
+  it("reports delivered as it came as its own outcome, never as success", () => {
+    const s = state(
+      step("bridge", { phase: "done", ref, received: amount }),
+      step("compose", { phase: "delivered-as-came", ref, received: amount, because: "floor" }),
+    );
+    expect(outcomeOf(s)).toBe("delivered-as-came");
+    expect(progressOf(s).finished).toBe(true);
+    expect(progressOf(s).done).toBe(1);
+  });
+
+  it("counts a conversion that ran as finished and successful", () => {
+    const s = state(
+      step("bridge", { phase: "done", ref, received: amount }),
+      step("compose", { phase: "delivered-and-converted", ref, received: amount, fee: undefined }),
+    );
+    expect(outcomeOf(s)).toBe("succeeded");
+    expect(progressOf(s).done).toBe(2);
+  });
+
+  it("keeps a conversion still to run in flight, and not walked back by a late poll", () => {
+    const s = state(step("compose", converting));
+    expect(outcomeOf(s)).toBe("in-flight");
+    expect(progressOf(s).finished).toBe(false);
+    const converted = applyUpdate(
+      s,
+      "compose",
+      { phase: "delivered-and-converted", ref, received: amount, fee: undefined },
+      10,
+    );
+    expect(applyUpdate(converted, "compose", converting, 20).steps[0]?.phase.phase).toBe(
+      "delivered-and-converted",
+    );
+  });
+});
+
 describe("progress tells the interface where to look", () => {
   it("flags when nothing will happen without the user", () => {
     const s = state(
