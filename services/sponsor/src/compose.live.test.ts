@@ -178,6 +178,7 @@ async function queue(wanted: Asset, wantedContract: string) {
     fee: undefined,
     trust: "",
     walletNote: "",
+    fallback: "",
   };
   const instructions = encodeArrivalMessage(recipient.publicKey(), compose);
   const guid = randomBytes(32).toString("hex");

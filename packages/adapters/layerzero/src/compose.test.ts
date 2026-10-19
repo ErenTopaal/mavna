@@ -37,6 +37,7 @@ const compose: ComposeArrival = {
   fee: { bps: 30, recipient: VECTOR_FEE_TO },
   trust: "",
   walletNote: "",
+  fallback: "",
 };
 
 // the same bytes are decoded by the contract's own test,

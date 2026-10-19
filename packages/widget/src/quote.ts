@@ -80,7 +80,12 @@ export interface RouteView {
    * the conversion in plain words, and that no Stellar wallet is needed.
    */
   readonly compose:
-    | { readonly label: string; readonly trust: string; readonly walletNote: string }
+    | {
+        readonly label: string;
+        readonly trust: string;
+        readonly walletNote: string;
+        readonly fallback: string;
+      }
     | undefined;
 }
 
@@ -160,6 +165,7 @@ export function toRouteView(route: Route): RouteView {
             label: `Converts on arrival via ${venueLabel(route.compose.venue)}`,
             trust: route.compose.trust,
             walletNote: route.compose.walletNote,
+            fallback: route.compose.fallback,
           },
   };
 }

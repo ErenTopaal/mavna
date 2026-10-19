@@ -89,6 +89,13 @@ export interface ComposeContext {
 }
 
 const BPS = 10_000n;
+/**
+ * The most a compose route gives up to slippage. Anyone may complete the
+ * conversion, including someone who moves the pool first in the same
+ * transaction, so whatever lies between the quote and the minimum can be taken.
+ * Kept tight, and the minimum is what the route tells the user to expect.
+ */
+export const COMPOSE_MAX_SLIPPAGE_BPS = 20;
 // the contract's own work on Stellar after the delivery: estimates and a swap in
 // one ledger, plus the executor noticing the queued step
 const COMPOSE_SECONDS = 30;
@@ -304,7 +311,7 @@ export async function quoteComposeRoute(
       assetIn: request.arrivingContract,
       assetOut: request.wantedContract,
       amountIn: plain.receives.baseUnits,
-      maxSlippageBps: request.maxSlippageBps,
+      maxSlippageBps: Math.min(request.maxSlippageBps, COMPOSE_MAX_SLIPPAGE_BPS),
     });
   } catch (cause) {
     return ctx.decline(
@@ -349,10 +356,13 @@ export async function quoteComposeRoute(
     trust:
       `LayerZero carries it, checked by the verifiers ${resolved.tokenSymbol}'s owner chose. On ` +
       `Stellar the Mavna Arrival Contract converts it through ${venueName(venue.provider)} with ` +
-      "your minimum enforced on-chain. The contract has no administrator, accepts only " +
-      `${resolved.tokenSymbol} from LayerZero, and sends ${arriving.symbol} on as it came if ` +
-      `${wanted.symbol} cannot meet your minimum.`,
+      "your minimum enforced on-chain. The contract has no administrator and accepts only " +
+      `${resolved.tokenSymbol} from LayerZero. Anyone may complete the conversion, so expect ` +
+      "the minimum rather than the quote.",
     walletNote: "No Stellar wallet needed: the conversion happens on arrival.",
+    fallback:
+      `If ${wanted.symbol} cannot be bought for at least your minimum, you receive ` +
+      `${arriving.symbol} as it came instead.`,
   };
 
   const sendParam = buildSendParam({

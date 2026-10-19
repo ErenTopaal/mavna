@@ -1510,7 +1510,9 @@ export function renderRoutes(
                     "display:block;margin-top:11px;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-muted-2)",
                   )}
                 >
-                  {x.compose === undefined ? x.trust : `${x.trust} · ${x.compose.walletNote}`}
+                  {x.compose === undefined
+                    ? x.trust
+                    : `${x.trust} · ${x.compose.walletNote} ${x.compose.fallback}`}
                 </span>
                 <span
                   style={s(
@@ -1805,6 +1807,7 @@ function routeDetail(
       ? [
           { key: "compose", name: "Conversion", value: x.compose.label },
           { key: "wallet", name: "Stellar wallet", value: x.compose.walletNote },
+          { key: "fallback", name: "If it cannot convert", value: x.compose.fallback },
           { key: "trust", name: "Who is trusted", value: x.compose.trust },
         ]
       : []),

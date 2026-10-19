@@ -131,6 +131,8 @@ export interface ComposeArrival {
   readonly trust: string;
   /** Says that no Stellar wallet is needed for this route. */
   readonly walletNote: string;
+  /** Says plainly that the conversion can fall back to delivering the token as it came. */
+  readonly fallback: string;
 }
 
 /**

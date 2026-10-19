@@ -57,6 +57,8 @@ const compose: ComposeArrival = {
   fee: undefined,
   trust: "The Mavna Arrival Contract converts it, with no administrator.",
   walletNote: "No Stellar wallet needed: the conversion happens on arrival.",
+  fallback:
+    "If XLM cannot be bought for at least your minimum, you receive USDC as it came instead.",
 };
 const composeRoute = (): Route => {
   const plain = routeFor("layerzero");
@@ -83,6 +85,7 @@ describe("a compose route in the route list", () => {
     expect(view.compose?.label).toBe("Converts on arrival via Aquarius");
     expect(view.compose?.walletNote).toMatch(/No Stellar wallet needed/);
     expect(view.compose?.trust).toMatch(/no administrator/);
+    expect(view.compose?.fallback).toMatch(/as it came instead/);
     expect(view.sigs).toBe(1);
     expect(toRouteView(routeFor("layerzero")).compose).toBeUndefined();
   });

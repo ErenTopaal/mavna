@@ -208,6 +208,31 @@ describe("a compose route", () => {
     expect(route.fees.find((f) => f.kind === "gas")?.total.baseUnits).toBe("7000");
   });
 
+  it("asks the venue with a tighter slippage, and says plainly what happens below the minimum", async () => {
+    const asked: number[] = [];
+    const { ctx } = context({
+      venue: {
+        id: "aquarius",
+        quotePath: async (q) => {
+          asked.push(q.maxSlippageBps);
+          return {
+            provider: "aquarius",
+            amountOut: "1000000",
+            amountOutMinimum: "998000",
+            path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
+          };
+        },
+      },
+    });
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route)) throw new Error(JSON.stringify(route));
+    expect(asked).toEqual([20]);
+    expect(route.compose?.fallback).toBe(
+      "If USDC cannot be bought for at least your minimum, you receive XLM as it came instead.",
+    );
+    expect(route.compose?.trust).toMatch(/expect the minimum/i);
+  });
+
   it("itemises the integrator fee and keeps the user's floor after it", async () => {
     const { ctx } = context();
     const route = await quoteComposeRoute(ctx, {
