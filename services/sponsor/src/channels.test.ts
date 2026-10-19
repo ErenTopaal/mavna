@@ -94,6 +94,54 @@ describe("channel pool", () => {
     expect(pool.leasedCount).toBe(0);
   });
 
+  it("hands out a channel's key only to the owner of its lease", () => {
+    const keys = [Keypair.random()];
+    const pool = new ChannelPool({ channels: keys });
+    const address = keys[0]?.publicKey() ?? "";
+
+    // Free, nobody may sign with it.
+    expect(pool.keypairFor("owner", address)).toBeUndefined();
+
+    pool.acquire("owner", NOW + DAY, NOW);
+    expect(pool.keypairFor("owner", address)?.publicKey()).toBe(address);
+    expect(pool.keypairFor("someone-else", address)).toBeUndefined();
+
+    // Once it has moved on, the old owner's settlement no longer gets its key.
+    pool.release("owner", address);
+    pool.acquire("next", NOW + DAY, NOW);
+    expect(pool.keypairFor("owner", address)).toBeUndefined();
+    expect(pool.keypairFor("next", address)?.publicKey()).toBe(address);
+  });
+
+  it("extends a lease only for the owner on the channel it holds", () => {
+    const keys = [Keypair.random(), Keypair.random()];
+    const pool = new ChannelPool({ channels: keys });
+    const mine = pool.acquire("owner", NOW + 300, NOW);
+    const theirs = pool.acquire("other", NOW + 300, NOW);
+
+    expect(pool.extend("owner", theirs?.address ?? "", NOW + DAY, NOW)).toBe(false);
+    expect(pool.extend("nobody", mine?.address ?? "", NOW + DAY, NOW)).toBe(false);
+    expect(pool.extend("owner", mine?.address ?? "", NOW + DAY, NOW)).toBe(true);
+
+    // The extended lease outlives the short one it started as; the other does not.
+    expect(pool.acquire("third", NOW + DAY, NOW + 400)?.address).toBe(theirs?.address);
+    expect(pool.acquire("fourth", NOW + DAY, NOW + 400)).toBeUndefined();
+  });
+
+  it("does not extend a lease that lapsed and went to someone else", () => {
+    const pool = poolOf(1);
+    const first = pool.acquire("slow", NOW + 300, NOW);
+    expect(pool.acquire("quick", NOW + DAY, NOW + 331)?.address).toBe(first?.address);
+    expect(pool.extend("slow", first?.address ?? "", NOW + DAY, NOW + 332)).toBe(false);
+  });
+
+  it("does not revive a lapsed lease, even before anyone else asked for the channel", () => {
+    const pool = poolOf(1);
+    const first = pool.acquire("slow", NOW + 300, NOW);
+    expect(pool.extend("slow", first?.address ?? "", NOW + DAY, NOW + 331)).toBe(false);
+    expect(pool.availableCount).toBe(1);
+  });
+
   it("refuses to exist with no channels at all", () => {
     expect(() => new ChannelPool({ channels: [] })).toThrow();
   });

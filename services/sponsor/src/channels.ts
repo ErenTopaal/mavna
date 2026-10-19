@@ -66,9 +66,7 @@ export class ChannelPool {
    * still be live on the same sequence.
    */
   acquire(transferId: string, untilUnix: number, nowUnix: number): Channel | undefined {
-    for (const [owner, lease] of this.leased) {
-      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) this.free(owner);
-    }
+    this.reclaim(nowUnix);
     const existing = this.leased.get(transferId);
     if (existing !== undefined) {
       this.leased.set(transferId, {
@@ -84,15 +82,30 @@ export class ChannelPool {
   }
 
   /**
-   * The key for a channel this pool owns, by address.
+   * Lengthen a lease its owner still holds on this channel, to `untilUnix`.
+   * False when the owner holds no live lease on it: the lease lapsed, or the
+   * channel has since gone to someone else, whose settlement now owns the
+   * sequence this owner's was built on.
+   */
+  extend(transferId: string, channelAddress: string, untilUnix: number, nowUnix: number): boolean {
+    this.reclaim(nowUnix);
+    const lease = this.leased.get(transferId);
+    if (lease === undefined || lease.channel.address !== channelAddress) return false;
+    this.leased.set(transferId, { ...lease, untilUnix: Math.max(lease.untilUnix, untilUnix) });
+    return true;
+  }
+
+  /**
+   * The key for a channel, for the owner of its lease and nobody else.
    *
    * Exists so a settlement stored as XDR can be signed at submission time: the
-   * transaction names its channel as source, and the store holds no keys.
+   * transaction names its channel as source, and the store holds no keys. A
+   * channel that is free or leased to someone else carries another settlement's
+   * sequence, or will, so signing for a former owner would spend it.
    */
-  keypairFor(address: string): Keypair | undefined {
-    const leased = [...this.leased.values()].find((l) => l.channel.address === address);
-    if (leased !== undefined) return leased.channel.keypair;
-    return this.available.find((c) => c.address === address)?.keypair;
+  keypairFor(transferId: string, channelAddress: string): Keypair | undefined {
+    const lease = this.leased.get(transferId);
+    return lease?.channel.address === channelAddress ? lease.channel.keypair : undefined;
   }
 
   /**
@@ -105,6 +118,12 @@ export class ChannelPool {
   release(transferId: string, channelAddress: string): void {
     if (this.leased.get(transferId)?.channel.address !== channelAddress) return;
     this.free(transferId);
+  }
+
+  private reclaim(nowUnix: number): void {
+    for (const [owner, lease] of this.leased) {
+      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) this.free(owner);
+    }
   }
 
   private free(transferId: string): void {

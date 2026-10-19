@@ -780,8 +780,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     const transaction = TransactionBuilder.fromXDR(held.xdr, options.network.passphrase);
     if ("innerTransaction" in transaction) return { settled: false };
-    const channelKeypair = pool.keypairFor(transaction.source);
-    if (channelKeypair === undefined) return { settled: false };
+    // Only while this account still holds the channel. Once the lease has moved
+    // on, the channel's next sequence belongs to someone else's settlement, and
+    // signing this one would spend it.
+    const channelKeypair = pool.keypairFor(destination, transaction.source);
+    if (channelKeypair === undefined) {
+      console.error(
+        `[sponsor] the settlement held for ${destination} is on a channel it no longer leases`,
+      );
+      return { settled: false };
+    }
 
     // A delivery landing proves Circle minted something, not that it was this
     // user's transfer or enough of it. Submitting before the money is there
