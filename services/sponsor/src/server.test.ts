@@ -310,14 +310,18 @@ function stubIris(answer: (url: URL) => Response | Promise<Response>): URL[] {
   return asked;
 }
 
-async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promise<TestServer> {
+async function startServer(
+  overrides: Partial<SponsorServerOptions> = {},
+  /** Leave out the harness's channel, so the server funds its own on first use. */
+  { fundsOwnChannel = false }: { fundsOwnChannel?: boolean } = {},
+): Promise<TestServer> {
   const sponsor = Keypair.random();
   const channel = Keypair.random();
   const recording = new RecordingRpc();
   recording.accounts.set(sponsor.publicKey(), 100n);
   recording.accounts.set(channel.publicKey(), 200n);
 
-  const server = createSponsorServer({
+  const options: SponsorServerOptions = {
     rpc: recording,
     network,
     networkId: "testnet",
@@ -331,7 +335,9 @@ async function startServer(overrides: Partial<SponsorServerOptions> = {}): Promi
     prices: new FixedPrice(),
     allowedOrigins: [],
     ...overrides,
-  });
+  };
+  if (fundsOwnChannel) delete (options as { channels?: ChannelPool }).channels;
+  const server = createSponsorServer(options);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   running.push(server);
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -1987,6 +1993,75 @@ describe("the sponsor does not take a failed read for a missing account", () => 
       expect(response.status, path).toBe(500);
       expect(response.body.retryable, path).toBe(true);
     }
+    logged.mockRestore();
+  });
+});
+
+describe("the sponsor funds its own channel once", () => {
+  function countFunding(server: TestServer): () => number {
+    let funded = 0;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, options) => {
+      if (label === "channel funding") funded += 1;
+      return submit(label, build, options);
+    };
+    return () => funded;
+  }
+
+  it("funds one channel when the first two settlements are asked for at once", async () => {
+    // The funding waits until both requests are past the cap check, so the
+    // second reaches the channel step while the first is still funding.
+    let checked = 0;
+    let bothIn: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      bothIn = resolve;
+    });
+    class CountingCaps extends CapLedger {
+      override async check(source: Parameters<CapLedger["check"]>[0]) {
+        checked += 1;
+        if (checked === 2) bothIn();
+        return super.check(source);
+      }
+    }
+    const server = await startServer(
+      { caps: new CountingCaps(new InMemoryCapStore()) },
+      { fundsOwnChannel: true },
+    );
+    const funded = countFunding(server);
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, options) => {
+      if (label === "channel funding") await gate;
+      return submit(label, build, options);
+    };
+
+    const answers = await Promise.all(
+      [Keypair.random(), Keypair.random()].map((user) =>
+        server.post("/settlement", { destination: user.publicKey(), sourceChainId: "1" }),
+      ),
+    );
+    expect(funded()).toBe(1);
+    expect(answers.map((a) => a.status).sort()).toEqual([200, 503]);
+  });
+
+  it("tries the funding again after it failed", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startServer({}, { fundsOwnChannel: true });
+    const funded = countFunding(server);
+    server.rpc.rejectNext = new MavnaError("channel funding was rejected: txInsufficientBalance", {
+      retryable: false,
+    });
+
+    const failed = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(failed.status).toBe(500);
+    const retried = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(retried.status).toBe(200);
+    expect(funded()).toBe(2);
     logged.mockRestore();
   });
 });

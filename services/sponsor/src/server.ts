@@ -296,9 +296,27 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    *
    * 2 XLM: the account's own 1 XLM minimum plus fee headroom for the
    * settlements it will carry. Reused serially; the pool is the upgrade path.
+   * The funding is shared by every request that arrives while it runs, so two
+   * first settlements fund one channel, and forgotten if it fails so the next
+   * request tries again.
    */
-  async function ensureChannels(): Promise<ChannelPool> {
-    if (channels !== undefined) return channels;
+  let funding: Promise<ChannelPool> | undefined;
+  function ensureChannels(): Promise<ChannelPool> {
+    if (channels !== undefined) return Promise.resolve(channels);
+    funding ??= fundChannel().then(
+      (pool) => {
+        channels = pool;
+        return pool;
+      },
+      (cause: unknown) => {
+        funding = undefined;
+        throw cause;
+      },
+    );
+    return funding;
+  }
+
+  async function fundChannel(): Promise<ChannelPool> {
     const channel = Keypair.random();
     const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
     const create = new TransactionBuilder(sponsorAccount, {
@@ -312,8 +330,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       .build();
     create.sign(keypair);
     await options.rpc.submit("channel funding", async () => create);
-    channels = new ChannelPool({ channels: [channel] });
-    return channels;
+    return new ChannelPool({ channels: [channel] });
   }
 
   /**
