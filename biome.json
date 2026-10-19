@@ -12,7 +12,9 @@
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml",
-      "!apps/app/src/styles/shadcn.css"
+      "!apps/app/src/styles/shadcn.css",
+      "!contracts/**/target",
+      "!contracts/**/test_snapshots"
     ]
   },
   "formatter": {
