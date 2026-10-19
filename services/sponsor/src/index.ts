@@ -22,3 +22,10 @@ export type {
 export { HorizonSponsorshipView, reconcile } from "./reconcile.js";
 export type { SponsorServer, SponsorServerOptions } from "./server.js";
 export { createSponsorServer } from "./server.js";
+export type {
+  ProxyAnswer,
+  ProxyRequest,
+  SoroswapProxy,
+  SoroswapProxyOptions,
+} from "./soroswap.js";
+export { clientAddress, createSoroswapProxy } from "./soroswap.js";

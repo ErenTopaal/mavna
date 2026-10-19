@@ -3,6 +3,7 @@ import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } from "@mavna/s
 import { Asset } from "@stellar/stellar-sdk";
 import { env } from "./env.js";
 import { createSponsorServer } from "./server.js";
+import { createSoroswapProxy } from "./soroswap.js";
 
 /**
  * The runnable sponsor, configured from the environment.
@@ -57,6 +58,14 @@ if (
   process.exit(2);
 }
 
+// Optional. Without a key there is no Soroswap proxy, and browsers converting
+// through this sponsor use the next venue instead.
+const soroswapApiKey = env("SOROSWAP_API_KEY");
+const soroswap =
+  soroswapApiKey === undefined
+    ? undefined
+    : createSoroswapProxy({ apiKey: soroswapApiKey, network: networkId });
+
 const server = createSponsorServer({
   rpc: new RpcClient({ url: network.rpcUrl }),
   network,
@@ -74,6 +83,8 @@ const server = createSponsorServer({
     .map((origin) => origin.trim())
     .filter((origin) => origin !== ""),
   ...(settleSweepSeconds === undefined ? {} : { settleSweepSeconds }),
+  ...(soroswap === undefined ? {} : { soroswap }),
+  trustForwardedFor: env("MAVNA_TRUST_FORWARDED_FOR") === "1",
 });
 
 const port = Number(env("PORT") ?? 8787);

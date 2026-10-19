@@ -15,6 +15,7 @@
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/core": "workspace:*",
     "@mavna/stellar": "workspace:*",
+    "@mavna/swap": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
     "zod": "4.4.3"
   }

@@ -1,3 +1,4 @@
+import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   buildBurn,
@@ -35,6 +36,7 @@ import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
+import { createSoroswapProxy } from "./soroswap.js";
 
 /**
  * The sponsor's endpoints, driven over real HTTP against a real server.
@@ -2406,5 +2408,88 @@ describe("the sponsor funds its own channel once", () => {
     expect(retried.status).toBe(200);
     expect(funded()).toBe(2);
     logged.mockRestore();
+  });
+});
+
+describe("the soroswap proxy, mounted on the sponsor", () => {
+  const APP = "https://app.example";
+
+  /** A stand-in Soroswap on localhost that answers /health and counts calls. */
+  async function upstream(): Promise<{ url: string; calls: () => number }> {
+    let calls = 0;
+    const fake = createHttpServer((_req, res) => {
+      calls += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: { indexer: { testnet: ["soroswap"], mainnet: [] } } }));
+    });
+    await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
+    running.push(fake);
+    return {
+      url: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`,
+      calls: () => calls,
+    };
+  }
+
+  async function mounted(trustForwardedFor = false) {
+    const soroswap = await upstream();
+    const server = await startServer({
+      allowedOrigins: [APP],
+      trustForwardedFor,
+      soroswap: createSoroswapProxy({
+        apiKey: "sk_test_key",
+        network: "testnet",
+        baseUrl: soroswap.url,
+        perClientPerMinute: 1,
+      }),
+    });
+    const health = (headers: Record<string, string>) =>
+      fetch(`${server.url}/swap/soroswap/health`, { headers });
+    return { soroswap, health };
+  }
+
+  it("answers an allowed origin with CORS, and refuses any other", async () => {
+    const { soroswap, health } = await mounted();
+    const allowed = await health({ origin: APP });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe(APP);
+    expect(await allowed.json()).toEqual({
+      network: "testnet",
+      usable: true,
+      protocols: ["soroswap"],
+    });
+
+    const stranger = await health({ origin: "https://elsewhere.example" });
+    expect(stranger.status).toBe(403);
+    const none = await health({});
+    expect(none.status).toBe(403);
+    expect(soroswap.calls()).toBe(1);
+  });
+
+  it("does not exist on a sponsor without a Soroswap key", async () => {
+    const server = await startServer({ allowedOrigins: [APP] });
+    const response = await fetch(`${server.url}/swap/soroswap/health`, {
+      headers: { origin: APP },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it("limits by the forwarded client only when told to trust the header", async () => {
+    const trusting = await mounted(true);
+    expect((await trusting.health({ origin: APP, "x-forwarded-for": "198.51.100.1" })).status).toBe(
+      200,
+    );
+    // A different client behind the same proxy has its own allowance.
+    expect((await trusting.health({ origin: APP, "x-forwarded-for": "198.51.100.2" })).status).toBe(
+      200,
+    );
+
+    const wary = await mounted(false);
+    expect((await wary.health({ origin: APP, "x-forwarded-for": "198.51.100.1" })).status).toBe(
+      200,
+    );
+    // Forging the header buys nothing: both calls come from the same socket.
+    expect((await wary.health({ origin: APP, "x-forwarded-for": "198.51.100.2" })).status).toBe(
+      429,
+    );
   });
 });

@@ -38,6 +38,7 @@ import {
 } from "./caps.js";
 import { ChannelPool } from "./channels.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
+import { clientAddress, type SoroswapProxy } from "./soroswap.js";
 
 /**
  * The small server the specification says must exist, and what it may not do.
@@ -99,6 +100,17 @@ export interface SponsorServerOptions {
    * otherwise leave the reserve unpaid until the settlement's time bound.
    */
   readonly settleSweepSeconds?: number;
+  /**
+   * The Soroswap proxy, present only when this deployment holds a Soroswap key.
+   * Without one its endpoints do not exist, and the browser falls to the next
+   * venue.
+   */
+  readonly soroswap?: SoroswapProxy;
+  /**
+   * Whether X-Forwarded-For names the client, for per-client limits. True only
+   * behind a reverse proxy that sets it; otherwise any caller can forge it.
+   */
+  readonly trustForwardedFor?: boolean;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -482,6 +494,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
       await deliver((await readJson(req)) as DeliverBody, res, origin);
+      return;
+    }
+
+    if (options.soroswap?.owns(url.pathname) === true) {
+      const answer = await options.soroswap.handle({
+        method: req.method ?? "",
+        path: url.pathname,
+        originAllowed: origin !== undefined,
+        client: clientAddress(req, options.trustForwardedFor === true),
+        // An origin that will be refused costs nothing to read.
+        body: req.method === "POST" && origin !== undefined ? await readJson(req) : undefined,
+      });
+      reply(res, answer.status, answer.body, origin);
       return;
     }
 
