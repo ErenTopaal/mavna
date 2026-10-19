@@ -59,7 +59,9 @@ switch for running without a funded sponsor key:
   not exist (an address with nothing in it cannot pay for anything; it needs at
   least 1 XLM to exist and 0.5 XLM more to hold USDC), or when the account cannot
   spare the reserve and the fee above its minimum balance. The daily caps do not
-  apply, since no sponsor money is spent.
+  apply, since no sponsor money is spent. With nothing lent, `assets` may name any
+  one curated asset, so an account can open its own USDT0 trustline on mainnet with
+  `["USDT0"]`; more than one name answers `400`.
 - `POST /submit` submits that transaction exactly as the account signed it. The
   sponsor adds no signature and needs no held settlement.
 - `POST /settlement` and `POST /settlement/commit` answer `409`: there is no loan
@@ -73,7 +75,7 @@ nothing is signed here; the transaction returns unsigned.
 Request: `{ "destination": "G...", "assets": ["USDC"], "sourceChainId": "ethereum-sepolia" }`.
 `assets` is optional and defaults to `["USDC"]`; each name must be on the operator's
 curated list, and since the settlement repays one USDC trustline and nothing else,
-the only set accepted is `["USDC"]`. `sourceChainId` feeds the volume cap's chain
+the only set accepted is `["USDC"]` (self-funded reserves aside, above). `sourceChainId` feeds the volume cap's chain
 class.
 
 Answers:

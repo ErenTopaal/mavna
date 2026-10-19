@@ -754,7 +754,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     // The settlement repays one USDC trustline, so any other set is a
     // preparation /submit would refuse after the user had already signed it.
-    if (names.length !== 1 || names[0] !== "USDC") {
+    // An account paying its own reserve borrows nothing, so it may open any one
+    // curated trustline.
+    if (reserveFunding === "self" && names.length !== 1) {
+      await answer(
+        res,
+        400,
+        { error: "Ask for one trustline at a time.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    if (reserveFunding === "sponsor" && (names.length !== 1 || names[0] !== "USDC")) {
       await answer(
         res,
         400,
@@ -838,6 +849,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   ): Promise<void> {
     const holder = signerFor(destination);
     const base = BigInt(options.network.baseReserveStroops);
+    const holds = assets.map((asset) => asset.getCode()).join(" and ");
     const entry = await readAccountEntry(options.rpc, holder);
     if (entry === undefined) {
       await answer(
@@ -847,7 +859,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           error:
             "That Stellar account does not exist yet, and this service does not front " +
             `reserves. It needs at least ${stroopsToXlm(2n * base)} XLM sent to it to exist, ` +
-            `and ${stroopsToXlm(base)} XLM more to hold USDC, before it can receive this.`,
+            `and ${stroopsToXlm(base)} XLM more to hold ${holds}, before it can receive this.`,
           retryable: false,
         },
         origin,
@@ -862,7 +874,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         400,
         {
           error:
-            `Holding USDC locks ${stroopsToXlm(base * BigInt(assets.length))} XLM in this ` +
+            `Holding ${holds} locks ${stroopsToXlm(base * BigInt(assets.length))} XLM in this ` +
             `account, plus a fee of ${stroopsToXlm(BigInt(SELF_FUNDED_FEE_STROOPS))} XLM, and it ` +
             `has ${stroopsToXlm(spare > 0n ? spare : 0n)} XLM to spare. Add XLM to it, then try again.`,
           retryable: false,

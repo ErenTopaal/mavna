@@ -2756,6 +2756,75 @@ describe("with reserve funding set to self, the account pays its own reserve", (
   });
 });
 
+describe("with reserve funding set to self, an account can open its own USDT0 trustline", () => {
+  const USDT0 = new Asset("USDT0", Keypair.random().publicKey());
+
+  it("builds a USDT0 trustline the account opens and pays for itself", async () => {
+    const server = await startServer({ reserveFunding: "self", curatedAssets: { USDC, USDT0 } });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const response = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDT0"],
+      sourceChainId: "42161",
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.selfFunded).toBe(true);
+    const tx = TransactionBuilder.fromXDR(
+      response.body.xdr as string,
+      network.passphrase,
+    ) as Transaction;
+    expect(tx.source).toBe(user.publicKey());
+    const [op] = tx.operations as Operation.ChangeTrust[];
+    expect(tx.operations).toHaveLength(1);
+    expect(op?.line.toString()).toBe(USDT0.toString());
+
+    const submitted = await server.post("/submit", { signedXdr: signXdr(tx.toXDR(), user) });
+    expect(submitted.status).toBe(200);
+  });
+
+  it("names USDT0 when the account cannot spare the reserve for it", async () => {
+    const server = await startServer({ reserveFunding: "self", curatedAssets: { USDC, USDT0 } });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    server.rpc.nativeBalances.set(user.publicKey(), 16_000_000n);
+    const response = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDT0"],
+      sourceChainId: "42161",
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/^Holding USDT0 locks 0\.5 XLM/);
+  });
+
+  it("opens one trustline per preparation and only for assets it curates", async () => {
+    const server = await startServer({ reserveFunding: "self", curatedAssets: { USDC, USDT0 } });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    for (const assets of [["USDC", "USDT0"], ["EURC"], []]) {
+      const refused = await server.post("/prepare", {
+        destination: user.publicKey(),
+        assets,
+        sourceChainId: "42161",
+      });
+      expect(refused.status).toBe(400);
+    }
+  });
+
+  it("still prepares only USDC when the sponsor fronts the reserve, since it is repaid in USDC", async () => {
+    const server = await startServer({ curatedAssets: { USDC, USDT0 } });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const refused = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDT0"],
+      sourceChainId: "42161",
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/only prepares a USDC trustline/);
+  });
+});
+
 describe("the sponsor pays for no delivery smaller than its minimum", () => {
   const BURN = `0x${"cd".repeat(32)}`;
   const ATTESTATION = `0x${"ef".repeat(65)}`;

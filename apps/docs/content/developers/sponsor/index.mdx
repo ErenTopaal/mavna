@@ -58,8 +58,12 @@ The curated asset list, the assets this sponsor opens trustlines for, is written
 per network in `services/sponsor/src/assets.ts` rather than accepted from the wire:
 clients ask by name and the issuer comes from the operator's own list, because a
 sponsor that takes issuers from callers pays to phish its own users. It is Circle's
-USDC only, with the issuers Circle publishes
-(`GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` on mainnet).
+USDC, with the issuers Circle publishes
+(`GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` on mainnet), and on
+mainnet USDT0 (`GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q`, the asset
+the LayerZero Stellar OFT mints). A sponsor-fronted preparation only ever opens USDC,
+the asset its settlement repays; USDT0 is opened only for an account paying its own
+reserve.
 
 Every setting is checked at start, and a mistake stops the process with its own
 message rather than surfacing later as a refusal nobody can explain.

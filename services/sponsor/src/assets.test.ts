@@ -16,8 +16,17 @@ describe("the assets this sponsor opens trustlines for", () => {
     );
   });
 
-  it("curates nothing else, since the settlement repays only a USDC trustline", () => {
-    expect(Object.keys(curatedAssetsFor("mainnet"))).toEqual(["USDC"]);
+  it("names the USDT0 asset the LayerZero Stellar OFT mints, on mainnet only", () => {
+    // Read 2026-10-19 from the USDT0 OFT CBOWOLFS...MMF6: its Token is the asset contract
+    // CBSJZEIO...26YF, whose AssetInfo is USDT0 issued by GATISXX6...HN6Q (matches
+    // docs.usdt0.to and developers.stellar.org/launch/usdt0). There is no USDT0 on testnet.
+    const usdt0 = curatedAssetsFor("mainnet").USDT0;
+    expect(usdt0?.getCode()).toBe("USDT0");
+    expect(usdt0?.getIssuer()).toBe("GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q");
+  });
+
+  it("curates nothing else", () => {
+    expect(Object.keys(curatedAssetsFor("mainnet"))).toEqual(["USDC", "USDT0"]);
     expect(Object.keys(curatedAssetsFor("testnet"))).toEqual(["USDC"]);
   });
 });
