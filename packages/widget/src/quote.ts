@@ -27,7 +27,7 @@ import type { SponsorTerms } from "./sponsor";
 /** USDC carries six decimals on every source chain the rails start from. */
 const USDC_DECIMALS_ON_EVM = 6;
 
-export type RailName = "Circle" | "Axelar" | "LayerZero";
+export type RailName = "Circle" | "Axelar" | "LayerZero" | "NEAR Intents";
 export type Priority = "best" | "fast";
 /** USDT0 lands as itself: no conversion leg is offered for it here. */
 export type Wanted = "USDC" | "XLM" | "USDT0";
@@ -39,11 +39,13 @@ const SOURCE_TO_RAIL: Readonly<Record<string, RailName>> = {
   cctp: "Circle",
   axelar: "Axelar",
   layerzero: "LayerZero",
+  "near-intents": "NEAR Intents",
 };
 const RAIL_TO_SOURCE: Readonly<Record<RailName, string>> = {
   Circle: "cctp",
   Axelar: "axelar",
   LayerZero: "layerzero",
+  "NEAR Intents": "near-intents",
 };
 
 /** Trust model as the design's short label, keyed by rail name. */
@@ -51,6 +53,7 @@ export const TRUST_LABEL: Readonly<Record<RailName, string>> = {
   Circle: "Issuer mint & burn",
   Axelar: "Validator set",
   LayerZero: "Issuer-chosen verifiers",
+  "NEAR Intents": "Competing solvers",
 };
 
 export interface QuoteInputs {

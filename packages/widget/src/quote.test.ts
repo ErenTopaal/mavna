@@ -80,7 +80,7 @@ describe("runQuote", () => {
     amount: "5",
     destination: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
     priority: "best" as const,
-    rails: { Circle: true, Axelar: true, LayerZero: true },
+    rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
   };
 
   it("reports a chain with no known USDC through the quote's own answer instead of throwing", () => {

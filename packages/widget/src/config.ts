@@ -189,7 +189,7 @@ export interface ResolvedConfig {
   readonly engineConfig: EngineConfig;
 }
 
-const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero"];
+const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
 
 /** A configuration mistake, said at mount rather than when a user presses something. */
 function configError(message: string): Error {

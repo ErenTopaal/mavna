@@ -1,0 +1,98 @@
+---
+title: NEAR Intents
+description: NEAR Intents through the 1Click API as a rail. Competing solvers deliver on Stellar out of their own inventory, against a deposit the user pays into an address 1Click hands out.
+---
+
+# NEAR Intents
+
+`@mavna/adapter-near-intents`, id `near-intents`, trust model `solver-network`.
+Nothing is burned, locked or messaged. The user pays an ordinary ERC-20 transfer
+into a deposit address, and a market of solvers competes to deliver the asked-for
+asset on Stellar from their own inventory. The NEAR Intents contract settles the
+trade, and a deposit that cannot be filled at the quoted floor is returned.
+
+```ts
+const nearIntents = new NearIntentsAdapter({ network, rpc, baseReserveStroops });
+```
+
+The adapter talks to the [1Click API](https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api)
+and nothing else on the NEAR side.
+
+## What it carries
+
+Sources are EVM chains only, because the deposit is an ERC-20 transfer and that is
+what a connected EVM wallet can sign: Ethereum, Arbitrum, Base, OP Mainnet,
+Polygon, Avalanche, BNB Smart Chain, Gnosis, Berachain, Monad, X Layer, Plasma and
+Scroll, each offered only while 1Click lists a token on it. The token is matched
+to 1Click's list by contract address, and its decimals must agree with 1Click's or
+the quote is declined, since the amount would otherwise be read as a different
+number.
+
+On Stellar, 1Click delivers two assets: USDC issued by Circle
+(`USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`) and XLM. There is
+no USDT. Assets are matched by code and issuer, never by symbol. 1Click delivers
+only to a plain `G` account: contract and muxed addresses are refused before a
+quote is asked for, as 1Click refuses them itself.
+
+1Click has no test network, so on testnet this rail declines every quote with a
+sentence saying so.
+
+## Quoting and building
+
+A quote is a dry request. It reserves nothing and hands out no deposit address,
+and the route carries what the solvers would deliver (`receives`) and the floor
+they are held to (`receivesAtLeast`, `deliveredAtLeast`). 1Click insists on a
+refund address even on a dry request and the sender is not known yet, so a fresh
+address that nothing is ever refunded to stands in for it.
+
+The deposit address exists only once the transfer is built, because it is tied to
+a refund address. `buildTransactions` therefore takes the connected wallet:
+
+```ts
+const txs = await nearIntents.buildTransactions(route, { sender: walletAddress });
+```
+
+It asks for the real quote with that wallet as the refund address and returns one
+`evm-tx`: `transfer(depositAddress, amount)` on the source token. No approval is
+needed. It refuses to build when the sender is missing, when 1Click records a
+different refund address, when the deposit would need a memo, or when the new
+quote's floor is below the route's: a price that moved is a new quote for the user
+to see, not something to sign for them.
+
+## Destination readiness
+
+USDC is a classic asset, so the destination is inspected exactly as on the other
+rails. An account without a trustline, or no account at all, gets a
+prepare-account step, the account reserve and the floor check, and the
+preparation happens before the deposit. XLM needs the account to exist; whether
+NEAR Intents' bridge creates a missing one is not documented, so that lane is
+declined with a reason rather than guessed at.
+
+## Status
+
+1Click knows a transfer by its deposit address, which is a first-class lookup key.
+With only the source transaction, the adapter reads it from the source chain,
+checks it is a transfer of a token 1Click carries there, and takes the deposit
+address from its calldata, searching every listed chain when the chain is not
+known.
+
+| 1Click status | Phase |
+| --- | --- |
+| `PENDING_DEPOSIT` | `pending` once a deposit transaction is known, otherwise `idle` |
+| `KNOWN_DEPOSIT_TX`, `PROCESSING` | `pending` |
+| `INCOMPLETE_DEPOSIT` | `stalled`, waiting until the quote expires and the deposit is returned |
+| `SUCCESS` | `done`, linked to the Stellar transaction; `partial` if less than the floor arrived |
+| `REFUNDED` | `refunded` to the refund address, in the sent asset |
+| `FAILED` | `failed`, with the deposit address as the reference support asks for |
+
+## Fees and keys
+
+The fees on a route are the ones 1Click states: its platform fee as basis points
+of the amount sent, and the withdrawal fee on the Stellar side. Both are already
+out of the quoted amount. The solver's spread is in the price.
+
+Without an API key 1Click adds 25 basis points to every quote. A partner key from
+the [Partner Dashboard](https://partners.near-intents.org) moves quotes to the
+partner schedule; pass it as `apiKey`. A key is a secret, so it belongs in a
+server-side SDK integration, never in a browser bundle, and the widget does not
+take one.

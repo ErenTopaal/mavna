@@ -19,6 +19,12 @@ one answers for itself.
 | Mechanism | The issuer burns on the source and mints on Stellar | A validator set attests; tokens move through the Interchain Token Service hub | Tokens implement OFT; verifiers chosen per token check each message |
 | Assets | USDC | Interchain Token Service tokens, USDC among them on mainnet | USDT0 on mainnet, plus any OFT you name yourself |
 
+A fourth rail, [NEAR Intents](/developers/rails/near-intents)
+(`@mavna/adapter-near-intents`, id `near-intents`, trust model `solver-network`),
+takes an ERC-20 deposit into an address 1Click hands out and has competing solvers
+deliver USDC or XLM on Stellar. It runs on mainnet only, because 1Click has no test
+network.
+
 ## The network picture, stated precisely
 
 The engine is network-agnostic: the same adapters run on testnet and mainnet,

@@ -35,6 +35,7 @@
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
+    "@mavna/adapter-near-intents": "workspace:*",
     "@mavna/core": "workspace:*",
     "@mavna/routing": "workspace:*",
     "@mavna/status": "workspace:*",

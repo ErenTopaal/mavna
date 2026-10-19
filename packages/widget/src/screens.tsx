@@ -1403,9 +1403,9 @@ export function renderRoutes(
   const fastest =
     routes.length > 0 ? routes.reduce((a, b) => (b.minutes < a.minutes ? b : a)) : undefined;
 
-  const enabledRails: RailName[] = (["Circle", "Axelar", "LayerZero"] as RailName[]).filter(
-    (n) => st.rails[n] !== false,
-  );
+  const enabledRails: RailName[] = (
+    ["Circle", "Axelar", "LayerZero", "NEAR Intents"] as RailName[]
+  ).filter((n) => st.rails[n] !== false);
   const landed = new Set(routes.map((x) => x.source));
   const declinedNames = new Set(st.rejected.map((r) => railDisplay(r.source)));
   const awaiting = enabledRails.filter((n) => !landed.has(n) && !declinedNames.has(n));

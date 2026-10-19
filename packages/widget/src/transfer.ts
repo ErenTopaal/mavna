@@ -316,7 +316,11 @@ async function send(
   route: Route,
 ): Promise<string | undefined> {
   const { engine, chainId, chainName, patch } = deps;
-  const transactions = await adapter.buildTransactions(route);
+  // The connected wallet goes along for a rail that must name a refund address
+  // before it hands out somewhere to deposit; the others ignore it.
+  const transactions = await adapter.buildTransactions(route, {
+    sender: deps.connection.address,
+  });
   const hashes = await execute({
     connection: deps.connection,
     route,

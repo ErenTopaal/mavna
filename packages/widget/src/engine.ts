@@ -6,6 +6,7 @@ import {
   NON_EVM_CHAINS,
 } from "@mavna/adapter-cctp";
 import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
+import { NearIntentsAdapter } from "@mavna/adapter-near-intents";
 import type { BridgeAdapter, Asset as MavnaAsset, NetworkId, RouteRanking } from "@mavna/core";
 import {
   type CircuitBreaker,
@@ -65,8 +66,8 @@ export interface EngineConfig {
   readonly chains?:
     | { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
     | undefined;
-  /** The rails to race. Defaults to all three. */
-  readonly rails?: readonly ("Circle" | "Axelar" | "LayerZero")[] | undefined;
+  /** The rails to race. Defaults to all of them. */
+  readonly rails?: readonly ("Circle" | "Axelar" | "LayerZero" | "NEAR Intents")[] | undefined;
   /** A host-provided Stellar signer, replacing the built-in wallet kit. */
   readonly stellar?: StellarWalletApi | undefined;
   /** The localStorage key for transfer history, namespaced by keyPrefix. */
@@ -78,7 +79,7 @@ export interface Engine {
   readonly rpc: RpcClient;
   readonly breaker: CircuitBreaker;
   /**
-   * cctp, axelar, layerzero, raced together. A route is built, tracked and
+   * cctp, axelar, layerzero, near-intents, raced together. A route is built, tracked and
    * looked up through the adapter that quoted it (see `adapterFor`), never
    * through a named one, so there is no Circle handle here to reach for.
    */
@@ -150,6 +151,13 @@ export function createEngine(config: EngineConfig): Engine {
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
   });
+  // No 1Click key here: anything in the widget's bundle is public, so it quotes
+  // on 1Click's keyless schedule.
+  const nearIntents = new NearIntentsAdapter({
+    network,
+    rpc,
+    baseReserveStroops: netConfig.baseReserveStroops,
+  });
 
   const stellarChainId = network === "mainnet" ? "stellar" : "stellar-testnet";
   const usdcIssuer = STELLAR_USDC_ISSUER[network];
@@ -202,13 +210,14 @@ export function createEngine(config: EngineConfig): Engine {
     ? preferred
     : (sourceChains[0]?.id ?? "");
 
-  // The rails to race. An integrator can offer a subset; the default is all three.
+  // The rails to race. An integrator can offer a subset; the default is all of them.
   const railToSource: Readonly<Record<string, string>> = {
     Circle: "cctp",
     Axelar: "axelar",
     LayerZero: "layerzero",
+    "NEAR Intents": "near-intents",
   };
-  const allAdapters: readonly BridgeAdapter[] = [cctp, axelar, layerzero];
+  const allAdapters: readonly BridgeAdapter[] = [cctp, axelar, layerzero, nearIntents];
   const adapters =
     config.rails === undefined
       ? allAdapters
