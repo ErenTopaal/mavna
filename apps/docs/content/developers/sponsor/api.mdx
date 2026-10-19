@@ -81,7 +81,12 @@ switch for running without a funded sponsor key:
   permissionless) and pays its fee from its own XLM. Before asking for the
   signature the widget checks the endpoint holds exactly this message, and that the
   run asks for one authorization only: the wallet's, for `lz_compose` on the
-  configured contract with these arguments, with nothing nested under it.
+  configured contract with these arguments, with nothing nested under it. It shows
+  the fee of the simulated run and asks for the signature only on a second press.
+  Most finishes cost a few hundredths of an XLM; one that falls due to renew the
+  contract's storage (its instance and code, renewed to 30 days once either has
+  less than 15 left) pays that rent, which was 30.7 XLM on testnet for the code
+  entry. Compose quotes show that cost, simulated at quote time, in this mode.
 
 ## `POST /prepare`
 
