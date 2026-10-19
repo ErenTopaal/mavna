@@ -89,9 +89,9 @@ What the constructor is given decides what the contract will ever trust, so on m
   `CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK` exposes `commit_upgrade` and
   `apply_upgrade` for its `Admin`, read from its instance storage on 2026-10-20 as
   `GAV5FBMKD2ZF4X2MGWDNQYUP7KFL7MRM6HZBY7HKQLB4BRHSCCX5J6VS`, and `set_emergency_mode` for its
-  `EmergencyAdmin`, `GCGZ6E5RBUKLNB4VZ5RC65C4QMBSBJ3COVRRJCWAMCXJC36LB7YYWEKM`. Either key, or a router
-  upgraded by them, can change what a swap does with the funds it is given. The router's source was
-  not reviewed here; check these roles again at deployment time.
+  `EmergencyAdmin`, `GCGZ6E5RBUKLNB4VZ5RC65C4QMBSBJ3COVRRJCWAMCXJC36LB7YYWEKM`. Either key, or a
+  router upgraded by them, can change what a swap does with the funds it is given. The router's
+  source was not reviewed here; check these roles again at deployment time.
 
 Earlier testnet instances hold nothing and are not used. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`)
 swapped without estimating first, and its fallback failed on-chain whenever the swap reverted,
