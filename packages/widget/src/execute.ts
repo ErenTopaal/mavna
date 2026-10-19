@@ -1,6 +1,11 @@
 import { ERC20_ABI, type NativeCurrency } from "@mavna/adapter-cctp";
-import type { AllowanceCheck, Route, UnsignedTransaction } from "@mavna/core";
-import type { Abi, Address, Hash } from "viem";
+import {
+  type AllowanceCheck,
+  type Route,
+  SENDER_ADDRESS,
+  type UnsignedTransaction,
+} from "@mavna/core";
+import type { Abi, AbiFunction, AbiParameter, Address, Hash } from "viem";
 import { type Connection, chainFor, isUserRejection, switchChain } from "./wallet.js";
 
 /**
@@ -36,6 +41,8 @@ interface EvmCall {
   readonly abi: Abi;
   readonly functionName: string;
   readonly args: readonly unknown[];
+  /** Native currency sent with the call, when the payload carries any. */
+  readonly value: bigint | undefined;
 }
 
 /**
@@ -71,7 +78,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
       continue;
     }
 
-    const call = parseCall(transaction.payload);
+    const call = parseCall(transaction.payload, connection.address);
     onEvent({ kind: "awaiting-signature", index, describes: transaction.describes });
 
     let hash: Hash;
@@ -83,6 +90,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
         abi: call.abi,
         functionName: call.functionName,
         args: call.args,
+        value: call.value,
       });
     } catch (cause) {
       if (isUserRejection(cause)) {
@@ -124,25 +132,48 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
  * The allowance the burn needs is read from the approval's own stated condition,
  * so this cannot drift from what is actually being asked for.
  */
-async function assertBalanceCovers(options: ExecuteOptions): Promise<void> {
+export async function assertBalanceCovers(
+  options: Pick<ExecuteOptions, "connection" | "route" | "transactions" | "nativeCurrency">,
+): Promise<void> {
+  const { connection } = options;
   const condition = options.transactions
     .map((t) => t.unnecessaryWhen)
     .find((c) => c?.kind === "erc20-allowance");
-  if (condition === undefined) return;
 
-  const needed = BigInt(condition.atLeastBaseUnits);
-  const held = await options.connection.reader.readContract({
-    address: condition.token as Address,
-    abi: ERC20_ABI,
-    functionName: "balanceOf",
-    args: [options.connection.address],
-  });
+  if (condition !== undefined) {
+    const needed = BigInt(condition.atLeastBaseUnits);
+    const held = await connection.reader.readContract({
+      address: condition.token as Address,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [connection.address],
+    });
 
-  if (held < needed) {
-    const { symbol, decimals } = options.route.sends.asset;
+    if (held < needed) {
+      const { symbol, decimals } = options.route.sends.asset;
+      throw new Error(
+        `This wallet holds ${format(held, decimals)} ${symbol} and the transfer needs ` +
+          `${format(needed, decimals)}. Nothing has been sent.`,
+      );
+    }
+  }
+
+  // The delivery fee rides on the send itself, so the wallet needs that much
+  // native currency on top of the gas. Gas cannot be known before signing, which
+  // makes this a floor and not a guarantee, but it catches the common failure.
+  const fee = options.transactions
+    .filter((t) => t.format === "evm-tx")
+    .reduce((sum, t) => sum + (parseCall(t.payload, connection.address).value ?? 0n), 0n);
+  if (fee === 0n) return;
+
+  const native = await connection.reader.getBalance({ address: connection.address });
+  if (native < fee) {
+    const currency = options.nativeCurrency;
+    const label = currency?.symbol ?? "the native token";
+    const decimals = currency?.decimals ?? 18;
     throw new Error(
-      `This wallet holds ${format(held, decimals)} ${symbol} and the transfer needs ` +
-        `${format(needed, decimals)}. Nothing has been sent.`,
+      `This transfer needs ${format(fee, decimals)} ${label} to pay for delivery, plus gas, ` +
+        `and this wallet holds ${format(native, decimals)}. Nothing has been sent.`,
     );
   }
 }
@@ -189,23 +220,81 @@ function readAllowance(condition: AllowanceCheck, connection: Connection): Promi
  * Read an `evm-tx` payload back into a call.
  *
  * Arguments come across as strings so the payload survives JSON, which has no
- * bigint. Anything that is all digits goes back to a bigint; a hex address or
- * hook blob stays a string. Getting this backwards encodes an amount as text and
- * the contract rejects it, which is loud, rather than silently sending the wrong
- * number, which is not.
+ * bigint. What goes back to a bigint is decided by the ABI's own type for that
+ * slot, not by how the string looks: an amount is a uint, and a text field that
+ * happens to be all digits is still text. Getting this wrong encodes an amount
+ * as text and the contract rejects it, or worse, sends the wrong number.
+ *
+ * `value` is the native amount a payable call carries (a LayerZero or Axelar
+ * delivery fee). It stays undefined when the payload has none, so a plain call
+ * is not turned into a zero-value payable one.
  */
-function parseCall(payload: string): EvmCall {
+export function parseCall(payload: string, sender: Address): EvmCall {
   const raw = JSON.parse(payload) as {
     to: string;
     abi: Abi;
     functionName: string;
     args: readonly unknown[];
+    value?: string;
   };
+
+  const inputs = inputsFor(raw.abi, raw.functionName, raw.args.length);
 
   return {
     to: raw.to as Address,
     abi: raw.abi,
     functionName: raw.functionName,
-    args: raw.args.map((arg) => (typeof arg === "string" && /^\d+$/.test(arg) ? BigInt(arg) : arg)),
+    args: raw.args.map((arg, i) => coerce(arg, inputs[i], sender)),
+    value: raw.value === undefined ? undefined : BigInt(raw.value),
   };
+}
+
+function inputsFor(
+  abi: Abi,
+  functionName: string,
+  argCount: number,
+): readonly (AbiParameter | undefined)[] {
+  const candidates = abi.filter(
+    (item): item is AbiFunction => item.type === "function" && item.name === functionName,
+  );
+  // Overloads share a name, so the argument count is what tells them apart.
+  const match = candidates.find((f) => f.inputs.length === argCount);
+  if (match === undefined) {
+    throw new Error(
+      `The transfer asks for ${functionName} with ${argCount} arguments, and its own ` +
+        "interface has no such function. Nothing has been sent.",
+    );
+  }
+  return match.inputs;
+}
+
+const INTEGER_TYPE = /^u?int\d*$/;
+const ARRAY_TYPE = /^(.*)\[\d*\]$/;
+
+function coerce(arg: unknown, param: AbiParameter | undefined, sender: Address): unknown {
+  if (arg === SENDER_ADDRESS) return sender;
+  if (param === undefined) return arg;
+
+  if (typeof arg === "string") {
+    return INTEGER_TYPE.test(param.type) && /^-?\d+$/.test(arg) ? BigInt(arg) : arg;
+  }
+
+  const element = ARRAY_TYPE.exec(param.type);
+  if (Array.isArray(arg)) {
+    if (element !== null) {
+      const inner = { ...param, type: element[1] } as AbiParameter;
+      return arg.map((item) => coerce(item, inner, sender));
+    }
+    const components = "components" in param ? param.components : [];
+    return arg.map((item, i) => coerce(item, components[i], sender));
+  }
+
+  if (typeof arg === "object" && arg !== null && "components" in param) {
+    const byName = new Map(param.components.map((c) => [c.name, c]));
+    return Object.fromEntries(
+      Object.entries(arg).map(([key, item]) => [key, coerce(item, byName.get(key), sender)]),
+    );
+  }
+
+  return arg;
 }
