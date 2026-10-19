@@ -340,12 +340,27 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
         `Whether the receiving account exists could not be checked: ${message(check.destination)}`,
       );
     }
+    const holds = route.deliveredAtLeast.asset.symbol;
     if (check.destination === "missing") {
       return decline(
         "destination-unsupported",
         "That Stellar account does not exist yet, and right now an account pays its own " +
           "reserve, which an address with nothing in it cannot do. Send it at least 1.5 XLM " +
-          "first (1 to exist, 0.5 to hold USDC), or send to an account that already exists.",
+          `first (1 to exist, 0.5 to hold ${holds}), or send to an account that already exists.`,
+      );
+    }
+    // Circle routes add their delivery fee to this and are checked below; any
+    // other rail needs only the trustline's reserve and fee, known now, so it is
+    // declined here rather than refused by the sponsor after the user chose it.
+    const reserve = BigInt(check.baseReserveStroops ?? 0) + OWN_TRUSTLINE_FEE_STROOPS;
+    if (!circle && check.spareStroops !== undefined && check.spareStroops < reserve) {
+      const spare = check.spareStroops > 0n ? check.spareStroops : 0n;
+      return decline(
+        "destination-unsupported",
+        "Right now an account pays its own reserve: " +
+          `${stroopsToXlm(BigInt(check.baseReserveStroops ?? 0))} XLM to hold ${holds}, plus ` +
+          `a small fee, and this one has ${stroopsToXlm(spare)} XLM to spare. Add XLM to it, ` +
+          "or send to an account that can already hold it.",
       );
     }
   }

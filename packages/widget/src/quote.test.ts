@@ -649,3 +649,57 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
     expect((await quoted()).routes).toEqual([]);
   });
 });
+
+describe("a route whose receiving account opens its own trustline", () => {
+  const usdt0: Asset = {
+    chainId: "stellar",
+    id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+    symbol: "USDT0",
+    decimals: 7,
+    curatedBy: "LayerZero",
+  };
+  const selfFunded = {
+    network: "testnet",
+    reserveFunding: "self" as const,
+    minDeliveryBaseUnits: 0n,
+  };
+  const check = (destination: "exists" | "missing", spareStroops?: bigint) => ({
+    network: "testnet",
+    terms: selfFunded,
+    destination,
+    spareStroops,
+    baseReserveStroops: 5_000_000,
+  });
+
+  it("names the asset it would hold when the account does not exist yet", () => {
+    const set = applySponsorTerms(
+      {
+        routes: [routeFor("layerzero", { newAccount: true, delivers: usdt0 })],
+        rejected: [],
+        complete: true,
+      },
+      check("missing"),
+    );
+    expect(set.rejected[0]?.explanation).toMatch(/0\.5 to hold USDT0/);
+    expect(set.rejected[0]?.explanation).not.toMatch(/USDC/);
+  });
+
+  it("is declined at quote time when the account cannot spare the reserve, on any rail", () => {
+    const route = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
+    const enough = 5_000_000n + 1_000n;
+    const offered = applySponsorTerms(
+      { routes: [route], rejected: [], complete: true },
+      check("exists", enough),
+    );
+    expect(offered.routes).toEqual([route]);
+    const short = applySponsorTerms(
+      { routes: [route], rejected: [], complete: true },
+      check("exists", enough - 1n),
+    );
+    expect(short.routes).toEqual([]);
+    expect(short.rejected[0]).toMatchObject({ reason: "destination-unsupported" });
+    expect(short.rejected[0]?.explanation).toMatch(
+      /0\.5 XLM to hold USDT0.*0\.5000999 XLM to spare/,
+    );
+  });
+});
