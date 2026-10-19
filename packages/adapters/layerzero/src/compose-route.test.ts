@@ -374,13 +374,18 @@ describe("building a compose send", () => {
     // checked again when built, not only when quoted: a compose to a recipient that
     // cannot take what arrives would sit in the contract with no one to rescue it
     await expect(
-      composeSendFor(ctx, { ...route, destination: Keypair.random().publicKey() }, resolved),
+      composeSendFor(
+        ctx,
+        { ...route, compose: route.compose, destination: Keypair.random().publicKey() },
+        resolved,
+      ),
     ).rejects.toThrow(/does not exist yet/);
     await expect(
       composeSendFor(
         ctx,
         {
           ...route,
+          compose: route.compose,
           destination: "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ",
         },
         resolved,
