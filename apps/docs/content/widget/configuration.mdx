@@ -72,7 +72,8 @@ this page.
 ## Integration
 
 - **`keyPrefix`**. Namespaces this widget's local transfer history, so two
-  integrators on one origin do not share it.
+  integrators on one origin do not share it. History is also kept per network, so
+  Activity on mainnet never shows, or tries to finish, a testnet transfer.
 - **`walletConfig`**. Opt out of the widget's own wallet management:
   `onConnect` replaces the built-in connect UI with your own, `evm` seeds an
   already-connected EVM connection, and `stellar` provides your own Stellar signer.
