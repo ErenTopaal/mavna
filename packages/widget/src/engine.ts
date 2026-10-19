@@ -10,12 +10,12 @@ import type { BridgeAdapter, Asset as MavnaAsset, NetworkId, RouteRanking } from
 import {
   type CircuitBreaker,
   createCircuitBreaker,
-  type IntegratorFee,
   parseDisabledSources,
   type SwapAttachment,
 } from "@mavna/routing";
 import { createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
+import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
 
@@ -59,7 +59,7 @@ export interface EngineConfig {
   readonly disabledSources: string | undefined;
   readonly ranking: RouteRanking;
   /** Taken from what the user receives; absent unless an integrator sets one. */
-  readonly integratorFee: IntegratorFee | undefined;
+  readonly integratorFee: IntegratorFeeConfig | undefined;
   /** Chains the picker offers, filtered over the network's real chain list. */
   readonly chains?:
     | { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
@@ -89,7 +89,7 @@ export interface Engine {
   readonly stellarChainId: string;
   readonly defaultSourceChain: string;
   readonly ranking: RouteRanking;
-  readonly integratorFee: IntegratorFee | undefined;
+  readonly integratorFee: IntegratorFeeConfig | undefined;
   readonly sponsor: SponsorClient;
   readonly stellar: StellarWalletApi;
   /** The localStorage key for this widget's transfer history. */
@@ -107,6 +107,12 @@ const STELLAR_USDC_ISSUER: Readonly<Record<NetworkId, string>> = {
 };
 
 export function createEngine(config: EngineConfig): Engine {
+  if (config.integratorFee !== undefined) {
+    // Once per engine, at construction, so a re-quote does not repeat it.
+    console.warn(
+      "Mavna: the configured integrator fee is not applied. No collector exists for these routes yet, so no fee is shown or taken.",
+    );
+  }
   const { network } = config;
   const netConfig = createNetworkConfig({ id: network, rpcUrl: config.rpcUrl });
   const rpc = new RpcClient({ url: netConfig.rpcUrl });

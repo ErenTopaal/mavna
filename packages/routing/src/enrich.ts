@@ -1,4 +1,11 @@
-import { type Amount, type Asset, amountOf, type Route, type RouteRejection } from "@mavna/core";
+import {
+  type Amount,
+  type Asset,
+  amountOf,
+  MavnaError,
+  type Route,
+  type RouteRejection,
+} from "@mavna/core";
 
 /**
  * The slice of the exchange layer this module needs, stated structurally.
@@ -76,11 +83,12 @@ export async function attachSwapLeg(
     return {
       source: route.source,
       reason: "no-liquidity",
-      retryable: true,
+      // An unknown failure is assumed worth asking about again; a provider that
+      // says it is permanent is believed.
+      retryable: cause instanceof MavnaError ? cause.retryable : true,
       explanation:
         `This route can bring your money to Stellar, but converting it into ` +
-        `${attachment.wanted.symbol} is not possible right now: ` +
-        `${cause instanceof Error ? cause.message : "the exchange did not answer."}`,
+        `${attachment.wanted.symbol} is not possible right now.`,
     };
   }
 
@@ -117,6 +125,12 @@ export interface IntegratorFee {
   /** Who it goes to. Shown, because fees are itemised by recipient. */
   readonly recipient: string;
   readonly recipientName: string;
+  /**
+   * Whether anything in this route's transactions actually pays the fee out.
+   * Required rather than defaulted so every caller decides: showing a fee that
+   * nobody collects takes money off the headline and gives it to no one.
+   */
+  readonly collects: (route: Route) => boolean;
 }
 
 /**
@@ -134,6 +148,8 @@ export function applyIntegratorFee(route: Route, fee: IntegratorFee): Route {
     // meaning 3% is caught by the cap on the sanity of the number itself.
     throw new RangeError(`An integrator fee must be 0 to 1000 basis points, got ${fee.bps}.`);
   }
+
+  if (!fee.collects(route)) return route;
 
   const takeFrom = (amount: Amount): { kept: Amount; taken: bigint } => {
     const base = BigInt(amount.baseUnits);

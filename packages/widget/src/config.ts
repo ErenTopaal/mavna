@@ -5,6 +5,8 @@ import type { EngineConfig } from "./engine.js";
 import type { RailName, Wanted } from "./quote.js";
 import type { StellarWalletApi } from "./stellar-wallet.js";
 import type { Connection } from "./wallet.js";
+/** What an integrator sets. Whether it can be collected is decided by the engine. */
+export type IntegratorFeeConfig = Omit<IntegratorFee, "collects">;
 
 /**
  * The widget's public configuration, in the shape an integrator writes.
@@ -92,7 +94,7 @@ export interface MavnaWidgetConfig {
    * An integrator fee, taken from what the user receives. bps is an integer in
    * [0, 1000]; recipient and recipientName are both required when set.
    */
-  readonly fee?: IntegratorFee;
+  readonly fee?: IntegratorFeeConfig;
   /** Rails an operator has taken out of rotation (`parseDisabledSources` format). */
   readonly disabledSources?: string;
 

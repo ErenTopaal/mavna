@@ -198,7 +198,12 @@ export function runQuote(
       breaker: engine.breaker,
       swap: inputs.wanted === "XLM" ? engine.xlmSwap : undefined,
       ranking: inputs.priority === "fast" ? "fastest" : "best-received",
-      integratorFee: engine.integratorFee,
+      // No transaction builder pays a fee out yet, so nothing may be shown as
+      // taken. Revisit when a collector exists for a route.
+      integratorFee:
+        engine.integratorFee === undefined
+          ? undefined
+          : { ...engine.integratorFee, collects: () => false },
     },
   ).then(
     (final) => {

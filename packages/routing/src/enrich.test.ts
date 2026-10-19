@@ -1,4 +1,4 @@
-import type { Asset, Route } from "@mavna/core";
+import { type Asset, MavnaError, type Route } from "@mavna/core";
 import { describe, expect, it } from "vitest";
 import { applyIntegratorFee, attachSwapLeg, type SwapQuoter } from "./enrich.js";
 
@@ -101,6 +101,37 @@ describe("attaching the conversion leg", () => {
     expect(out.retryable).toBe(true);
     expect(out.explanation).toContain("XLM");
   });
+
+  it("never shows a raw error message to the user", async () => {
+    const failing: SwapQuoter = {
+      id: "aquarius",
+      quote: () => Promise.reject(new Error("HTTP 500 at https://internal.example/stack")),
+    };
+    const out = await attachSwapLeg(route, attachment(failing), 50);
+    if (!("reason" in out)) throw new Error("should have rejected");
+    expect(out.explanation).not.toContain("HTTP 500");
+    expect(out.explanation).not.toContain("internal.example");
+  });
+
+  it("carries a permanent failure as non-retryable", async () => {
+    const failing: SwapQuoter = {
+      id: "aquarius",
+      quote: () => Promise.reject(new MavnaError("no route", { retryable: false })),
+    };
+    const out = await attachSwapLeg(route, attachment(failing), 50);
+    if (!("reason" in out)) throw new Error("should have rejected");
+    expect(out.retryable).toBe(false);
+  });
+
+  it("keeps a transient failure retryable", async () => {
+    const failing: SwapQuoter = {
+      id: "aquarius",
+      quote: () => Promise.reject(new MavnaError("down", { retryable: true })),
+    };
+    const out = await attachSwapLeg(route, attachment(failing), 50);
+    if (!("reason" in out)) throw new Error("should have rejected");
+    expect(out.retryable).toBe(true);
+  });
 });
 
 describe("the bridge floor", () => {
@@ -115,6 +146,7 @@ describe("the bridge floor", () => {
       bps: 30,
       recipient: "GINTEGRATOR",
       recipientName: "Example Wallet",
+      collects: () => true,
     });
     expect(JSON.stringify(out.deliveredAtLeast)).toBe(JSON.stringify(route.deliveredAtLeast));
   });
@@ -126,6 +158,7 @@ describe("the integrator's cut", () => {
       bps: 30,
       recipient: "GINTEGRATOR",
       recipientName: "Example Wallet",
+      collects: () => true,
     });
 
     // 0.30% of 50000000 is 150000, rounded down.
@@ -142,6 +175,7 @@ describe("the integrator's cut", () => {
       bps: 0,
       recipient: "GINTEGRATOR",
       recipientName: "Example Wallet",
+      collects: () => true,
     });
     expect(out.receives.baseUnits).toBe(route.receives.baseUnits);
     expect(out.fees.find((f) => f.kind === "integrator")?.total.baseUnits).toBe("0");
@@ -149,7 +183,23 @@ describe("the integrator's cut", () => {
 
   it("refuses a rate no integrator could defend", () => {
     expect(() =>
-      applyIntegratorFee(route, { bps: 5000, recipient: "G", recipientName: "x" }),
+      applyIntegratorFee(route, {
+        bps: 5000,
+        recipient: "G",
+        recipientName: "x",
+        collects: () => true,
+      }),
     ).toThrow(RangeError);
+  });
+
+  it("returns the route unchanged when nothing can collect the fee", () => {
+    const out = applyIntegratorFee(route, {
+      bps: 30,
+      recipient: "GINTEGRATOR",
+      recipientName: "Example Wallet",
+      collects: () => false,
+    });
+    expect(out).toBe(route);
+    expect(out.fees.find((f) => f.kind === "integrator")).toBeUndefined();
   });
 });
