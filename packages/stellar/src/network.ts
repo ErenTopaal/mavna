@@ -19,7 +19,11 @@ export interface NetworkConfig {
    * source, it is the only source for those two questions.
    */
   readonly horizonUrl: string;
-  /** Base reserve in stroops. Read from a ledger header rather than assumed. */
+  /**
+   * Base reserve in stroops, as configured. A default confirmed against a
+   * ledger header when written, not read live; override it if the network
+   * changes the parameter.
+   */
   readonly baseReserveStroops: number;
   readonly explorer: {
     readonly tx: (hash: string) => string;

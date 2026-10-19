@@ -77,8 +77,10 @@ export interface LayerZeroAdapterOptions {
   /** Used to inspect the destination and to read the Stellar side of the pathway. */
   readonly rpc: RpcClient;
   /**
-   * The network's base reserve, read from a ledger header rather than assumed.
-   * It is a network parameter and has changed before.
+   * The network's base reserve, as configured. Nothing here reads it from the
+   * ledger: callers pass `NetworkConfig.baseReserveStroops`, which defaults to
+   * the 0.5 XLM last confirmed on both networks and is overridable because it
+   * is a network parameter and has changed before.
    */
   readonly baseReserveStroops: number;
   /** Prices the arriving token in XLM, so the sponsorship floor can be compared. */

@@ -32,7 +32,7 @@ export interface ReserveInputs {
   readonly lane: DestinationLane;
   /** True when the asset the user wants differs from the asset the bridge delivers. */
   readonly destinationAssetDiffers: boolean;
-  /** Network parameter, read from a ledger header rather than assumed. */
+  /** Network parameter, from the network config rather than hardcoded here. */
   readonly baseReserveStroops: number;
   /**
    * Multiple of the bare deposit used as the minimum transfer size. Four gives
