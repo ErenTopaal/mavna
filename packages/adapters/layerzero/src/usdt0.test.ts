@@ -95,7 +95,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
       case "quoteSend":
         return reply({ nativeFee: 41_000_000_000_000n, lzTokenFee: 0n });
       case "quoteOFT": {
-        const amount = (args?.[0] as { amountLD: bigint }).amountLD;
+        const amount = ((args ?? [])[0] as { amountLD: bigint }).amountLD;
         return reply([
           { minAmountLD: 0n, maxAmountLD: 10n ** 30n },
           [],
