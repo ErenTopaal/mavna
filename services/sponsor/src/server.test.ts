@@ -2075,7 +2075,7 @@ describe("the sponsor funds its own channel once", () => {
       ),
     );
     expect(funded()).toBe(1);
-    expect(answers.map((a) => a.status).sort()).toEqual([200, 503]);
+    expect(answers.map((a) => a.status).sort((a, b) => a - b)).toEqual([200, 503]);
   });
 
   it("tries the funding again after it failed", async () => {
