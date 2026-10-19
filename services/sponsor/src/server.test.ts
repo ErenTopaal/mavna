@@ -2408,3 +2408,37 @@ describe("the sponsor funds its own channel once", () => {
     logged.mockRestore();
   });
 });
+
+describe("finishing a conversion on arrival", () => {
+  const ARRIVAL = "CBSWBSELNYEDXQHO4JDXYJ7HFMTSBLVHAKIQ6KFC2NYZUT5PHDSI6252";
+  const good = {
+    from: "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB",
+    guid: "ab".repeat(32),
+    index: 0,
+    message: "0x01",
+  };
+
+  it("says so when this sponsor finishes none", async () => {
+    const server = await startServer();
+    const response = await server.post("/compose", good);
+    expect(response.status).toBe(404);
+    expect(response.body.retryable).toBe(false);
+  });
+
+  it("refuses malformed input before reading anything", async () => {
+    const server = await startServer({ arrivalContract: ARRIVAL });
+    for (const body of [
+      { ...good, from: "not an address" },
+      { ...good, guid: "abc" },
+      { ...good, index: -1 },
+      { ...good, index: 1.5 },
+      { ...good, message: "0x0" },
+      { ...good, message: `0x${"00".repeat(5000)}` },
+      {},
+    ]) {
+      const response = await server.post("/compose", body);
+      expect(response.status, JSON.stringify(body).slice(0, 80)).toBe(400);
+      expect(response.body.retryable).toBe(false);
+    }
+  });
+});

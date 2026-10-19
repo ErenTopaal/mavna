@@ -8,6 +8,7 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --passWithNoTests --root ../.. services/sponsor",
+    "test:live": "vitest run --project live --passWithNoTests --root ../.. services/sponsor",
     "publish:check": "echo 'not published'",
     "start": "node dist/main.mjs"
   },
@@ -15,6 +16,10 @@
     "@mavna/core": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
-    "@mavna/adapter-cctp": "workspace:*"
+    "@mavna/adapter-cctp": "workspace:*",
+    "@mavna/adapter-layerzero": "workspace:*"
+  },
+  "devDependencies": {
+    "@mavna/swap": "workspace:*"
   }
 }

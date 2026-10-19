@@ -37,6 +37,7 @@ import {
   InMemoryCapStore,
 } from "./caps.js";
 import { ChannelPool } from "./channels.js";
+import { ComposeRefused, Composer } from "./compose.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 
 /**
@@ -99,6 +100,11 @@ export interface SponsorServerOptions {
    * otherwise leave the reserve unpaid until the settlement's time bound.
    */
   readonly settleSweepSeconds?: number;
+  /**
+   * The Mavna Arrival Contract whose overdue conversions this sponsor finishes.
+   * Absent means /compose answers that it finishes none.
+   */
+  readonly arrivalContract?: string;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -143,6 +149,13 @@ interface SettlementBody {
   readonly sourceChainId?: string;
 }
 
+interface ComposeBody {
+  readonly from?: unknown;
+  readonly guid?: unknown;
+  readonly index?: unknown;
+  readonly message?: unknown;
+}
+
 interface SettleBody {
   readonly destination?: unknown;
 }
@@ -183,6 +196,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     payerSecret: options.sponsorSecret,
     buildDelivery: options.buildDelivery,
   });
+  const composer =
+    options.arrivalContract === undefined
+      ? undefined
+      : new Composer({
+          rpc: options.rpc,
+          network: options.network,
+          contract: options.arrivalContract,
+          payerSecret: options.sponsorSecret,
+        });
+  // one finish per message at a time; the chain refuses a second anyway, this
+  // only keeps a double click from costing two simulations and two fees
+  const composing = new Set<string>();
 
   /**
    * Settlements collected before any capital moved, waiting for delivery.
@@ -482,6 +507,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
       await deliver((await readJson(req)) as DeliverBody, res, origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/compose") {
+      await compose((await readJson(req)) as ComposeBody, res, origin);
       return;
     }
 
@@ -1235,6 +1264,49 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     lastSettleCall.set(destination, now);
 
     reply(res, 200, await settleIfHeld(destination), origin);
+  }
+
+  /**
+   * Finish an overdue conversion on arrival. Safe to call any number of times:
+   * the endpoint runs a queued message once and refuses every later attempt.
+   */
+  async function compose(
+    body: ComposeBody,
+    res: ServerResponse,
+    origin: string | undefined,
+  ): Promise<void> {
+    if (composer === undefined) {
+      reply(
+        res,
+        404,
+        { error: "This sponsor finishes no conversions on arrival.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    const key = typeof body.guid === "string" ? body.guid.toLowerCase() : "";
+    if (composing.has(key)) {
+      reply(
+        res,
+        429,
+        { error: "This conversion is being finished already.", retryable: true },
+        origin,
+      );
+      return;
+    }
+    composing.add(key);
+    try {
+      const outcome = await composer.finish(body as Parameters<Composer["finish"]>[0]);
+      reply(res, outcome.kind === "not-queued" ? 404 : 200, { ...outcome }, origin);
+    } catch (cause) {
+      if (cause instanceof ComposeRefused) {
+        reply(res, 400, { error: cause.message, retryable: false }, origin);
+        return;
+      }
+      throw cause;
+    } finally {
+      composing.delete(key);
+    }
   }
 
   /** Trigger the mint for an attested burn. Idempotent; retrying is always safe. */

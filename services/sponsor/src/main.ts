@@ -74,6 +74,9 @@ const server = createSponsorServer({
     .map((origin) => origin.trim())
     .filter((origin) => origin !== ""),
   ...(settleSweepSeconds === undefined ? {} : { settleSweepSeconds }),
+  ...(env("MAVNA_ARRIVAL_CONTRACT") === undefined
+    ? {}
+    : { arrivalContract: env("MAVNA_ARRIVAL_CONTRACT") as string }),
 });
 
 const port = Number(env("PORT") ?? 8787);
