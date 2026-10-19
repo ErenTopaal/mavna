@@ -12,6 +12,7 @@
  * the widget (an integrator's config).
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
+import { stroopsToXlm } from "@mavna/stellar";
 import { buildPathPayment } from "@mavna/swap";
 import {
   FeeBumpTransaction,
@@ -21,6 +22,7 @@ import {
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute } from "./execute";
 import { remember } from "./history";
+import { deliverOwn, OWN_DELIVERY_FEE_BUDGET_STROOPS, type OwnDelivery } from "./own-delivery";
 import { type RouteView, settlementBlocker, trustlineName, type Wanted } from "./quote";
 import {
   adapterFor,
@@ -34,7 +36,7 @@ import {
   stepsFor,
   trackDelivery,
 } from "./rails";
-import type { SponsorTerms } from "./sponsor";
+import type { SponsorDelivery, SponsorTerms } from "./sponsor";
 import type { Connection } from "./wallet";
 
 export type StepPhase = "idle" | "blocked" | "pending" | "done" | "failed";
@@ -133,6 +135,7 @@ export type TransferEngine = Pick<
   | "rpc"
   | "usdcOnStellar"
   | "sponsorTerms"
+  | "stellarNetwork"
 >;
 
 export interface TransferDeps {
@@ -310,12 +313,20 @@ async function deliverToStellar(
   chainId: string,
   patch: Patch,
   alreadyPrepared: boolean,
+  /** The account pays for its own delivery: `owner` signs it, the sponsor is not asked. */
+  ownDelivery: boolean,
 ): Promise<void> {
   const domain = engine.sourceDomain(chainId);
   patch("attest", { phase: "pending" });
   let prepared = alreadyPrepared;
   for (let attempt = 0; attempt < 90; attempt += 1) {
-    const outcome = await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
+    const outcome =
+      ownDelivery && owner !== undefined
+        ? await deliverOwn(engine, burnHash, domain, owner)
+        : await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
+    if (outcome.kind === "too-costly") {
+      throw new StillMoving(tooCostly(outcome.feeStroops));
+    }
     if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
       patch("attest", { phase: "done" });
       const deliverPatch: { phase: StepPhase; ref?: string; refUrl?: string; note?: string } = {
@@ -327,7 +338,7 @@ async function deliverToStellar(
       }
       // The sponsor reports when the held settlement submitted with the mint, so
       // the deliver step can say the deposit repaid itself. Real, from /deliver.
-      if (outcome.settled === true) {
+      if ("settled" in outcome && outcome.settled === true) {
         deliverPatch.note = "Delivered, and the deposit repaid itself from the arrival.";
       }
       patch("deliver", deliverPatch);
@@ -348,6 +359,33 @@ async function deliverToStellar(
   throw new StillMoving(
     "Circle has not attested this transfer yet. Your funds are safe and this page " +
       "can finish the delivery later: find the transfer under Activity.",
+  );
+}
+
+/**
+ * Finish a Circle delivery that stalled, from Activity. Whoever pays for
+ * deliveries does it: the sponsor, or with reserves funded by the account, the
+ * connected Stellar wallet, which pays the fee from its own XLM.
+ */
+export async function finishDelivery(
+  engine: TransferEngine,
+  burnHash: string,
+  domain: number,
+): Promise<SponsorDelivery | OwnDelivery> {
+  const terms = await engine.sponsorTerms();
+  if (terms.reserveFunding === "self") {
+    return deliverOwn(engine, burnHash, domain, await engine.stellar.connect());
+  }
+  return engine.sponsor.requestDelivery(burnHash, domain);
+}
+
+/** Why a delivery the account would pay for was left unsigned. */
+export function tooCostly(feeStroops: bigint): string {
+  return (
+    `Delivering on Stellar costs ${stroopsToXlm(feeStroops)} XLM right now, more than the ` +
+    `${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM this page asks an account to spend on ` +
+    "it, so it was not signed. The funds are safe and still deliverable: finish the delivery " +
+    "later under Activity."
   );
 }
 
@@ -402,21 +440,39 @@ async function send(
   return sendHash;
 }
 
+/** The sponsor's terms, or a refusal before anything is sent when it cannot be asked. */
+async function termsOf(engine: TransferEngine, needs: string): Promise<SponsorTerms> {
+  try {
+    return await engine.sponsorTerms();
+  } catch (cause) {
+    throw new Error(
+      `${needs} needs the sponsor service, which is not reachable right now ` +
+        `(${cause instanceof Error ? cause.message : String(cause)}). Nothing has been sent.`,
+    );
+  }
+}
+
+/**
+ * The connected Stellar wallet, when it is the receiving account. An account
+ * that pays for its own delivery signs it, so this is known before anything burns.
+ */
+async function ownWallet(engine: TransferEngine, route: Route): Promise<string> {
+  const address = await engine.stellar.connect();
+  if (address !== route.destination) {
+    throw new Error(
+      "Right now the receiving account pays for its own delivery on Stellar, so only its " +
+        "owner can sign it. Connect that wallet, or pick another route. Nothing has been sent.",
+    );
+  }
+  return address;
+}
+
 /**
  * Refuse a new account the sponsor cannot reach or cannot be repaid for, and
  * learn who pays its reserve.
  */
 async function assertSponsorable(engine: TransferEngine, route: Route): Promise<SponsorTerms> {
-  let terms: SponsorTerms;
-  try {
-    terms = await engine.sponsorTerms();
-  } catch (cause) {
-    throw new Error(
-      "Setting up a new Stellar account needs the sponsor service, which is not " +
-        `reachable right now (${cause instanceof Error ? cause.message : String(cause)}). ` +
-        "Nothing has been sent.",
-    );
-  }
+  const terms = await termsOf(engine, "Setting up a new Stellar account");
   const blocked = settlementBlocker(route, engine.usdcOnStellar.id, terms.reserveFunding);
   if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
   return terms;
@@ -507,22 +563,27 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
 
   if (adapter.id === "cctp") {
     let prepared = false;
-    if (view.newAccount) {
-      const terms = await assertSponsorable(engine, route);
-      if (terms.reserveFunding === "self") {
-        patch("prepare", { phase: "blocked" });
-        owner = await prepareOwn(engine, route, chainId);
-        patch("prepare", { phase: "done" });
-        prepared = true;
-      } else {
-        patch("settle", { phase: "blocked" });
-        owner = await collectSettlement(engine, route, chainId);
-        patch("settle", { phase: "done" });
-      }
+    // Who funds decides who delivers on Stellar, so it is asked on every Circle
+    // transfer, not only one that sets an account up.
+    const terms = view.newAccount
+      ? await assertSponsorable(engine, route)
+      : await termsOf(engine, "Delivering a Circle transfer on Stellar");
+    const ownDelivery = terms.reserveFunding === "self";
+    if (view.newAccount && ownDelivery) {
+      patch("prepare", { phase: "blocked" });
+      owner = await prepareOwn(engine, route, chainId);
+      patch("prepare", { phase: "done" });
+      prepared = true;
+    } else if (view.newAccount) {
+      patch("settle", { phase: "blocked" });
+      owner = await collectSettlement(engine, route, chainId);
+      patch("settle", { phase: "done" });
+    } else if (ownDelivery) {
+      owner = await ownWallet(engine, route);
     }
     const burnHash = await send(deps, adapter, route);
     if (burnHash !== undefined) {
-      await deliverToStellar(engine, burnHash, owner, route, chainId, patch, prepared);
+      await deliverToStellar(engine, burnHash, owner, route, chainId, patch, prepared, ownDelivery);
     }
   } else {
     owner = await runRelayed(deps, adapter);

@@ -103,11 +103,12 @@ export function stepsFor(
         actor: "Circle",
       },
       {
+        // no sponsor pays for it, so the account signs and pays the mint itself
         id: "deliver",
         label: "Deliver on Stellar",
-        note: "Delivered on Stellar.",
-        user: false,
-        actor: "Mavna",
+        note: "Approve in your Stellar wallet. The fee comes from this account's own XLM.",
+        user: true,
+        actor: "Your wallet",
       },
       ...(converts ? [swap] : []),
     ];

@@ -60,7 +60,15 @@ import {
   renderSettings,
 } from "./screens";
 import { s } from "./style";
-import { buildSteps, type FlightRow, type FlightStep, runTransfer, StillMoving } from "./transfer";
+import {
+  buildSteps,
+  type FlightRow,
+  type FlightStep,
+  finishDelivery,
+  runTransfer,
+  StillMoving,
+  tooCostly,
+} from "./transfer";
 import { connect, type DiscoveredWallet, switchChain, watchWallets } from "./wallet";
 
 type Screen =
@@ -1163,11 +1171,14 @@ export class Flow extends React.Component<FlowProps, State> {
     );
     const domain = known === undefined ? 0 : this.engine.sourceDomain(known.sourceChainId);
     try {
-      const outcome = await this.engine.sponsor.requestDelivery(
+      const outcome = await finishDelivery(
+        this.engine,
         hash.startsWith("0x") ? hash : `0x${hash}`,
         domain,
       );
-      if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
+      if (outcome.kind === "too-costly") {
+        this.setState({ lookupNote: tooCostly(outcome.feeStroops), lookupNoteKind: "fault" });
+      } else if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
         this.setState({
           lookupNote: "Delivered. The funds are on Stellar.",
           lookupNoteKind: "quiet",

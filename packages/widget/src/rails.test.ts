@@ -452,4 +452,12 @@ describe("stepsFor an account that pays its own reserve", () => {
     );
     expect(prepare?.note).toMatch(/own XLM/);
   });
+
+  it("has the account sign and pay Circle's delivery on Stellar itself", () => {
+    const deliver = stepsFor(routeFor("cctp"), "self").find((s) => s.id === "deliver");
+    expect(deliver).toMatchObject({ user: true, actor: "Your wallet" });
+    expect(deliver?.note).toMatch(/Stellar wallet.*own XLM/);
+    const sponsored = stepsFor(routeFor("cctp"), "sponsor").find((s) => s.id === "deliver");
+    expect(sponsored).toMatchObject({ user: false, actor: "Mavna" });
+  });
 });

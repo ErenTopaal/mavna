@@ -66,6 +66,14 @@ switch for running without a funded sponsor key:
   sponsor adds no signature and needs no held settlement.
 - `POST /settlement` and `POST /settlement/commit` answer `409`: there is no loan
   to repay.
+- The widget does not ask `POST /deliver` for a Circle transfer. The receiving
+  account signs and pays Circle's `mint_and_forward` on Stellar itself, built from
+  Circle's attestation with the same delivery builder the sponsor uses, so a
+  sponsor with no XLM can still serve Circle transfers. A Circle route is declined
+  at quote time unless the receiving account is an ordinary `G` account that can
+  spare 0.1 XLM for the delivery (plus 0.5 XLM when it opens its USDC trustline
+  first), and the connected Stellar wallet must be that account. `/deliver` itself
+  is unchanged, and is still what a sponsor-funded deployment uses.
 
 ## `POST /prepare`
 

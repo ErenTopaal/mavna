@@ -14,7 +14,7 @@ import {
   parseDisabledSources,
   type SwapAttachment,
 } from "@mavna/routing";
-import { createNetworkConfig, RpcClient } from "@mavna/stellar";
+import { createNetworkConfig, type NetworkConfig, RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
 import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
@@ -91,6 +91,8 @@ export interface Engine {
   readonly usdcIssuer: string;
   /** The network's base reserve in stroops, for pricing what an account pays itself. */
   readonly baseReserveStroops: number;
+  /** The Stellar network this engine runs on, for building what an account signs itself. */
+  readonly stellarNetwork: NetworkConfig;
   readonly sourceChains: ReadonlyArray<{ id: string; name: string }>;
   readonly stellarChainId: string;
   readonly defaultSourceChain: string;
@@ -239,6 +241,7 @@ export function createEngine(config: EngineConfig): Engine {
     xlmSwap,
     usdcIssuer,
     baseReserveStroops: netConfig.baseReserveStroops,
+    stellarNetwork: netConfig,
     sourceChains,
     stellarChainId,
     defaultSourceChain,

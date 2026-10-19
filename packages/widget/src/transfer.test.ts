@@ -1,8 +1,16 @@
 import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
-import { RpcClient } from "@mavna/stellar";
+import { createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
-import { Account, Asset, Networks, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import type { Address, Hash } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -17,9 +25,16 @@ import {
   STELLAR_USDC,
   STELLAR_XLM,
 } from "./__fixtures__/scripted";
+import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
-import { runTransfer, StillMoving, type TransferDeps, type TransferEngine } from "./transfer";
+import {
+  finishDelivery,
+  runTransfer,
+  StillMoving,
+  type TransferDeps,
+  type TransferEngine,
+} from "./transfer";
 import type { Connection } from "./wallet";
 
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
@@ -42,6 +57,11 @@ let preparation: string;
 /** What a self-funded preparation opens and who sources it, when a test makes it wrong. */
 let preparedLine: string | undefined;
 let preparedSource: string | undefined;
+/** What Circle's attestation service answers, in turn; the last one repeats. */
+let irisReplies: Array<[number, unknown]>;
+const attested = {
+  messages: [{ status: "complete", message: "0x0102", attestation: "0x0304", decodedMessage: {} }],
+};
 /** The assets each /prepare asked for. */
 let askedAssets: string[][];
 
@@ -57,6 +77,9 @@ beforeEach(() => {
   lane = "ready";
   funding = "sponsor";
   preparation = "";
+  preparedFee = "182612";
+  simulationFailure = undefined;
+  irisReplies = [[200, attested]];
   preparedLine = undefined;
   preparedSource = undefined;
   askedAssets = [];
@@ -70,8 +93,14 @@ beforeEach(() => {
   // the sponsor, at the network boundary
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname;
-    log.push(`sponsor ${path}`);
     const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+    if (path.startsWith("/v2/messages/")) {
+      log.push(`iris ${path}`);
+      const next = irisReplies.length > 1 ? irisReplies.shift() : irisReplies[0];
+      if (next === undefined) throw new Error("no iris reply scripted");
+      return reply(next[0], next[1]);
+    }
+    log.push(`sponsor ${path}`);
     switch (path) {
       case "/health":
         return reply(200, {
@@ -143,26 +172,52 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Ledger entries the way the Stellar node returns them, as far as they are read. */
+/** Ledger entries the way the Stellar node returns them. */
 function ledgerEntries(): unknown[] {
+  const accountId = Keypair.fromPublicKey(DESTINATION).xdrAccountId();
   const account = {
-    val: {
-      switch: () => ({ name: "account" }),
-      account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 1 }),
-    },
+    val: xdr.LedgerEntryData.account(
+      new xdr.AccountEntry({
+        accountId,
+        balance: xdr.Int64.fromString("50000000"),
+        seqNum: xdr.Int64.fromString("41"),
+        numSubEntries: 1,
+        inflationDest: null,
+        flags: 0,
+        homeDomain: "",
+        thresholds: Buffer.from([1, 0, 0, 0]),
+        signers: [],
+        ext: new xdr.AccountEntryExt(0),
+      }),
+    ),
   };
+  const [code, issuer] = STELLAR_USDC.id.split(":");
   const trustline = {
-    val: {
-      switch: () => ({ name: "trustline" }),
-      trustLine: () => ({ balance: () => 0n, limit: () => 10n ** 15n, flags: () => 1 }),
-    },
+    val: xdr.LedgerEntryData.trustline(
+      new xdr.TrustLineEntry({
+        accountId,
+        asset: new Asset(code ?? "", issuer).toTrustLineXDRObject(),
+        balance: xdr.Int64.fromString("0"),
+        limit: xdr.Int64.fromString((10n ** 15n).toString()),
+        flags: 1,
+        ext: new xdr.TrustLineEntryExt(0),
+      }),
+    ),
   };
   if (lane === "needs-account") return [];
   if (lane === "needs-trustline") return [account];
   return [account, trustline];
 }
 
-/** A real client whose node is a double, so the destination check reads what a test says. */
+/** What the delivery costs once simulated, as the node prepares it. */
+let preparedFee: string;
+/** What simulating the delivery answers instead, when a test makes it fail. */
+let simulationFailure: Error | undefined;
+
+/**
+ * A real client whose node is a double, so the destination check reads what a
+ * test says and a delivery the account pays for can be simulated and sent.
+ */
 function stellarNode(): RpcClient {
   const client = new RpcClient({
     url: "https://example.invalid",
@@ -173,6 +228,23 @@ function stellarNode(): RpcClient {
     log.push("stellar read destination");
     return { entries: ledgerEntries(), latestLedger: 100 } as never;
   });
+  vi.spyOn(client.server, "getLatestLedger").mockResolvedValue({ sequence: 100 } as never);
+  vi.spyOn(client.server, "prepareTransaction").mockImplementation(async (tx) => {
+    log.push("stellar simulate delivery");
+    if (simulationFailure !== undefined) throw simulationFailure;
+    return TransactionBuilder.cloneFrom(tx as never, { fee: preparedFee }).build() as never;
+  });
+  vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
+    const op = (tx as { operations: Array<{ type: string; func?: unknown }> }).operations[0];
+    log.push(`stellar send ${op?.type}`);
+    return { status: "PENDING", hash: "0ae1" } as never;
+  });
+  vi.spyOn(client.server, "getTransaction").mockResolvedValue({
+    status: "SUCCESS",
+    txHash: "0ae1",
+    ledger: 101,
+    latestLedger: 101,
+  } as never);
   return client;
 }
 
@@ -190,7 +262,16 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         return DESTINATION;
       },
       sign: async (xdr: string) => {
-        log.push(`stellar sign ${xdr === preparation ? "PREPARATION" : xdr}`);
+        if (xdr === preparation) {
+          log.push("stellar sign PREPARATION");
+          return `signed ${xdr}`;
+        }
+        if (xdr.startsWith("AAAA")) {
+          // a real envelope goes back as one; the node double checks no signatures
+          log.push("stellar sign DELIVERY");
+          return xdr;
+        }
+        log.push(`stellar sign ${xdr}`);
         return `signed ${xdr}`;
       },
       disconnect: async () => {},
@@ -200,6 +281,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     sdex: new SdexProvider("testnet"),
     rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
+    stellarNetwork: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
   };
 }
 
@@ -540,9 +622,109 @@ describe("runTransfer when the account pays its own reserve", () => {
       "evm approve value=undefined",
       "evm depositForBurnWithHook value=undefined",
       `history ${SEND_HASH}`,
-      "sponsor /deliver",
+      "iris /v2/messages/3",
+      "stellar read destination",
+      "stellar simulate delivery",
+      "stellar sign DELIVERY",
+      "stellar send invokeHostFunction",
       "deliver done",
     ]);
+  });
+
+  it("over Circle, has the receiving account deliver and pay for the mint, never the sponsor", async () => {
+    funding = "self";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const { seen, patch } = patches();
+    await run(cctp, routeFor("cctp"), patch);
+
+    expect(log).toEqual([
+      "sponsor /health",
+      "stellar connect",
+      "evm read balanceOf",
+      "evm read allowance",
+      "evm approve value=undefined",
+      "evm depositForBurnWithHook value=undefined",
+      `history ${SEND_HASH}`,
+      "iris /v2/messages/3",
+      "stellar read destination",
+      "stellar simulate delivery",
+      "stellar sign DELIVERY",
+      "stellar send invokeHostFunction",
+      "deliver done",
+    ]);
+    expect(seen).toContainEqual({
+      id: "deliver",
+      patch: expect.objectContaining({ phase: "done", ref: expect.stringMatching(/0ae1/) }),
+    });
+  });
+
+  it("over Circle, waits for the attestation before building the delivery", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    funding = "self";
+    irisReplies = [
+      [404, {}],
+      [
+        200,
+        { messages: [{ status: "pending_confirmations", message: "0x", attestation: "PENDING" }] },
+      ],
+      [200, attested],
+    ];
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const done = run(cctp, routeFor("cctp"), patches().patch);
+    await vi.advanceTimersByTimeAsync(40_000);
+    await done;
+    expect(log.filter((l) => l.startsWith("iris"))).toHaveLength(3);
+    expect(log.filter((l) => l === "stellar simulate delivery")).toHaveLength(1);
+  });
+
+  it("over Circle, counts a delivery that already landed as delivered", async () => {
+    funding = "self";
+    simulationFailure = new Error("HostError: Error(Contract, #6908)");
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const { seen, patch } = patches();
+    await run(cctp, routeFor("cctp"), patch);
+    expect(log).not.toContain("stellar sign DELIVERY");
+    expect(seen).toContainEqual({ id: "deliver", patch: { phase: "done" } });
+  });
+
+  it("over Circle, leaves a delivery that costs more than it should unsigned and still deliverable", async () => {
+    funding = "self";
+    preparedFee = (OWN_DELIVERY_FEE_BUDGET_STROOPS + 1n).toString();
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/0\.1000001 XLM.*Activity/);
+    expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, refuses before the burn when the connected wallet is not the receiving account", async () => {
+    funding = "self";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const route = { ...routeFor("cctp"), destination: SENDER_STELLAR };
+    await expect(run(cctp, route, patches().patch)).rejects.toThrow(
+      /pays for its own delivery.*Nothing has been sent/,
+    );
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
   });
 
   it("refuses to set up an account for someone other than the connected wallet, before any signature", async () => {
@@ -621,5 +803,24 @@ describe("runTransfer when the account pays its own reserve", () => {
       ),
     ).rejects.toThrow(/the sponsor curates/);
     expect(log.some((l) => l.startsWith("sponsor /prepare"))).toBe(false);
+  });
+});
+
+describe("finishing a Circle delivery from Activity", () => {
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+
+  it("has the connected account sign and pay for it when accounts fund themselves", async () => {
+    funding = "self";
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3);
+    expect(outcome).toEqual({ kind: "delivered", txHash: "0ae1", ledger: 101 });
+    expect(log).toContain("stellar sign DELIVERY");
+    expect(log).not.toContain("sponsor /deliver");
+  });
+
+  it("asks the sponsor when it pays for deliveries", async () => {
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3);
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log).toEqual(["sponsor /health", "sponsor /deliver"]);
   });
 });
