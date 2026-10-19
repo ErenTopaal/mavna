@@ -51,7 +51,13 @@ export interface SponsorClient {
     txHash: string,
     domain: number,
     destination?: string,
-  ): Promise<SponsorDelivery & { settled?: boolean; settlementTxHash?: string }>;
+  ): Promise<
+    SponsorDelivery & {
+      settled?: boolean;
+      settlementTxHash?: string;
+      settlementRetryable?: boolean;
+    }
+  >;
   /**
    * Ask the sponsor to submit the settlement it holds for an account, which it
    * does only once the money the settlement spends from has arrived.
