@@ -16,6 +16,7 @@ import {
   type RailName,
   type RouteView,
   railDisplay,
+  railsLabel,
   TRUST_LABEL,
   type Wanted,
 } from "./quote";
@@ -94,7 +95,7 @@ export function renderSend(
   const destShort = st.destination === "" ? "Not set" : short(st.destination);
   const destInk = c.destValid() ? "var(--mv-ink-2)" : "var(--mv-signal)";
   const priorityLabel = st.priority === "best" ? "Best return" : "Fastest";
-  const railsLabel = `${enabledRailCount(st.rails)} of 3`;
+  const railsShown = railsLabel(st.rails, c.availableRails());
   const approvals = r === undefined ? "Nothing yet" : `${r.sigs} steps`;
 
   return (
@@ -336,7 +337,7 @@ export function renderSend(
                   "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-muted)",
                 )}
               >
-                {railsLabel}
+                {railsShown}
               </span>
               <span
                 style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}
@@ -709,7 +710,7 @@ export function renderAddress(c: Flow): ReactElement {
 export function renderSettings(c: Flow): ReactElement {
   const st = c.state;
   const priorityLabel = st.priority === "best" ? "Best return" : "Fastest";
-  const railsLabel = `${enabledRailCount(st.rails)} of 3`;
+  const railsShown = railsLabel(st.rails, c.availableRails());
   const switchBg = st.showDeclined ? "var(--mv-ink)" : "var(--mv-rule-2)";
   const knobBg = st.showDeclined ? "var(--mv-surface)" : "var(--mv-ink-2)";
   const knobX = st.showDeclined ? "18px" : "0px";
@@ -752,7 +753,7 @@ export function renderSettings(c: Flow): ReactElement {
               "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-ink-3)",
             )}
           >
-            {railsLabel}
+            {railsShown}
           </span>
           <span style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}>
             ▸

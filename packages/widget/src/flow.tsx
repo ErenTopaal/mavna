@@ -160,7 +160,7 @@ export interface FlowProps {
     readonly amount?: string | undefined;
     readonly destination?: string | undefined;
   };
-  /** The rails on offer, from config. Defaults to all three. */
+  /** The rails on offer, from config. Defaults to all four. */
   readonly rails?: readonly RailName[];
   readonly hiddenUI?: readonly HiddenUIElement[];
   readonly requiredUI?: readonly RequiredUIElement[];

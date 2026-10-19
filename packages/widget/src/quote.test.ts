@@ -20,6 +20,7 @@ import {
   assetsFor,
   buildAssets,
   declineUnsettleable,
+  railsLabel,
   runQuote,
   toRouteView,
   trustlineName,
@@ -950,5 +951,13 @@ describe("a conversion on arrival's cost to finish by hand", () => {
         ?.finishXlm,
     ).toBe("0.2070159");
     expect(toRouteView({ ...base, compose }).compose?.finishXlm).toBeUndefined();
+  });
+});
+
+describe("the rails status line", () => {
+  it("counts what is on out of the rails actually configured, not a fixed three", () => {
+    const all = { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true };
+    expect(railsLabel(all, ["Circle", "Axelar", "LayerZero", "NEAR Intents"])).toBe("4 of 4");
+    expect(railsLabel({ ...all, Axelar: false }, ["Circle", "Axelar", "LayerZero"])).toBe("2 of 3");
   });
 });

@@ -132,6 +132,14 @@ export function enabledRailCount(rails: Readonly<Record<RailName, boolean>>): nu
   return (Object.keys(RAIL_TO_SOURCE) as RailName[]).filter((r) => rails[r] !== false).length;
 }
 
+/** "N of M": the configured rails switched on, out of those configured. */
+export function railsLabel(
+  rails: Readonly<Record<RailName, boolean>>,
+  configured: readonly RailName[],
+): string {
+  return `${configured.filter((r) => rails[r] !== false).length} of ${configured.length}`;
+}
+
 /**
  * The venue label for a swap provider id.
  *
