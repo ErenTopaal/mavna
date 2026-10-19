@@ -128,11 +128,15 @@ function quoteReply(body: Record<string, unknown>, over: Record<string, unknown>
   });
 }
 
+const urlOf = (input: string | URL | Request): string =>
+  input instanceof Request ? input.url : input.toString();
+
 const oneClickFetch: typeof fetch = async (input, init) => {
-  const url = String(input);
+  const url = urlOf(input);
   if (url === `${ONE_CLICK}/v0/tokens`) return oneClick.tokens();
   if (url === `${ONE_CLICK}/v0/quote`) {
-    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    if (typeof init?.body !== "string") throw new Error("the quote was sent without a JSON body");
+    const body = JSON.parse(init.body) as Record<string, unknown>;
     quoteBodies.push(body);
     return oneClick.quote(body);
   }
@@ -297,7 +301,7 @@ beforeEach(() => {
     status: () => json({ message: "Deposit address not found" }, 404),
   };
   vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = urlOf(input);
     if (url.startsWith(`${HORIZON}/order_book`)) {
       asked.push("horizon order book");
       // 0.2 USDC per XLM both ways, so one USDC is five XLM.
