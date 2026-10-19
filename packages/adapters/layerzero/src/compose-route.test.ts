@@ -371,6 +371,21 @@ describe("building a compose send", () => {
     await expect(
       composeSendFor(ctx, { ...route, compose: { ...route.compose, path: OFF_LIST } }, resolved),
     ).rejects.toThrow(/would not convert/);
+    // checked again when built, not only when quoted: a compose to a recipient that
+    // cannot take what arrives would sit in the contract with no one to rescue it
+    await expect(
+      composeSendFor(ctx, { ...route, destination: Keypair.random().publicKey() }, resolved),
+    ).rejects.toThrow(/does not exist yet/);
+    await expect(
+      composeSendFor(
+        ctx,
+        {
+          ...route,
+          destination: "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ",
+        },
+        resolved,
+      ),
+    ).rejects.toThrow();
     const built = await composeSendFor(ctx, { ...route, compose: route.compose }, resolved);
     expect(built.to).toBe(ARRIVAL);
     expect(built.extraOptions).toBe("0x");

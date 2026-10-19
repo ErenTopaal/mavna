@@ -470,9 +470,16 @@ export async function composeSendFor(
       },
     );
   }
+  // the contract cannot send anything back once it holds it, so a recipient that
+  // cannot be named in the message, or cannot take what arrives, is never sent to
+  const composeMsg = encodeArrivalMessage(route.destination, route.compose);
+  const why =
+    (await cannotHold(ctx.rpc, route.destination, route.compose.arriving, "arriving")) ??
+    (await cannotHold(ctx.rpc, route.destination, route.compose.wanted, "wanted"));
+  if (why !== undefined) throw new MavnaError(why, { retryable: false });
   return {
     to: route.compose.contract,
-    composeMsg: encodeArrivalMessage(route.destination, route.compose),
+    composeMsg,
     extraOptions: await composeOptionsFor(ctx, resolved),
   };
 }
