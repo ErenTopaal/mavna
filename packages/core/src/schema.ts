@@ -15,7 +15,9 @@ export const baseUnits: z.ZodType<string> = z.string().regex(/^\d+$/, "must be i
 
 /** A positive integer that fits a ledger amount without going through a number. */
 export const positiveBaseUnits: z.ZodType<string> = baseUnits.refine(
-  (v) => BigInt(v) > 0n,
+  // zod runs refinements even after the regex has failed, and BigInt throws on
+  // "1.5", so the format is checked again here rather than assumed.
+  (v) => /^\d+$/.test(v) && BigInt(v) > 0n,
   "must be greater than zero",
 );
 

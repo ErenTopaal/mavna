@@ -40,6 +40,12 @@ describe("amounts", () => {
     expect(positiveBaseUnits.safeParse("0").success).toBe(false);
     expect(positiveBaseUnits.safeParse("1").success).toBe(true);
   });
+
+  it("rejects a non-integer as positive base units rather than throwing", () => {
+    for (const bad of ["1.5", "-1", "1e6", ""]) {
+      expect(positiveBaseUnits.safeParse(bad).success).toBe(false);
+    }
+  });
 });
 
 describe("addresses", () => {
