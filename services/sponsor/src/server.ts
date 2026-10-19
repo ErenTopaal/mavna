@@ -524,33 +524,40 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const pool: ChannelPoolSnapshot = channels?.snapshot() ?? { secrets: [], leases: [] };
     const channelDocument: ChannelDocument =
       pendingChannel === undefined ? pool : { ...pool, pending: pendingChannel.secret() };
+    // In this order, one after another: a held settlement names a channel lease,
+    // so the lease is on disk before the settlement that relies on it. A crash
+    // between them then leaves a lease without a settlement, which lapses
+    // harmlessly, never a settlement whose lease could be handed to another.
     const documents: Record<string, unknown> = {
       built: built.snapshot(),
-      held: { held, settled: Object.fromEntries(recentlySettled) } satisfies HeldDocument,
       channels: channelDocument,
+      held: { held, settled: Object.fromEntries(recentlySettled) } satisfies HeldDocument,
     };
     // Most answers change nothing, and rewriting every file (secrets included)
     // for each anonymous refusal is wasted disk and a wider window for a
     // half-finished write, so only a document that differs is written.
-    const writes: Promise<void>[] = [];
+    let chain: Promise<void> = Promise.resolve();
     for (const [name, value] of Object.entries(documents)) {
       const text = JSON.stringify(value);
       const last = written.get(name);
       if (last?.text === text) {
         // the same state may still be on its way to disk: waited on, so this
         // answer goes out no sooner than that write lands, and hears if it fails
-        writes.push(last.done);
+        const pending = last.done;
+        chain = chain.then(() => pending);
         continue;
       }
-      const done = state.write(name, value).catch((cause: unknown) => {
-        // not written after all, so the next persist tries again
-        if (written.get(name)?.text === text) written.delete(name);
-        throw cause;
-      });
+      const done = chain
+        .then(() => state.write(name, value))
+        .catch((cause: unknown) => {
+          // not written after all, so the next persist tries again
+          if (written.get(name)?.text === text) written.delete(name);
+          throw cause;
+        });
       written.set(name, { text, done });
-      writes.push(done);
+      chain = done;
     }
-    return Promise.all(writes).then(() => undefined);
+    return chain;
   }
   /**
    * What this server built and has not yet seen signed. The funded key signs

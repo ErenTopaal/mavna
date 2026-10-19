@@ -2536,6 +2536,34 @@ describe("the sponsor writes its state only when it changed", () => {
     expect((await changing).status).toBe(200);
   });
 
+  it("writes a channel's lease down before the settlement that depends on it", async () => {
+    // a crash between the two must leave a lease without a settlement, never a
+    // settlement whose channel lease was lost and could go to someone else
+    const order: string[] = [];
+    class OrderedStore extends MemoryDocumentStore {
+      override async write(name: string, value: unknown): Promise<void> {
+        order.push(`start ${name}`);
+        await new Promise((r) => setTimeout(r, 5));
+        await super.write(name, value);
+        order.push(`done ${name}`);
+      }
+    }
+    const server = await startServer({ state: new OrderedStore() });
+    const user = Keypair.random();
+    const built = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    order.length = 0;
+    await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(built.body.xdr as string, user),
+    });
+    expect(order).toContain("start held");
+    expect(order).toContain("done channels");
+    expect(order.indexOf("done channels")).toBeLessThan(order.indexOf("start held"));
+  });
+
   it("writes only the document a request changed", async () => {
     const state = new CountingStore();
     const server = await startServer({ state });
