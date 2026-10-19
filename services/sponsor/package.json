@@ -8,7 +8,6 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --passWithNoTests --root ../.. services/sponsor",
-    "test:live": "vitest run --project live --passWithNoTests --root ../.. services/sponsor",
     "publish:check": "echo 'not published'",
     "start": "node dist/main.mjs"
   },
