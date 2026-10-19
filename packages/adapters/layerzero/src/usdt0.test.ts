@@ -138,7 +138,7 @@ function json(value: unknown, status = 200): Response {
 /** LayerZero's registries and Scan, the Arbitrum node and Horizon, over fetch. */
 function remoteServices(): void {
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = input instanceof Request ? input.url : input.toString();
     if (url === LAYERZERO_METADATA_URL) {
       return json({
         "stellar-mainnet": {
@@ -185,7 +185,7 @@ function remoteServices(): void {
       });
     }
     if (url === "https://arb1.arbitrum.io/rpc") {
-      const { method, params } = JSON.parse(String(init?.body)) as {
+      const { method, params } = JSON.parse(init?.body as string) as {
         method: string;
         params: [{ to: string; data: `0x${string}` }];
       };
