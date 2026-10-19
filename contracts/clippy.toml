@@ -1,0 +1,2 @@
+# lz_compose's argument list is LayerZero's interface, not ours to shorten
+too-many-arguments-threshold = 12

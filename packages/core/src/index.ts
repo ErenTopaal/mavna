@@ -2,6 +2,7 @@ export type {
   AllowanceCheck,
   BridgeAdapter,
   BuildContext,
+  ComposeQuoteRequest,
   QuoteRequest,
   TransactionFormat,
   TransferHandle,
@@ -9,12 +10,21 @@ export type {
   UnsignedTransaction,
 } from "./adapter.js";
 export { ADAPTER_QUOTE_TIMEOUT_MS, isRejection, SENDER_ADDRESS } from "./adapter.js";
-export type { Blocked, OnChainRef, Remedy, StepPhase, TerminalPhase } from "./execution.js";
-export { canAdvance, isTerminal, PHASE_ORDER, TERMINAL_PHASES } from "./execution.js";
+export type {
+  Blocked,
+  ComposeFinish,
+  OnChainRef,
+  Remedy,
+  StepPhase,
+  TerminalPhase,
+} from "./execution.js";
+export { canAdvance, isSuccess, isTerminal, PHASE_ORDER, TERMINAL_PHASES } from "./execution.js";
 export type { Amount, Asset, ChainRef, Fee, FeeKind, FeeRecipient } from "./money.js";
 export { amountOf, sameAsset } from "./money.js";
 export { ReferenceAdapter, referenceRequest } from "./reference-adapter.js";
 export type {
+  ComposeArrival,
+  ComposeHop,
   Route,
   RouteRanking,
   RouteRejection,

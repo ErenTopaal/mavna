@@ -1158,6 +1158,24 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   async onFinish(): Promise<void> {
+    const compose = this.state.found?.compose;
+    if (compose !== undefined) {
+      try {
+        const outcome = await this.engine.sponsor.requestCompose(compose);
+        if (outcome.kind === "not-queued") {
+          this.setState({
+            lookupNote: "Stellar holds nothing waiting for this transfer yet. Try again shortly.",
+            lookupNoteKind: "quiet",
+          });
+          return;
+        }
+        // read back from the chain, which is the only thing that says how it ended
+        await this.onFind();
+      } catch (e) {
+        this.setState({ lookupNote: msg(e), lookupNoteKind: "fault" });
+      }
+      return;
+    }
     const hash = this.state.lookup.trim();
     if (!/^(0x)?[0-9a-fA-F]{64}$/.test(hash)) {
       this.setState({

@@ -1,5 +1,5 @@
-export type { AquariusOptions } from "./aquarius.js";
-export { AquariusProvider } from "./aquarius.js";
+export type { AquariusOptions, PathQuote } from "./aquarius.js";
+export { AquariusProvider, decodeSwapChain } from "./aquarius.js";
 export type { SwapBuildRequest, SwapProvider, SwapQuote, SwapQuoteRequest } from "./provider.js";
 export { applySlippage } from "./provider.js";
 export type { PathPaymentInputs } from "./sdex.js";

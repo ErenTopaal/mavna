@@ -68,6 +68,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
     ec.disabledSources ?? "",
     ec.ranking,
     ec.integratorFee ? `${ec.integratorFee.bps}:${ec.integratorFee.recipient}` : "",
+    ec.arrivalContract ?? "",
   ].join("|");
   // biome-ignore lint/correctness/useExhaustiveDependencies: engineKey captures every field of ec that changes the engine.
   const engine = useMemo(() => createEngine(ec), [engineKey]);

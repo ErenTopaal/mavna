@@ -48,6 +48,8 @@ export interface ScanMessage {
   readonly guid?: string;
   readonly status?: { readonly name?: ScanStatusName; readonly message?: string };
   readonly pathway?: {
+    /** The message's nonce on its pathway, which a compose message carries. */
+    readonly nonce?: number;
     readonly srcEid?: number;
     readonly dstEid?: number;
     readonly sender?: { readonly address?: string; readonly chain?: string };

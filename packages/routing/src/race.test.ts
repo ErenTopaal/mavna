@@ -1,4 +1,11 @@
-import type { BridgeAdapter, QuoteRequest, Route, RouteRejection, RouteSet } from "@mavna/core";
+import type {
+  BridgeAdapter,
+  ComposeQuoteRequest,
+  QuoteRequest,
+  Route,
+  RouteRejection,
+  RouteSet,
+} from "@mavna/core";
 import { describe, expect, it } from "vitest";
 import type { SwapQuoter } from "./enrich.js";
 import { raceAdapters } from "./race.js";
@@ -160,5 +167,143 @@ describe("racing route sources", () => {
     expect(result.rejected.find((r) => r.source === "stuck")?.reason).toBe("timed-out");
     expect(result.rejected.find((r) => r.source === "declines")?.reason).toBe("no-liquidity");
     expect(result.complete).toBe(true);
+  });
+});
+
+describe("compose routes", () => {
+  const usdt0 = { chainId: "stellar", id: "USDT0:G", symbol: "USDT0", decimals: 7, curatedBy: "t" };
+  const usdc = { chainId: "stellar", id: "USDC:G", symbol: "USDC", decimals: 7, curatedBy: "t" };
+  const quoter: SwapQuoter = {
+    id: "venue",
+    quote: async (q) => ({
+      provider: "venue",
+      amountOut: q.amountIn,
+      amountOutMinimum: q.amountIn,
+    }),
+  };
+  const swap = {
+    provider: quoter,
+    delivered: usdt0,
+    deliveredContract: "CUSDT0",
+    wanted: usdc,
+    wantedContract: "CUSDC",
+  };
+  const plainRoute = (source: string): Route =>
+    ({
+      ...route(source, "100"),
+      id: `${source}-plain`,
+      destination: "GDEST",
+      receivesAtLeast: { asset: usdt0, baseUnits: "99" },
+      steps: [],
+      fees: [],
+    }) as unknown as Route;
+
+  function composing(
+    id: string,
+    answer: (r: ComposeQuoteRequest) => Promise<Route | RouteRejection | undefined>,
+    asked: ComposeQuoteRequest[] = [],
+  ): BridgeAdapter {
+    return {
+      ...adapter(id, async () => plainRoute(id)),
+      quoteCompose: (r) => {
+        asked.push(r);
+        return answer(r);
+      },
+    };
+  }
+
+  it("races a compose route beside the plain one, ranked with the rest", async () => {
+    const asked: ComposeQuoteRequest[] = [];
+    const result = await raceAdapters(
+      [
+        composing(
+          "lz",
+          async (r) => ({
+            ...r.plain,
+            id: "lz-compose",
+            receives: { asset: usdc, baseUnits: "150" },
+          }),
+          asked,
+        ),
+      ],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      { swap },
+    );
+    expect(result.routes.map((r) => r.id)).toEqual(["lz-compose", "lz-plain"]);
+    // the rail is handed its own plain route and the asset it delivers
+    expect(asked[0]?.plain.id).toBe("lz-plain");
+    expect(asked[0]?.arrivingContract).toBe("CUSDT0");
+    expect(asked[0]?.wantedContract).toBe("CUSDC");
+    expect(asked[0]?.to).toBe(usdc);
+  });
+
+  it("keeps the plain route when the compose route is rejected, and says why", async () => {
+    const result = await raceAdapters(
+      [
+        composing("lz", async () => ({
+          source: "lz",
+          reason: "destination-unsupported",
+          explanation: "A brand-new account keeps the plain route.",
+          retryable: false,
+        })),
+      ],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      { swap },
+    );
+    expect(result.routes.map((r) => r.id)).toEqual(["lz-plain"]);
+    expect(result.rejected.map((r) => r.explanation)).toEqual([
+      "A brand-new account keeps the plain route.",
+    ]);
+  });
+
+  it("adds nothing when the rail has no converting contract on this network", async () => {
+    const result = await raceAdapters(
+      [composing("lz", async () => undefined)],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      { swap },
+    );
+    expect(result.routes).toHaveLength(1);
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  it("is not asked when no conversion is wanted", async () => {
+    const asked: ComposeQuoteRequest[] = [];
+    await raceAdapters([composing("lz", async () => undefined, asked)], request);
+    expect(asked).toHaveLength(0);
+  });
+
+  it("is not complete until the compose answer is in, and times it out on its own", async () => {
+    const updates: RouteSet[] = [];
+    const result = await raceAdapters(
+      [composing("lz", () => new Promise(() => {}))],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      { swap, timeoutMs: 50, onUpdate: (u) => updates.push(u) },
+    );
+    expect(updates.filter((u) => u.complete)).toHaveLength(1);
+    expect(updates.at(-1)?.complete).toBe(true);
+    expect(result.routes.map((r) => r.id)).toEqual(["lz-plain"]);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+  });
+
+  it("hands the integrator fee to the contract that collects it, and does not take it twice", async () => {
+    const asked: ComposeQuoteRequest[] = [];
+    const result = await raceAdapters(
+      [
+        composing(
+          "lz",
+          async (r) => ({ ...r.plain, id: "lz-compose", compose: {} as Route["compose"] }),
+          asked,
+        ),
+      ],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      {
+        swap,
+        integratorFee: { bps: 30, recipient: "GFEE", recipientName: "App", collects: () => true },
+      },
+    );
+    expect(asked[0]?.integratorFee).toEqual({ bps: 30, recipient: "GFEE", recipientName: "App" });
+    const compose = result.routes.find((r) => r.id === "lz-compose");
+    expect(compose?.fees).toEqual([]);
+    expect(compose?.receives.baseUnits).toBe("100");
   });
 });

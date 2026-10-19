@@ -17,6 +17,14 @@ export type {
   LeaseRecord,
 } from "./channels.js";
 export { ChannelPool } from "./channels.js";
+export type { ComposeOutcome, ComposeRequest, ComposerOptions } from "./compose.js";
+export {
+  assertOnlyExecutorCompose,
+  ComposeRefused,
+  Composer,
+  KEEP_ALIVE_LEDGERS,
+  parseComposeRequest,
+} from "./compose.js";
 export type { ReserveFunding, SponsorConfig } from "./config.js";
 export { readSponsorConfig, SponsorConfigError } from "./config.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";

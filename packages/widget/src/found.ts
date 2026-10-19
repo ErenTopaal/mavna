@@ -1,4 +1,4 @@
-import type { Remedy, StepPhase } from "@mavna/core";
+import type { ComposeFinish, Remedy, StepPhase } from "@mavna/core";
 import type { LookupKey } from "@mavna/status";
 import { amountValue, fmt, short } from "./format";
 import { railDisplay } from "./quote";
@@ -23,7 +23,18 @@ export interface FoundState {
   readonly note: string;
   /** True only when nothing more will happen without the user, so Finish shows. */
   readonly canFinish: boolean;
+  /**
+   * Present when what Finish does is run an overdue conversion on arrival,
+   * rather than Circle's mint: the exact message waiting on Stellar.
+   */
+  readonly compose?: ComposeFinish;
 }
+
+/**
+ * How long after delivery a conversion on arrival counts as overdue. LayerZero's
+ * executor normally runs it within a ledger or two of the delivery.
+ */
+export const COMPOSE_OVERDUE_SECONDS = 120;
 
 /**
  * Fold a real status phase into the found panel's three tones.
@@ -46,9 +57,50 @@ export function foundFor(
   phase: StepPhase,
   keyKind: LookupKey["kind"],
   rails: readonly string[],
+  nowUnix: number = Math.floor(Date.now() / 1000),
 ): FoundState {
   const circle = rails.includes("cctp");
   switch (phase.phase) {
+    case "delivered-and-converted":
+      return {
+        tone: "ok",
+        note: `Delivered and converted on arrival. ${fmt(amountValue(phase.received))} ${phase.received.asset.symbol} arrived.`,
+        canFinish: false,
+      };
+    case "delivered-as-came":
+      return {
+        tone: "bad",
+        note: `Delivered as it came, not converted. ${fmt(amountValue(phase.received))} ${phase.received.asset.symbol} arrived. ${phase.because}`,
+        canFinish: false,
+      };
+    case "delivered-conversion-pending": {
+      const overdue = nowUnix - phase.deliveredAtUnix > COMPOSE_OVERDUE_SECONDS;
+      if (!overdue) {
+        return {
+          tone: "wait",
+          note: "Delivered on Stellar. The conversion on arrival is running now.",
+          canFinish: false,
+        };
+      }
+      if (phase.finish === undefined) {
+        return {
+          tone: "wait",
+          note:
+            "Delivered on Stellar, and the conversion on arrival is overdue. Its message could " +
+            "not be read back exactly, so it cannot be finished from here; it is still waiting " +
+            "and nothing is lost.",
+          canFinish: false,
+        };
+      }
+      return {
+        tone: "wait",
+        note:
+          "Delivered on Stellar, and the conversion on arrival is overdue. Finishing it is " +
+          "safe to try: it can only ever run once.",
+        canFinish: true,
+        compose: phase.finish,
+      };
+    }
     case "done":
       return {
         tone: "ok",

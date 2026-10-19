@@ -37,6 +37,7 @@ import { z } from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
 import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
+import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
@@ -127,6 +128,16 @@ export interface SponsorServerOptions {
    * venue.
    */
   readonly soroswap?: SoroswapProxy;
+  /**
+   * The Mavna Arrival Contract whose overdue conversions this sponsor finishes.
+   * Absent means /compose answers that it finishes none.
+   */
+  readonly arrivalContract?: string;
+  /**
+   * The key named as `lz_compose`'s executor, separate from the sponsor key and
+   * holding only its minimum balance. Required with `arrivalContract`.
+   */
+  readonly arrivalExecutorSecret?: string;
 }
 
 /** The HTTP server, and the sweep that settles what no page came back for. */
@@ -181,6 +192,13 @@ interface DeliverBody {
 interface SettlementBody {
   readonly destination?: string;
   readonly sourceChainId?: string;
+}
+
+interface ComposeBody {
+  readonly from?: unknown;
+  readonly guid?: unknown;
+  readonly index?: unknown;
+  readonly message?: unknown;
 }
 
 interface SettleBody {
@@ -329,6 +347,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     payerSecret: options.sponsorSecret,
     buildDelivery: options.buildDelivery,
   });
+  if (options.arrivalContract !== undefined && options.arrivalExecutorSecret === undefined) {
+    throw new Error(
+      "Finishing conversions needs its own executor key (arrivalExecutorSecret), separate " +
+        "from the sponsor key.",
+    );
+  }
+  const composer =
+    options.arrivalContract === undefined || options.arrivalExecutorSecret === undefined
+      ? undefined
+      : new Composer({
+          rpc: options.rpc,
+          network: options.network,
+          contract: options.arrivalContract,
+          payerSecret: options.sponsorSecret,
+          executorSecret: options.arrivalExecutorSecret,
+        });
+  // the chain refuses a second finish anyway; these keep repeated or spammed asks
+  // from costing simulations and fees. Per message and overall, not per address:
+  // behind the reverse proxy every caller has the proxy's address.
+  const composing = new Set<string>();
+  const lastComposeCall = new Map<string, number>();
+  const recentComposes: number[] = [];
 
   /**
    * Settlements collected before any capital moved, waiting for delivery.
@@ -661,7 +701,26 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     });
   }
 
+  let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
+
+  function keepArrivalAlive(): void {
+    if (composer === undefined) return;
+    composer.keepAlive().then(
+      (done) => console.error(`[sponsor] arrival contract kept alive, tx ${done.txHash}`),
+      (cause: unknown) =>
+        console.error(
+          "[sponsor] could not keep the arrival contract alive:",
+          cause instanceof Error ? cause.message : cause,
+        ),
+    );
+  }
+
   function startSweep(): void {
+    if (composer !== undefined && keepAliveTimer === undefined) {
+      keepArrivalAlive();
+      keepAliveTimer = setInterval(keepArrivalAlive, KEEP_ALIVE_EVERY_MS);
+      keepAliveTimer.unref?.();
+    }
     if (sweepSeconds === 0 || sweepTimer !== undefined) return;
     sweepTimer = setInterval(sweepTick, sweepSeconds * 1000);
     // The sweep alone is no reason to keep the process alive.
@@ -669,6 +728,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   function stopSweep(): Promise<void> {
+    if (keepAliveTimer !== undefined) clearInterval(keepAliveTimer);
+    keepAliveTimer = undefined;
     if (sweepTimer !== undefined) clearInterval(sweepTimer);
     sweepTimer = undefined;
     return sweepRun ?? Promise.resolve();
@@ -782,6 +843,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
       await deliver((await readJson(req)) as DeliverBody, res, origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/compose") {
+      await compose((await readJson(req)) as ComposeBody, res, origin);
       return;
     }
 
@@ -1810,6 +1875,85 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     await answer(res, 200, await settleIfHeld(destination), origin);
   }
 
+  /**
+   * Finish an overdue conversion on arrival. Safe to call any number of times:
+   * the endpoint runs a queued message once and refuses every later attempt.
+   */
+  async function compose(
+    body: ComposeBody,
+    res: ServerResponse,
+    origin: string | undefined,
+  ): Promise<void> {
+    if (composer === undefined) {
+      reply(
+        res,
+        404,
+        { error: "This sponsor finishes no conversions on arrival.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    let request: ReturnType<typeof parseComposeRequest>;
+    try {
+      request = parseComposeRequest(body as Parameters<typeof parseComposeRequest>[0]);
+    } catch (cause) {
+      if (cause instanceof ComposeRefused) {
+        reply(res, 400, { error: cause.message, retryable: false }, origin);
+        return;
+      }
+      throw cause;
+    }
+    const key = request.guid;
+    {
+      const now = nowUnix();
+      for (const [guid, at] of lastComposeCall) {
+        if (at + COMPOSE_INTERVAL_SECONDS <= now) lastComposeCall.delete(guid);
+      }
+      while (recentComposes.length > 0 && (recentComposes[0] ?? 0) + 60 <= now) {
+        recentComposes.shift();
+      }
+      if (composing.has(key) || lastComposeCall.has(key)) {
+        reply(
+          res,
+          429,
+          {
+            error: "This conversion was asked about moments ago. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      if (recentComposes.length >= COMPOSES_PER_MINUTE) {
+        reply(
+          res,
+          429,
+          {
+            error: "Too many conversions are being finished right now. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      lastComposeCall.set(key, now);
+      recentComposes.push(now);
+    }
+    composing.add(key);
+    try {
+      const outcome = await composer.finish(request);
+      reply(res, outcome.kind === "not-queued" ? 404 : 200, { ...outcome }, origin);
+    } catch (cause) {
+      if (cause instanceof ComposeRefused) {
+        reply(res, 400, { error: cause.message, retryable: false }, origin);
+        return;
+      }
+      throw cause;
+    } finally {
+      composing.delete(key);
+    }
+  }
+
   /** Trigger the mint for an attested burn. Idempotent; retrying is always safe. */
   async function deliver(
     body: DeliverBody,
@@ -2188,6 +2332,11 @@ const SETTLEMENT_WAIT_SECONDS = 120;
 
 /** How often one account's held settlement may be asked for through /settle. */
 const SETTLE_INTERVAL_SECONDS = 30;
+/** How often one message may be asked to finish, and how many finishes a minute in all. */
+const COMPOSE_INTERVAL_SECONDS = 30;
+const COMPOSES_PER_MINUTE = 10;
+/** Daily, well inside the thirty days KEEP_ALIVE_LEDGERS buys. */
+const KEEP_ALIVE_EVERY_MS = 24 * 60 * 60 * 1000;
 
 /** A whole day, as the builder defaults to: Circle's standard transfer has no ceiling. */
 const SETTLEMENT_VALIDITY_SECONDS = 86_400;

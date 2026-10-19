@@ -1,0 +1,108 @@
+import type { NetworkConfig, RpcClient } from "@mavna/stellar";
+import { Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+import { describe, expect, it } from "vitest";
+import { assertOnlyExecutorCompose, ComposeRefused, Composer } from "./compose.js";
+
+const CONTRACT = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+const executor = Keypair.random().publicKey();
+const args = [
+  new Address(executor).toScVal(),
+  nativeToScVal(7, { type: "u32" }),
+  xdr.ScVal.scvBytes(Buffer.from("01", "hex")),
+];
+
+function invocation(
+  contract: string,
+  fn: string,
+  callArgs: xdr.ScVal[],
+  subs: xdr.SorobanAuthorizedInvocation[] = [],
+): xdr.SorobanAuthorizedInvocation {
+  return new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress: new Address(contract).toScAddress(),
+        functionName: fn,
+        args: callArgs,
+      }),
+    ),
+    subInvocations: subs,
+  });
+}
+
+function byAddress(
+  who: string,
+  root: xdr.SorobanAuthorizedInvocation,
+): xdr.SorobanAuthorizationEntry {
+  return new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: new Address(who).toScAddress(),
+        nonce: xdr.Int64.fromString("1"),
+        signatureExpirationLedger: 0,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
+    rootInvocation: root,
+  });
+}
+
+const expected = { executor, contract: CONTRACT, args };
+const good = byAddress(executor, invocation(CONTRACT, "lz_compose", args));
+
+describe("what a finish may authorize", () => {
+  it("accepts exactly the executor's lz_compose on the configured contract", () => {
+    expect(() => assertOnlyExecutorCompose([good], expected)).not.toThrow();
+  });
+
+  it("refuses anything a token in the message could have added", () => {
+    // what the review's hostile wanted token produced: a transfer nested under lz_compose
+    const nested = invocation(
+      "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "transfer",
+      [new Address(executor).toScVal()],
+    );
+    const cases: xdr.SorobanAuthorizationEntry[][] = [
+      [],
+      [good, good],
+      [byAddress(executor, invocation(CONTRACT, "lz_compose", args, [nested]))],
+      [byAddress(Keypair.random().publicKey(), invocation(CONTRACT, "lz_compose", args))],
+      [byAddress(executor, invocation(CONTRACT, "config", args))],
+      [
+        byAddress(
+          executor,
+          invocation(
+            "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+            "lz_compose",
+            args,
+          ),
+        ),
+      ],
+      [byAddress(executor, invocation(CONTRACT, "lz_compose", args.slice(0, 2)))],
+      [
+        new xdr.SorobanAuthorizationEntry({
+          credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+          rootInvocation: invocation(CONTRACT, "lz_compose", args),
+        }),
+      ],
+    ];
+    for (const entries of cases) {
+      expect(() => assertOnlyExecutorCompose(entries, expected)).toThrow(ComposeRefused);
+    }
+  });
+});
+
+describe("the executor key", () => {
+  it("must not be the key that pays", () => {
+    const payer = Keypair.random().secret();
+    expect(
+      () =>
+        new Composer({
+          rpc: {} as RpcClient,
+          network: { passphrase: "Test SDF Network ; September 2015" } as NetworkConfig,
+          contract: CONTRACT,
+          payerSecret: payer,
+          executorSecret: payer,
+        }),
+    ).toThrow(/separate/);
+  });
+});

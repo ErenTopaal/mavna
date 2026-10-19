@@ -23,6 +23,12 @@ export type SponsorDelivery =
   | { kind: "recipient-not-ready"; detail: string }
   | { kind: "not-attested-yet" };
 
+/** What finishing a conversion on arrival came to. */
+export type SponsorCompose =
+  | { kind: "composed"; txHash: string; ledger: number }
+  | { kind: "already-composed" }
+  | { kind: "not-queued" };
+
 export interface SponsorSettle {
   settled: boolean;
   settlementTxHash?: string;
@@ -91,6 +97,18 @@ export interface SponsorClient {
   settle(destination: string): Promise<SponsorSettle>;
   /** The sponsor's terms. Rejects when it cannot be reached or read. */
   terms(): Promise<SponsorTerms>;
+  /**
+   * Run an overdue conversion on arrival. Safe to repeat: the chain runs it
+   * once, and every later ask comes back `already-composed`.
+   */
+  requestCompose(finish: {
+    readonly from: string;
+    readonly guid: string;
+    readonly index: number;
+    readonly message: string;
+  }): Promise<SponsorCompose>;
+  /** Whether a sponsor is reachable at all, for saying so before it matters. */
+  sponsorIsUp(): Promise<boolean>;
 }
 
 export function createSponsorClient(baseUrl: string): SponsorClient {
@@ -163,6 +181,31 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
       if (answer.status === 429) return { settled: false, settlementRetryable: true };
       if (!answer.ok) throw failure(answer);
       return answer.body as SponsorSettle;
+    },
+    async requestCompose(finish) {
+      const answer = await send("/compose", {
+        from: finish.from,
+        guid: finish.guid,
+        index: finish.index,
+        message: finish.message,
+      });
+      // a 404 with an outcome is "nothing queued yet"; one without is a sponsor
+      // that finishes no conversions, which is a failure to say
+      if (answer.status === 404 && (answer.body as { kind?: unknown } | null)?.kind) {
+        return answer.body as SponsorCompose;
+      }
+      if (!answer.ok) throw failure(answer);
+      return answer.body as SponsorCompose;
+    },
+    async sponsorIsUp() {
+      try {
+        const response = await fetch(`${baseUrl}/health`, {
+          signal: AbortSignal.timeout(4_000),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
     },
     async terms() {
       const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(8_000) });

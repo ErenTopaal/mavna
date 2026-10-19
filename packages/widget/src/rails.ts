@@ -139,18 +139,33 @@ export function stepsFor(
   }
 
   const approves = route.steps.some((s) => s.kind === "approve-source");
+  const compose = route.compose;
   return [
     ...(newAccount ? (selfFunded ? [prepare] : [settle, prepare]) : []),
     ...(approves ? [approve] : []),
     send,
     {
       id: "deliver",
-      label: `${rail} delivers on Stellar`,
+      label:
+        compose === undefined
+          ? `${rail} delivers on Stellar`
+          : `${rail} delivers to the Arrival Contract`,
       note: "Usually a few minutes.",
       user: false,
       actor: rail,
     },
     ...(converts ? [swap] : []),
+    ...(compose === undefined
+      ? []
+      : [
+          {
+            id: "convert",
+            label: `Converted to ${compose.wanted.symbol} on arrival`,
+            note: compose.walletNote,
+            user: false,
+            actor: "Arrival Contract",
+          },
+        ]),
   ];
 }
 
@@ -256,6 +271,8 @@ export function endedNote(phase: StepPhase): string {
       return `Returned to ${phase.to}. ${fmt(amountValue(phase.returned))} ${phase.returned.asset.symbol} came back.`;
     case "partial":
       return `Part of this arrived: ${fmt(amountValue(phase.received))} of ${fmt(amountValue(phase.expected))} ${phase.expected.asset.symbol}. ${remedyNote(phase.remedy)}`;
+    case "delivered-as-came":
+      return `Delivered as it came, not converted: ${fmt(amountValue(phase.received))} ${phase.received.asset.symbol} arrived. ${phase.because}`;
     default:
       return "";
   }
@@ -328,6 +345,28 @@ export async function trackDelivery(
         case "refunded":
         case "partial":
           patch(stepId, { phase: "failed", note: endedNote(phase) });
+          return { outcome: "terminal", phase };
+        // a compose route: the rail has delivered, and the conversion is its own step
+        case "delivered-conversion-pending":
+          patch(stepId, { phase: "done", note: "Delivered to the Arrival Contract on Stellar." });
+          patch("convert", {
+            phase: "pending",
+            note: "Converting now. If this takes long, Activity can finish it, and only once.",
+          });
+          break;
+        case "delivered-and-converted":
+          patch(stepId, { phase: "done", note: "Delivered to the Arrival Contract on Stellar." });
+          patch("convert", {
+            phase: "done",
+            note: `Converted on arrival. ${fmt(amountValue(phase.received))} ${phase.received.asset.symbol} arrived.`,
+            ref: shortHash(phase.ref.txHash),
+            refUrl: phase.ref.explorerUrl,
+          });
+          return { outcome: "terminal", phase };
+        case "delivered-as-came":
+          // the money arrived, so the delivery is done; the conversion is what did not happen
+          patch(stepId, { phase: "done", note: "Delivered to the Arrival Contract on Stellar." });
+          patch("convert", { phase: "failed", note: endedNote(phase) });
           return { outcome: "terminal", phase };
         case "stalled":
           patch(stepId, { phase: "pending", note: remedyNote(phase.remedy) });

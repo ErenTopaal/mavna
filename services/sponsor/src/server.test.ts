@@ -3063,3 +3063,69 @@ describe("the soroswap proxy, mounted on the sponsor", () => {
     );
   });
 });
+
+describe("finishing a conversion on arrival", () => {
+  const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+  const good = {
+    from: "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB",
+    guid: "ab".repeat(32),
+    index: 0,
+    message: "0x01",
+  };
+
+  it("refuses to start finishing conversions without its own executor key", async () => {
+    await expect(startServer({ arrivalContract: ARRIVAL })).rejects.toThrow(/executor key/);
+  });
+
+  it("says so when this sponsor finishes none", async () => {
+    const server = await startServer();
+    const response = await server.post("/compose", good);
+    expect(response.status).toBe(404);
+    expect(response.body.retryable).toBe(false);
+  });
+
+  it("finishes one message at most once in a while, however its guid is written", async () => {
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    await server.post("/compose", good);
+    const again = await server.post("/compose", { ...good, guid: `0x${good.guid.toUpperCase()}` });
+    expect(again.status).toBe(429);
+    expect(again.body.retryable).toBe(true);
+  });
+
+  it("caps how many finishes it will try a minute", async () => {
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const guid = i.toString(16).padStart(64, "0");
+      statuses.push((await server.post("/compose", { ...good, guid })).status);
+    }
+    expect(statuses.slice(0, 10)).not.toContain(429);
+    expect(statuses[10]).toBe(429);
+  });
+
+  it("refuses malformed input before reading anything", async () => {
+    const server = await startServer({
+      arrivalContract: ARRIVAL,
+      arrivalExecutorSecret: Keypair.random().secret(),
+    });
+    for (const body of [
+      { ...good, from: "not an address" },
+      { ...good, guid: "abc" },
+      { ...good, index: -1 },
+      { ...good, index: 1.5 },
+      { ...good, message: "0x0" },
+      { ...good, message: `0x${"00".repeat(5000)}` },
+      {},
+    ]) {
+      const response = await server.post("/compose", body);
+      expect(response.status, JSON.stringify(body).slice(0, 80)).toBe(400);
+      expect(response.body.retryable).toBe(false);
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { canAdvance, isTerminal, type Remedy, type StepPhase } from "@mavna/core";
+import { canAdvance, isSuccess, isTerminal, type Remedy, type StepPhase } from "@mavna/core";
 
 /**
  * The state machine behind a transfer in flight.
@@ -95,7 +95,7 @@ export interface Progress {
 }
 
 export function progressOf(state: TransferState): Progress {
-  const done = state.steps.filter((s) => s.phase.phase === "done").length;
+  const done = state.steps.filter((s) => isSuccess(s.phase)).length;
   const current = state.steps.find((s) => !isTerminal(s.phase));
   const needsUser =
     current?.phase.phase === "blocked" ||
@@ -121,10 +121,12 @@ export function progressOf(state: TransferState): Progress {
  */
 export function outcomeOf(
   state: TransferState,
-): "succeeded" | "refunded" | "partial" | "failed" | "in-flight" {
+): "succeeded" | "refunded" | "partial" | "failed" | "delivered-as-came" | "in-flight" {
   if (state.steps.some((s) => s.phase.phase === "failed")) return "failed";
   if (state.steps.some((s) => s.phase.phase === "refunded")) return "refunded";
   if (state.steps.some((s) => s.phase.phase === "partial")) return "partial";
-  if (state.steps.every((s) => s.phase.phase === "done")) return "succeeded";
+  // the money arrived, but not as the asset asked for, so it is not a success
+  if (state.steps.some((s) => s.phase.phase === "delivered-as-came")) return "delivered-as-came";
+  if (state.steps.every((s) => isSuccess(s.phase))) return "succeeded";
   return "in-flight";
 }

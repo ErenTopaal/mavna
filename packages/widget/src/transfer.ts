@@ -12,6 +12,7 @@
  * the widget (an integrator's config).
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
+import { isSuccess } from "@mavna/core";
 import { stroopsToXlm } from "@mavna/stellar";
 import {
   FeeBumpTransaction,
@@ -583,7 +584,7 @@ async function runRelayed(deps: TransferDeps, adapter: BridgeAdapter): Promise<s
         : `${STILL_MOVING} The last check failed: ${tracked.error}`,
     );
   }
-  if (tracked.phase.phase !== "done") throw new Error(endedNote(tracked.phase));
+  if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));
 
   if (owner !== undefined && !selfFunded) {
     // The funds are on Stellar whatever the sponsor says next, so nothing here
