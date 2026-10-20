@@ -67,10 +67,8 @@ export default async function RootLayout({
           // bottom of every page is chrome that earns nothing.
           footer={null}
           sidebar={{ defaultMenuCollapseLevel: 1, autoCollapse: true, toggleButton: true }}
-          // No edit link and no feedback link: the GitHub organisation does not
-          // exist yet, and a link nobody can open is worse than no link.
-          editLink={null}
-          feedback={{ content: null }}
+          // edit links point at each page's source in the public repository
+          docsRepositoryBase="https://github.com/ErenTopaal/mavna/blob/main/apps/docs"
         >
           {children}
         </Layout>
