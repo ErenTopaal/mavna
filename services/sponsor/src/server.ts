@@ -1084,7 +1084,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         );
       }
     }
-    for (const destination of [...heldSettlements.keys()]) {
+    // a snapshot: settling an account removes it from the map mid-loop
+    const destinations = Array.from(heldSettlements.keys());
+    for (const destination of destinations) {
       try {
         // Inside the try: dropping an expired settlement writes to the cap
         // store, and one account's failed write must not end the sweep.

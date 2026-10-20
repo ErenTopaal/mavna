@@ -94,7 +94,9 @@ describe("a route that fails for a reason that may pass", () => {
     const fetchImpl: typeof fetch = async () => ok(REGISTRY);
     // chain id right, no code at the address: a settled answer.
     const evmFetch: typeof fetch = async (_url, init) => {
-      const { method } = JSON.parse(String(init?.body)) as { method: string };
+      const { method } = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+        method: string;
+      };
       return ok({ result: method === "eth_chainId" ? "0xaa36a7" : "0x" });
     };
     const discovery = new Discovery({

@@ -198,7 +198,7 @@ for (const network of ["testnet", "mainnet"]) {
     ([, c]) => c.chainType === "evm" || c.chainType === "stellar",
   );
   const settled = await Promise.allSettled(
-    rows.map(([id, chain]) =>
+    rows.map(([, chain]) =>
       chain.chainType === "stellar" ? inspectStellar(network, chain) : inspectEvm(chain),
     ),
   );

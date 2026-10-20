@@ -154,7 +154,7 @@ function json(value: unknown): Response {
 /** Axelar's APIs and Horizon, as they answer on testnet. */
 function remoteServices(): void {
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url === CHAINS_URL) {
       return json([
         { id: "base-sepolia", chain_type: "evm" },
@@ -202,7 +202,10 @@ function remoteServices(): void {
     if (url === `${GMP}/estimateITSFee`) return json(10543325497105);
     if (url === ASSETS_URL) return json(itsAssets);
     if (url === `${GMP}/searchGMP`) {
-      const query = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const query = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<
+        string,
+        unknown
+      >;
       return json({ data: query.messageId === undefined ? gmp.first : gmp.second });
     }
     if (url.startsWith(`${HORIZON}/order_book`)) {

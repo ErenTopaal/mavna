@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import type { MavnaWidgetConfig } from "@mavna/widget";
 import { describe, expect, it } from "vitest";
 import { buildSource } from "./source.js";
@@ -14,7 +15,7 @@ const config: MavnaWidgetConfig = {
 function printedConfig(source: string): Record<string, unknown> {
   const match = /config=\{([\s\S]*)\}\n\/>$/.exec(source);
   if (match?.[1] === undefined) throw new Error(`no config prop in:\n${source}`);
-  return new Function(`return (${match[1]});`)() as Record<string, unknown>;
+  return runInNewContext(`(${match[1]})`) as Record<string, unknown>;
 }
 
 describe("the config the playground prints", () => {

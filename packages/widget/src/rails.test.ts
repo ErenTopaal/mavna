@@ -366,7 +366,7 @@ describe("pollSettlement", () => {
   function answers(...replies: Array<[number, unknown]>): string[] {
     const asked: string[] = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-      asked.push(`${url} ${String(init.body)}`);
+      asked.push(`${url} ${typeof init.body === "string" ? init.body : ""}`);
       const reply = replies.length > 1 ? replies.shift() : replies[0];
       if (reply === undefined) throw new Error("no reply scripted");
       const [status, body] = reply;

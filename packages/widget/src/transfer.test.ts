@@ -507,7 +507,7 @@ function patches() {
     seen,
     patch: (id: string, patch: Record<string, unknown>) => {
       seen.push({ id, patch });
-      if (id === "deliver" && patch.phase !== undefined) log.push(`deliver ${patch.phase}`);
+      if (id === "deliver" && typeof patch.phase === "string") log.push(`deliver ${patch.phase}`);
     },
   };
 }
@@ -1803,6 +1803,6 @@ describe("holdBlocker", () => {
     expect(holdBlocker({ kind: "needs-trustline", slotsNeeded: 1 }, "USDC")).toBe("opens");
     expect(
       holdBlocker({ kind: "unusable", slotsNeeded: 0, reason: "It is not authorised." }, "USDC"),
-    ).toMatch(/not authorised.*Nothing has been sent/);
+    ).toEqual({ refused: expect.stringMatching(/not authorised.*Nothing has been sent/) });
   });
 });

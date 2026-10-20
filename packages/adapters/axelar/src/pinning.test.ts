@@ -33,7 +33,7 @@ let asked: string[];
 
 function publish(chains: Record<string, unknown>): void {
   vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-    asked.push(String(input));
+    asked.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     return new Response(JSON.stringify({ chains }), {
       status: 200,
       headers: { "Content-Type": "application/json" },

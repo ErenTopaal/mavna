@@ -93,7 +93,7 @@ function json(value: unknown, status = 200): Response {
 function axelarDouble(overrides: { chains?: () => Response } = {}) {
   const calls: Call[] = [];
   const handler = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     calls.push({ url, body });
     if (url === CHAINS_URL) return overrides.chains?.() ?? json(registryRows);

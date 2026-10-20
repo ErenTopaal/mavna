@@ -776,13 +776,18 @@ async function assertSponsorable(engine: TransferEngine, route: Route): Promise<
  * opened, or a refusal when it is there and cannot take the arrival at all
  * (unauthorised by its issuer, or at its limit), which no new trustline fixes.
  */
-export function holdBlocker(lane: DestinationLane, symbol: string): "opens" | string | undefined {
+export function holdBlocker(
+  lane: DestinationLane,
+  symbol: string,
+): "opens" | { readonly refused: string } | undefined {
   switch (lane.kind) {
     case "ready":
     case "contract-ready":
       return undefined;
     case "unusable":
-      return `${lane.reason} Converting into ${symbol} would fail after the money arrives. Nothing has been sent.`;
+      return {
+        refused: `${lane.reason} Converting into ${symbol} would fail after the money arrives. Nothing has been sent.`,
+      };
     default:
       return "opens";
   }
@@ -817,7 +822,7 @@ async function runRelayed(
       new StellarAsset(code ?? "", issuer),
     );
     const blocked = holdBlocker(state.lane, convertsTo.symbol);
-    if (blocked !== undefined && blocked !== "opens") throw new Error(blocked);
+    if (blocked !== undefined && blocked !== "opens") throw new Error(blocked.refused);
     if (blocked === "opens") {
       const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
       if (terms.reserveFunding !== "self") {

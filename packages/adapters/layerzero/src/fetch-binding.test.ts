@@ -19,7 +19,10 @@ function strictFetch(answer: (url: string) => unknown): typeof globalThis.fetch 
       throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
     }
     const url = input instanceof Request ? input.url : input.toString();
-    const body = init?.body === undefined ? undefined : JSON.parse(String(init.body));
+    const body =
+      init?.body === undefined
+        ? undefined
+        : JSON.parse(typeof init.body === "string" ? init.body : "{}");
     return Promise.resolve(
       new Response(JSON.stringify(answer(body?.method ?? url)), {
         status: 200,

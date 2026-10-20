@@ -20,7 +20,9 @@ describe("EvmReader endpoint trust", () => {
   it("keeps an endpoint after a transport error on eth_chainId", async () => {
     let calls = 0;
     const fetchImpl: typeof fetch = async (_url, init) => {
-      const { method } = JSON.parse(String(init?.body)) as { method: string };
+      const { method } = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+        method: string;
+      };
       if (method === "eth_chainId") {
         calls += 1;
         if (calls === 1) throw new TypeError("fetch failed");
@@ -36,11 +38,14 @@ describe("EvmReader endpoint trust", () => {
 
   it("drops an endpoint that serves a different chain", async () => {
     const asked: string[] = [];
-    const fetchImpl: typeof fetch = async (url, init) => {
-      asked.push(String(url));
-      const { method } = JSON.parse(String(init?.body)) as { method: string };
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      asked.push(url);
+      const { method } = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+        method: string;
+      };
       if (method === "eth_chainId") {
-        return json({ result: String(url) === URL_A ? "0xa" : "0xaa36a7" });
+        return json({ result: url === URL_A ? "0xa" : "0xaa36a7" });
       }
       return json({ result: "0x1234" });
     };

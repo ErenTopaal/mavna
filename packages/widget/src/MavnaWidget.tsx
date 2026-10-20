@@ -117,7 +117,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
   const t = resolved.theme;
   // Token overrides first, then the named ones, applied as CSS variables on the
   // root so they cascade into everything the flow renders.
-  const style: Record<string, string> = { ...(t?.tokens ?? {}) };
+  const style: Record<string, string> = { ...t?.tokens };
   if (t?.font !== undefined) style["--mv-font"] = t.font;
   if (t?.fontMono !== undefined) style["--mv-font-mono"] = t.fontMono;
   if (t?.radius !== undefined) style["--mv-radius"] = t.radius;

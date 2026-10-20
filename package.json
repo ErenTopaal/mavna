@@ -40,7 +40,7 @@
     "@playwright/test": "1.64.1",
     "@solana/addresses": "8.5.0",
     "@types/node": "26.6.5",
-    "oxlint": "1.78.0",
+    "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",
     "prettier": "3.9.10",
     "publint": "0.3.25",
