@@ -100,6 +100,10 @@ export interface ComposeContext {
 }
 
 const BPS = 10_000n;
+
+const SELF_PAYMENT =
+  "A conversion on arrival cannot pay the Arrival Contract itself, as the recipient or as " +
+  "the fee account: it would hold the funds with no way to send them on.";
 /**
  * The most a compose route gives up to slippage. Anyone may complete the
  * conversion, including someone who moves the pool first in the same
@@ -243,6 +247,11 @@ export async function quoteComposeRoute(
     );
   }
 
+  // funds the contract pays to itself stay in it with no one able to take them out
+  if (destination === ctx.arrival.contract) {
+    return ctx.decline("destination-unsupported", SELF_PAYMENT);
+  }
+
   let resolved: ResolvedRoute;
   try {
     resolved = await ctx.discovery.routeFrom(request.from.chainId);
@@ -297,6 +306,9 @@ export async function quoteComposeRoute(
       "The integrator's fee account is not a Stellar account or contract, so a conversion on " +
         "arrival has nowhere to pay it. The plain route is unaffected.",
     );
+  }
+  if (fee !== undefined && fee.bps > 0 && fee.recipient === ctx.arrival.contract) {
+    return ctx.decline("destination-unsupported", SELF_PAYMENT);
   }
   try {
     const why =
@@ -501,6 +513,12 @@ export async function composeSendFor(
         retryable: false,
       },
     );
+  }
+  if (
+    route.destination === route.compose.contract ||
+    route.compose.fee?.recipient === route.compose.contract
+  ) {
+    throw new MavnaError(SELF_PAYMENT, { retryable: false });
   }
   // the contract cannot send anything back once it holds it, so a recipient that
   // cannot be named in the message, or cannot take what arrives, is never sent to

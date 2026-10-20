@@ -370,6 +370,42 @@ describe("a compose route", () => {
   });
 });
 
+describe("the Arrival Contract never pays itself", () => {
+  // funds the contract sends to itself sit in it with no one able to take them out
+  it("declines the contract's own id as the recipient", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, request(ARRIVAL));
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("declines the contract's own id as the integrator's fee account", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, {
+      ...request(),
+      integratorFee: { bps: 100, recipient: ARRIVAL, recipientName: "Example app" },
+    });
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("refuses either again when a route naming it is built", async () => {
+    const { ctx } = context();
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route) || route.compose === undefined) {
+      throw new Error("expected a route");
+    }
+    await expect(
+      composeSendFor(ctx, { ...route, compose: route.compose, destination: ARRIVAL }, resolved),
+    ).rejects.toThrow(/Arrival Contract itself/);
+    await expect(
+      composeSendFor(
+        ctx,
+        { ...route, compose: { ...route.compose, fee: { bps: 100, recipient: ARRIVAL } } },
+        resolved,
+      ),
+    ).rejects.toThrow(/Arrival Contract itself/);
+  });
+});
+
 describe("building a compose send", () => {
   it("refuses a route naming any contract but the configured one", async () => {
     const { ctx } = context();
