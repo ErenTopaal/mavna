@@ -139,6 +139,11 @@ export class EvmReader {
     return decodeBytes32(await this.call(this.rpcUrl, token, data));
   }
 
+  /** The gas service the token service itself pays into. */
+  async gasService(service: string): Promise<string> {
+    return decodeAddress(await this.call(this.rpcUrl, service, encodeCall(SELECTORS.gasService)));
+  }
+
   async decimals(token: string): Promise<number> {
     const data = encodeCall(SELECTORS.decimals);
     return Number(decodeUint(await this.call(this.rpcUrl, token, data)));

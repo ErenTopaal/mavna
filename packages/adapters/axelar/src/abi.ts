@@ -26,6 +26,8 @@ export const SELECTORS = {
   getImplementationTypeAndTokenAddress: "0xd4ae3c42",
   /** interchainTokenId() */
   interchainTokenId: "0x129d8188",
+  /** gasService(), the token service's own record of its gas service */
+  gasService: "0x6a22d8cc",
   /** isTrustedChain(string), present from token service 2.2.0 onwards */
   isTrustedChain: "0xcaca8dbe",
   /** trustedAddress(string), how 2.1.x answers the same question */

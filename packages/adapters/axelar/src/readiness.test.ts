@@ -24,6 +24,7 @@ import { SELECTORS } from "./abi.js";
 import { AxelarAdapter } from "./adapter.js";
 import { forgetItsAssets } from "./assets.js";
 import { forgetChains } from "./deployments.js";
+import { DEPLOYMENTS_COMMIT } from "./pinned.js";
 import { TOKEN_MANAGER } from "./token.js";
 
 /**
@@ -37,8 +38,7 @@ import { TOKEN_MANAGER } from "./token.js";
  */
 
 const CHAINS_URL = "https://testnet.api.axelarscan.io/api/getChains";
-const CONFIG_URL =
-  "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/main/axelar-chains-config/info/testnet.json";
+const CONFIG_URL = `https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${DEPLOYMENTS_COMMIT}/axelar-chains-config/info/testnet.json`;
 const GMP = "https://testnet.api.gmp.axelarscan.io";
 const HORIZON = "https://horizon.test";
 
@@ -47,7 +47,8 @@ const SOURCE_SERVICE = "0xb5fb4be02232b1bba4dc8f81dc24c26980de9e3c";
 const SOURCE_TOKEN = "0xa813265d59c9bc06e439e61fa133b5f23134b2ce";
 const TOKEN_MANAGER_ADDRESS = "0x2222222222222222222222222222222222222222";
 const TOKEN_ID = `0x${"0a".repeat(32)}`;
-const STELLAR_SERVICE = StrKey.encodeContract(Buffer.alloc(32, 7));
+// the testnet Stellar token service confirmed in pinned.ts
+const STELLAR_SERVICE = "CC7LAC4S7KAPIM26WKWFSOXWLNLSG7EXTC2EVY2H2UPKSTX3Z2A7M5YP";
 
 const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 const USDC_ID = `USDC:${USDC_ISSUER}`;
@@ -86,6 +87,8 @@ interface SendingChain {
   stellarTrusts: boolean;
   /** A node too busy to answer the token manager read. */
   busy: boolean;
+  /** The gas service the token service names on-chain. */
+  gasService: string;
 }
 let sending: SendingChain;
 
@@ -116,6 +119,10 @@ async function ethCall(_rpcUrl: string, to: string, data: string): Promise<strin
   }
   if (selector === SELECTORS.getImplementationTypeAndTokenAddress) {
     return `0x${word(sending.managerType.toString(16))}${word(sending.managed)}`;
+  }
+  // gasService(), asked of the token service to cross-check the configuration
+  if (selector === "0x6a22d8cc" && target === SOURCE_SERVICE) {
+    return `0x${word(sending.gasService)}`;
   }
   if (selector === SELECTORS.isTrustedChain && target === SOURCE_SERVICE) {
     return `0x${word("1")}`;
@@ -364,6 +371,7 @@ beforeEach(() => {
     managed: SOURCE_TOKEN,
     stellarTrusts: true,
     busy: false,
+    gasService: "0xbe406f0189a0b4cf3a05c286473d23791dd44cc6",
   };
   gmp = { first: [], second: [] };
   configDecimals = 18;
@@ -768,7 +776,8 @@ describe("building an Axelar transfer", () => {
       const approval = JSON.parse(built[0]?.payload ?? "{}");
       expect(built.length, String(type)).toBe(2);
       expect(approval.functionName).toBe("approve");
-      expect(approval.args).toEqual([SOURCE_SERVICE, route.sends.baseUnits]);
+      expect(approval.args[0].toLowerCase()).toBe(SOURCE_SERVICE);
+      expect(approval.args[1]).toBe(route.sends.baseUnits);
     }
   });
 
@@ -836,5 +845,22 @@ describe("the delivery fee's unit", () => {
     estimatorDecimals = Number.NaN;
     const result = await adapter().quote(ask());
     expect(isRoute(result)).toBe(false);
+  });
+});
+
+describe("the token service's own word on its gas service", () => {
+  it("declines to quote when it names a gas service other than the confirmed one", async () => {
+    classicUsdc();
+    sending.gasService = "0x00000000000000000000000000000000deadbeef";
+    const result = await adapter().quote(ask());
+    expect(isRoute(result)).toBe(false);
+    expect((result as RouteRejection).reason).toBe("chain-unsupported");
+  });
+
+  it("refuses to build when it names a gas service other than the confirmed one", async () => {
+    classicUsdc();
+    const route = routeOf(await adapter().quote(ask()));
+    sending.gasService = "0x00000000000000000000000000000000deadbeef";
+    await expect(adapter().buildTransactions(route)).rejects.toThrow(/gas service/);
   });
 });

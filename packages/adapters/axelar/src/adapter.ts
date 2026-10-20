@@ -169,6 +169,15 @@ export class AxelarAdapter implements BridgeAdapter {
     }
 
     const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    try {
+      await confirmGasService(evm, source.address, source.chain);
+    } catch (cause) {
+      return this.declineFrom(
+        cause,
+        "chain-unsupported",
+        cause instanceof MavnaError ? cause.message : "Mavna cannot send from that chain yet.",
+      );
+    }
     const stellarIts = await this.stellarReader();
 
     let token: ItsToken;
@@ -491,6 +500,7 @@ export class AxelarAdapter implements BridgeAdapter {
     ]);
 
     const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    await confirmGasService(evm, source.address, source.chain);
     const stellarIts = await this.stellarReader();
 
     const token = await resolveItsToken({
@@ -1002,6 +1012,26 @@ export function scaleAcrossDecimals(amount: bigint, from: number, to: number): b
   if (from === to) return amount;
   if (to > from) return amount * 10n ** BigInt(to - from);
   return amount / 10n ** BigInt(from - to);
+}
+
+/**
+ * The token service names its gas service itself, and that must be the one
+ * confirmed for this chain. Asked at quote and again at build, because the
+ * value sent with a transfer pays whichever contract this is.
+ */
+async function confirmGasService(
+  evm: EvmReader,
+  tokenService: string,
+  chain: AxelarChain,
+): Promise<void> {
+  const named = await evm.gasService(tokenService);
+  if (chain.gasService === undefined || named.toLowerCase() !== chain.gasService.toLowerCase()) {
+    throw new MavnaError(
+      `The token service on ${chain.name} pays a different gas service than the one ` +
+        "confirmed for it. Nothing will be sent through it.",
+      { retryable: false },
+    );
+  }
 }
 
 function asJson(value: string | bigint): string {

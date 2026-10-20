@@ -33,6 +33,8 @@ export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";
 export { buildAddGas, GAS_SERVICE_ABI, GmpApi, legDelivered } from "./gmp.js";
 export type { JsonReply } from "./http.js";
 export { REQUEST_TIMEOUT_MS, requestJson } from "./http.js";
+export type { PinnedChain } from "./pinned.js";
+export { DEPLOYMENTS_COMMIT, PINNED_DEPLOYMENTS } from "./pinned.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";
 export type { ItsToken, ResolveInputs } from "./token.js";
 export {

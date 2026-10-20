@@ -1,5 +1,6 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import { requestJson } from "./http.js";
+import { DEPLOYMENTS_COMMIT, PINNED_DEPLOYMENTS } from "./pinned.js";
 
 /**
  * Where Axelar's contracts are, read from Axelar rather than from memory.
@@ -22,12 +23,15 @@ import { requestJson } from "./http.js";
  * so the version decides which one to ask.
  */
 
-const CONFIG_URL: Readonly<Record<NetworkId, string>> = {
-  testnet:
-    "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/main/axelar-chains-config/info/testnet.json",
-  mainnet:
-    "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/main/axelar-chains-config/info/mainnet.json",
-};
+/**
+ * Read at a fixed commit, never from the main branch. A commit to that repo, or
+ * whatever serves it, would otherwise choose the contract a user approves and
+ * the node that vouches for it. See pinned.ts for how the commit and the
+ * addresses accepted from it were confirmed.
+ */
+const CONFIG_URL = (network: NetworkId): string =>
+  "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/" +
+  `${DEPLOYMENTS_COMMIT}/axelar-chains-config/info/${network}.json`;
 
 export interface NativeCurrency {
   readonly symbol: string;
@@ -108,7 +112,7 @@ export function forgetChains(): void {
 }
 
 async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, AxelarChain>> {
-  const reply = await requestJson("Axelar's deployment configuration", CONFIG_URL[network]);
+  const reply = await requestJson("Axelar's deployment configuration", CONFIG_URL(network));
   if (!reply.ok) {
     throw new MavnaError(
       `Could not read Axelar's published deployment configuration (HTTP ${reply.status}).`,
@@ -142,8 +146,7 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
       explorerUrl: chain.explorer?.url,
       nativeCurrency:
         symbol === undefined || decimals === undefined ? undefined : { symbol, decimals },
-      interchainTokenService: chain.contracts?.InterchainTokenService?.address,
-      gasService: chain.contracts?.AxelarGasService?.address,
+      ...confirmedContracts(network, id, chain),
       interchainTokenServiceVersion: chain.contracts?.InterchainTokenService?.version,
     });
   }
@@ -154,6 +157,43 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
     });
   }
   return chains;
+}
+
+/**
+ * The token service and gas service, only as confirmed on-chain.
+ *
+ * A chain the sweep did not confirm gets neither, so nothing is built for it. A
+ * chain whose published address differs from the confirmed one means the file
+ * is not what was checked, and the whole configuration is refused: whatever
+ * changed one address could have changed the rest.
+ */
+function confirmedContracts(
+  network: NetworkId,
+  id: string,
+  chain: RawChain,
+): { interchainTokenService: string | undefined; gasService: string | undefined } {
+  const pinned = PINNED_DEPLOYMENTS[network][id];
+  if (pinned === undefined) return { interchainTokenService: undefined, gasService: undefined };
+
+  const published = {
+    its: chain.contracts?.InterchainTokenService?.address,
+    gas: chain.contracts?.AxelarGasService?.address,
+  };
+  const differs = (a: string | undefined, b: string | undefined) =>
+    a !== undefined && b !== undefined && a.toLowerCase() !== b.toLowerCase();
+  if (
+    published.its === undefined ||
+    differs(published.its, pinned.interchainTokenService) ||
+    differs(published.gas, pinned.gasService) ||
+    (pinned.gasService !== undefined && published.gas === undefined)
+  ) {
+    throw new MavnaError(
+      `Axelar's configuration names different contracts for ${id} than the ones ` +
+        "confirmed on-chain. Refusing all of it rather than trusting any of it.",
+      { retryable: false },
+    );
+  }
+  return { interchainTokenService: pinned.interchainTokenService, gasService: pinned.gasService };
 }
 
 /**

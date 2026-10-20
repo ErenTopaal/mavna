@@ -6,6 +6,7 @@ import { forgetItsAssets, loadItsAssets } from "./assets.js";
 import { forgetChains, loadChains } from "./deployments.js";
 import { discoverLiveChains } from "./discovery.js";
 import { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
+import { DEPLOYMENTS_COMMIT } from "./pinned.js";
 
 /**
  * The adapter's edges with Axelar's HTTP APIs, held still with a fetch double.
@@ -15,8 +16,7 @@ import { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
  */
 
 const CHAINS_URL = "https://testnet.api.axelarscan.io/api/getChains";
-const CONFIG_URL =
-  "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/main/axelar-chains-config/info/testnet.json";
+const CONFIG_URL = `https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${DEPLOYMENTS_COMMIT}/axelar-chains-config/info/testnet.json`;
 const GMP = "https://testnet.api.gmp.axelarscan.io";
 
 const STELLAR_ID = "stellar-2026-q1-2";
@@ -58,7 +58,11 @@ const configBody = {
       rpc: "https://soroban-testnet.stellar.org",
       tokenSymbol: "XLM",
       decimals: 7,
-      contracts: {},
+      contracts: {
+        InterchainTokenService: {
+          address: "CC7LAC4S7KAPIM26WKWFSOXWLNLSG7EXTC2EVY2H2UPKSTX3Z2A7M5YP",
+        },
+      },
     },
   },
 };
