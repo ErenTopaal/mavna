@@ -1082,8 +1082,16 @@ export function renderFlight(
 ): ReactElement {
   const { r, sym, arrived } = d;
   const chain = r === undefined ? d.chain : r.route.fromChain;
-  const flightEyebrow = arrived ? "Arrived on Stellar" : "Arriving on Stellar";
-  const flightFigure = r === undefined ? "-" : fmt(r.receives);
+  const asCame = c.state.arrivedAs;
+  const flightEyebrow =
+    asCame !== null
+      ? "Arrived on Stellar, not converted"
+      : arrived
+        ? "Arrived on Stellar"
+        : "Arriving on Stellar";
+  const flightFigure =
+    asCame !== null ? fmt(asCame.amount) : r === undefined ? "-" : fmt(r.receives);
+  const flightSym = asCame !== null ? asCame.symbol : sym;
   const flightMeta =
     r === undefined
       ? []
@@ -1123,7 +1131,7 @@ export function renderFlight(
                 "font-size:13px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:8px",
               )}
             >
-              {sym}
+              {flightSym}
             </span>
           </p>
         </div>

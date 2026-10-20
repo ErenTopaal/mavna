@@ -69,7 +69,7 @@ describe("Flow.endWith", () => {
   it("tells the host a conversion delivered as it came apart from a failure, with what arrived", () => {
     const events: MavnaWidgetEvent[] = [];
     const flow = new Flow({ engine, emit: (event) => events.push(event) });
-    flow.endWith(new DeliveredAsCame("USDT0 arrived as it came.", "USDT0", "5000000"));
+    flow.endWith(new DeliveredAsCame("USDT0 arrived as it came.", "USDT0", "5000000", 7));
     expect(events).toEqual([
       {
         type: "transferDeliveredAsCame",
@@ -391,5 +391,22 @@ describe("fees and rates on a route", () => {
     expect(routeDetail(usdt0, "XLM", true).find((r) => r.key === "rate")?.value).toMatch(
       /^1 USDT0 ≈/,
     );
+  });
+});
+
+describe("an arrival that stayed as it came", () => {
+  it("is headlined with what arrived, not the conversion it did not get", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = applied(new Flow({ engine, emit: (event) => events.push(event) }));
+    const view = toRouteView(routeFor("layerzero", { swap: true, delivers: STELLAR_XLM }));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.endWith(new DeliveredAsCame("Not converted.", "USDC", "40000000", 7));
+    expect(events.map((e) => e.type)).toEqual(["transferDeliveredAsCame"]);
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM", arrived: true }),
+    );
+    expect(html).toContain("Arrived on Stellar, not converted");
+    expect(html).toContain("4.00");
+    expect(html).toContain("USDC");
   });
 });

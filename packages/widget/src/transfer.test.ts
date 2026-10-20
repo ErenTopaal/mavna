@@ -1441,7 +1441,11 @@ describe("runTransfer when the account pays its own reserve", () => {
         },
       });
       const { seen, patch } = patches();
-      await run(adapter, fronted(), patch);
+      // arrived, and stays as it came: told apart from a completed conversion
+      const error = await run(adapter, fronted(), patch).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(DeliveredAsCame);
+      expect((error as DeliveredAsCame).baseUnits).toBe("40000000");
+      expect((error as DeliveredAsCame).decimals).toBe(7);
       expect(conversionAmounts).toEqual([]);
       expect(seen.filter((p) => p.id === "swap").at(-1)?.patch).toMatchObject({
         phase: "done",

@@ -68,15 +68,17 @@ export class StillMoving extends Error {
  * in; not a success, and not a loss either.
  */
 export class DeliveredAsCame extends Error {
-  /** What arrived, by symbol, and how much in its base units. */
+  /** What arrived, by symbol, and how much in its base units and decimals. */
   readonly asset: string;
   readonly baseUnits: string;
+  readonly decimals: number;
 
-  constructor(message: string, asset: string, baseUnits: string) {
+  constructor(message: string, asset: string, baseUnits: string, decimals: number) {
     super(message);
     this.name = "DeliveredAsCame";
     this.asset = asset;
     this.baseUnits = baseUnits;
+    this.decimals = decimals;
   }
 }
 
@@ -831,6 +833,7 @@ async function runRelayed(
       endedNote(tracked.phase),
       tracked.phase.received.asset.symbol,
       tracked.phase.received.baseUnits,
+      tracked.phase.received.asset.decimals,
     );
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));
@@ -932,24 +935,24 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
     // the sponsor's repayment, if it has not been taken yet, keeps its share
     const brought = heldAfter - heldBefore;
     const quoted = BigInt(bridged?.baseUnits ?? "0");
-    const convertible = (brought < quoted ? brought : quoted) - unrepaid;
+    const arrived = brought < quoted ? brought : quoted;
+    const convertible = arrived - unrepaid;
     const stays = `so it stays in ${swapFrom.symbol}, in your account.`;
+    // arrived and left as it came: said apart from a completed conversion
+    const asCame = (message: string): DeliveredAsCame =>
+      new DeliveredAsCame(message, swapFrom.symbol, arrived.toString(), swapFrom.decimals);
     if (convertible <= 0n) {
-      patch("swap", {
-        phase: "done",
-        note:
-          `Not converted: after what repaying the sponsor's reserve may take, nothing that ` +
-          `arrived is left to convert, ${stays}`,
-      });
-      return;
+      const note =
+        `Not converted: after what repaying the sponsor's reserve may take, nothing that ` +
+        `arrived is left to convert, ${stays}`;
+      patch("swap", { phase: "done", note });
+      throw asCame(note);
     }
     // a page that is gone does not ask for a signature nobody can see
     if (gone(deps.signal)) {
-      throw new DeliveredAsCame(
+      throw asCame(
         `This page closed before the conversion, so it was not asked for. The ${swapFrom.symbol} ` +
           "has arrived and is yours.",
-        swapFrom.symbol,
-        convertible.toString(),
       );
     }
     let converted: Awaited<ReturnType<typeof convertOnStellar>>;
@@ -959,23 +962,18 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
       // the money is on Stellar either way: a conversion that could not run
       // leaves it as it came, which is not a failed transfer
       const reason = asError(cause).message;
-      throw new DeliveredAsCame(
+      throw asCame(
         reason.includes("has arrived")
           ? reason
           : `It was not converted: ${reason} The ${swapFrom.symbol} has arrived and is yours.`,
-        swapFrom.symbol,
-        convertible.toString(),
       );
     }
-    patch(
-      "swap",
-      converted === "converted"
-        ? { phase: "done" }
-        : {
-            phase: "done",
-            note: `Not converted: what is left to convert is below what the exchange can take, ${stays}`,
-          },
-    );
+    if (converted === "too-small") {
+      const note = `Not converted: what is left to convert is below what the exchange can take, ${stays}`;
+      patch("swap", { phase: "done", note });
+      throw asCame(note);
+    }
+    patch("swap", { phase: "done" });
   }
 }
 

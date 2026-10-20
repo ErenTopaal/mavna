@@ -24,7 +24,7 @@ import type {
   WalletConfig,
 } from "./config";
 import type { Engine, SourceDetail } from "./engine";
-import { toBaseUnits } from "./format";
+import { fromBaseUnits, toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
@@ -146,6 +146,8 @@ interface State {
   found: FoundState | null;
   finishTries: number;
   history: readonly TransferRecord[];
+  /** What arrived when a transfer landed unconverted, for the flight's headline. */
+  arrivedAs: { readonly amount: number; readonly symbol: string } | null;
 }
 
 export interface FlowProps {
@@ -266,6 +268,7 @@ export class Flow extends React.Component<FlowProps, State> {
     found: null,
     finishTries: 0,
     history: [],
+    arrivedAs: null,
   };
 
   /** The widget's own outermost element; nothing outside it is the widget's to touch. */
@@ -779,7 +782,15 @@ export class Flow extends React.Component<FlowProps, State> {
     this.rows = [];
     const cap = this.lockHeight();
     this.setState(
-      { routes: [], rejected: [], complete: false, quoting: true, phase: "quote", steps: [] },
+      {
+        routes: [],
+        rejected: [],
+        complete: false,
+        quoting: true,
+        phase: "quote",
+        steps: [],
+        arrivedAs: null,
+      },
       () => this.animateHeight(cap),
     );
     this.sweep();
@@ -1067,7 +1078,25 @@ export class Flow extends React.Component<FlowProps, State> {
         asset: error.asset,
         baseUnits: error.baseUnits,
       });
-      this.failFlight(error.message, false);
+      // it arrived, so the flight ends arrived, headlined with what it arrived as
+      this.setState(
+        (st) => ({
+          phase: "arrived" as const,
+          arrivedAs: {
+            amount: fromBaseUnits(error.baseUnits, error.decimals),
+            symbol: error.asset,
+          },
+          steps: st.steps.map((step) =>
+            step.phase === "blocked" || step.phase === "pending"
+              ? { ...step, phase: "done" as const, note: error.message }
+              : step,
+          ),
+          note: error.message,
+          noteKind: "quiet" as const,
+          history: readHistory(this.engine.historyKey),
+        }),
+        () => this.advanceStep(),
+      );
       return;
     }
     this.failFlight(msg(error, "The transfer did not go through."));
