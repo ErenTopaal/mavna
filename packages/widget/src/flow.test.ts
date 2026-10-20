@@ -464,3 +464,32 @@ describe("the chain picker on a USDT0 send", () => {
     expect(html).not.toContain("3 chains");
   });
 });
+
+describe("what a screen reader hears", () => {
+  it("is told the step the flight is on, and what it says", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      phase: "sending",
+      steps: [
+        {
+          id: "burn",
+          label: "Send from Arbitrum",
+          user: true,
+          actor: "Your wallet",
+          phase: "failed",
+          note: "The network refused it.",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      renderFlight(flow, {
+        r: flow.chosen(),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+        arrived: false,
+      }),
+    );
+    expect(html).toMatch(/role="status"[^>]*>[^<]*Send from Arbitrum[^<]*The network refused it\./);
+  });
+});

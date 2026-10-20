@@ -1539,15 +1539,18 @@ function renderApp(c: Flow): ReactNode {
 
             {st.screen === "send" ? (
               <div style={s("flex:0 0 auto;padding-top:12px")}>
-                {st.note !== null ? (
-                  <p
-                    style={s(
-                      `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
-                    )}
-                  >
-                    {st.note}
-                  </p>
-                ) : null}
+                {/* always there, so a note that appears is announced */}
+                <div role="status" aria-live="polite">
+                  {st.note !== null ? (
+                    <p
+                      style={s(
+                        `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
+                      )}
+                    >
+                      {st.note}
+                    </p>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={() => onPrimary(c, { r, chain: chainDetail })}
@@ -1998,15 +2001,18 @@ function renderCompact(c: Flow): ReactNode {
 
       {st.screen === "send" ? (
         <div style={s("flex:0 0 auto;padding:10px 16px 16px")}>
-          {st.note !== null ? (
-            <p
-              style={s(
-                `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
-              )}
-            >
-              {st.note}
-            </p>
-          ) : null}
+          {/* always there, so a note that appears is announced */}
+          <div role="status" aria-live="polite">
+            {st.note !== null ? (
+              <p
+                style={s(
+                  `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
+                )}
+              >
+                {st.note}
+              </p>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={() => onPrimaryCompact(c, { chain: chainDetail })}

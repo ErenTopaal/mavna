@@ -41,15 +41,53 @@ export function dismissesOnKey(
   return e.key === "Escape" && overlay !== null && overlay.contains(e.target as never);
 }
 
+/**
+ * Where Tab should move focus to keep it inside the dialog, or undefined to let
+ * it move on its own: past the last element it wraps to the first, before the
+ * first to the last, and focus found outside comes back in.
+ */
+export function nextFocus<T>(
+  focusables: readonly T[],
+  current: unknown,
+  back: boolean,
+): T | undefined {
+  const first = focusables[0];
+  const last = focusables.at(-1);
+  if (first === undefined || last === undefined) return undefined;
+  if (!focusables.includes(current as T)) return back ? last : first;
+  if (!back && current === last) return first;
+  if (back && current === first) return last;
+  return undefined;
+}
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function DrawerChrome(props: DrawerChromeProps): ReactNode {
   const { mounted, closing, showTrigger, onOpen, onClose } = props;
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  // read through a ref, so a host passing a new callback each render does not
+  // re-run the open effect and pull focus back to the dialog mid-typing
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!mounted) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent): void => {
-      if (dismissesOnKey(e, overlayRef.current)) onClose();
+      if (dismissesOnKey(e, overlayRef.current)) {
+        closeRef.current();
+        return;
+      }
+      const overlay = overlayRef.current;
+      if (e.key !== "Tab" || overlay === null) return;
+      const focusables = Array.from(overlay.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const to = nextFocus(focusables, document.activeElement, e.shiftKey);
+      if (to !== undefined) {
+        e.preventDefault();
+        to.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     // The page behind a modal must not scroll under it.
@@ -61,8 +99,10 @@ export function DrawerChrome(props: DrawerChromeProps): ReactNode {
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
+      // back to whatever opened it, so keyboard users are not left at the top of the page
+      opener?.focus();
     };
-  }, [mounted, onClose]);
+  }, [mounted]);
 
   return (
     <>

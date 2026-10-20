@@ -21,7 +21,7 @@ import {
   type Wanted,
 } from "./quote";
 import { s } from "./style";
-import type { FlightRow } from "./transfer";
+import type { FlightRow, FlightStep } from "./transfer";
 
 /**
  * The rail label, with the swap venue when the route converts.
@@ -1079,6 +1079,16 @@ export function renderReview(
 
 // ----------------------------------------------------------------- flight ---
 
+/** The step the flight is on, and what it says, for a screen reader. */
+function flightAnnouncement(steps: readonly FlightStep[], eyebrow: string): string {
+  const now =
+    steps.find((step) => step.phase === "failed") ??
+    steps.find((step) => step.phase === "blocked" || step.phase === "pending");
+  if (now === undefined) return eyebrow;
+  const lead = now.phase === "failed" ? "Stopped" : eyebrow;
+  return [`${lead}: ${now.label}.`, now.note ?? ""].join(" ").trim();
+}
+
 export function renderFlight(
   c: Flow,
   d: {
@@ -1175,6 +1185,10 @@ export function renderFlight(
           <span>{stepEyebrow}</span>
           <span>{stepCount}</span>
         </div>
+        {/* read out as the flight moves, since the step list itself only changes colour */}
+        <p role="status" aria-live="polite" className="mv-sr-only">
+          {flightAnnouncement(c.state.steps, stepEyebrow)}
+        </p>
         <div
           style={s(
             "flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:8px;margin-right:-8px",
