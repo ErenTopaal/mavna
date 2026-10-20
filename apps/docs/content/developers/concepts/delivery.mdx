@@ -62,3 +62,33 @@ fees and dust. The user's minimum-received floor is enforced on-chain through
 `minAmountLD`, derived from their chosen slippage, because a token contract can take
 a fee in transit and accepting anything back would be an unbounded loss nobody
 consented to. An un-indexed message is `pending`, not `failed`.
+
+## LayerZero with a conversion on arrival: the contract's own event
+
+A route that converts on arrival is delivered to the Mavna Arrival Contract, which
+swaps on Stellar and sends the wanted asset on. Arrival is proven from LayerZero's
+record of the message and the contract's own event, never from a balance. The
+message names the contract it was sent to; one that went to another Arrival
+Contract is reported as stalled, with the explorer link, rather than as delivered.
+For this app's contract, the status reads the event the contract emits for the
+message's guid, starting at the delivery's own ledger: `converted` is
+`delivered-and-converted`, anything else is `delivered-as-came`.
+
+With no event yet, it reads the endpoint's compose queue for that guid. Nothing
+queued is still `pending`; a queued step is `delivered-conversion-pending`, and
+the exact queued bytes are rebuilt from LayerZero's record and checked against the
+endpoint's hash before they are offered as `finish`, so whoever finishes it can
+only run what is waiting. Anyone may finish an overdue step: the contract refuses
+any other bytes, and the user's minimum is enforced inside it.
+
+## NEAR Intents: 1Click's own record of the swap
+
+A NEAR Intents transfer is found by its deposit address, or, from the source
+transaction, by reading which 1Click deposit address that transaction paid.
+1Click's status for that address decides the phase: `SUCCESS` is `done` with the
+amount 1Click says settled, or the quote's floor when it does not say, never the
+estimate; `REFUNDED` is `refunded` with what came back; `INCOMPLETE_DEPOSIT` is
+`stalled`, because the rest must be sent or 1Click returns the deposit once the
+quote expires; `FAILED` is `failed` with the deposit address as the reference
+1Click's support asks for. A deposit address that is not one of this rail's
+transfers answers `idle`.

@@ -44,7 +44,10 @@ type StepPhase =
   | { readonly phase: "done"; readonly ref: OnChainRef; readonly received: Amount }
   | { readonly phase: "refunded"; readonly ref: OnChainRef; readonly to: string; readonly returned: Amount }
   | { readonly phase: "partial"; readonly ref: OnChainRef; readonly received: Amount; readonly expected: Amount; readonly remedy: Remedy }
-  | { readonly phase: "failed"; readonly cause: string; readonly remedy: Remedy; readonly ref: OnChainRef | undefined };
+  | { readonly phase: "failed"; readonly cause: string; readonly remedy: Remedy; readonly ref: OnChainRef | undefined }
+  | { readonly phase: "delivered-conversion-pending"; readonly ref: OnChainRef; readonly deliveredAtUnix: number; readonly finish: ComposeFinish | undefined }
+  | { readonly phase: "delivered-and-converted"; readonly ref: OnChainRef; readonly received: Amount; readonly fee: Amount | undefined }
+  | { readonly phase: "delivered-as-came"; readonly ref: OnChainRef; readonly received: Amount; readonly because: string };
 ```
 
 `pending` and `stalled` both carry an on-chain reference, but they are separate
@@ -58,12 +61,26 @@ carries a `because`, so a failure is never a message with nothing to do beside i
 because a returned transfer rendered as a plain success is a lie about someone's
 money.
 
+The last three belong to a route that converts on arrival, where the Arrival
+Contract swaps what LayerZero delivers into the asset the user asked for:
+
+- `delivered-conversion-pending` is not an ending. The funds are on Stellar, held
+  by a step anyone may complete, and `finish` (when it is known) carries the exact
+  queued message that completes it. See [delivery](/developers/concepts/delivery).
+- `delivered-and-converted` is success: the contract converted and sent the
+  wanted asset on, and `fee` is the integrator's cut when one was set.
+- `delivered-as-came` is an ending of its own and never a success: the conversion
+  could not meet the user's minimum, so the arriving token was sent on unchanged,
+  and `because` says so. `isSuccess` is false for it, while `isTerminal` is true.
+
 ## The state machine
 
 `applyUpdate` advances a step and refuses to move a finished transfer backwards, so
 a late poll cannot walk a delivered payment back to pending: retrying is how one
 payment becomes two. `progressOf` reports how far along a transfer is and whether
-it needs the user, and `outcomeOf` collapses the steps to one word, with `failed`,
-`refunded`, and `partial` taking precedence over `succeeded`. There is no single
+it needs the user, and `outcomeOf` collapses the steps to one word: `failed`, then
+`refunded`, then `partial`, then `delivered-as-came` take precedence, and
+`succeeded` needs every step at `done` or `delivered-and-converted`; anything else
+is `in-flight`. There is no single
 "track this" call to make; you assemble tracking from these functions and a store,
 which is what lets the same machine drive a live transfer and a resumed one.

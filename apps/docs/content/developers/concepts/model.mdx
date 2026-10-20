@@ -54,7 +54,13 @@ number.
 ## Fees are itemised, and one of them is not a fee
 
 ```ts
-type FeeKind = "bridge" | "swap" | "gas" | "integrator" | "account-reserve";
+type FeeKind =
+  | "bridge"
+  | "swap"
+  | "gas"
+  | "integrator"
+  | "account-reserve"
+  | "reserve-repayment";
 ```
 
 A `Fee` carries its `kind`, its `total`, the recipients, and `includedInQuote`,
@@ -66,5 +72,9 @@ after all of them.
 XLM that ends up locked in the user's own new Stellar account as its reserve and
 returns to them if they close it. [Sponsorship](/developers/concepts/sponsorship)
 explains where it goes and how it comes back.
+
+`reserve-repayment` is the most a held settlement may take of the arrival to repay
+a reserve the sponsor fronted. It is set aside, in the arriving asset, before any
+conversion, and what the repayment does not use stays with the user.
 
 The exact declarations are in [core types](/developers/reference/core-types).

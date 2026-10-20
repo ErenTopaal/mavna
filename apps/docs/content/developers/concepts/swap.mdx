@@ -70,5 +70,11 @@ rejection with each venue's reason, rather than a route that cannot complete.
 When the transfer reaches the swap step, the widget quotes again through the same
 chain, builds with the venue that answered, and asks the user to sign.
 
+A route that converts on arrival attaches no swap step. On a LayerZero compose
+route, the Arrival Contract converts on Stellar with the user's minimum enforced
+on-chain, through Aquarius, so it adds no step and no signature: the source-chain
+send is the whole transfer. If the minimum cannot be met, the arriving token is
+delivered as it came.
+
 To the user, "send USDC, receive XLM" is one quote and one flow.
 [As a user, arriving as XLM](/guides/receive-xlm) is a single toggle.
