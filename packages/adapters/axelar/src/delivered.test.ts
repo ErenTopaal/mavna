@@ -44,7 +44,7 @@ function json(value: unknown): Response {
 
 function services(): void {
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url === "https://api.axelarscan.io/api/getChains") {
       return json([
         { id: "ethereum", chain_type: "evm" },
@@ -83,7 +83,10 @@ function services(): void {
       return json(horizonOperations);
     }
     if (url === "https://api.gmp.axelarscan.io/searchGMP") {
-      const query = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const query = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<
+        string,
+        unknown
+      >;
       return json({ data: query.messageId === undefined ? transfer.first : transfer.second });
     }
     throw new Error(`the fetch double has no answer for ${url}`);

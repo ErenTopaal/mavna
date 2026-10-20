@@ -1282,7 +1282,8 @@ function guardedEngine(engine: TransferEngine, signal: AbortSignal | undefined):
         return engine.stellar.sign(xdr, address);
       },
       disconnect: () => engine.stellar.disconnect(),
-      ...(engine.stellar.forget === undefined ? {} : { forget: engine.stellar.forget }),
+      // called through the wallet, so a forget that uses `this` still has it
+      ...(engine.stellar.forget === undefined ? {} : { forget: () => engine.stellar.forget?.() }),
     },
   };
 }

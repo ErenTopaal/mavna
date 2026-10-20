@@ -1235,7 +1235,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     const order: string[] = [];
     const { patch } = patches();
     await run(cctp, routeFor("cctp"), (id, p) => {
-      if (id === "deliver" && p.phase !== undefined) order.push(`deliver ${String(p.phase)}`);
+      if (id === "deliver" && typeof p.phase === "string") order.push(`deliver ${p.phase}`);
       patch(id, p);
     });
     expect(order[0]).toBe("deliver blocked");
@@ -2074,6 +2074,41 @@ describe("a Stellar wallet connected to another account", () => {
       }),
     ).rejects.toThrow(/Switch to that account in your wallet/);
     expect(forgot).toBe(1);
+  });
+});
+
+describe("a Stellar wallet that keeps its state on itself", () => {
+  it("is still forgotten when its forget reads `this`", async () => {
+    const engine = engineWith(new ScriptedAdapter("layerzero", [delivered()]));
+    // a wallet written as a class: forget works only when called on the wallet
+    class Wallet {
+      remembered: string | undefined = SENDER_STELLAR;
+      connect = async () => SENDER_STELLAR;
+      sign = engine.stellar.sign;
+      disconnect = engine.stellar.disconnect;
+      forget(): void {
+        this.remembered = undefined;
+      }
+    }
+    const wallet = new Wallet();
+    await expect(
+      runTransfer({
+        engine: { ...engine, stellar: wallet },
+        view: toRouteView(routeFor("layerzero", { newAccount: true })),
+        chainId: "arbitrum-sepolia",
+        chainName: "Arbitrum Sepolia",
+        evmChainId: ARBITRUM_SEPOLIA,
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        connection: connection(),
+        wanted: "USDC",
+        patch: patches().patch,
+        onEvmEvent: () => {},
+        wait: instant,
+        // with the page-close signal, the wallet is reached through its guard
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/Switch to that account in your wallet/);
+    expect(wallet.remembered).toBeUndefined();
   });
 });
 

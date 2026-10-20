@@ -1250,7 +1250,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (pool === undefined) return;
     const now = nowUnix();
     const free = pool.freeAddresses(now);
-    for (const address of [...idleSince.keys()]) {
+    // a snapshot: entries are deleted as the loop goes
+    for (const address of Array.from(idleSince.keys())) {
       if (!free.includes(address)) idleSince.delete(address);
     }
     const named = new Set([...heldSettlements.values()].map((held) => held.channel));
@@ -3285,7 +3286,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    */
   async function sweepWatched(): Promise<void> {
     const startedAt = nowUnix();
-    for (const [key, entry] of [...watch]) {
+    // a snapshot: burns are forgotten as the loop goes
+    for (const [key, entry] of Array.from(watch)) {
       if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < startedAt) {
         forgetBurn(key);
         console.error(
@@ -3319,7 +3321,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         forgetBurn(key);
         console.error(
           `[sponsor] stopped watching burn ${entry.txHash} on domain ${entry.domain}: ` +
-            String(result.body.error ?? "it can never be delivered"),
+            (typeof result.body.error === "string"
+              ? result.body.error
+              : "it can never be delivered"),
         );
       } else {
         entry.tries += 1;

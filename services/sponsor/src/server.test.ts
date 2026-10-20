@@ -4755,8 +4755,11 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
   const ATTESTATION = `0x${"ef".repeat(65)}`;
   const burn = (n: number) => `0x${(1000 + n).toString(16).padStart(64, "0")}`;
 
-  /** Circle's answer: unknown (404), known and pending, or attested with this message. */
-  function irisAnswers(message: string | "pending" | undefined): void {
+  /**
+   * Circle's answer: unknown (404) for undefined, known and pending for the
+   * string "pending", or attested with any other message.
+   */
+  function irisAnswers(message: string | undefined): void {
     stubIris(() =>
       message === undefined
         ? new Response("{}", { status: 404 })
