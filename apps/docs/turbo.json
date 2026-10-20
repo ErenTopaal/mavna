@@ -1,12 +1,13 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "//": "Inlined at build time, so a cached build made for another sponsor is never served. The browser tests' build is its own task, so restoring it from the cache can only ever write .next-test, never the .next or search index a host is given.",
+  "//": "Inlined at build time, so a cached build made for another sponsor is never served. The browser tests' build is its own task, so restoring it from the cache can only ever write .next-test, never the .next or search index a host is given. The test-only variables reach a host build unhashed, only so its config can refuse them loudly.",
   "extends": ["//"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["MAVNA_NEXT_DIST_DIR", "NEXT_PUBLIC_MAVNA_*"],
-      "outputs": [".next/**", "!.next/cache/**", "public/_pagefind/**"]
+      "env": ["NEXT_PUBLIC_MAVNA_*"],
+      "outputs": [".next/**", "!.next/cache/**", "public/_pagefind/**"],
+      "passThroughEnv": ["MAVNA_NEXT_DIST_DIR"]
     },
     "build:test": {
       "dependsOn": ["^build"],
