@@ -803,7 +803,14 @@ export class LayerZeroAdapter implements BridgeAdapter {
 
     const deliveredTx = message.destination?.tx?.txHash;
     if (this.composing !== undefined) {
-      const composed = await composePhase(this.composing, message, chainId, {
+      // read from the Stellar OFT the message reached, not from a fresh route
+      const facts = await readStellarOft(this.rpc, ours.stellarOft);
+      const through = {
+        stellarOft: ours.stellarOft,
+        endpoint: facts.endpoint,
+        decimalsDiff: facts.decimalsDiff,
+      };
+      const composed = await composePhase(this.composing, message, through, {
         chainId: STELLAR_SIDE[this.network].chainId,
         txHash: deliveredTx ?? handle.sourceTxHash,
         explorerUrl:

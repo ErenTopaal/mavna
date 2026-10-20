@@ -609,6 +609,33 @@ describe("reading a compose's status from LayerZero's record", () => {
     },
   });
   const ref = { chainId: "stellar-testnet", txHash: "7e37", explorerUrl: "" };
+  // the Stellar OFT the message was delivered to, as status read it from the chain
+  const delivery = { stellarOft: SENDER, endpoint: ENDPOINT, decimalsDiff: 1 };
+
+  it("reads a delivered compose without the gates a new send goes through", async () => {
+    const { ctx } = context();
+    // a send-time check failing today must not make an arrived transfer unreadable
+    vi.spyOn(ctx.discovery, "routeFrom").mockRejectedValue(new Error("a gate failed today"));
+    vi.spyOn(ctx.rpc.server, "getTransaction").mockResolvedValue({
+      status: "SUCCESS",
+      ledger: 5,
+      createdAt: 1_700_000_000,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "getHealth").mockResolvedValue({
+      oldestLedger: 1,
+      latestLedger: 9,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "getEvents").mockResolvedValue({
+      events: [],
+      latestLedger: 9,
+    } as never);
+    vi.spyOn(ctx.rpc.server, "simulateTransaction").mockResolvedValue({
+      latestLedger: 9,
+      result: { retval: xdr.ScVal.scvBytes(Buffer.alloc(32, 3)), auth: [] },
+    } as never);
+    const phase = await composePhase(ctx, scan(ARRIVAL) as never, delivery, ref);
+    expect(phase?.phase).toBe("delivered-conversion-pending");
+  });
 
   it("dates a delivery Scan did not time from the Stellar transaction itself", async () => {
     const { ctx } = context();
@@ -629,7 +656,7 @@ describe("reading a compose's status from LayerZero's record", () => {
       latestLedger: 9,
       result: { retval: xdr.ScVal.scvBytes(Buffer.alloc(32, 3)), auth: [] },
     } as never);
-    const phase = await composePhase(ctx, scan(ARRIVAL) as never, "arbitrum-sepolia", ref);
+    const phase = await composePhase(ctx, scan(ARRIVAL) as never, delivery, ref);
     expect(phase).toMatchObject({
       phase: "delivered-conversion-pending",
       deliveredAtUnix: 1_700_000_000,
@@ -638,7 +665,7 @@ describe("reading a compose's status from LayerZero's record", () => {
 
   it("says plainly that a compose went to another Arrival Contract rather than calling it delivered", async () => {
     const { ctx } = context();
-    const phase = await composePhase(ctx, scan(STRANGER) as never, "arbitrum-sepolia", ref);
+    const phase = await composePhase(ctx, scan(STRANGER) as never, delivery, ref);
     expect(phase?.phase).toBe("stalled");
     if (phase?.phase !== "stalled") return;
     expect(phase.remedy).toMatchObject({ kind: "contact" });
