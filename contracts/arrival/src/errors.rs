@@ -16,4 +16,7 @@ pub enum Error {
     VenueOutsideFloor = 5,
     /// The constructor was given no OFT, a duplicated OFT, or no wanted asset.
     BadAllowlist = 6,
+    /// The recipient refused the converted asset and the venue would not take it
+    /// back, so nothing can be delivered yet. The compose stays queued.
+    NoWayBack = 7,
 }

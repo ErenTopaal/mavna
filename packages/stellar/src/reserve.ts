@@ -6,7 +6,7 @@ import type { DestinationLane } from "./destination.js";
  *
  * All of this follows from one measured fact: Stellar locks a deposit per unit of
  * ledger space, an account occupies 2 units and each trustline 1, at 0.5 XLM per
- * unit. See resources/cost_decision.md, which is the authority.
+ * unit (the network's base reserve, read from its config).
  */
 
 /** Slots consumed by holding one additional asset. */
@@ -112,9 +112,9 @@ export interface ArrivingValue {
 /**
  * Convert an amount of some other asset into XLM, at a price read from the chain.
  *
- * `cost_decision.md` §9 is explicit that the floors are computed from the live
- * reserve cost and the live XLM price rather than stored as constants, so they
- * track the market without anyone editing a number. This is that conversion.
+ * The floors are computed from the live reserve cost and the live XLM price
+ * rather than stored as constants, so they track the market without anyone
+ * editing a number. This is that conversion.
  *
  * The price is given as XLM per one whole unit of the asset, in stroops. Passing
  * it in rather than fetching it here keeps this package free of a network call on
@@ -155,11 +155,15 @@ const STROOPS_PER_XLM = 10_000_000n;
 
 /** Exact conversion. Amounts are integers in base units; no floating point, ever. */
 export function stroopsToXlm(stroops: bigint): string {
-  const whole = stroops / STROOPS_PER_XLM;
-  const fraction = stroops % STROOPS_PER_XLM;
-  if (fraction === 0n) return whole.toString();
+  // bigint division truncates toward zero, so the parts are taken from the
+  // magnitude and the sign put back in front
+  const sign = stroops < 0n ? "-" : "";
+  const magnitude = stroops < 0n ? -stroops : stroops;
+  const whole = magnitude / STROOPS_PER_XLM;
+  const fraction = magnitude % STROOPS_PER_XLM;
+  if (fraction === 0n) return `${sign}${whole}`;
   const padded = fraction.toString().padStart(7, "0").replace(/0+$/, "");
-  return `${whole}.${padded}`;
+  return `${sign}${whole}.${padded}`;
 }
 
 export function xlmToStroops(xlm: string): bigint {

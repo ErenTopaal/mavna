@@ -164,7 +164,10 @@ function remoteServices(): void {
       });
     }
     if (url.startsWith(`${HORIZON}/order_book`)) {
-      return json({ bids: [{ price: "0.2" }], asks: [{ price: "0.2" }] });
+      return json({
+        bids: [{ price: "0.2", amount: "1000" }],
+        asks: [{ price: "0.2", amount: "5000" }],
+      });
     }
     if (url === `${SCAN_BASE_URL.mainnet}/messages/tx/${SEND_HASH}`) {
       return json({
@@ -284,7 +287,12 @@ function stellarNode(): RpcClient {
           key,
           val: {
             switch: () => ({ name: "trustline" }),
-            trustLine: () => ({ balance: () => 0n, limit: () => 10n ** 15n, flags: () => 1 }),
+            trustLine: () => ({
+              balance: () => 0n,
+              limit: () => 10n ** 15n,
+              flags: () => 1,
+              ext: () => ({ switch: () => 0 }),
+            }),
           },
         });
       }

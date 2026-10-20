@@ -9,8 +9,9 @@ import type { NetworkConfig } from "./network.js";
  * return unsigned transactions and the caller supplies signatures, because the
  * SDK must never be in a position to move anyone's funds.
  *
- * The mechanism and its constraints are settled in resources/cost_decision.md.
- * Do not redesign it here.
+ * The mechanism: the sponsor sponsors the reserves of the account and its
+ * trustlines inside one preparation, and is repaid by a settlement the user signs
+ * in advance. Changing it changes what the sponsor can lose.
  */
 
 export interface PreparationInputs {
@@ -27,9 +28,10 @@ export interface PreparationInputs {
 }
 
 /**
- * At most two permissions per account, and only for the assets in the quote being
- * executed. This invariant is what stops an attacker inducing an unbounded number
- * of sponsored trustlines, each costing another half XLM.
+ * At most two permissions per preparation, and only for the assets in the quote
+ * being executed. This bounds what one preparation can cost the sponsor; it does
+ * not stop a second preparation for the same account, which only the sponsor's
+ * own caps limit.
  */
 const MAX_SPONSORED_ASSETS = 2;
 

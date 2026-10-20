@@ -1,10 +1,12 @@
 import { MavnaError } from "@mavna/core";
 import {
   Account,
+  Contract,
   Keypair,
   Networks,
   Operation,
   rpc,
+  SorobanDataBuilder,
   type Transaction,
   TransactionBuilder,
   xdr,
@@ -236,5 +238,310 @@ describe("loading an account", () => {
       .loadAccount(Keypair.random().publicKey())
       .catch((error: unknown) => error);
     expect(failure).not.toBeInstanceOf(AccountNotFound);
+  });
+});
+
+/** What the SDK's HTTP client throws when a request runs past its timeout. */
+function timedOut(): Error {
+  return Object.assign(new Error("timeout of 15000 ms exceeded"), {
+    name: "AxiosError",
+    code: "ECONNABORTED",
+  });
+}
+
+function pendingTx(hash: string): rpc.Api.SendTransactionResponse {
+  return { status: "PENDING", hash, latestLedger: 1, latestLedgerCloseTime: 0 };
+}
+
+function missing(
+  hash: string,
+  latestLedger: number,
+  latestLedgerCloseTime: number,
+): rpc.Api.GetTransactionResponse {
+  return {
+    status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+    txHash: hash,
+    latestLedger,
+    latestLedgerCloseTime,
+    oldestLedger: 1,
+    oldestLedgerCloseTime: 0,
+  };
+}
+
+function landed(hash: string, ledger: number): rpc.Api.GetTransactionResponse {
+  return {
+    status: rpc.Api.GetTransactionStatus.SUCCESS,
+    txHash: hash,
+    ledger,
+    createdAt: 0,
+    applicationOrder: 1,
+    feeBump: false,
+    latestLedger: ledger,
+    latestLedgerCloseTime: 0,
+    oldestLedger: 1,
+    oldestLedgerCloseTime: 0,
+  } as unknown as rpc.Api.GetTransactionResponse;
+}
+
+/** A client whose sleeps move a fake clock, so waits are measured in pretend seconds. */
+function clockedClient(options: { baseDelayMs?: number } = {}): RpcClient {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  return new RpcClient({
+    url: "https://example.invalid",
+    baseDelayMs: options.baseDelayMs ?? 1000,
+    sleep: async (ms) => {
+      vi.setSystemTime(Date.now() + ms);
+    },
+  });
+}
+
+function txValidFor(seconds: number): Transaction {
+  const source = Keypair.random();
+  const tx = new TransactionBuilder(new Account(source.publicKey(), "41"), {
+    fee: "100",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.bumpSequence({ bumpTo: "50" }))
+    .setTimeout(seconds)
+    .build();
+  tx.sign(source);
+  return tx;
+}
+
+describe("request timeouts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("bounds every request, since the SDK's own timeout option is ignored", () => {
+    expect(clientForTest().server.httpClient.defaults.timeout).toBe(15_000);
+    const client = new RpcClient({ url: "https://example.invalid", timeoutMs: 2_000 });
+    expect(client.server.httpClient.defaults.timeout).toBe(2_000);
+  });
+
+  it("retries a read that timed out", async () => {
+    const client = clientForTest();
+    let calls = 0;
+    const value = await client.read("thing", async () => {
+      calls += 1;
+      if (calls === 1) throw timedOut();
+      return { value: "answer", ledger: 5 };
+    });
+    expect(value).toBe("answer");
+    expect(calls).toBe(2);
+  });
+
+  it("calls a read that keeps timing out retryable", async () => {
+    const client = clientForTest();
+    const failure = await client
+      .read("thing", async () => {
+        throw timedOut();
+      })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(true);
+    expect((failure as MavnaError).cause).toBeInstanceOf(Error);
+  });
+
+  it("does not retry a read that failed for another reason", async () => {
+    const client = clientForTest();
+    let calls = 0;
+    const failure = await client
+      .read("thing", async () => {
+        calls += 1;
+        throw new Error("bad request");
+      })
+      .catch((error: unknown) => error);
+    expect((failure as Error).message).toBe("bad request");
+    expect(calls).toBe(1);
+  });
+
+  it("looks for a send that timed out by its hash instead of building another", async () => {
+    const client = clientForTest();
+    const tx = txValidFor(300);
+    const hash = tx.hash().toString("hex");
+    let built = 0;
+    client.server.sendTransaction = async () => {
+      throw timedOut();
+    };
+    client.server.getTransaction = async (h) => landed(h, 42);
+    const result = await client.submit("delivery", async () => {
+      built += 1;
+      return tx;
+    });
+    expect(result.txHash).toBe(hash);
+    expect(built).toBe(1);
+  });
+
+  it("keeps waiting through a lookup that timed out", async () => {
+    const client = clientForTest();
+    const tx = txValidFor(300);
+    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      if (asked === 1) throw timedOut();
+      return landed(h, 7);
+    };
+    const result = await client.submit("delivery", async () => tx);
+    expect(result.ledger).toBe(7);
+  });
+});
+
+describe("deciding a transaction expired", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps waiting while the ledger has not closed past the time bound, whatever the local clock says", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const maxTime = Number(tx.timeBounds?.maxTime);
+    // the local clock runs two minutes ahead of the network
+    vi.setSystemTime((maxTime + 120) * 1000);
+    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      return asked < 3 ? missing(h, 10, maxTime - 5) : landed(h, 11);
+    };
+    const result = await client.submit("delivery", async () => tx);
+    expect(result.ledger).toBe(11);
+  });
+
+  it("concludes it expired once a caught-up node has closed a ledger past the bound", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const maxTime = Number(tx.timeBounds?.maxTime);
+    client.observeWrite(10);
+    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.getTransaction = async (h) => missing(h, 12, maxTime + 1);
+    const failure = await client
+      .submit("delivery", async () => tx, { attempts: 1 })
+      .catch((error: unknown) => error);
+    expect((failure as MavnaError).message).toMatch(/not included before it expired/);
+    expect((failure as MavnaError).retryable).toBe(true);
+  });
+
+  it("does not believe an expiry from a node behind the high-water mark", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const maxTime = Number(tx.timeBounds?.maxTime);
+    client.observeWrite(20);
+    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      return asked === 1 ? missing(h, 12, maxTime + 1) : landed(h, 21);
+    };
+    const result = await client.submit("delivery", async () => tx);
+    expect(result.ledger).toBe(21);
+  });
+
+  it("says a transaction it rebuilds may still land, and not to retry, when nodes never say", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const maxTime = Number(tx.timeBounds?.maxTime);
+    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    // a node stuck before the bound, for good
+    client.server.getTransaction = async (h) => missing(h, 10, maxTime - 30);
+    const failure = await client
+      .submit("delivery", async () => tx)
+      .catch((error: unknown) => error);
+    expect((failure as MavnaError).message).toMatch(/may still land/);
+    expect((failure as MavnaError).retryable).toBe(false);
+  });
+
+  it("waits on a hash until the ledger says its time bound has passed", async () => {
+    const client = clockedClient();
+    const maxTime = Math.floor(Date.now() / 1000) + 30;
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      return missing(h, 10, asked < 4 ? maxTime : maxTime + 5);
+    };
+    const failure = await client.waitForTransaction("ab", maxTime).catch((e: unknown) => e);
+    expect((failure as MavnaError).message).toMatch(/not included before it expired/);
+    expect(asked).toBe(4);
+  });
+});
+
+describe("waiting for an account", () => {
+  it("gives up at once on an error that is not about the account being absent", async () => {
+    const client = clientForTest();
+    let calls = 0;
+    client.server.getLedgerEntries = async () => {
+      calls += 1;
+      throw new Error("bad request");
+    };
+    const failure = await client
+      .waitForAccount(Keypair.random().publicKey())
+      .catch((error: unknown) => error);
+    expect((failure as Error).message).toBe("bad request");
+    expect(calls).toBe(1);
+  });
+
+  it("keeps the last reason when the account never appears", async () => {
+    const client = clientForTest();
+    client.server.getLedgerEntries = async () => ({ latestLedger: 5, entries: [] });
+    const failure = await client
+      .waitForAccount(Keypair.random().publicKey(), 3)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).message).toMatch(/never appeared/);
+    expect((failure as MavnaError).cause).toBeInstanceOf(AccountNotFound);
+  });
+});
+
+describe("preparing a contract call", () => {
+  function simulated(latestLedger: number, fee: string): rpc.Api.SimulateTransactionResponse {
+    return {
+      id: "1",
+      latestLedger,
+      events: [],
+      _parsed: true,
+      transactionData: new SorobanDataBuilder().setResourceFee(fee),
+      minResourceFee: fee,
+      result: { auth: [], retval: xdr.ScVal.scvVoid() },
+    } as rpc.Api.SimulateTransactionSuccessResponse;
+  }
+
+  it("uses only a simulation from a node at or past the high-water mark", async () => {
+    const client = clientForTest();
+    client.observeWrite(100);
+    const answers = [simulated(90, "999"), simulated(100, "123")];
+    let asked = 0;
+    client.server.simulateTransaction = async () => answers[asked++] ?? simulated(100, "123");
+
+    const call = new TransactionBuilder(new Account(Keypair.random().publicKey(), "1"), {
+      fee: "100",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        new Contract("CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC").call("decimals"),
+      )
+      .setTimeout(30)
+      .build();
+    const prepared = await client.prepare(call);
+
+    expect(asked).toBe(2);
+    const data = prepared.toEnvelope().v1().tx().ext().sorobanData();
+    expect(data.resourceFee().toString()).toBe("123");
+  });
+
+  it("surfaces a simulation that failed", async () => {
+    const client = clientForTest();
+    client.server.simulateTransaction = async () =>
+      ({ id: "1", latestLedger: 5, events: [], _parsed: true, error: "boom" }) as never;
+    const call = new TransactionBuilder(new Account(Keypair.random().publicKey(), "1"), {
+      fee: "100",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        new Contract("CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC").call("decimals"),
+      )
+      .setTimeout(30)
+      .build();
+    await expect(client.prepare(call)).rejects.toThrow("boom");
   });
 });

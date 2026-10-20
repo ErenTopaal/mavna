@@ -244,6 +244,10 @@ fn trust(env: &Env, address: &Address, asset: &xdr::Asset) {
 }
 
 fn trust_with(env: &Env, address: &Address, asset: &xdr::Asset, flags: u32) {
+    trust_up_to(env, address, asset, flags, i64::MAX);
+}
+
+fn trust_up_to(env: &Env, address: &Address, asset: &xdr::Asset, flags: u32, limit: i64) {
     let id = account_id(address);
     let asset = match asset.clone() {
         xdr::Asset::Native => xdr::TrustLineAsset::Native,
@@ -260,7 +264,7 @@ fn trust_with(env: &Env, address: &Address, asset: &xdr::Asset, flags: u32) {
             account_id: id,
             asset,
             balance: 0,
-            limit: i64::MAX,
+            limit,
             flags,
             ext: xdr::TrustLineEntryExt::V0,
         }),
@@ -1257,4 +1261,135 @@ fn a_path_longer_than_the_cap_is_delivered_as_it_came() {
     w.compose(&guid, &message).unwrap();
     assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
     assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+}
+
+const AUTHORIZED: u32 = xdr::TrustLineFlags::AuthorizedFlag as u32;
+
+#[test]
+fn a_recipient_trustline_limit_below_the_conversion_delivers_as_it_came() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    // the venue double trades 1:1 both ways, so swapping back returns it all
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.held(), (0, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.outcome, w.sym("as_came"));
+    assert_eq!(e.asset, w.usdt0);
+    assert_eq!(e.amount, 1_000_000);
+    assert_eq!(e.fee, 0);
+}
+
+#[test]
+fn an_integrator_trustline_at_its_limit_gives_the_fee_to_the_recipient() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust(&w.env, &recipient, &w.usdc_asset);
+    let integrator = account(&w.env);
+    open_account(&w.env, &integrator);
+    trust_up_to(&w.env, &integrator, &w.usdc_asset, AUTHORIZED, 1);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 20;
+    ask.fee_recipient = integrator.clone();
+    let msg = encode(&w.env, &ask);
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&integrator), 0);
+    assert_eq!(w.held(), (0, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.outcome, w.sym("converted"));
+    assert_eq!(e.amount, 1_000_000);
+    assert_eq!(e.fee, 0);
+    assert_eq!(e.fee_recipient, None);
+}
+
+#[test]
+fn a_fee_neither_side_can_take_goes_back_to_the_recipient_as_it_came() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    // room for the net amount and not a unit more
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 998_000);
+    let integrator = account(&w.env);
+    open_account(&w.env, &integrator);
+    trust_up_to(&w.env, &integrator, &w.usdc_asset, AUTHORIZED, 1);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 20;
+    ask.fee_recipient = integrator.clone();
+    let msg = encode(&w.env, &ask);
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 998_000);
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 2_000);
+    assert_eq!(w.token(&w.usdc).balance(&integrator), 0);
+    assert_eq!(w.held(), (0, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.outcome, w.sym("converted"));
+    assert_eq!(e.amount, 998_000);
+    assert_eq!(e.fee, 0);
+    assert_eq!(e.unconverted, 2_000);
+}
+
+#[test]
+fn a_refused_conversion_the_venue_will_not_take_back_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    // estimates now promise 1% more than any swap pays, so the way back, which
+    // holds the venue to its estimate, is refused
+    VenueClient::new(&w.env, &w.venue).set_optimism(&100);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    assert_eq!(w.held(), (1_000_000, 0));
+    let queued =
+        endpoint::Client::new(&w.env, &w.endpoint).compose_queue(&w.oft, &w.arrival, &guid, &0);
+    assert_eq!(queued, Some(w.env.crypto().keccak256(&message).into()));
+
+    // once the recipient can take it, the same compose completes
+    trust(&w.env, &recipient, &w.usdc_asset);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn a_fee_named_for_the_contract_itself_is_not_charged() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 20;
+    ask.fee_recipient = w.arrival.clone();
+    let msg = encode(&w.env, &ask);
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.held(), (0, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.fee, 0);
+    assert_eq!(e.fee_recipient, None);
 }

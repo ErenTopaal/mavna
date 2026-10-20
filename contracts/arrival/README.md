@@ -32,11 +32,27 @@ good, and this is an accepted consequence of having no admin:
   direct transfer);
 - a compose message written by a third party whose recipient cannot be decoded;
 - a compose whose recipient can never receive the arriving token (for example, the issuer has
-  deauthorised its trustline for good). It stays queued and runs if the recipient ever can.
+  deauthorised its trustline for good, or its trustline limit has no room for the amount). It stays
+  queued and runs if the recipient ever can;
+- a compose whose recipient is the Arrival Contract itself, which only a third party's message can
+  name: the contract pays itself and the funds stay here.
 
-Mavna's SDK never builds the second or third case: it refuses a recipient it cannot encode, and
-checks when quoting and again when building that the recipient can hold both the arriving token and
-the asset it wants. For any recipient it can decode, the contract converts or delivers as it came.
+Mavna's SDK never builds the second, third or fourth case: it refuses a recipient it cannot encode,
+and checks when quoting and again when building that the recipient can hold both the arriving token
+and the asset it wants. For any other recipient it can decode, the contract converts or delivers as
+it came.
+
+A trustline limit is the one refusal the contract cannot see before it swaps, because an asset
+contract does not expose it. So the payout is attempted rather than assumed:
+
+- the recipient refuses the converted amount: the output is swapped back through the same pools,
+  holding the venue to its own estimate, and everything is delivered as it came. The recipient gets
+  less than arrived by the venue's fees both ways. If the venue will not take it back, the call
+  reverts and the compose stays queued until the recipient raises its limit;
+- the integrator's fee account refuses the fee: the fee goes to the recipient, and if the recipient
+  has no room for it either, it is swapped back and sent to the recipient as the arriving token. An
+  integrator's account never holds up a user's funds;
+- a fee account equal to the Arrival Contract is treated as no fee.
 
 ## Build
 
@@ -64,7 +80,7 @@ The same commit built from a clean `git archive` in another directory gives the 
 
 | Network | Contract                                                   | Wasm sha256                                                        | Allowlist                                                                                                  |
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| testnet | `CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A` | `688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
+| testnet | `CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X` | `66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its allowlisted sender is
 a key that queues compose messages on the real testnet endpoint itself. It proves the endpoint
@@ -93,10 +109,12 @@ What the constructor is given decides what the contract will ever trust, so on m
   router upgraded by them, can change what a swap does with the funds it is given. The router's
   source was not reviewed here; check these roles again at deployment time.
 
-Earlier testnet instances hold nothing and are not used. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`)
-swapped without estimating first, and its fallback failed on-chain whenever the swap reverted,
-because a rolled-back swap still costs ledger writes that simulation does not predict.
-`CB4B235W...JS7F` (`47921dcd...d714`) did not treat a trustline the issuer has not authorised as
-unable to hold the wanted asset. `CBSWBSEL...6252` (`56e2acc5...e35f`) called any wanted asset or
-path token the message named, which let a hostile token spend an executor's authorization; it had no
-lists of what it may convert into and route through.
+Earlier testnet instances hold nothing and are not used. `CD5M6IBU...P35A` (`688456b0...6155`)
+trapped when a trustline limit refused the payout, leaving the compose queued instead of delivering
+it as it came. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`) swapped without estimating first, and its
+fallback failed on-chain whenever the swap reverted, because a rolled-back swap still costs ledger
+writes that simulation does not predict. `CB4B235W...JS7F` (`47921dcd...d714`) did not treat a
+trustline the issuer has not authorised as unable to hold the wanted asset. `CBSWBSEL...6252`
+(`56e2acc5...e35f`) called any wanted asset or path token the message named, which let a hostile
+token spend an executor's authorization; it had no lists of what it may convert into and route
+through.

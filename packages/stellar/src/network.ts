@@ -80,20 +80,13 @@ export const PUBLIC_TESTNET_RPC_URL = "https://soroban-testnet.stellar.org";
  * returned malformed responses on two calls in eight and was dropped for it.
  *
  * Ordered by measured latency. An integrator can and should point at their own.
+ *
+ * Mainnet showed no backwards drift across repeated calls, unlike testnet. That
+ * is a reason to expect fewer retries, not to trust a single read: a provider can
+ * change its topology without telling anyone, so the read guard still applies.
  */
 export const PUBLIC_MAINNET_RPC_URLS: readonly string[] = [
   "https://rpc.lightsail.network",
   "https://soroban-rpc.mainnet.stellar.gateway.fm",
   "https://mainnet.sorobanrpc.com",
 ];
-
-/**
- * Mainnet behaves better than testnet here, but the read guard still applies.
- *
- * Testnet's public endpoint is load balanced across nodes at different heights and
- * drifts backwards; mainnet showed no regressions across repeated calls. That is a
- * reason to expect fewer retries, not a reason to trust a single read: a provider
- * can change its topology without telling anyone, and the guard costs nothing when
- * it is not needed.
- */
-export const MAINNET_IS_MORE_CONSISTENT_BUT_STILL_GUARDED = true;

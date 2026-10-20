@@ -143,7 +143,10 @@ function remoteServices(): void {
     if (url.startsWith(`${HORIZON}/order_book`)) {
       asked.push("horizon order book");
       // 0.2 USDC per XLM both ways, so one USDC is five XLM.
-      return json({ bids: [{ price: "0.2" }], asks: [{ price: "0.2" }] });
+      return json({
+        bids: [{ price: "0.2", amount: "1000" }],
+        asks: [{ price: "0.2", amount: "5000" }],
+      });
     }
     throw new Error(`the fetch double has no answer for ${url}`);
   });
@@ -222,7 +225,12 @@ function stellarNode(): RpcClient {
           key,
           val: {
             switch: () => ({ name: "trustline" }),
-            trustLine: () => ({ balance: () => 0n, limit: () => 10n ** 15n, flags: () => 1 }),
+            trustLine: () => ({
+              balance: () => 0n,
+              limit: () => 10n ** 15n,
+              flags: () => 1,
+              ext: () => ({ switch: () => 0 }),
+            }),
           },
         });
       }

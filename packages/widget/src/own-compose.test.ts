@@ -5,7 +5,8 @@ import {
   Address,
   nativeToScVal,
   type Operation,
-  TransactionBuilder,
+  SorobanDataBuilder,
+  type Transaction,
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -113,14 +114,17 @@ function stellarNode(): RpcClient {
         result: { retval: queued, auth: [] },
       } as never;
     }
+    // priced so the prepared transaction costs 500000 stroops in all
+    const resourceFee = 500_000n - BigInt((tx as Transaction).fee);
     return {
+      _parsed: true,
+      id: "1",
+      events: [],
       latestLedger: entries.arrival.latestLedger,
+      minResourceFee: resourceFee.toString(),
+      transactionData: new SorobanDataBuilder().setResourceFee(resourceFee),
       result: { retval: xdr.ScVal.scvVoid(), auth: recordedAuth(call?.args() ?? []) },
     } as never;
-  });
-  vi.spyOn(client.server, "prepareTransaction").mockImplementation(async (tx) => {
-    log.push("prepare");
-    return TransactionBuilder.cloneFrom(tx as never, { fee: "500000" }).build() as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
     const sent = tx as { source: string; operations: Operation.InvokeHostFunction[] };
@@ -180,7 +184,7 @@ describe("finishing a conversion on arrival from Activity", () => {
       "stellar connect",
       "simulate compose_queue",
       "simulate lz_compose",
-      "prepare",
+      "simulate lz_compose",
     ]);
     if (priced.kind !== "priced") return;
     expect(await priced.finish()).toEqual({ kind: "composed", txHash: "c0de", ledger: 7 });
