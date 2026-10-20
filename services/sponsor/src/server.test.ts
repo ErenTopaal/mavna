@@ -2551,6 +2551,21 @@ describe("the sponsor skips stored state it did not write, and still starts", ()
 });
 
 describe("the sponsor reads every request field as the type it must be", () => {
+  it.each(["constructor", "toString", "__proto__"])(
+    "refuses %s as an asset name, which no curated list holds",
+    async (name) => {
+      const server = await startServer({ reserveFunding: "self" });
+      const user = Keypair.random();
+      server.rpc.accounts.set(user.publicKey(), 1n);
+      const answered = await server.post("/prepare", {
+        destination: user.publicKey(),
+        assets: [name],
+      });
+      expect(answered.status).toBe(400);
+      expect(answered.body.error).toBe("This sponsor only prepares accounts for assets it curates.");
+    },
+  );
+
   it("refuses a source chain that is not a chain id, and still starts after a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mavna-sponsor-"));
     const state = new FileDocumentStore(dir);

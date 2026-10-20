@@ -1051,7 +1051,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     const names = body.assets ?? ["USDC"];
-    const assets = names.map((name) => options.curatedAssets[name]);
+    // own keys only: a plain object answers "constructor" and "toString" too
+    const assets = names.map((name) =>
+      Object.hasOwn(options.curatedAssets, name) ? options.curatedAssets[name] : undefined,
+    );
     if (assets.some((asset) => asset === undefined)) {
       // By name from the curated list, never by issuer from the wire: sponsoring
       // a trustline to an imitation asset is paying to phish our own users.
