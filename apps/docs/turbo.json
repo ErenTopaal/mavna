@@ -1,9 +1,11 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "//": "Inlined at build time, so a cached build made for another sponsor is never served.",
   "extends": ["//"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["NEXT_PUBLIC_MAVNA_*"],
       "outputs": [".next/**", "!.next/cache/**", "public/_pagefind/**"]
     }
   }

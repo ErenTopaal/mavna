@@ -130,6 +130,10 @@ function FootLink({ href, children }: { href: string; children: ReactNode }): Re
   );
 }
 
+// set at build time, and vite.config.ts refuses a production build without it.
+// a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
+const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
+
 /** A real Mavna widget, mounted only once it nears the viewport so the landing does
  *  not spin up several transfer engines on first paint. It holds its own height
  *  until then, so the page does not jump when the widget arrives. */
@@ -160,7 +164,11 @@ function Live({
   }, [show]);
   return (
     <div ref={ref} style={{ minHeight: show ? undefined : hold, ...style }}>
-      {show ? <MavnaWidget config={config} /> : null}
+      {show ? (
+        <MavnaWidget
+          config={SPONSOR_URL === undefined ? config : { ...config, sponsorUrl: SPONSOR_URL }}
+        />
+      ) : null}
     </div>
   );
 }

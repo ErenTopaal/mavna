@@ -9,7 +9,12 @@ export default defineConfig({
           // apps/** included deliberately: every gap a full audit found lived in
           // the assembly layer, which was the one layer nothing tested. Green
           // packages under an untested app is how that happened.
-          include: ["packages/**/*.test.ts", "services/**/*.test.ts", "apps/**/src/**/*.test.ts"],
+          include: [
+            "packages/**/*.test.ts",
+            "services/**/*.test.ts",
+            "apps/**/src/**/*.test.ts",
+            "apps/docs/*.test.ts",
+          ],
           // Live tests must never run here. They hit the network, and a testnet
           // outage is not evidence that someone's change is wrong.
           exclude: ["**/*.live.test.ts", "**/node_modules/**", "**/dist/**"],

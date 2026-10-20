@@ -1,4 +1,5 @@
 // @ts-check
+import { PHASE_PRODUCTION_BUILD } from "next/constants.js";
 import nextra from "nextra";
 
 /**
@@ -15,8 +16,26 @@ const withNextra = nextra({
   search: { codeblocks: true },
 });
 
-export default withNextra({
-  reactStrictMode: true,
-  // Do not write CLAUDE.md / AGENTS.md into this app on every dev run.
-  agentRules: false,
-});
+/**
+ * The live widgets on these pages call a sponsor. Without one they fall back to
+ * http://localhost:8787, which a reader's browser cannot reach, and every
+ * Circle route declines, so a production build stops here instead.
+ *
+ * @param {string} phase
+ */
+export default function config(phase) {
+  if (
+    phase === PHASE_PRODUCTION_BUILD &&
+    (process.env.NEXT_PUBLIC_MAVNA_SPONSOR_URL ?? "") === ""
+  ) {
+    throw new Error(
+      "NEXT_PUBLIC_MAVNA_SPONSOR_URL is not set. A production build needs the testnet sponsor " +
+        "the live widgets will call, for example NEXT_PUBLIC_MAVNA_SPONSOR_URL=https://sponsor.mavna.app.",
+    );
+  }
+  return withNextra({
+    reactStrictMode: true,
+    // Do not write CLAUDE.md / AGENTS.md into this app on every dev run.
+    agentRules: false,
+  });
+}
