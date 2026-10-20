@@ -18,7 +18,7 @@ import {
   pad,
 } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LayerZeroAdapter } from "./adapter.js";
+import { LayerZeroAdapter, LayerZeroRefusal } from "./adapter.js";
 import { SEND_ULN_ABI } from "./dvn.js";
 import {
   LAYERZERO_DVN_METADATA_URL,
@@ -561,7 +561,7 @@ describe("what a user sends and what lands, read from the deployment", () => {
     world.assetInfoIssuer = READY;
     await expect(mainnet().sendableAssets("arbitrum")).rejects.toMatchObject({
       retryable: false,
-      message: expect.stringMatching(/does not derive/),
+      detail: expect.stringMatching(/does not derive/),
     });
   });
 
@@ -679,7 +679,10 @@ describe("the Stellar side of the pathway, checked before sending", () => {
 
   it("refuses a Stellar OFT that does not peer back to the sending OFT", async () => {
     world.stellarPeer = `0x${"00".repeat(12)}${"77".repeat(20)}`;
-    await expect(mainnet().sendableAssets("arbitrum")).rejects.toThrow(/does not peer back/);
+    await expect(mainnet().sendableAssets("arbitrum")).rejects.toMatchObject({
+      retryable: false,
+      detail: expect.stringMatching(/does not peer back/),
+    });
   });
 
   it("declines while the Stellar OFT is paused, since nothing would be delivered", async () => {
@@ -729,6 +732,33 @@ describe("the Stellar side of the pathway, checked before sending", () => {
     world.inboundCapacity = 250_000_000n;
     world.maxAmountLD = 25_000_000n;
     expect(isRoute(await quoteFor())).toBe(true);
+  });
+});
+
+describe("what sendableAssets throws to an SDK caller", () => {
+  it("says it in our words, keeps the node's in detail, and stays retryable", async () => {
+    world.evmDown = true;
+    const error = await mainnet()
+      .sendableAssets("arbitrum")
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LayerZeroRefusal);
+    const refusal = error as LayerZeroRefusal;
+    expect(refusal.message).toBe(
+      "LayerZero could not be read for this chain right now. Try again in a moment.",
+    );
+    expect(refusal.retryable).toBe(true);
+    expect(refusal.detail).toMatch(/No usable node answered for chain 42161/);
+  });
+
+  it("keeps a permanent refusal permanent, with what was wrong in detail", async () => {
+    world.assetInfoIssuer = READY;
+    const error = (await mainnet()
+      .sendableAssets("arbitrum")
+      .catch((e: unknown) => e)) as LayerZeroRefusal;
+    expect(error).toBeInstanceOf(LayerZeroRefusal);
+    expect(error.retryable).toBe(false);
+    expect(error.message).not.toMatch(/does not derive/);
+    expect(error.detail).toMatch(/does not derive/);
   });
 });
 

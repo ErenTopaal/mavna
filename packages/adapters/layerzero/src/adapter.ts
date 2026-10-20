@@ -158,6 +158,21 @@ export interface LayerZeroAdapterOptions {
   readonly arrival?: ArrivalSetup;
 }
 
+/**
+ * A LayerZero "no", with what a person reads kept apart from what an operator
+ * needs. `message` is fixed and fit to show; `detail` carries the nodes' and
+ * contracts' own words, which can hold URLs and raw protocol text.
+ */
+export class LayerZeroRefusal extends MavnaError {
+  readonly detail: string;
+
+  constructor(message: string, detail: string, options: { retryable: boolean; cause?: unknown }) {
+    super(message, options);
+    this.name = "LayerZeroRefusal";
+    this.detail = detail;
+  }
+}
+
 export class LayerZeroAdapter implements BridgeAdapter {
   readonly id = "layerzero";
   /**
@@ -253,7 +268,24 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * when the chain has no route or what lands has no classic identity.
    */
   async sendableAssets(chainId: string): Promise<{ readonly from: Asset; readonly to: Asset }> {
-    const route = await this.discovery.routeFrom(chainId);
+    let route: ResolvedRoute;
+    try {
+      route = await this.discovery.routeFrom(chainId);
+    } catch (cause) {
+      // already written for the person reading it
+      if (cause instanceof NoRouteHere) throw cause;
+      // an SDK caller may show this message, so it is ours; the nodes' and
+      // contracts' own words go in detail, and retrying stays as possible as it was
+      const retryable = cause instanceof MavnaError && cause.retryable;
+      throw new LayerZeroRefusal(
+        retryable
+          ? "LayerZero could not be read for this chain right now. Try again in a moment."
+          : "LayerZero has no working route from this chain to Stellar right now. Another " +
+              "route may.",
+        operatorDetail(cause),
+        { retryable, cause },
+      );
+    }
     if (route.delivers === undefined) {
       throw new MavnaError(
         `${route.tokenSymbol} from ${route.source.name} lands on Stellar as the token contract ` +
