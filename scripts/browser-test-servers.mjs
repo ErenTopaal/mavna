@@ -5,6 +5,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const base = Number(process.env.MAVNA_TEST_PORT ?? "4319");
+const port = (offset) => String(base + offset);
 
 const built = spawnSync(
   "pnpm",
@@ -49,11 +51,11 @@ async function answers(url) {
   }
 }
 
-serve("@mavna/playground", ["vite", "preview", "--port", "4320", "--strictPort"]);
-serve("@mavna/web", ["vite", "preview", "--port", "4321", "--strictPort"]);
-serve("@mavna/docs", ["next", "start", "--port", "4322"]);
+serve("@mavna/playground", ["vite", "preview", "--port", port(1), "--strictPort"]);
+serve("@mavna/web", ["vite", "preview", "--port", port(2), "--strictPort"]);
+serve("@mavna/docs", ["next", "start", "--port", port(3)]);
 
-const others = ["http://localhost:4320", "http://localhost:4321", "http://localhost:4322"];
+const others = [1, 2, 3].map((offset) => `http://localhost:${port(offset)}`);
 const deadline = Date.now() + 120_000;
 while (!(await Promise.all(others.map(answers))).every(Boolean)) {
   if (Date.now() > deadline) {
@@ -63,4 +65,4 @@ while (!(await Promise.all(others.map(answers))).every(Boolean)) {
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
-serve("@mavna/app", ["vite", "preview", "--port", "4319", "--strictPort"]);
+serve("@mavna/app", ["vite", "preview", "--port", port(0), "--strictPort"]);

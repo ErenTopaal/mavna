@@ -9,6 +9,7 @@
       "!**/node_modules",
       "!**/test-results",
       "!**/playwright-report",
+      "!tests/fixtures",
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml",
@@ -65,6 +66,27 @@
         "rules": {
           "a11y": {
             "noLabelWithoutControl": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/**/src/**",
+        "!packages/**/src/**/*.test.ts",
+        "!packages/**/src/**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "Buffer is a Node global that browsers do not have, and the packages run in browsers. Use Uint8Array with TextEncoder or TextDecoder, or the Buffer an SDK itself exports when its API demands one."
+                }
+              }
+            }
           }
         }
       }

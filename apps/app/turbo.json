@@ -4,7 +4,7 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "env": ["VITE_MAVNA_*"]
+      "env": ["VITE_MAVNA_*", "MAVNA_BROWSER_HARNESS"]
     }
   }
 }

@@ -10,5 +10,5 @@
     "paths": { "@/*": ["./src/*"] },
     "isolatedDeclarations": false
   },
-  "include": ["src/**/*", "vite.config.ts"]
+  "include": ["src/**/*", "harness/**/*", "vite.config.ts"]
 }

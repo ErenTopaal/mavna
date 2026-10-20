@@ -32,8 +32,22 @@ export default defineConfig(({ command, mode }) => {
   if (command === "build" && mode === "production") {
     requireSponsors(loadEnv(mode, fileURLToPath(new URL(".", import.meta.url)), "VITE_"));
   }
+  // the browser tests' harness page, never part of a build that gets hosted
+  const harness = process.env.MAVNA_BROWSER_HARNESS === "1";
   return {
     plugins: [react(), tailwindcss()],
+    ...(harness
+      ? {
+          build: {
+            rolldownOptions: {
+              input: {
+                main: fileURLToPath(new URL("./index.html", import.meta.url)),
+                harness: fileURLToPath(new URL("./harness/buffer-free.html", import.meta.url)),
+              },
+            },
+          },
+        }
+      : {}),
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },

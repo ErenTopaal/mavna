@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { SPONSOR_URL } from "./sponsor.js";
+import { PORTS, SPONSOR_URL } from "./env.js";
 
 // Each hosted surface asks its sponsor for terms once it has something to quote. Built
 // with a sponsor url, that is the url it asks; built without one, it would ask
@@ -28,15 +28,15 @@ async function askForQuote(page: Page): Promise<void> {
 }
 
 const SURFACES: readonly { name: string; url: string; reveal?: string }[] = [
-  { name: "app", url: "http://localhost:4319/" },
-  { name: "playground", url: "http://localhost:4320/" },
+  { name: "app", url: `http://localhost:${PORTS.app}/` },
+  { name: "playground", url: `http://localhost:${PORTS.playground}/` },
   // the landing mounts its widget only once it nears the viewport
   {
     name: "landing",
-    url: "http://localhost:4321/",
+    url: `http://localhost:${PORTS.landing}/`,
     reveal: "One transfer. Every bridge answers at the same time.",
   },
-  { name: "docs live widget", url: "http://localhost:4322/widget" },
+  { name: "docs live widget", url: `http://localhost:${PORTS.docs}/widget` },
 ];
 
 for (const surface of SURFACES) {
