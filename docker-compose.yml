@@ -7,6 +7,10 @@
 # Two services after a one-off build. The app is static files behind a web
 # server; the sponsor is the one process with a key, and its section says
 # exactly what that key can do.
+#
+# The build installs into this checkout's node_modules from inside a Linux
+# container, so the packages it links are Linux ones. Run it from a checkout you
+# do not also build on the host, or run `pnpm install` on the host afterwards.
 services:
   # Installs and builds once for both services. Two installs into the one
   # checkout race on pnpm's store and fail. Built through turbo with the
