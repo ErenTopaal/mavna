@@ -93,6 +93,13 @@ export interface RouteView {
    * not convert has none and a route through a different venue shows that venue.
    */
   readonly swapVenue: string | undefined;
+  /**
+   * The integrator's cut, when the route takes one: only a conversion on arrival
+   * does, where the Arrival Contract pays it out. Already off `receives`.
+   */
+  readonly integratorFee:
+    | { readonly amount: number; readonly symbol: string; readonly recipient: string }
+    | undefined;
   /** What the transfer fee is counted in, read off the fee itself. */
   readonly feeSymbol: string;
   /**
@@ -169,6 +176,7 @@ export function toRouteView(route: Route): RouteView {
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
   const repayment = route.fees.find((f) => f.kind === "reserve-repayment");
   const swapStep = route.steps.find((s) => s.kind === "swap");
+  const integrator = route.fees.find((f) => f.kind === "integrator");
   const receives = amountValue(route.receives);
   const floor = amountValue(route.receivesAtLeast);
   return {
@@ -197,6 +205,14 @@ export function toRouteView(route: Route): RouteView {
             symbol: repayment.total.asset.symbol,
           },
     swapVenue: swapStep === undefined ? undefined : venueLabel(swapStep.source),
+    integratorFee:
+      integrator === undefined
+        ? undefined
+        : {
+            amount: amountValue(integrator.total),
+            symbol: integrator.total.asset.symbol,
+            recipient: integrator.recipients[0]?.name ?? "the integrator",
+          },
     feeSymbol: bridge?.total.asset.symbol ?? route.sends.asset.symbol,
     compose:
       route.compose === undefined
@@ -799,8 +815,8 @@ export function runQuote(
             swap:
               swap === undefined || funding !== "sponsor" ? swap : { ...swap, repaysReserve: true },
             ranking: inputs.priority === "fast" ? "fastest" : "best-received",
-            // No transaction builder pays a fee out yet, so nothing may be shown as
-            // taken. Revisit when a collector exists for a route.
+            // Only a conversion on arrival collects a fee, and its route carries the
+            // fee itself; no other route's builder pays one out, so none is applied here.
             integratorFee:
               engine.integratorFee === undefined
                 ? undefined

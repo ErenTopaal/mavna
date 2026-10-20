@@ -925,6 +925,15 @@ export function renderReview(
           { key: "dest", name: "Recipient", value: short(r.route.destination) },
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} ${r.feeSymbol}` },
+          ...(r.integratorFee === undefined
+            ? []
+            : [
+                {
+                  key: "integrator",
+                  name: "Integrator fee",
+                  value: `${fmt(r.integratorFee.amount)} ${r.integratorFee.symbol} to ${r.integratorFee.recipient}`,
+                },
+              ]),
           ...(r.newAccount && r.reserveXlm !== undefined
             ? [
                 {

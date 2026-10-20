@@ -307,3 +307,34 @@ describe("the host page around the widget", () => {
     expect(flow.state.screen).toBe("send");
   });
 });
+
+describe("an integrator fee on a route", () => {
+  it("is shown on review as its own line, with who receives it", () => {
+    const base = routeFor("layerzero");
+    const route = {
+      ...base,
+      fees: [
+        {
+          kind: "integrator" as const,
+          total: { asset: STELLAR_XLM, baseUnits: "2500000" },
+          recipients: [
+            {
+              name: "Acme Wallet",
+              amount: { asset: STELLAR_XLM, baseUnits: "2500000" },
+              address: DESTINATION,
+            },
+          ],
+          includedInQuote: true,
+        },
+      ],
+    };
+    const view = toRouteView(route);
+    expect(view.integratorFee).toEqual({ amount: 0.25, symbol: "XLM", recipient: "Acme Wallet" });
+    const flow = quotedFlow({ terms: 0 });
+    const html = renderToStaticMarkup(
+      renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM" }),
+    );
+    expect(html).toContain("Integrator fee");
+    expect(html).toContain("0.25 XLM to Acme Wallet");
+  });
+});
