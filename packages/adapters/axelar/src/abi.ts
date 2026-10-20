@@ -73,9 +73,9 @@ export function encodeAddress(value: string): string {
  * always the size of the head.
  */
 function encodeStringTail(value: string): string {
-  const bytes = Buffer.from(value, "utf8");
+  const bytes = new TextEncoder().encode(value);
   const padded = Math.ceil(bytes.length / 32) * 32;
-  return word(bytes.length.toString(16)) + bytes.toString("hex").padEnd(padded * 2, "0");
+  return word(bytes.length.toString(16)) + bytesToHex(bytes).padEnd(padded * 2, "0");
 }
 
 /** Calldata for a call whose arguments are all one word each. */
@@ -152,7 +152,7 @@ export function decodeString(data: string): string {
       retryable: false,
     });
   }
-  return Buffer.from(hex, "hex").toString("utf8");
+  return new TextDecoder().decode(hexToBytes(hex));
 }
 
 /**
@@ -190,5 +190,25 @@ export function encodeStellarDestination(address: string): string {
     );
   }
 
-  return `0x${Buffer.from(address, "ascii").toString("hex")}`;
+  // a valid strkey is base32 letters and digits only, so each character is one ascii byte
+  let hex = "";
+  for (let i = 0; i < address.length; i++)
+    hex += address.charCodeAt(i).toString(16).padStart(2, "0");
+  return `0x${hex}`;
+}
+
+export function bytesToHex(bytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
+  return hex;
+}
+
+export function hexToBytes(hex: string): Uint8Array {
+  const bare = hex.replace(/^0x/, "");
+  if (bare.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(bare)) {
+    throw new MavnaError("Not valid hex.", { retryable: false });
+  }
+  const out = new Uint8Array(bare.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(bare.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }

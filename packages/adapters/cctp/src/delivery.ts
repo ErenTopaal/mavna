@@ -1,7 +1,7 @@
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig } from "@mavna/stellar";
 import type { Account, Transaction } from "@stellar/stellar-sdk";
-import { Contract, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import { Contract, nativeToScVal, TransactionBuilder } from "@stellar/stellar-sdk";
 import { CCTP_CONTRACTS } from "./config.js";
 import { fromHex } from "./hook.js";
 
@@ -63,8 +63,9 @@ export function buildDelivery(inputs: DeliveryInputs): Transaction {
     .addOperation(
       forwarder.call(
         "mint_and_forward",
-        xdr.ScVal.scvBytes(Buffer.from(message)),
-        xdr.ScVal.scvBytes(Buffer.from(attestation)),
+        // nativeToScVal copies into the SDK's own Buffer, so no global is needed
+        nativeToScVal(message, { type: "bytes" }),
+        nativeToScVal(attestation, { type: "bytes" }),
       ),
     )
     .setTimeout(300)

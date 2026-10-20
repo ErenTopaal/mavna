@@ -312,3 +312,21 @@ describe("amounts as a person reads them", () => {
     expect(readable(0n, 7)).toBe("0");
   });
 });
+
+describe("string coding with no Buffer global at all", () => {
+  it("encodes and decodes a string the same way", () => {
+    const nodeBuffer = globalThis.Buffer;
+    const expected = encodeStringCall(SELECTORS.isTrustedChain, "stellar-2026-q1-2");
+    const answer = `0x${"20".padStart(64, "0")}${"5".padStart(64, "0")}${"68c3a96c6c6f".padEnd(64, "0")}`;
+    delete (globalThis as { Buffer?: unknown }).Buffer;
+    try {
+      expect(encodeStringCall(SELECTORS.isTrustedChain, "stellar-2026-q1-2")).toBe(expected);
+      // multi-byte utf-8 survives the round trip: "héllo" is five characters, six bytes
+      expect(decodeString(answer.replace("5".padStart(64, "0"), "6".padStart(64, "0")))).toBe(
+        "héllo",
+      );
+    } finally {
+      globalThis.Buffer = nodeBuffer;
+    }
+  });
+});

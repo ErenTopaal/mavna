@@ -1,5 +1,16 @@
+import { fileURLToPath } from "node:url";
+import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
+import { Account } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { canonicalToLocal, deliveryFailureOf, localToCanonical } from "./delivery.js";
+import { hideBufferFrom } from "./__fixtures__/no-buffer.js";
+import {
+  buildDelivery,
+  canonicalToLocal,
+  deliveryFailureOf,
+  localToCanonical,
+} from "./delivery.js";
+
+const PAYER = "GCKPC23TA3D6FCZDVMH5U4IPJFZEYUFBVASNLDMM3UEYHJGM3DAIVJSU";
 
 /**
  * The decimal boundary.
@@ -70,5 +81,24 @@ describe("what a failed delivery means", () => {
   it("names nothing else", () => {
     expect(deliveryFailureOf("txInsufficientBalance")).toBeUndefined();
     expect(deliveryFailureOf("Error(Contract, #69080)")).toBeUndefined();
+  });
+});
+
+describe("the delivery without Node's Buffer, as in a browser", () => {
+  it("builds the same mint_and_forward call", () => {
+    const inputs = () => ({
+      network: createNetworkConfig({ id: "testnet", rpcUrl: PUBLIC_TESTNET_RPC_URL }),
+      networkId: "testnet" as const,
+      payerAccount: new Account(PAYER, "41"),
+      messageHex: "0x00000001deadbeef",
+      attestationHex: "0xcafe01",
+    });
+    const withNode = buildDelivery(inputs()).toXDR();
+    const restore = hideBufferFrom(fileURLToPath(new URL(".", import.meta.url)));
+    try {
+      expect(buildDelivery(inputs()).toXDR()).toBe(withNode);
+    } finally {
+      restore();
+    }
   });
 });

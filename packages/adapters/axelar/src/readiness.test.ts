@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import {
@@ -10,6 +11,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hideBufferFrom } from "./__fixtures__/no-buffer.js";
 import { SELECTORS } from "./abi.js";
 import { AxelarAdapter } from "./adapter.js";
 import { forgetItsAssets } from "./assets.js";
@@ -479,5 +481,26 @@ describe("an interchain token, by destination lane", () => {
       await adapter().quote(ask({ to: stellarInterchain, destination: CONTRACT_DESTINATION })),
     );
     expect(route.steps.map((step) => step.kind)).toEqual(["bridge"]);
+  });
+});
+
+describe("without Node's Buffer, as in a browser", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = hideBufferFrom(fileURLToPath(new URL(".", import.meta.url)));
+  });
+  afterEach(() => restore());
+
+  it("quotes and builds a transfer", async () => {
+    classicUsdc();
+    const route = routeOf(await adapter().quote(ask()));
+    const built = await adapter().buildTransactions(route);
+
+    const transfer = JSON.parse(built[built.length - 1]?.payload ?? "{}");
+    expect(transfer.functionName).toBe("interchainTransfer");
+    // the destination is the strkey's own letters, hex encoded
+    expect(transfer.args[2]).toBe(
+      `0x${Array.from(new TextEncoder().encode(ACCOUNT), (b) => b.toString(16)).join("")}`,
+    );
   });
 });
