@@ -11,10 +11,12 @@
  * build.
  *
  * Only what the build reads is copied: the workspace manifests and configs at
- * the root, and packages/, apps/, services/, scripts/ and contracts/. Inside
- * those, nothing git ignores (the checkout's own .gitignore) and nothing that
- * looks like a secret (.env files, *.env, keys) travels: compose passes settings
- * as environment variables, and the volume is mounted into the app container.
+ * the root, and inside packages/, apps/, services/, scripts/ and contracts/ only
+ * the file types a build reads (sources, manifests, styles, assets). On top of
+ * that, nothing any .gitignore ignores and nothing that looks like a secret
+ * (.env files, *.env, keys, *secret*, *credential*) travels: compose passes
+ * settings as environment variables, and the volume is mounted into the app
+ * container.
  */
 import {
   copyFileSync,
@@ -59,20 +61,63 @@ const SECRET = [
   /^id_(rsa|ecdsa|ed25519)/,
 ];
 
+// inside the allowed directories, only the file types a build reads
+const BUILD_FILE = new Set([
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "jsonc",
+  "md",
+  "mdx",
+  "css",
+  "html",
+  "svg",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "ico",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "toml",
+  "rs",
+  "lock",
+  "yaml",
+  "yml",
+  "sh",
+  "wasm",
+]);
+
 function isSecret(name) {
-  return name !== ".env.example" && SECRET.some((pattern) => pattern.test(name));
+  if (name === ".env.example") return false;
+  return SECRET.some((pattern) => pattern.test(name)) || /secret|credential/i.test(name);
+}
+
+function isBuildFile(name) {
+  const dot = name.lastIndexOf(".");
+  // no extension, or only a leading dot (.npmrc, .envrc): not a build file
+  return dot > 0 && BUILD_FILE.has(name.slice(dot + 1).toLowerCase());
 }
 
 /**
- * The checkout's .gitignore, as tests on a path relative to the root: a plain
- * name matches at any depth, a pattern with a slash from the root, `*` within a
- * segment, `!` re-includes. Enough for this repository's file, which is all it
- * has to read.
+ * One .gitignore's rules, as tests on a path relative to the directory it sits
+ * in: a plain name matches at any depth below it, a pattern with a slash from
+ * that directory, `*` within a segment, `!` re-includes. Enough for this
+ * repository's files, which is all it has to read.
  */
-function gitignored(src) {
-  const file = join(src, ".gitignore");
-  if (!existsSync(file)) return () => false;
-  const rules = readFileSync(file, "utf8")
+function rulesIn(dir, base) {
+  const file = join(dir, ".gitignore");
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"))
@@ -84,28 +129,37 @@ function gitignored(src) {
         .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
         .join("[^/]*");
       const anchored = body.includes("/");
-      return { negated, test: new RegExp(anchored ? `^${glob}$` : `(^|/)${glob}$`) };
+      return { base, negated, test: new RegExp(anchored ? `^${glob}$` : `(^|/)${glob}$`) };
     });
-  return (path) => {
-    let ignored = false;
-    for (const rule of rules) if (rule.test.test(path)) ignored = !rule.negated;
-    return ignored;
-  };
+}
+
+function ignoredBy(rules, path) {
+  let ignored = false;
+  for (const rule of rules) {
+    const prefix = rule.base === "" ? "" : `${rule.base}/`;
+    if (!path.startsWith(prefix)) continue;
+    if (rule.test.test(path.slice(prefix.length))) ignored = !rule.negated;
+  }
+  return ignored;
 }
 
 export function sync(src, dest) {
-  const ignored = gitignored(src);
-  const wanted = (rel, name) =>
-    !VOLUME_OWN.has(name) &&
-    !isSecret(name) &&
-    !ignored(rel === "" ? name : `${rel}/${name}`) &&
-    (rel !== "" || ROOT_ALLOWED.has(name));
-  mirror(src, dest, "", wanted);
+  mirror(src, dest, "", rulesIn(src, ""));
 }
 
-function mirror(src, dest, rel, wanted) {
+function wanted(rel, name, isDirectory, rules) {
+  const path = rel === "" ? name : `${rel}/${name}`;
+  if (VOLUME_OWN.has(name) || isSecret(name) || ignoredBy(rules, path)) return false;
+  if (rel === "") return ROOT_ALLOWED.has(name);
+  return isDirectory || isBuildFile(name);
+}
+
+function mirror(src, dest, rel, inherited) {
   mkdirSync(dest, { recursive: true });
-  const names = readdirSync(src).filter((name) => wanted(rel, name));
+  const rules = rel === "" ? inherited : [...inherited, ...rulesIn(src, rel)];
+  const names = readdirSync(src).filter((name) =>
+    wanted(rel, name, lstatSync(join(src, name)).isDirectory(), rules),
+  );
   const keep = new Set(names);
   for (const name of readdirSync(dest)) {
     if (!keep.has(name) && !VOLUME_OWN.has(name)) {
@@ -124,7 +178,7 @@ function mirror(src, dest, rel, wanted) {
     }
     if (kind.isDirectory()) {
       if (there !== undefined && !there.isDirectory()) rmSync(to, { force: true });
-      mirror(from, to, rel === "" ? name : `${rel}/${name}`, wanted);
+      mirror(from, to, rel === "" ? name : `${rel}/${name}`, rules);
     } else {
       if (there !== undefined) rmSync(to, { recursive: true, force: true });
       if (kind.isSymbolicLink()) symlinkSync(readlinkSync(from), to);

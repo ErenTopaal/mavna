@@ -203,48 +203,67 @@ describe("the conversion inside the rail's budget", () => {
   const wanted = { ...asset, id: "native", symbol: "XLM" };
 
   it("hands the swap leg what is left of the budget, and says the conversion ran out of time", async () => {
-    let abortedAfter: number | undefined;
-    const started = Date.now();
-    const waitsForDeadline: SwapQuoter = {
-      id: "venues",
-      quote: (q) =>
-        new Promise((_resolve, reject) => {
-          q.signal?.addEventListener("abort", () => {
-            abortedAfter = Date.now() - started;
-            reject(new Error("aborted"));
-          });
-        }),
-    };
-    const result = await raceAdapters(
-      [
-        adapter("rail", async () => {
-          await sleep(60);
-          return {
-            ...route("rail"),
-            destination: "GDEST",
-            deliveredAtLeast: { asset, baseUnits: "1" },
-          };
-        }),
-      ],
-      { ...request, maxSlippageBps: 50 },
-      {
-        timeoutMs: 200,
-        swap: {
-          provider: waitsForDeadline,
-          delivered: asset,
-          deliveredContract: "CA",
-          wanted,
-          wantedContract: "native",
+    // Fake time, so the budget arithmetic is checked exactly and a loaded
+    // machine cannot move it. AbortSignal.timeout is Node's own timer, outside
+    // the fakes, so it is replaced with a signal this test fires itself.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const deadline = new AbortController();
+    const handed: number[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      handed.push(ms);
+      return deadline.signal;
+    });
+    try {
+      let legAsked = false;
+      const waitsForDeadline: SwapQuoter = {
+        id: "venues",
+        quote: (q) =>
+          new Promise((_resolve, reject) => {
+            legAsked = true;
+            q.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      };
+      const racing = raceAdapters(
+        [
+          adapter("rail", async () => {
+            await sleep(60);
+            return {
+              ...route("rail"),
+              destination: "GDEST",
+              deliveredAtLeast: { asset, baseUnits: "1" },
+            };
+          }),
+        ],
+        { ...request, maxSlippageBps: 50 },
+        {
+          timeoutMs: 200,
+          swap: {
+            provider: waitsForDeadline,
+            delivered: asset,
+            deliveredContract: "CA",
+            wanted,
+            wantedContract: "native",
+          },
         },
-      },
-    );
-    // the leg is stopped at the rail's deadline, not a full budget after the rail answered
-    expect(abortedAfter).toBeGreaterThanOrEqual(180);
-    expect(abortedAfter).toBeLessThan(240);
-    expect(result.rejected).toHaveLength(1);
-    expect(result.rejected[0]?.reason).toBe("timed-out");
-    expect(result.rejected[0]?.explanation).toMatch(/XLM/);
-    expect(result.rejected[0]?.retryable).toBe(true);
+      );
+      await vi.advanceTimersByTimeAsync(60);
+      // the rail took 60 of its 200 ms, so the leg gets the 140 left, not a
+      // fresh budget of its own
+      expect(legAsked).toBe(true);
+      expect(handed).toEqual([140]);
+
+      deadline.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await racing;
+      expect(result.routes).toEqual([]);
+      expect(result.rejected).toHaveLength(1);
+      expect(result.rejected[0]?.reason).toBe("timed-out");
+      expect(result.rejected[0]?.explanation).toMatch(/XLM/);
+      expect(result.rejected[0]?.retryable).toBe(true);
+    } finally {
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 
