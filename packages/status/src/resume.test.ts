@@ -8,6 +8,26 @@ describe("finding a transfer from what the user actually has", () => {
     expect(parseLookupKey(`0x${h}`).kind).toBe("source-tx");
   });
 
+  it("accepts a Solana signature and a Starknet hash written without its leading zeros", () => {
+    // a Solana signature is 64 bytes in base58, so 87 or 88 characters
+    const solana =
+      "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+    expect(parseLookupKey(solana)).toEqual({ kind: "source-tx", value: solana });
+    expect(parseLookupKey(solana.slice(0, 87)).kind).toBe("source-tx");
+    const starknet = `0x${"7c1f".repeat(15)}abc`;
+    expect(starknet).toHaveLength(65);
+    expect(parseLookupKey(starknet)).toEqual({ kind: "source-tx", value: starknet });
+    expect(parseLookupKey("0x1a2b").kind).toBe("source-tx");
+    // exactly 40 hex digits is still an EVM address
+    expect(parseLookupKey(`0x${"ab".repeat(20)}`).kind).toBe("deposit-address");
+  });
+
+  it("refuses base58 that is too short or uses letters base58 leaves out", () => {
+    expect(() => parseLookupKey("5VERv8NMvzbJMEkV8xnrLkEa")).toThrow(/Paste the transaction/);
+    expect(() => parseLookupKey(`${"0OIl".repeat(22)}`)).toThrow(/Paste the transaction/);
+    expect(() => parseLookupKey(`0x${"a".repeat(65)}`)).toThrow(/Paste the transaction/);
+  });
+
   it("accepts a Stellar address, which is all a user may have after closing a tab", () => {
     // The most mature product in this category REFUSES this: its type requires a
     // transaction hash or an internal task id. This is the differentiator.

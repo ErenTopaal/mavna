@@ -24,9 +24,11 @@ a `TransferHandle`. Being able to resume from the destination address is the poi
 prior art misses: most bridges can resume from a transaction hash or a task id and
 cannot answer "here is the address I sent to."
 
-`parseLookupKey` takes a pasted string and classifies it: a 64-character hex value
-is a source transaction, a Stellar address is a destination, an EVM address is a
-deposit address. `toHandle` turns the key into a `TransferHandle`, leaving
+`parseLookupKey` takes a pasted string and classifies it. A Stellar address is a
+destination and an EVM address (`0x` and exactly 40 hex digits) is a deposit
+address. A source transaction is 64 hex digits with or without `0x`, any other
+`0x` hex value of up to 64 digits (a Starknet hash shown without its leading
+zeros), or a base58 Solana signature of 64 to 88 characters. `toHandle` turns the key into a `TransferHandle`, leaving
 `sourceChainId` absent so an adapter that spans many chains searches rather than
 declines.
 
