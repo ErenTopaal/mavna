@@ -14,8 +14,9 @@ import {
   parseDisabledSources,
   type SwapAttachment,
 } from "@mavna/routing";
-import { createNetworkConfig, type NetworkConfig, RpcClient } from "@mavna/stellar";
+import { createNetworkConfig, type NetworkConfig, RpcClient, XlmPriceSource } from "@mavna/stellar";
 import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { IntegratorFeeConfig } from "./config.js";
 import { circleDomain, usdcSourceChains } from "./domains";
 import { rememberConnection } from "./helpers";
@@ -128,6 +129,12 @@ export interface Engine {
    * next quote asks again rather than repeating an outage forever.
    */
   sponsorTerms(): Promise<SponsorTerms>;
+  /**
+   * The XLM order book's mid price for Stellar USDC, in stroops per whole USDC,
+   * read from Horizon the way the sponsor prices its settlement. Rejects when the
+   * book cannot price it.
+   */
+  xlmStroopsPerUsdc(): Promise<bigint>;
   /** Chains USDT0 can be sent from, filtered by the same allow and deny lists. */
   readonly usdt0Chains: ReadonlyArray<{ id: string; name: string }>;
   /**
@@ -153,6 +160,7 @@ export function createEngine(config: EngineConfig): Engine {
   const { network } = config;
   const netConfig = createNetworkConfig({ id: network, rpcUrl: config.rpcUrl });
   const rpc = new RpcClient({ url: netConfig.rpcUrl });
+  const xlmPrices = new XlmPriceSource({ horizonUrl: netConfig.horizonUrl });
 
   const breaker = createCircuitBreaker(() => parseDisabledSources(config.disabledSources));
 
@@ -267,6 +275,8 @@ export function createEngine(config: EngineConfig): Engine {
     // A host can bring its own Stellar signer; otherwise the built-in wallet kit.
     stellar: rememberConnection(config.stellar ?? createStellarWallet(network)),
     historyKey: config.historyKey,
+    xlmStroopsPerUsdc: () =>
+      xlmPrices.xlmStroopsPerUnit(new StellarAsset("USDC", STELLAR_USDC_ISSUER[network])),
     sourceDomain(chainId) {
       return circleDomain(network, chainId);
     },

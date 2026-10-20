@@ -368,6 +368,12 @@ export interface SponsorCheck {
    * recipient's own transaction whoever funds reserves.
    */
   readonly convertsInto?: Asset;
+  /**
+   * The XLM order book's mid price for USDC, in stroops per whole USDC: the same
+   * figure the sponsor prices its settlement's most it may spend by. Read only
+   * when the sponsor fronts reserves, for a route that sets an account up.
+   */
+  readonly xlmStroopsPerUsdc?: bigint | Error;
   readonly holdsWanted?:
     | "ready"
     | "missing"
@@ -451,6 +457,11 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
 
+  if (setsUp && terms.reserveFunding === "sponsor") {
+    const blocked = repaymentBlocker(route, check.xlmStroopsPerUsdc);
+    if (blocked !== undefined) return decline(blocked[0], blocked[1]);
+  }
+
   const holds = convertBlocker(route, check);
   if (holds !== undefined) return decline(holds[0], holds[1]);
 
@@ -487,6 +498,43 @@ function convertsInto(route: Route, check: SponsorCheck): Asset | undefined {
   if (wanted === undefined) return undefined;
   const swap = route.steps.find((s) => s.kind === "swap");
   return swap?.to.asset.id === wanted.id ? wanted : undefined;
+}
+
+/**
+ * Why the arrival could not repay a reserve the sponsor fronts, or undefined.
+ *
+ * The settlement buys the reserve back out of what arrives and may spend up to
+ * twice its value at the order book's mid price (the sponsor's documented
+ * ceiling). An arrival short of that ceiling is a settlement the user signs
+ * that may never be taken, leaving the sponsor's XLM stranded in the account.
+ */
+function repaymentBlocker(
+  route: Route,
+  price: bigint | Error | undefined,
+): [RouteRejection["reason"], string] | undefined {
+  if (price === undefined || price instanceof Error) {
+    return [
+      "temporarily-unavailable",
+      "What repaying the new account's reserve would take could not be priced just now" +
+        (price instanceof Error ? `: ${message(price)}` : "."),
+    ];
+  }
+  const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  if (reserve === undefined || price <= 0n) {
+    return ["temporarily-unavailable", "This route does not say what reserve it sets up."];
+  }
+  const arrives = route.deliveredAtLeast;
+  const scale = 10n ** BigInt(arrives.asset.decimals);
+  const mostItMayTake = (BigInt(reserve.total.baseUnits) * 2n * scale) / price;
+  if (BigInt(arrives.baseUnits) > mostItMayTake) return undefined;
+  const symbol = arrives.asset.symbol;
+  return [
+    "amount-too-small",
+    `Setting up this new account is repaid from what arrives, and that repayment may take up ` +
+      `to ${fmtUnits(mostItMayTake.toString(), arrives.asset.decimals)} ${symbol}. Only at ` +
+      `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
+      "may not cover it. Send more, or send to an account that can already receive it.",
+  ];
 }
 
 /**
@@ -629,7 +677,10 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
 
 /** Ask the sponsor for its terms, and the network for the destination if they need it. */
 async function checkSponsor(
-  engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops">,
+  engine: Pick<
+    Engine,
+    "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops" | "xlmStroopsPerUsdc"
+  >,
   destination: string,
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
@@ -642,6 +693,7 @@ async function checkSponsor(
   }
   let found: SponsorCheck["destination"] = "exists";
   let spare: bigint | undefined;
+  let price: bigint | Error | undefined;
   const { baseReserveStroops } = engine;
   if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
     // read too, so a decline can say whether the account or only the trustline is missing
@@ -652,6 +704,14 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
+      // something will be set up, and repaid from the arrival at this price
+      if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
+        try {
+          price = await engine.xlmStroopsPerUsdc();
+        } catch (cause) {
+          price = cause instanceof Error ? cause : new Error(String(cause));
+        }
+      }
     } catch (cause) {
       found = cause instanceof Error ? cause : new Error(String(cause));
     }
@@ -703,6 +763,7 @@ async function checkSponsor(
     destination: found,
     spareStroops: spare,
     baseReserveStroops,
+    ...(price === undefined ? {} : { xlmStroopsPerUsdc: price }),
     ...(convertsInto === undefined ? {} : { convertsInto, holdsWanted }),
   };
 }
@@ -732,6 +793,7 @@ export function runQuote(
     | "usdt0Assets"
     | "usdt0Swap"
     | "baseReserveStroops"
+    | "xlmStroopsPerUsdc"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,

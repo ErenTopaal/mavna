@@ -39,6 +39,8 @@ const engine = {
   baseReserveStroops: 5_000_000,
   usdcOnStellar: stellar(`USDC:${CCTP_CONTRACTS.testnet.usdcIssuer}`, "USDC", 7),
   xlmOnStellar: stellar("native", "XLM", 7),
+  // Horizon's order book, at its boundary: 10 XLM to the USDC
+  xlmStroopsPerUsdc: async () => 100_000_000n,
 };
 
 /** An account entry the way the Stellar node returns it. */
@@ -201,7 +203,13 @@ describe("applySponsorTerms", () => {
     const [fresh, ready] = [routeFor("cctp", { newAccount: true }), routeFor("layerzero")];
     const set = applySponsorTerms(
       { routes: [fresh, ready], rejected: [], complete: true },
-      { network: "testnet", terms: sponsorFunded, destination: "exists" },
+      // 10 XLM to the USDC, so the repayment may take at most 0.3 of the 5 arriving
+      {
+        network: "testnet",
+        terms: sponsorFunded,
+        destination: "exists",
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
     );
     // the new account's repayment is one more approval
     expect(set.routes).toEqual([
@@ -209,6 +217,38 @@ describe("applySponsorTerms", () => {
       ready,
     ]);
     expect(set.rejected).toEqual([]);
+  });
+
+  it("declines a sponsored setup whose arrival could not cover the most its repayment may take", () => {
+    const fresh = routeFor("layerzero", { newAccount: true });
+    // at 0.5 XLM to the USDC the 1.5 XLM reserve may take up to 6 USDC; 5 arrive
+    const set = applySponsorTerms(
+      { routes: [fresh], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms: sponsorFunded,
+        destination: "missing",
+        xlmStroopsPerUsdc: 5_000_000n,
+      },
+    );
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ source: "layerzero", reason: "amount-too-small" });
+    expect(set.rejected[0]?.explanation).toMatch(/up to 6\.00 USDC.*at least 5\.00 USDC arrive/);
+  });
+
+  it("declines a sponsored setup it could not price, rather than guessing", () => {
+    const fresh = routeFor("axelar", { newAccount: true });
+    const set = applySponsorTerms(
+      { routes: [fresh], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms: sponsorFunded,
+        destination: "missing",
+        xlmStroopsPerUsdc: new Error("The order book has no bids."),
+      },
+    );
+    expect(set.rejected[0]).toMatchObject({ reason: "temporarily-unavailable" });
+    expect(set.rejected[0]?.explanation).toMatch(/no bids/);
   });
 
   it("declines setting up an address that does not exist when accounts fund their own reserve", () => {
@@ -815,6 +855,7 @@ describe("how many approvals a route asks for", () => {
     destination: "exists" as const,
     spareStroops: 100_000_000n,
     baseReserveStroops: 5_000_000,
+    xlmStroopsPerUsdc: 100_000_000n,
   });
 
   it("counts the delivery the receiving account signs for a Circle route when it pays its own", () => {
