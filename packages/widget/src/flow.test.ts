@@ -11,7 +11,7 @@ import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
-import { renderFlight, renderReview, routeDetail } from "./screens";
+import { renderChains, renderFlight, renderReview, routeDetail } from "./screens";
 import { DeliveredAsCame, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
@@ -441,5 +441,26 @@ describe("what the user wants to receive", () => {
 describe("the NEAR Intents trust line", () => {
   it("names the HOT Bridge that pays out on Stellar, not only the solvers", () => {
     expect(toRouteView(routeFor("near-intents")).trust).toMatch(/HOT Bridge/);
+  });
+});
+
+describe("the chain picker on a USDT0 send", () => {
+  it("counts the chains it lists, not the USDC ones", () => {
+    const chains = new Flow({
+      engine: {
+        ...engine,
+        sourceChains: [
+          { id: "a", name: "A" },
+          { id: "b", name: "B" },
+          { id: "c", name: "C" },
+        ],
+        usdt0Chains: [{ id: "a", name: "A" }],
+      } as unknown as Engine,
+      init: { send: "USDT0", chainId: "a" },
+    });
+    chains.state = { ...chains.state, chainQuery: "zzz" };
+    const html = renderToStaticMarkup(renderChains(chains));
+    expect(html).toContain("sends from 1 chain.");
+    expect(html).not.toContain("3 chains");
   });
 });

@@ -509,7 +509,9 @@ export function renderChains(c: Flow): ReactElement {
           style={s(
             "flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.12em;color:var(--mv-faint-2)",
           )}
-        >{`${c.engine.sourceChains.length} chains`}</span>
+        >
+          {chainCount(c)}
+        </span>
       </div>
 
       {signable.length > 0 ? (
@@ -594,7 +596,7 @@ export function renderChains(c: Flow): ReactElement {
           style={s(
             "margin:0;padding:4px 2px;font-size:13px;line-height:1.5;color:var(--mv-muted-2)",
           )}
-        >{`No chain called “${st.chainQuery}”. Mavna sends from ${c.engine.sourceChains.length} chains.`}</p>
+        >{`No chain called “${st.chainQuery}”. Mavna sends from ${chainCount(c)}.`}</p>
       ) : null}
     </div>
   );
@@ -648,6 +650,12 @@ export function renderPriority(c: Flow, sym: string): ReactElement {
       })}
     </div>
   );
+}
+
+/** The chains the picker lists for what is being sent, counted. */
+function chainCount(c: Flow): string {
+  const n = c.list().length;
+  return `${n} chain${n === 1 ? "" : "s"}`;
 }
 
 // ---------------------------------------------------------------- address ---
@@ -1744,7 +1752,7 @@ export function renderRoutes(
                     "font-family:var(--mv-font-mono);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
                   )}
                 >
-                  {c.engine.sourceChains.length}
+                  {c.list().length}
                 </span>
                 <span
                   style={s(
