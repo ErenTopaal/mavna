@@ -3,6 +3,7 @@ import { MavnaError } from "@mavna/core";
 import { type NetworkConfig, type RpcClient, SubmitRejected } from "@mavna/stellar";
 import { Keypair, type Transaction } from "@stellar/stellar-sdk";
 import { assertFeeWithin } from "./compose.js";
+import type { DeliveryBudget } from "./delivery-budget.js";
 
 /**
  * Performing the last mile of a CCTP transfer.
@@ -67,6 +68,12 @@ export interface DelivererOptions {
     readonly messageHex: string;
     readonly attestationHex: string;
   }) => import("@stellar/stellar-sdk").Transaction;
+  /**
+   * The day's budget for what this payer spends on deliveries. Each delivery
+   * sets its largest possible fee aside before it is signed, and is refused
+   * when that would pass the budget.
+   */
+  readonly budget?: DeliveryBudget;
 }
 
 /**
@@ -104,6 +111,20 @@ export class DeliveryFailedOnChain extends MavnaError {
     });
     this.name = "DeliveryFailedOnChain";
   }
+}
+
+/** Today's delivery budget is spent, so this delivery is not paid for. */
+export class DeliveryBudgetSpent extends MavnaError {
+  constructor() {
+    super("This sponsor has spent today's budget for paying deliveries.", { retryable: true });
+    this.name = "DeliveryBudgetSpent";
+  }
+}
+
+/** What the network charged for a landed delivery, or the whole share when it does not say. */
+function chargedBy(result: Awaited<ReturnType<RpcClient["submit"]>>, reserved: bigint): bigint {
+  const charged = result.resultXdr?.feeCharged();
+  return charged === undefined ? reserved : BigInt(charged.toString());
 }
 
 /** Circle marks an unfinished attestation with this rather than omitting it. */
@@ -152,6 +173,7 @@ export class Deliverer {
     // signed. A transaction that will fail should never be submitted, and the
     // simulation is also where a not-ready recipient announces itself, before
     // any fee is spent.
+    let maxFee = 0n;
     const build = async (): Promise<Transaction> => {
       const payerAccount = await this.options.rpc.loadAccount(this.#keypair.publicKey());
       const unsigned = this.options.buildDelivery({
@@ -164,21 +186,27 @@ export class Deliverer {
       const prepared = await this.options.rpc.prepare(unsigned);
       // Simulation sets the fee and the authorizations, so both are bounded
       // here before the payer signs anything.
-      assertFeeWithin(
-        BigInt(prepared.fee),
-        BigInt(unsigned.fee) + DELIVERY_RESOURCE_ALLOWANCE_STROOPS,
-        "This delivery",
-      );
+      maxFee = BigInt(unsigned.fee) + DELIVERY_RESOURCE_ALLOWANCE_STROOPS;
+      assertFeeWithin(BigInt(prepared.fee), maxFee, "This delivery");
       assertAsksNoAuthorization(prepared);
       return prepared;
     };
 
     let prepared: Transaction | undefined;
     let sent = false;
+    let ceiling: bigint;
     try {
       prepared = await build();
+      ceiling = BigInt(prepared.fee) > maxFee ? BigInt(prepared.fee) : maxFee;
     } catch (cause) {
       return classify(cause);
+    }
+
+    // Set aside before anything is signed: the most any attempt below may cost.
+    const reservation =
+      this.options.budget === undefined ? undefined : await this.options.budget.reserve(ceiling);
+    if (this.options.budget !== undefined && reservation === undefined) {
+      throw new DeliveryBudgetSpent();
     }
 
     try {
@@ -192,8 +220,12 @@ export class Deliverer {
         sent = true;
         return next;
       });
+      await reservation?.settle(chargedBy(result, ceiling));
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
+      // Refused before anything was sent costs nothing. Anything sent may
+      // have been charged, so its share stays counted in full.
+      if (!sent || cause instanceof SubmitRejected) await reservation?.release();
       // Sent, not refused, and not retryable: it was included and failed, so
       // its fee was paid. Said as such, never as a failure that cost nothing.
       if (

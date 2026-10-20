@@ -21,6 +21,21 @@ describe("the sponsor's configuration, read from the environment", () => {
     expect(config.port).toBe(8787);
     expect(config.channelPoolSize).toBe(4);
     expect(config.settlementsPerClient).toBe(2);
+    expect(config.deliveryBudgetStroops).toBe(250_000_000n);
+  });
+
+  it("reads the daily delivery budget in XLM, to the stroop", () => {
+    expect(
+      readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: "2.5" }).deliveryBudgetStroops,
+    ).toBe(25_000_000n);
+    expect(
+      readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: "0" }).deliveryBudgetStroops,
+    ).toBe(0n);
+    for (const bad of ["-1", "1.12345678", "lots"]) {
+      expect(() => readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: bad })).toThrow(
+        /MAVNA_DELIVERY_BUDGET_XLM/,
+      );
+    }
   });
 
   it("reads the channel pool size and the settlements one client may wait on", () => {

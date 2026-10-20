@@ -1092,6 +1092,26 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(response.body.error).not.toMatch(/Nothing was spent/);
   });
 
+  it("pays for no delivery past its daily budget, and says to try again later", async () => {
+    // room for one delivery's worst case (its 1 XLM bid plus 1 XLM of resources), not two
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, deliveryBudgetStroops: 25_000_000n });
+    irisReturns(cctpMessage(Keypair.random().publicKey()));
+
+    const first = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(first.status).toBe(200);
+    expect(first.body.kind).toBe("delivered");
+    // what it was charged is what counts, here its whole 1 XLM bid
+    const spent = (await state.read("delivery-spend")) as Record<string, string>;
+    expect(Object.values(spent)).toEqual(["10000000"]);
+
+    const second = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(second.status).toBe(503);
+    expect(second.body.retryable).toBe(true);
+    expect(second.body.error).toMatch(/today's budget/);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+
   it("delivers but settles nothing for a destination the message does not name", async () => {
     const server = await startServer({ buildDelivery });
     const victim = Keypair.random();

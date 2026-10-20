@@ -31,6 +31,8 @@ export interface SponsorConfig {
   readonly channelPoolSize: number;
   /** Settlements one client address may have waiting on a preparation; zero for no limit. */
   readonly settlementsPerClient: number;
+  /** Delivery fees the sponsor may pay in one UTC day, in stroops. */
+  readonly deliveryBudgetStroops: bigint;
   readonly stateDir: string | undefined;
   readonly port: number;
 }
@@ -152,9 +154,24 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
     trustProxy: trust === "true",
     channelPoolSize,
     settlementsPerClient: whole("MAVNA_SETTLEMENTS_PER_CLIENT", 2),
+    deliveryBudgetStroops: xlmStroops(
+      "MAVNA_DELIVERY_BUDGET_XLM",
+      get("MAVNA_DELIVERY_BUDGET_XLM") ?? "25",
+    ),
     stateDir: get("MAVNA_STATE_DIR"),
     port: whole("PORT", 8787),
   };
+}
+
+/** A decimal XLM amount to stroops, at Stellar's seven decimals. */
+function xlmStroops(name: string, text: string): bigint {
+  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(text);
+  if (match === null) {
+    throw new SponsorConfigError(
+      `${name} must be an XLM amount with at most seven decimals; got "${text}".`,
+    );
+  }
+  return BigInt(match[1] ?? "0") * 10_000_000n + BigInt((match[2] ?? "").padEnd(7, "0"));
 }
 
 /** A decimal USDC amount to base units, at the six decimals CCTP messages carry. */

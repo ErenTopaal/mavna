@@ -282,7 +282,8 @@ or `404` when Circle has no attested record of the transaction yet (retryable:
 nothing is wrong, ask again in a minute), `502` when Circle's attestation service
 could not be reached or did not answer usefully (retryable), `502` (retryable) when
 the delivery reached Stellar and failed there, so its fee was paid and nothing was
-minted, or `409` with
+minted, `503` (retryable) once the sponsor has spent the day's delivery budget
+(`MAVNA_DELIVERY_BUDGET_XLM`), or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
 [the cue to prepare it](/developers/concepts/sponsorship). When a held settlement is

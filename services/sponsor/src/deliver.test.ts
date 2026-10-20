@@ -12,7 +12,9 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { Deliverer } from "./deliver.js";
+import { Deliverer, DeliveryBudgetSpent } from "./deliver.js";
+import { DeliveryBudget } from "./delivery-budget.js";
+import { MemoryDocumentStore } from "./state.js";
 
 /**
  * The delivery worker's judgement, not its plumbing.
@@ -135,6 +137,8 @@ class SequencedRpc extends RpcClient {
   readonly sent: bigint[] = [];
   /** Something else the payer signed lands before this many sends. */
   landsFirst = new Set<number>();
+  /** A refusal every send gets, the way the network refuses a bad envelope. */
+  refuseWith: "txBadAuth" | undefined = undefined;
   /** What simulation adds to the transaction, the way prepareTransaction does. */
   simulate: (tx: Transaction) => Transaction = (tx) => tx;
   private readonly landed = new Set<string>();
@@ -147,13 +151,16 @@ class SequencedRpc extends RpcClient {
       this.sent.push(BigInt(inner.sequence));
       const hash = tx.hash().toString("hex");
       const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
-      if (BigInt(inner.sequence) !== this.sequence + 1n) {
+      if (this.refuseWith !== undefined || BigInt(inner.sequence) !== this.sequence + 1n) {
         return {
           ...base,
           status: "ERROR",
           errorResult: new xdr.TransactionResult({
             feeCharged: xdr.Int64.fromString("100"),
-            result: xdr.TransactionResultResult.txBadSeq(),
+            result:
+              this.refuseWith === undefined
+                ? xdr.TransactionResultResult.txBadSeq()
+                : xdr.TransactionResultResult.txBadAuth(),
             ext: new xdr.TransactionResultExt(0),
           }),
         };
@@ -181,8 +188,9 @@ class SequencedRpc extends RpcClient {
   }
 }
 
-function deliveryOn(rpcClient: SequencedRpc): Deliverer {
+function deliveryOn(rpcClient: SequencedRpc, budget?: DeliveryBudget): Deliverer {
   return new Deliverer({
+    ...(budget === undefined ? {} : { budget }),
     network,
     networkId: "testnet",
     payerSecret: payer,
@@ -282,5 +290,26 @@ describe("what the sponsor will pay and authorize for a delivery", () => {
       deliveryOn(rpc).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
     ).rejects.toThrow(/authorize/);
     expect(rpc.sent).toEqual([]);
+  });
+});
+
+describe("a delivery against the day's budget", () => {
+  it("is refused unsigned once the day's budget cannot cover its worst case", async () => {
+    const rpcClient = new SequencedRpc();
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 15_000_000n, () => "2026-10-20");
+    await expect(
+      deliveryOn(rpcClient, budget).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toBeInstanceOf(DeliveryBudgetSpent);
+    expect(rpcClient.sent).toEqual([]);
+  });
+
+  it("gives its share back when the network refused it outright", async () => {
+    const rpcClient = new SequencedRpc();
+    rpcClient.refuseWith = "txBadAuth";
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 50_000_000n, () => "2026-10-20");
+    await expect(
+      deliveryOn(rpcClient, budget).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow();
+    expect(await budget.spentToday()).toBe(0n);
   });
 });

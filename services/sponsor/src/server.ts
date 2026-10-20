@@ -41,7 +41,13 @@ import { CapLedger } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
-import { Deliverer, DeliveryFailedOnChain, type DeliveryOutcome } from "./deliver.js";
+import {
+  Deliverer,
+  DeliveryBudgetSpent,
+  DeliveryFailedOnChain,
+  type DeliveryOutcome,
+} from "./deliver.js";
+import { DeliveryBudget } from "./delivery-budget.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
 import {
   type ChainSponsorshipView,
@@ -145,6 +151,11 @@ export interface SponsorServerOptions {
    * so without a floor a stream of dust burns spends the sponsor's XLM.
    */
   readonly minDeliveryBaseUnits?: bigint;
+  /**
+   * What the sponsor may spend on delivery fees in one UTC day, in stroops,
+   * counted in the state store. 25 XLM by default; zero pays for none.
+   */
+  readonly deliveryBudgetStroops?: bigint;
   /** Requests per client address per minute. Zero or omitted means no limit. */
   readonly rateLimitPerMinute?: number;
   /** Take the client address from the last X-Forwarded-For entry. */
@@ -425,6 +436,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const leaseClients = new Map<string, string>();
   const composesPerClient = new RequestLimiter(COMPOSES_PER_CLIENT_PER_MINUTE);
   const deliverer = new Deliverer({
+    budget: new DeliveryBudget(
+      state,
+      options.deliveryBudgetStroops ?? DEFAULT_DELIVERY_BUDGET_STROOPS,
+    ),
     rpc: options.rpc,
     network: options.network,
     networkId: options.networkId,
@@ -2768,6 +2783,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         attestationHex: message.attestation,
       });
     } catch (cause) {
+      if (cause instanceof DeliveryBudgetSpent) {
+        console.error("[sponsor] today's delivery budget is spent; a delivery was turned away");
+        await answer(
+          res,
+          503,
+          {
+            error:
+              "This sponsor has spent today's budget for paying deliveries. Try again after " +
+              "midnight UTC, or deliver the transfer from the receiving account.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
       if (!(cause instanceof DeliveryFailedOnChain)) throw cause;
       console.error("[sponsor]", cause.message);
       await answer(
@@ -3052,6 +3082,12 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/**
+ * 25 XLM a day for delivery fees. A real delivery measured about 0.013 XLM, so
+ * this is well over a thousand a day, and what a day of abuse can cost.
+ */
+const DEFAULT_DELIVERY_BUDGET_STROOPS = 250_000_000n;
 
 /** How often the sweep cross-checks what the sponsor carries against the chain. */
 const RECONCILE_EVERY_MS = 60 * 60 * 1000;
