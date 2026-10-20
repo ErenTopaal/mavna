@@ -345,31 +345,6 @@ export class LayerZeroAdapter implements BridgeAdapter {
             decimals: STELLAR_DECIMALS,
           };
 
-    let destination: Awaited<ReturnType<typeof inspectDestination>>;
-    try {
-      destination = await inspectDestination(this.rpc, request.destination, wanted);
-    } catch (cause) {
-      // A node that is merely behind is NOT an address that cannot receive.
-      if (cause instanceof MavnaError && cause.retryable) {
-        return this.decline(
-          "temporarily-unavailable",
-          "Stellar did not answer freshly enough to check that address. Nothing is wrong " +
-            "with it; try again in a moment.",
-        );
-      }
-      return this.decline(
-        "destination-unsupported",
-        // Our own wording, never the raw error, so nothing about the address the
-        // user pasted can be echoed back into the interface.
-        cause instanceof MavnaError
-          ? cause.message
-          : "That is not an address that can receive a payment on Stellar.",
-      );
-    }
-    if (destination.lane.kind === "unusable") {
-      return this.decline("destination-unsupported", destination.lane.reason);
-    }
-
     let extraOptions: `0x${string}`;
     try {
       extraOptions = this.optionsFor(route);
@@ -446,6 +421,34 @@ export class LayerZeroAdapter implements BridgeAdapter {
       route.sharedDecimals,
       STELLAR_DECIMALS,
     );
+
+    let destination: Awaited<ReturnType<typeof inspectDestination>>;
+    try {
+      // read once the amount is known, so a trustline is held to what lands
+      destination = await inspectDestination(this.rpc, request.destination, wanted, {
+        amountStroops: delivered,
+      });
+    } catch (cause) {
+      // A node that is merely behind is NOT an address that cannot receive.
+      if (cause instanceof MavnaError && cause.retryable) {
+        return this.decline(
+          "temporarily-unavailable",
+          "Stellar did not answer freshly enough to check that address. Nothing is wrong " +
+            "with it; try again in a moment.",
+        );
+      }
+      return this.decline(
+        "destination-unsupported",
+        // Our own wording, never the raw error, so nothing about the address the
+        // user pasted can be echoed back into the interface.
+        cause instanceof MavnaError
+          ? cause.message
+          : "That is not an address that can receive a payment on Stellar.",
+      );
+    }
+    if (destination.lane.kind === "unusable") {
+      return this.decline("destination-unsupported", destination.lane.reason);
+    }
 
     const reserve = quoteReserve({
       lane: destination.lane,

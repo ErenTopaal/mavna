@@ -70,6 +70,8 @@ interface World {
   assetInfoIssuer: string;
   account: boolean;
   trustline: boolean;
+  /** The trustline's limit, when a test makes it tight. */
+  trustlineLimit?: bigint;
   /** What LayerZero Scan holds for SEND_HASH. */
   messages: unknown[];
   /** Whether the OFT's verifier set is its own choice or inherited from the network. */
@@ -364,7 +366,7 @@ function stellarNode(): RpcClient {
             switch: () => ({ name: "trustline" }),
             trustLine: () => ({
               balance: () => 0n,
-              limit: () => 10n ** 15n,
+              limit: () => world.trustlineLimit ?? 10n ** 15n,
               flags: () => 1,
               ext: () => ({ switch: () => 0 }),
             }),
@@ -617,6 +619,14 @@ describe("the Stellar side of the pathway, checked before sending", () => {
     world.maxAmountLD = 24_999_999n;
     const result = await quoteFor();
     expect(result).toMatchObject({ reason: "amount-too-large" });
+  });
+
+  it("declines a recipient whose trustline has no room for what lands", async () => {
+    // 25 USDT0 lands as 250000000 at seven decimals
+    world.trustlineLimit = 249_999_999n;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+    expect((result as RouteRejection).explanation).toMatch(/room for only 24\.9999999 USDT0/);
   });
 
   it("quotes when every limit has room", async () => {
