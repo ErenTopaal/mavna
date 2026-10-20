@@ -435,6 +435,9 @@ describe("what the user wants to receive", () => {
     flow.state = { ...flow.state, wanted: "USDT0" };
     flow.setSend("USDC");
     expect(flow.state.wanted).toBe("USDC");
+    // the receive side follows a plain switch: USDT0 lands as USDT0
+    flow.setSend("USDT0");
+    expect(flow.state.wanted).toBe("USDT0");
   });
 });
 

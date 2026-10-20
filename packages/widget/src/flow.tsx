@@ -339,9 +339,8 @@ export class Flow extends React.Component<FlowProps, State> {
       {
         send,
         chainId,
-        // USDC and XLM can come of either send; only USDT0 itself needs a USDT0 send
-        wanted:
-          this.state.wanted === "USDT0" ? (send === "USDT0" ? "USDT0" : "USDC") : this.state.wanted,
+        // each send lands as itself by default; a choice of XLM holds across both
+        wanted: this.state.wanted === "XLM" ? "XLM" : send,
         balance: null,
       },
       () => {
