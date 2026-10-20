@@ -18,6 +18,7 @@ import { createNetworkConfig, type NetworkConfig, RpcClient } from "@mavna/stell
 import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
 import { circleDomain, usdcSourceChains } from "./domains";
+import { rememberConnection } from "./helpers";
 import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
 import { layerZeroSourceDetail, usdt0ChainsFor, usdt0SwapFor } from "./usdt0.js";
@@ -264,7 +265,7 @@ export function createEngine(config: EngineConfig): Engine {
     integratorFee: config.integratorFee,
     sponsor,
     // A host can bring its own Stellar signer; otherwise the built-in wallet kit.
-    stellar: config.stellar ?? createStellarWallet(network),
+    stellar: rememberConnection(config.stellar ?? createStellarWallet(network)),
     historyKey: config.historyKey,
     sourceDomain(chainId) {
       return circleDomain(network, chainId);
