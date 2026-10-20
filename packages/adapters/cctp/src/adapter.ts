@@ -203,12 +203,7 @@ export class CctpAdapter implements BridgeAdapter {
     }
 
     const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
-    if (fee === undefined) {
-      return this.decline(
-        "temporarily-unavailable",
-        "Circle is not quoting this route right now. It is worth trying again shortly.",
-      );
-    }
+    if (typeof fee !== "bigint") return fee;
 
     const reserve = quoteReserve({
       lane: destination.lane,
@@ -615,15 +610,29 @@ export class CctpAdapter implements BridgeAdapter {
    * Returning undefined means Circle declined to quote, which is temporary and
    * different from a pair that does not route at all.
    */
-  private async bridgeFee(sourceDomain: number, amount: bigint): Promise<bigint | undefined> {
+  private async bridgeFee(sourceDomain: number, amount: bigint): Promise<bigint | RouteRejection> {
+    let options: readonly { finalityThreshold: number; minimumFee: number }[];
     try {
-      const options = await this.attestations.fees(sourceDomain, STELLAR_DOMAIN);
-      const standard = options.find((o) => o.finalityThreshold === FINALITY.standard);
-      if (standard === undefined) return undefined;
-      return (amount * BigInt(Math.round(standard.minimumFee))) / BPS;
-    } catch {
-      return undefined;
+      options = await this.attestations.fees(sourceDomain, STELLAR_DOMAIN);
+    } catch (cause) {
+      // Circle's 400 is a pair it does not route, which no retry changes. Only
+      // an outage or a rate limit is worth trying again.
+      if (cause instanceof MavnaError && !cause.retryable) {
+        return this.decline("chain-unsupported", cause.message);
+      }
+      return this.decline(
+        "temporarily-unavailable",
+        "Circle is not quoting this route right now. It is worth trying again shortly.",
+      );
     }
+    const standard = options.find((o) => o.finalityThreshold === FINALITY.standard);
+    if (standard === undefined) {
+      return this.decline(
+        "temporarily-unavailable",
+        "Circle is not quoting the standard path for this route right now.",
+      );
+    }
+    return circleFee(amount, standard.minimumFee);
   }
 
   private stellarUsdcAsset(): Asset {
@@ -639,6 +648,29 @@ export class CctpAdapter implements BridgeAdapter {
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
     return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
   }
+}
+
+/**
+ * Circle's fee on an amount, from a rate in basis points that may be fractional.
+ *
+ * Rounded up. maxFee is set from this, and a maxFee below Circle's fee leaves
+ * the burn waiting or reverting, while one unit over costs nothing extra since
+ * Circle takes only what it charges. The rate is read from its decimal form
+ * rather than through float arithmetic, and a form that is not a plain decimal
+ * is refused rather than approximated.
+ */
+export function circleFee(amount: bigint, minimumFeeBps: number): bigint {
+  const text = String(minimumFeeBps);
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(text);
+  if (match === null) {
+    throw new MavnaError(`Circle quoted a fee rate this cannot read exactly: ${text}.`, {
+      retryable: false,
+    });
+  }
+  const fraction = match[2] ?? "";
+  const numerator = BigInt(`${match[1]}${fraction}`);
+  const denominator = BPS * 10n ** BigInt(fraction.length);
+  return (amount * numerator + denominator - 1n) / denominator;
 }
 
 /** The plan layer speaks in readiness, the Stellar layer in reserve slots. */
