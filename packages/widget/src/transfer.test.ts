@@ -766,6 +766,20 @@ describe("the send's hash", () => {
     });
   });
 
+  it("is forgotten again when the wallet cancels the send, which then never lands", async () => {
+    const conn = connection({
+      receipt: async ({ onReplaced }) => {
+        onReplaced?.({ reason: "cancelled" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    await expect(run(relayed(), routeFor("layerzero"), patches().patch, conn)).rejects.toThrow(
+      /cancelled in your wallet/,
+    );
+    const kept = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{ sourceTxHash: string }>;
+    expect(kept).toEqual([]);
+  });
+
   it("follows a send the wallet sped up, so history holds the one that landed", async () => {
     const conn = connection({
       receipt: async ({ onReplaced }) => {

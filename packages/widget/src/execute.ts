@@ -29,6 +29,8 @@ export type ExecutionEvent =
   | { readonly kind: "skipped"; readonly index: number; readonly why: string }
   | { readonly kind: "awaiting-signature"; readonly index: number; readonly describes: string }
   | { readonly kind: "sent"; readonly index: number; readonly hash: Hash }
+  /** The wallet cancelled or replaced it with something else: `hash` will never land. */
+  | { readonly kind: "dropped"; readonly index: number; readonly hash: Hash }
   /** The wallet sped the transaction up: `hash` is the one that landed, `was` the one sent. */
   | { readonly kind: "replaced"; readonly index: number; readonly hash: Hash; readonly was: Hash }
   | { readonly kind: "confirmed"; readonly index: number; readonly hash: Hash };
@@ -170,6 +172,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
       throw cause;
     }
     if (replaced === "cancelled" || replaced === "replaced") {
+      onEvent({ kind: "dropped", index, hash });
       // a cancel is a self-send that succeeds, and moved none of the funds
       throw new Error(
         what === "transfer"

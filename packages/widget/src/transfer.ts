@@ -458,6 +458,9 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
     case "confirmed":
       patch(id, { phase: "done" });
       return;
+    case "dropped":
+      // the error that follows says what happened to it
+      return;
   }
 }
 
@@ -728,6 +731,8 @@ async function send(
       nativeCurrency: deps.nativeCurrency,
       onEvent: (event) => {
         if (event.index === last && event.kind === "sent") keep(event.hash);
+        // cancelled in the wallet: nothing of it will ever land to be found
+        if (event.index === last && event.kind === "dropped") forget(event.hash, engine.historyKey);
         if (event.index === last && event.kind === "replaced") {
           // sped up in the wallet: the one that landed is what Activity can find
           forget(event.was, engine.historyKey);
