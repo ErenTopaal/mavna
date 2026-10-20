@@ -7,7 +7,7 @@ export type {
   SwapQuoteRequest,
   Usability,
 } from "./provider.js";
-export { applySlippage } from "./provider.js";
+export { applySlippage, detailOf, SwapRefusal } from "./provider.js";
 export type { PathPaymentInputs } from "./sdex.js";
 export { buildPathPayment, SdexProvider } from "./sdex.js";
 export { selectSwapProvider } from "./select.js";

@@ -2,7 +2,7 @@ import { MavnaError } from "@mavna/core";
 import { Account, Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, routedFetch, sorobanNode } from "./__fixtures__/network.js";
-import type { SwapProvider } from "./provider.js";
+import type { SwapProvider, SwapRefusal } from "./provider.js";
 import { selectSwapProvider } from "./select.js";
 import { createSwapVenues, STELLAR_USDT0, SwapVenues, type Venue } from "./venues.js";
 
@@ -105,7 +105,7 @@ describe("the chain", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(false);
-    expect((error as MavnaError).message).toMatch(/sushiswap:/);
+    expect((error as SwapRefusal).detail).toMatch(/sushiswap:/);
   });
 
   it("falls to Aquarius when Soroswap has no route", async () => {
@@ -205,8 +205,9 @@ describe("the chain", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(false);
-    expect((error as MavnaError).message).toContain("soroswap");
-    expect((error as MavnaError).message).toContain("aquarius");
+    expect((error as SwapRefusal).message).toBe("No swap venue could convert this.");
+    expect((error as SwapRefusal).detail).toContain("soroswap");
+    expect((error as SwapRefusal).detail).toContain("aquarius");
   });
 
   it("asks a venue whether it is usable once a minute, not once a quote", async () => {
@@ -364,7 +365,8 @@ describe("the chain under the route race's deadline", () => {
     const error = await chain.quote({ ...req, signal: AbortSignal.timeout(30) }).catch((e) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(true);
-    expect((error as MavnaError).message).toMatch(/first.*in time/);
+    expect((error as SwapRefusal).message).toBe("No swap venue could convert this in time.");
+    expect((error as SwapRefusal).detail).toMatch(/first.*in time/);
   });
 
   it("hands each venue the deadline so it can stop its own requests", async () => {
@@ -398,9 +400,11 @@ describe("why a venue is unavailable", () => {
       .quote({ ...usdcToXlm, assetIn: STELLAR_USDT0, assetOut: USDC_MAIN })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
-    const message = (error as MavnaError).message;
-    expect(message).toMatch(/soroswap is unavailable \(.*testnet.*\)/);
-    expect(message).toMatch(/aquarius is unavailable \(.*503.*\)/);
-    expect(message).toMatch(/sushiswap is unavailable \(.*rpc\.example.*\)/);
+    // hosts and their errors are for whoever has to fix it, never for the user
+    expect((error as SwapRefusal).message).not.toMatch(/rpc\.example|503|testnet/);
+    const detail = (error as SwapRefusal).detail;
+    expect(detail).toMatch(/soroswap is unavailable \(.*testnet.*\)/);
+    expect(detail).toMatch(/aquarius is unavailable \(.*503.*\)/);
+    expect(detail).toMatch(/sushiswap is unavailable \(.*rpc\.example.*\)/);
   });
 });

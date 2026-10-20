@@ -275,13 +275,16 @@ async function xlmOf(account: string): Promise<bigint> {
   return BigInt(scValToNative(sim.result?.retval as xdr.ScVal) as bigint);
 }
 
+/** The Stellar OFT the message was delivered through: the sender key stands in for it. */
+const through = () => ({ stellarOft: sender.publicKey(), endpoint: ENDPOINT, decimalsDiff: 0 });
+
 describe("an overdue conversion on arrival", () => {
   it("shows as pending, is finished by the sponsor, and cannot be finished twice", async () => {
     const { compose, guid, queued, delivery, message } = await queue(USDC, USDC_SAC);
     const ctx = context();
     const ref = { chainId: "stellar-testnet", txHash: delivery.txHash, explorerUrl: "" };
 
-    const before = await composePhase(ctx, message, "test", ref);
+    const before = await composePhase(ctx, message, through(), ref);
     expect(before?.phase).toBe("delivered-conversion-pending");
     if (before?.phase !== "delivered-conversion-pending" || before.finish === undefined) {
       throw new Error(`expected a finishable conversion, got ${JSON.stringify(before)}`);
@@ -291,7 +294,7 @@ describe("an overdue conversion on arrival", () => {
     const finished = await composer().finish(before.finish);
     expect(finished.kind).toBe("composed");
 
-    const after = await composePhase(ctx, message, "test", ref);
+    const after = await composePhase(ctx, message, through(), ref);
     expect(after?.phase).toBe("delivered-and-converted");
     if (after?.phase === "delivered-and-converted") {
       expect(after.received.asset.id).toBe(USDC.toString());
@@ -315,12 +318,12 @@ describe("an overdue conversion on arrival", () => {
     const { message, delivery } = await queue(AQUA, AQUA_SAC);
     const ctx = context();
     const ref = { chainId: "stellar-testnet", txHash: delivery.txHash, explorerUrl: "" };
-    const before = await composePhase(ctx, message, "test", ref);
+    const before = await composePhase(ctx, message, through(), ref);
     if (before?.phase !== "delivered-conversion-pending" || before.finish === undefined) {
       throw new Error(`expected a finishable conversion, got ${JSON.stringify(before)}`);
     }
     expect((await composer().finish(before.finish)).kind).toBe("composed");
-    const after = await composePhase(ctx, message, "test", ref);
+    const after = await composePhase(ctx, message, through(), ref);
     expect(after?.phase).toBe("delivered-as-came");
   });
 });

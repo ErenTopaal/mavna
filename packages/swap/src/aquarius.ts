@@ -8,6 +8,7 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  SwapRefusal,
   type Usability,
 } from "./provider.js";
 import { buildContractCall, readContract } from "./soroban.js";
@@ -367,10 +368,10 @@ export class AquariusProvider implements SwapProvider {
       }
     }
     if (best === undefined) {
-      const why = [...new Set(refusals)].join("; ");
-      throw new MavnaError(
-        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses" +
-          (why === "" ? "." : `. The router refused: ${why}.`),
+      // the router's own refusals are an operator's to read, not the user's
+      throw new SwapRefusal(
+        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses.",
+        [...new Set(refusals)].join("; "),
         { retryable: false },
       );
     }

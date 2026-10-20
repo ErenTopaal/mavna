@@ -470,7 +470,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
       );
     }
 
-    let inbound: { readonly paused: boolean; readonly capacity: bigint };
+    let inbound: { readonly paused: boolean; readonly capacity: bigint | undefined };
     try {
       inbound = await this.discovery.stellarInbound(route);
     } catch (cause) {
@@ -488,7 +488,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
           "delivered until it resumes. Nothing has been sent.",
       );
     }
-    if (delivered > inbound.capacity) {
+    if (inbound.capacity !== undefined && delivered > inbound.capacity) {
       return this.decline(
         "amount-too-large",
         `Stellar's ${route.tokenSymbol} contract will take in at most ` +
@@ -803,7 +803,14 @@ export class LayerZeroAdapter implements BridgeAdapter {
 
     const deliveredTx = message.destination?.tx?.txHash;
     if (this.composing !== undefined) {
-      const composed = await composePhase(this.composing, message, chainId, {
+      // read from the Stellar OFT the message reached, not from a fresh route
+      const facts = await readStellarOft(this.rpc, ours.stellarOft);
+      const through = {
+        stellarOft: ours.stellarOft,
+        endpoint: facts.endpoint,
+        decimalsDiff: facts.decimalsDiff,
+      };
+      const composed = await composePhase(this.composing, message, through, {
         chainId: STELLAR_SIDE[this.network].chainId,
         txHash: deliveredTx ?? handle.sourceTxHash,
         explorerUrl:
