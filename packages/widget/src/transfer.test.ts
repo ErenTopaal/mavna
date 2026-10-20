@@ -28,6 +28,7 @@ import {
   STELLAR_USDC,
   STELLAR_XLM,
 } from "./__fixtures__/scripted";
+import type { ExecutionEvent } from "./execute";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
@@ -36,6 +37,7 @@ import {
   DeliveredAsCame,
   finishDelivery,
   holdBlocker,
+  mapEvm,
   runTransfer,
   StillMoving,
   type TransferDeps,
@@ -1983,5 +1985,43 @@ describe("holdBlocker", () => {
     expect(
       holdBlocker({ kind: "unusable", slotsNeeded: 0, reason: "It is not authorised." }, "USDC"),
     ).toEqual({ refused: expect.stringMatching(/not authorised.*Nothing has been sent/) });
+  });
+});
+
+describe("mapEvm, a reset and an approval on one row", () => {
+  const H = `0x${"aa".repeat(32)}` as Hash;
+  const run3 = (events: ExecutionEvent[]) => {
+    const seen: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    for (const event of events) mapEvm(event, 3, (id, patch) => seen.push({ id, patch }));
+    return seen;
+  };
+
+  it("does not show the approval done when only the reset was skipped", () => {
+    const seen = run3([
+      { kind: "skipped", index: 0, why: "Nothing is allowed yet, so there is nothing to reset." },
+      { kind: "awaiting-signature", index: 1, describes: "Allow" },
+    ]);
+    expect(seen.some((p) => p.id === "approve" && p.patch.phase === "done")).toBe(false);
+    expect(seen.some((p) => p.patch.note !== undefined)).toBe(false);
+    expect(seen.at(-1)).toEqual({ id: "approve", patch: { phase: "blocked" } });
+  });
+
+  it("shows it done once the approval itself is confirmed, or skipped", () => {
+    expect(
+      run3([
+        { kind: "confirmed", index: 0, hash: H },
+        { kind: "awaiting-signature", index: 1, describes: "Allow" },
+        { kind: "sent", index: 1, hash: H },
+        { kind: "confirmed", index: 1, hash: H },
+      ]).filter((p) => p.patch.phase === "done"),
+    ).toEqual([{ id: "approve", patch: { phase: "done" } }]);
+    expect(
+      run3([
+        { kind: "skipped", index: 0, why: "reset" },
+        { kind: "skipped", index: 1, why: "You have already allowed this." },
+      ]).filter((p) => p.patch.phase === "done"),
+    ).toEqual([
+      { id: "approve", patch: { phase: "done", note: "You have already allowed this." } },
+    ]);
   });
 });

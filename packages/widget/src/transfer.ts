@@ -484,11 +484,14 @@ export async function convertOnStellar(
  * Map the EVM stream onto the approve and send steps. The send is always the
  * last transaction; a rail whose token needs no allowance builds only that one.
  */
-function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
+export function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
   const id = event.index === count - 1 ? "burn" : "approve";
+  // A reset before the approval shares its row, so the row is done only once
+  // the last transaction before the send is: a skipped reset is not an approval.
+  const finishesRow = event.index === count - 1 || event.index === count - 2;
   switch (event.kind) {
     case "skipped":
-      patch(id, { phase: "done", note: event.why });
+      if (finishesRow) patch(id, { phase: "done", note: event.why });
       return;
     case "awaiting-signature":
       patch(id, { phase: "blocked" });
@@ -498,7 +501,7 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
       patch(id, { phase: "pending" });
       return;
     case "confirmed":
-      patch(id, { phase: "done" });
+      patch(id, finishesRow ? { phase: "done" } : { phase: "pending" });
       return;
     case "dropped":
       // the error that follows says what happened to it
