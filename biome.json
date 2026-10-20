@@ -13,7 +13,6 @@
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml",
-      "!apps/app/src/styles/shadcn.css",
       "!contracts/**/target",
       "!contracts/**/test_snapshots"
     ]
@@ -61,16 +60,6 @@
       }
     },
     {
-      "includes": ["apps/app/src/components/ui/**"],
-      "linter": {
-        "rules": {
-          "a11y": {
-            "noLabelWithoutControl": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": [
         "packages/**/src/**",
         "!packages/**/src/**/*.test.ts",
@@ -91,10 +80,5 @@
         }
       }
     }
-  ],
-  "css": {
-    "parser": {
-      "tailwindDirectives": true
-    }
-  }
+  ]
 }

@@ -5,9 +5,6 @@
     "lib": ["es2023", "dom", "dom.iterable"],
     "types": ["vite/client"],
     "noEmit": true,
-    // No baseUrl: TypeScript 7 removed it. Path mappings now resolve relative to
-    // this file, which is what the "./" prefix below is doing.
-    "paths": { "@/*": ["./src/*"] },
     "isolatedDeclarations": false
   },
   "include": ["src/**/*", "harness/**/*", "vite.config.ts"]

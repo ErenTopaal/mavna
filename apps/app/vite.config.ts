@@ -1,5 +1,4 @@
 import { fileURLToPath } from "node:url";
-import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
@@ -35,7 +34,7 @@ export default defineConfig(({ command, mode }) => {
   // the browser tests' harness page, never part of a build that gets hosted
   const harness = process.env.MAVNA_BROWSER_HARNESS === "1";
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react()],
     ...(harness
       ? {
           build: {
@@ -48,8 +47,5 @@ export default defineConfig(({ command, mode }) => {
           },
         }
       : {}),
-    resolve: {
-      alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    },
   };
 });
