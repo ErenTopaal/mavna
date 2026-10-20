@@ -3,12 +3,14 @@ import type { RpcClient } from "@mavna/stellar";
 import {
   Contract,
   Networks,
+  nativeToScVal,
   Asset as StellarAsset,
   StrKey,
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import { type Abi, decodeFunctionResult, encodeFunctionData } from "viem";
+import { type Abi, bytesToHex, decodeFunctionResult, encodeFunctionData, pad } from "viem";
+import { simulateRead } from "./compose.js";
 import {
   type EvmSource,
   LAYERZERO_DVN_METADATA_URL,
@@ -499,11 +501,23 @@ export class Discovery {
       );
     }
 
-    const delivers = await readStellarToken(
-      this.rpc,
-      facts.token,
-      this.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
-    );
+    // The other direction of the same pairing. Delivery runs through the Stellar
+    // OFT's own peer for this chain, and a message from an OFT it does not
+    // name is refused there after the source has already taken the funds.
+    const back = await simulateRead(this.rpc, this.passphrase(), stellarOft, "peer", [
+      nativeToScVal(sourceEid, { type: "u32" }),
+    ]);
+    const expected = pad(oft.toLowerCase() as `0x${string}`);
+    const named = back.switch().name === "scvBytes" ? bytesToHex(back.bytes()) : undefined;
+    if (named !== expected) {
+      throw new MavnaError(
+        `its Stellar peer ${stellarOft} does not peer back to it for endpoint ${sourceEid} ` +
+          `(it names ${named ?? "nothing"}), so a message from it would be refused on arrival`,
+        { retryable: false },
+      );
+    }
+
+    const delivers = await readStellarToken(this.rpc, facts.token, this.passphrase());
 
     const local = Number(sharedDecimals) + facts.decimalsDiff;
     if (local !== 7) {
@@ -549,13 +563,67 @@ export class Discovery {
     return { nativeFee: fee.nativeFee, lzTokenFee: fee.lzTokenFee };
   }
 
-  /** What the pathway says will actually arrive, in the source chain's units. */
-  async quoteDelivered(route: ResolvedRoute, sendParam: unknown): Promise<bigint | undefined> {
+  /**
+   * What the pathway says will actually arrive, in the source chain's units,
+   * and the most and least the OFT carries in one transfer.
+   */
+  async quoteDelivered(
+    route: ResolvedRoute,
+    sendParam: unknown,
+  ): Promise<
+    | { readonly received: bigint; readonly minAmountLD: bigint; readonly maxAmountLD: bigint }
+    | undefined
+  > {
     const reader = this.readerFor(route.chainId, route.source);
     const result = await this.read(reader, route.oft, OFT_ABI, "quoteOFT", [sendParam]);
     if (result === undefined) return undefined;
-    const receipt = (result as readonly unknown[])[2] as { amountReceivedLD: bigint } | undefined;
-    return receipt?.amountReceivedLD;
+    const [limit, , receipt] = result as readonly [
+      { minAmountLD: bigint; maxAmountLD: bigint } | undefined,
+      unknown,
+      { amountReceivedLD: bigint } | undefined,
+    ];
+    if (limit === undefined || receipt === undefined) return undefined;
+    return {
+      received: receipt.amountReceivedLD,
+      minAmountLD: limit.minAmountLD,
+      maxAmountLD: limit.maxAmountLD,
+    };
+  }
+
+  /**
+   * Whether the Stellar OFT will take a delivery from this route right now.
+   *
+   * Read at quote time rather than cached with the route, because both move:
+   * an operator can pause the contract, and the inbound bucket drains as
+   * transfers land. Either one refusing the message strands it after the
+   * source has taken the funds.
+   *
+   * The capacity's unit is not documented. It is compared with the delivered
+   * amount in Stellar's own units, which is exact if the bucket counts in
+   * those and only declines early if it counts in the smaller shared units.
+   */
+  async stellarInbound(
+    route: ResolvedRoute,
+  ): Promise<{ readonly paused: boolean; readonly capacity: bigint }> {
+    const [paused, capacity] = await Promise.all([
+      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "is_paused", []),
+      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "rate_limit_capacity", [
+        xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Inbound")]),
+        nativeToScVal(route.sourceEid, { type: "u32" }),
+      ]),
+    ]);
+    if (paused.switch().name !== "scvBool" || capacity.switch().name !== "scvI128") {
+      throw new MavnaError(
+        `The Stellar OFT ${route.stellarOft} answered is_paused or rate_limit_capacity in a ` +
+          "shape it does not use.",
+        { retryable: false },
+      );
+    }
+    return { paused: paused.b(), capacity: BigInt(scValToNative(capacity) as bigint) };
+  }
+
+  private passphrase(): string {
+    return this.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
   }
 
   /**

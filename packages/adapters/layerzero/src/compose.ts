@@ -381,7 +381,7 @@ export function arrivalConverts(
 }
 
 /** A read-only contract call, simulated from a throwaway source that never signs. */
-async function simulateRead(
+export async function simulateRead(
   rpcClient: RpcClient,
   passphrase: string,
   contract: string,

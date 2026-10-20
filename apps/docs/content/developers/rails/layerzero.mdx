@@ -62,6 +62,14 @@ on and refuses to send if that differs from the registry's current endpoint, whi
 is what stops a transfer routing into a deployment that is no longer the advertised
 one. The delivered decimals are required to be seven.
 
+The Stellar side is checked in the other direction too, because a message it would
+refuse is stranded after the source has already taken the funds. The Stellar OFT's
+own `peer` for the source endpoint must name the sending OFT. Each quote also reads
+whether the Stellar OFT is paused and how much its inbound rate limit will take
+from that chain right now, and declines when it is paused or the amount would not
+fit. It declines too when the amount is outside the per-transfer limits the
+sending OFT's `quoteOFT` reports.
+
 ## Approvals where the OFT locks the token
 
 Where the source OFT locks the token rather than burning it (USDT0 on Ethereum,

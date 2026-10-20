@@ -76,6 +76,14 @@ interface World {
   dvnInherited: boolean;
   /** True for an adapter that locks the token, as USDT0 does on Ethereum. */
   approvalRequired: boolean;
+  /** What the Stellar OFT's `peer(30110)` answers, as hex. */
+  stellarPeer: string;
+  /** What the Stellar OFT's `is_paused()` answers. */
+  paused: boolean;
+  /** What `rate_limit_capacity(Inbound, 30110)` answers. */
+  inboundCapacity: bigint;
+  /** The EVM OFT's `quoteOFT` limit. */
+  maxAmountLD: bigint;
 }
 
 let world: World;
@@ -116,7 +124,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
       case "quoteOFT": {
         const amount = ((args ?? [])[0] as { amountLD: bigint }).amountLD;
         return reply([
-          { minAmountLD: 0n, maxAmountLD: 10n ** 30n },
+          { minAmountLD: 0n, maxAmountLD: world.maxAmountLD },
           [],
           { amountSentLD: amount, amountReceivedLD: amount },
         ]);
@@ -358,6 +366,33 @@ function stellarNode(): RpcClient {
     }
     return { entries, latestLedger: 100 } as never;
   });
+  vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
+    const op = (tx as { toEnvelope(): xdr.TransactionEnvelope })
+      .toEnvelope()
+      .v1()
+      .tx()
+      .operations()[0];
+    const call = op?.body().invokeHostFunctionOp().hostFunction().invokeContract();
+    const contract =
+      call === undefined ? "" : Address.fromScAddress(call.contractAddress()).toString();
+    const name = call?.functionName().toString();
+    const args = call?.args() ?? [];
+    let retval: xdr.ScVal | undefined;
+    if (contract === STELLAR_OFT && name === "peer" && args[0]?.u32() === 30110) {
+      retval = xdr.ScVal.scvBytes(Buffer.from(world.stellarPeer.slice(2), "hex"));
+    } else if (contract === STELLAR_OFT && name === "is_paused") {
+      retval = xdr.ScVal.scvBool(world.paused);
+    } else if (
+      contract === STELLAR_OFT &&
+      name === "rate_limit_capacity" &&
+      args[0]?.vec()?.[0]?.sym().toString() === "Inbound" &&
+      args[1]?.u32() === 30110
+    ) {
+      retval = nativeToScVal(world.inboundCapacity, { type: "i128" });
+    }
+    if (retval === undefined) throw new Error(`the Stellar double has no answer for ${name}`);
+    return { latestLedger: 100, result: { retval, auth: [] } } as never;
+  });
   return client;
 }
 
@@ -388,6 +423,11 @@ beforeEach(() => {
     messages: [delivered()],
     dvnInherited: false,
     approvalRequired: false,
+    // live on 20 October 2026: the Arbitrum OFT, left-padded, and an unlimited bucket
+    stellarPeer: `0x${"00".repeat(12)}${OFT.slice(2).toLowerCase()}`,
+    paused: false,
+    inboundCapacity: 2n ** 127n - 1n,
+    maxAmountLD: 10n ** 30n,
   };
   remoteServices();
 });
@@ -530,6 +570,51 @@ describe("quoting USDT0 into Stellar", () => {
     expect(txs[0]?.describes).toMatch(/refunded/);
     // the verifiers are named, by LayerZero's name or else by address
     expect(txs[0]?.describes).toContain(`2 verifiers must all agree (LayerZero Labs, ${DVN_B})`);
+  });
+});
+
+describe("the Stellar side of the pathway, checked before sending", () => {
+  async function quoteFor(baseUnits = "25000000"): Promise<Route | RouteRejection> {
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    return adapter.quote({
+      from,
+      to,
+      sends: { asset: from, baseUnits },
+      destination: READY,
+      maxSlippageBps: 50,
+    });
+  }
+
+  it("refuses a Stellar OFT that does not peer back to the sending OFT", async () => {
+    world.stellarPeer = `0x${"00".repeat(12)}${"77".repeat(20)}`;
+    await expect(mainnet().sendableAssets("arbitrum")).rejects.toThrow(/does not peer back/);
+  });
+
+  it("declines while the Stellar OFT is paused, since nothing would be delivered", async () => {
+    world.paused = true;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "temporarily-unavailable" });
+    expect((result as RouteRejection).explanation).toMatch(/paused/);
+  });
+
+  it("declines more than the Stellar side will take in right now", async () => {
+    // 25 USDT0 lands as 250000000 at seven decimals
+    world.inboundCapacity = 249_999_999n;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "amount-too-large" });
+  });
+
+  it("declines more than the sending OFT will carry in one transfer", async () => {
+    world.maxAmountLD = 24_999_999n;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "amount-too-large" });
+  });
+
+  it("quotes when every limit has room", async () => {
+    world.inboundCapacity = 250_000_000n;
+    world.maxAmountLD = 25_000_000n;
+    expect(isRoute(await quoteFor())).toBe(true);
   });
 });
 

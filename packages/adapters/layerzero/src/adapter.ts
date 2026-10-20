@@ -401,12 +401,12 @@ export class LayerZeroAdapter implements BridgeAdapter {
       extraOptions,
     });
 
-    const [fee, deliveredLocal] = await Promise.all([
+    const [fee, oftQuote] = await Promise.all([
       this.discovery.quoteNativeFee(route, sendParam),
       this.discovery.quoteDelivered(route, sendParam),
     ]);
 
-    if (fee === undefined || deliveredLocal === undefined) {
+    if (fee === undefined || oftQuote === undefined) {
       // The contract refused to price it. On mainnet the documented cause is a
       // verifier set that resolves to a DVN which is not deployed, which cannot
       // be fixed from here and is not the user's doing.
@@ -414,6 +414,23 @@ export class LayerZeroAdapter implements BridgeAdapter {
         "temporarily-unavailable",
         `${source.name}'s ${route.tokenSymbol} contract would not price a transfer to Stellar ` +
           "right now. Nothing about the amount or the address is wrong.",
+      );
+    }
+
+    const deliveredLocal = oftQuote.received;
+    if (sends > oftQuote.maxAmountLD) {
+      return this.decline(
+        "amount-too-large",
+        `${source.name}'s ${route.tokenSymbol} contract carries at most ` +
+          `${readableAmount(oftQuote.maxAmountLD, route.tokenDecimals)} ${route.tokenSymbol} in one ` +
+          "transfer. Send less, or split it.",
+      );
+    }
+    if (sends < oftQuote.minAmountLD) {
+      return this.decline(
+        "amount-too-small",
+        `${source.name}'s ${route.tokenSymbol} contract carries at least ` +
+          `${readableAmount(oftQuote.minAmountLD, route.tokenDecimals)} ${route.tokenSymbol} in one transfer.`,
       );
     }
 
@@ -442,6 +459,33 @@ export class LayerZeroAdapter implements BridgeAdapter {
       return this.decline(
         "amount-too-small",
         "Nothing would arrive: the amount is smaller than this token's smallest transferable unit.",
+      );
+    }
+
+    let inbound: { readonly paused: boolean; readonly capacity: bigint };
+    try {
+      inbound = await this.discovery.stellarInbound(route);
+    } catch (cause) {
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "The Stellar side of this route could not be read right now.",
+      );
+    }
+    if (inbound.paused) {
+      return this.decline(
+        "temporarily-unavailable",
+        `${route.tokenSymbol} on Stellar is paused by its operator, so nothing sent now would be ` +
+          "delivered until it resumes. Nothing has been sent.",
+      );
+    }
+    if (delivered > inbound.capacity) {
+      return this.decline(
+        "amount-too-large",
+        `Stellar's ${route.tokenSymbol} contract will take in at most ` +
+          `${readableAmount(inbound.capacity, STELLAR_DECIMALS)} from ${source.name} right now. ` +
+          "Send less, or wait for its limit to refill.",
       );
     }
     // Converted first. The floor is an amount of XLM and this is an amount of
