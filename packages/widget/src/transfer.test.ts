@@ -8,7 +8,9 @@ import {
   Keypair,
   Networks,
   Operation,
+  SorobanDataBuilder,
   StrKey,
+  type Transaction,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -332,11 +334,21 @@ function stellarNode(): RpcClient {
     return { entries, latestLedger: 100 } as never;
   });
   vi.spyOn(client.server, "getLatestLedger").mockResolvedValue({ sequence: 100 } as never);
-  vi.spyOn(client.server, "prepareTransaction").mockImplementation(async (tx) => {
+  vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
     log.push("stellar simulate delivery");
     const failure = simulationFailures.shift();
     if (failure !== undefined) throw failure;
-    return TransactionBuilder.cloneFrom(tx as never, { fee: preparedFee }).build() as never;
+    // priced so the prepared transaction costs preparedFee in all
+    const resourceFee = BigInt(preparedFee) - BigInt((tx as Transaction).fee);
+    return {
+      _parsed: true,
+      id: "1",
+      events: [],
+      latestLedger: 100,
+      minResourceFee: resourceFee.toString(),
+      transactionData: new SorobanDataBuilder().setResourceFee(resourceFee),
+      result: { retval: xdr.ScVal.scvVoid(), auth: [] },
+    } as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
     const op = (tx as { operations: Array<{ type: string; func?: unknown }> }).operations[0];

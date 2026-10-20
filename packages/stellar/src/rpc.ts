@@ -41,6 +41,28 @@ export interface RpcClientOptions {
   readonly baseDelayMs?: number;
   /** Injectable so tests do not actually sleep. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * The longest any one request may take, in milliseconds. Without it a node that
+   * accepts the connection and never answers holds the caller forever.
+   */
+  readonly timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/**
+ * How long past a transaction's time bound to keep asking when no node has yet
+ * closed a ledger past it, before saying the outcome is unknown.
+ */
+const EXPIRY_GRACE_SECONDS = 120;
+
+/** What the SDK's HTTP client throws when a request runs past its timeout. */
+function isTimeout(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  return (
+    (cause as { code?: unknown }).code === "ECONNABORTED" ||
+    /^timeout of \d+ ?ms exceeded$/.test(cause.message)
+  );
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -111,6 +133,9 @@ export class RpcClient {
 
   constructor(options: RpcClientOptions) {
     this.server = new rpc.Server(options.url);
+    // rpc.Server's own `timeout` option is declared but never applied (sdk
+    // 16.2.0), so the bound goes on the client it builds
+    this.server.httpClient.defaults.timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.floor = createLedgerFloor();
     this.maxAttempts = options.maxAttempts ?? 6;
     this.baseDelayMs = options.baseDelayMs ?? 1000;
@@ -125,9 +150,20 @@ export class RpcClient {
    */
   async read<T>(label: string, read: () => Promise<FreshRead<T>>): Promise<T> {
     let lastSeenLedger = -1;
+    let lastTimeout: unknown;
 
     for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
-      const result = await read();
+      let result: FreshRead<T>;
+      try {
+        result = await read();
+      } catch (cause) {
+        // a stalled node says nothing about the answer, so ask again; any other
+        // failure is the caller's to see
+        if (!isTimeout(cause)) throw cause;
+        lastTimeout = cause;
+        await this.sleep(this.baseDelayMs * 2 ** attempt);
+        continue;
+      }
       if (result.ledger >= this.floor.value) {
         this.floor.observe(result.ledger);
         return result.value;
@@ -136,10 +172,16 @@ export class RpcClient {
       await this.sleep(this.baseDelayMs * 2 ** attempt);
     }
 
+    if (lastSeenLedger === -1 && lastTimeout !== undefined) {
+      throw new MavnaError(`Could not read ${label}: every request timed out.`, {
+        retryable: true,
+        cause: lastTimeout,
+      });
+    }
     throw new MavnaError(
       `Could not read ${label} from a node at or past ledger ${this.floor.value}; ` +
         `the closest was ${lastSeenLedger}.`,
-      { retryable: true },
+      { retryable: true, cause: lastTimeout },
     );
   }
 
@@ -192,14 +234,21 @@ export class RpcClient {
    * missing one is retried forever.
    */
   async waitForAccount(address: string, attempts = 40): Promise<Account> {
+    let last: unknown;
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         return await this.loadAccount(address);
-      } catch {
+      } catch (cause) {
+        // absence is what is being waited out, and so is a node that could not
+        // answer yet; anything else will not change by asking again
+        const waitable =
+          cause instanceof AccountNotFound || (cause instanceof MavnaError && cause.retryable);
+        if (!waitable) throw cause;
+        last = cause;
         await this.sleep(this.baseDelayMs * 2);
       }
     }
-    throw new MavnaError(`Account ${address} never appeared.`, { retryable: true });
+    throw new MavnaError(`Account ${address} never appeared.`, { retryable: true, cause: last });
   }
 
   /**
@@ -208,37 +257,68 @@ export class RpcClient {
    *
    * "Not found" means keep waiting, never failed. A lagging node's silence is
    * indistinguishable from a transaction that was never seen, so absence is only
-   * conclusive once the transaction could no longer be included.
+   * conclusive once a node at or past our high-water mark has closed a ledger
+   * after the transaction's time bound.
    */
   async waitForTransaction(
     hash: string,
-    /**
-     * Unix seconds after which the transaction can no longer be included. Absence
-     * is only conclusive past this point: before it, "not found" means the network
-     * has not got to it yet, and giving up early turns congestion into a false
-     * failure. Defaults to five minutes, matching the timeout we build with.
-     */
-    deadlineUnix: number = Math.floor(Date.now() / 1000) + 300,
+    /** The transaction's own maxTime, in unix seconds. */
+    maxTimeUnix: number,
   ): Promise<rpc.Api.GetTransactionResponse> {
-    const result = await this.pollUntil(hash, deadlineUnix);
-    if (result !== undefined) return result;
-    throw new MavnaError(`Transaction ${hash} was not included before it expired.`, {
-      retryable: true,
-    });
+    const now = Math.floor(Date.now() / 1000);
+    const found = await this.pollUntil(
+      hash,
+      maxTimeUnix,
+      Math.max(maxTimeUnix, now) + EXPIRY_GRACE_SECONDS,
+    );
+    if (found === "expired") {
+      throw new MavnaError(`Transaction ${hash} was not included before it expired.`, {
+        retryable: true,
+      });
+    }
+    if (found === "unknown") {
+      throw new MavnaError(
+        `Transaction ${hash} was not seen included, and no node has yet closed a ledger past ` +
+          "its time bound; it may still land.",
+        { retryable: false },
+      );
+    }
+    return found;
   }
 
-  /** The polling behind waitForTransaction. Undefined means the deadline passed first. */
+  /**
+   * The polling behind waitForTransaction and submit.
+   *
+   * "expired" only when a node at or past the high-water mark reports a ledger
+   * closed after `maxTimeUnix`: the network's clock, not ours, decides whether
+   * the transaction can still be included. "unknown" when the local clock passes
+   * `stopAtUnix` first, which says nothing about the transaction's fate.
+   */
   private async pollUntil(
     hash: string,
-    deadlineUnix: number,
-  ): Promise<rpc.Api.GetTransactionResponse | undefined> {
+    maxTimeUnix: number | undefined,
+    stopAtUnix: number,
+  ): Promise<rpc.Api.GetTransactionResponse | "expired" | "unknown"> {
     for (;;) {
-      const result = await this.server.getTransaction(hash);
-      if (result.status !== "NOT_FOUND") {
+      let result: rpc.Api.GetTransactionResponse | undefined;
+      try {
+        result = await this.server.getTransaction(hash);
+      } catch (cause) {
+        if (!isTimeout(cause)) throw cause;
+      }
+      if (result !== undefined && result.status !== "NOT_FOUND") {
         if (result.status === "SUCCESS") this.observeWrite(result.ledger);
         return result;
       }
-      if (Math.floor(Date.now() / 1000) > deadlineUnix) return undefined;
+      if (
+        result !== undefined &&
+        maxTimeUnix !== undefined &&
+        result.latestLedger >= this.floor.value &&
+        result.latestLedgerCloseTime > maxTimeUnix
+      ) {
+        return "expired";
+      }
+      if (Math.floor(Date.now() / 1000) > stopAtUnix) return "unknown";
       await this.sleep(this.baseDelayMs * 2);
     }
   }
@@ -270,11 +350,16 @@ export class RpcClient {
    * other read.
    */
   async prepare(tx: Transaction): Promise<Transaction> {
-    await this.read("ledger head before simulating", async () => {
-      const latest = await this.server.getLatestLedger();
-      return { value: latest.sequence, ledger: latest.sequence };
+    // the simulation itself carries the ledger it ran against, so the guard is
+    // applied to that answer rather than to a separate request a load balancer
+    // may send to a different node
+    const simulated = await this.read("simulation", async () => {
+      const response = await this.server.simulateTransaction(tx);
+      return { value: response, ledger: response.latestLedger };
     });
-    return this.server.prepareTransaction(tx);
+    // what the SDK's prepareTransaction does with the same answer
+    if (rpc.Api.isSimulationError(simulated)) throw new Error(simulated.error);
+    return rpc.assembleTransaction(tx, simulated).build();
   }
 
   /**
@@ -299,7 +384,31 @@ export class RpcClient {
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       const tx = await build();
-      const sent = await this.server.sendTransaction(tx);
+      // The transaction's own time bound is the only correct deadline: past it
+      // the network cannot include it, and before it silence means nothing.
+      // A fee-bump carries its bounds on the inner transaction, not the envelope.
+      const bounds = "timeBounds" in tx ? tx.timeBounds : tx.innerTransaction.timeBounds;
+      const maxTime = Number(bounds?.maxTime ?? 0);
+      const now = Math.floor(Date.now() / 1000);
+      // measured from now as well, so a local clock running ahead still waits
+      const stopAt = maxTime > 0 ? Math.max(maxTime, now) + EXPIRY_GRACE_SECONDS : now + 300;
+      const capped =
+        options.waitSeconds === undefined ? stopAt : Math.min(stopAt, now + options.waitSeconds);
+
+      let sent: rpc.Api.SendTransactionResponse;
+      try {
+        sent = await this.server.sendTransaction(tx);
+      } catch (cause) {
+        if (!isTimeout(cause)) throw cause;
+        // the node may have taken it before going quiet, so a rebuild could act
+        // twice; only its hash can say
+        sent = {
+          status: "PENDING",
+          hash: tx.hash().toString("hex"),
+          latestLedger: 0,
+          latestLedgerCloseTime: 0,
+        };
+      }
 
       if (sent.status === "ERROR") {
         const reason = sent.errorResult?.result().switch().name ?? "unknown";
@@ -323,23 +432,24 @@ export class RpcClient {
         continue;
       }
 
-      // The transaction's own time bound is the only correct deadline: past it
-      // the network cannot include it, and before it silence means nothing.
-      // A fee-bump carries its bounds on the inner transaction, not the envelope.
-      const bounds = "timeBounds" in tx ? tx.timeBounds : tx.innerTransaction.timeBounds;
-      const maxTime = Number(bounds?.maxTime ?? 0);
-      const expires = maxTime > 0 ? maxTime : Math.floor(Date.now() / 1000) + 300;
-      const capped =
-        options.waitSeconds === undefined
-          ? expires
-          : Math.min(expires, Math.floor(Date.now() / 1000) + options.waitSeconds);
-      const result = await this.pollUntil(sent.hash, capped);
-      if (result === undefined) {
+      const result = await this.pollUntil(sent.hash, maxTime > 0 ? maxTime : undefined, capped);
+      if (result === "expired") {
+        // proven out of reach, so building it again cannot act twice
+        lastReason = `transaction ${sent.hash} expired before it was included`;
+        if (attempt + 1 < attempts) continue;
+        throw new MavnaError(`Transaction ${sent.hash} was not included before it expired.`, {
+          retryable: true,
+        });
+      }
+      if (result === "unknown") {
+        // Sending the same signed envelope again cannot act twice, so a
+        // presigned one may be retried. Anything rebuilt would be a new
+        // transaction beside one that may still land.
         throw new MavnaError(
-          capped < expires
+          capped < stopAt
             ? `${label} was not seen included within ${options.waitSeconds} seconds; it may still land.`
-            : `Transaction ${sent.hash} was not included before it expired.`,
-          { retryable: true },
+            : `${label} was not seen included, and no node has closed a ledger past its time bound; it may still land.`,
+          { retryable: options.presigned === true },
         );
       }
       if (result.status === "SUCCESS") return result;
