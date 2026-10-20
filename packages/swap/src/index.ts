@@ -1,12 +1,18 @@
 export type { AquariusOptions, PathQuote } from "./aquarius.js";
 export { AquariusProvider, decodeSwapChain } from "./aquarius.js";
-export type { SwapBuildRequest, SwapProvider, SwapQuote, SwapQuoteRequest } from "./provider.js";
+export type {
+  SwapBuildRequest,
+  SwapProvider,
+  SwapQuote,
+  SwapQuoteRequest,
+  Usability,
+} from "./provider.js";
 export { applySlippage } from "./provider.js";
 export type { PathPaymentInputs } from "./sdex.js";
 export { buildPathPayment, SdexProvider } from "./sdex.js";
 export { selectSwapProvider } from "./select.js";
 export type { Simulated } from "./soroban.js";
-export { buildContractCall, readContract, rpcHealthy, simulate } from "./soroban.js";
+export { buildContractCall, readContract, rpcHealth, rpcHealthy, simulate } from "./soroban.js";
 export type {
   SoroswapBuildRequest,
   SoroswapOptions,

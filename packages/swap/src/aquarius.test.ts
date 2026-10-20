@@ -352,6 +352,30 @@ describe("a conversion path built from the router's own pools between listed tok
     expect(asked.length).toBeGreaterThan(0);
   });
 
+  it("says why when the router refused to list pools, rather than only that there are none", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [RPC]: sorobanNode(
+          () => ({ error: "HostError: Error(Contract, #2006)" }),
+          Networks.TESTNET,
+        ),
+      }).fetch,
+    );
+    const error = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC })
+      .quotePath({
+        assetIn: XLM,
+        assetOut: USDC,
+        amountIn: "100000000",
+        maxSlippageBps: 20,
+        via: [AQUA],
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/no pools that connect/);
+    expect((error as MavnaError).message).toMatch(/#2006/);
+  });
+
   it("refuses plainly when no pools connect the pair through listed tokens", async () => {
     vi.stubGlobal("fetch", routedFetch({ [RPC]: router({}, []) }).fetch);
     await expect(

@@ -15,8 +15,9 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
-import { buildContractCall, readContract, rpcHealthy } from "./soroban.js";
+import { buildContractCall, readContract, rpcHealth } from "./soroban.js";
 import { toContractId, validated } from "./wire.js";
 
 /**
@@ -94,8 +95,14 @@ export class SushiSwapProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
-    if (this.network !== "mainnet") return false;
-    return rpcHealthy(this.rpcUrl, this.timeoutMs);
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    if (this.network !== "mainnet") {
+      return { usable: false, because: "SushiSwap has no deployment on this network" };
+    }
+    return rpcHealth(this.rpcUrl, this.timeoutMs);
   }
 
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {

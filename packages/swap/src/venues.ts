@@ -1,7 +1,13 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import type { Transaction } from "@stellar/stellar-sdk";
 import { AquariusProvider } from "./aquarius.js";
-import type { SwapBuildRequest, SwapProvider, SwapQuote, SwapQuoteRequest } from "./provider.js";
+import type {
+  SwapBuildRequest,
+  SwapProvider,
+  SwapQuote,
+  SwapQuoteRequest,
+  Usability,
+} from "./provider.js";
 import { SoroswapProvider } from "./soroswap.js";
 import { SushiSwapProvider } from "./sushiswap.js";
 import { toContractId } from "./wire.js";
@@ -103,7 +109,7 @@ export class SwapVenues implements SwapProvider {
   readonly canCollectIntegratorFee: boolean;
 
   private readonly venues: readonly Venue[];
-  private readonly usable = new Map<string, { value: boolean; at: number }>();
+  private readonly usable = new Map<string, { value: Usability; at: number }>();
 
   constructor(network: NetworkId, venues: readonly Venue[]) {
     this.network = network;
@@ -126,7 +132,7 @@ export class SwapVenues implements SwapProvider {
 
   async isUsable(): Promise<boolean> {
     for (const venue of this.venues) {
-      if (await this.isVenueUsable(venue.provider)) return true;
+      if ((await this.isVenueUsable(venue.provider)).usable) return true;
     }
     return false;
   }
@@ -156,8 +162,10 @@ export class SwapVenues implements SwapProvider {
     const asked = serving.map(async (venue, i): Promise<Outcome> => {
       let outcome: Outcome;
       try {
-        if (!(await this.isVenueUsable(venue.provider))) {
-          outcome = { reason: `${venue.provider.id} is unavailable`, retryable: true };
+        const usability = await this.isVenueUsable(venue.provider);
+        if (!usability.usable) {
+          const why = usability.because === undefined ? "" : ` (${usability.because})`;
+          outcome = { reason: `${venue.provider.id} is unavailable${why}`, retryable: true };
         } else {
           outcome = { quote: await venue.provider.quote(request) };
         }
@@ -223,10 +231,13 @@ export class SwapVenues implements SwapProvider {
     return venue.provider.build(request);
   }
 
-  private async isVenueUsable(provider: SwapProvider): Promise<boolean> {
+  private async isVenueUsable(provider: SwapProvider): Promise<Usability> {
     const known = this.usable.get(provider.id);
     if (known !== undefined && Date.now() - known.at < USABLE_FOR_MS) return known.value;
-    const value = await provider.isUsable();
+    const value: Usability =
+      provider.usability === undefined
+        ? { usable: await provider.isUsable() }
+        : await provider.usability();
     this.usable.set(provider.id, { value, at: Date.now() });
     return value;
   }

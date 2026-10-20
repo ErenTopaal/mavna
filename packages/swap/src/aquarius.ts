@@ -8,9 +8,17 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
 import { buildContractCall, readContract } from "./soroban.js";
-import { boundedBy, fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
+import {
+  boundedBy,
+  causeOf,
+  fetchOrThrow,
+  readValidated,
+  toContractId,
+  validated,
+} from "./wire.js";
 
 /**
  * Aquarius. The fallback venue, on both networks.
@@ -126,16 +134,23 @@ export class AquariusProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    const url = `${this.baseUrl}/api/external/v1/pools/?size=1`;
     try {
-      const response = await fetch(`${this.baseUrl}/api/external/v1/pools/?size=1`, {
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-      if (!response.ok) return false;
+      const response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      if (!response.ok)
+        return { usable: false, because: `${url} answered HTTP ${response.status}` };
       const parsed = poolsPage.safeParse(await response.json());
-      return parsed.success && parsed.data.count > 0;
-    } catch {
+      if (!parsed.success) return { usable: false, because: `${url} answered in another shape` };
+      return parsed.data.count > 0
+        ? { usable: true }
+        : { usable: false, because: "Aquarius lists no pools on this network" };
+    } catch (cause) {
       // isUsable answers a question; an unreachable service is the answer "no".
-      return false;
+      return { usable: false, because: `${url} did not answer (${causeOf(cause)})` };
     }
   }
 
@@ -265,6 +280,8 @@ export class AquariusProvider implements SwapProvider {
     // pool keys stay the sdk's own byte objects, which scvBytes takes back as is
     type PoolKey = ReturnType<xdr.ScVal["bytes"]>;
     const pools = new Map<string, readonly PoolKey[]>();
+    // the router's refusals, kept for the answer when nothing connects
+    const refusals: string[] = [];
     const poolsOf = async (tokens: readonly string[]): Promise<readonly PoolKey[]> => {
       const key = tokens.join(",");
       const known = pools.get(key);
@@ -276,6 +293,7 @@ export class AquariusProvider implements SwapProvider {
       } catch (cause) {
         // a node that did not answer is not a pair with no pools
         if (cause instanceof MavnaError && cause.retryable) throw cause;
+        refusals.push(`get_pools: ${causeOf(cause)}`);
         found = [];
       }
       pools.set(key, found);
@@ -302,6 +320,7 @@ export class AquariusProvider implements SwapProvider {
           out = BigInt(scValToNative(estimate) as bigint);
         } catch (cause) {
           if (cause instanceof MavnaError && cause.retryable) throw cause;
+          refusals.push(`estimate_swap: ${causeOf(cause)}`);
           continue;
         }
         if (best === undefined || out > best.out) {
@@ -335,8 +354,10 @@ export class AquariusProvider implements SwapProvider {
       }
     }
     if (best === undefined) {
+      const why = [...new Set(refusals)].join("; ");
       throw new MavnaError(
-        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses.",
+        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses" +
+          (why === "" ? "." : `. The router refused: ${why}.`),
         { retryable: false },
       );
     }

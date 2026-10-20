@@ -379,3 +379,27 @@ describe("the chain under the route race's deadline", () => {
     expect(seen[0]?.aborted).toBe(true);
   });
 });
+
+describe("why a venue is unavailable", () => {
+  it("is kept in the chain's refusal, for whoever has to fix it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${PROXY}/swap/soroswap/health`]: healthy("testnet"),
+        [`${AQUA_MAIN}/api/external/v1/pools/`]: () => json({ error: "maintenance" }, 503),
+      }).fetch,
+    );
+    const error = await createSwapVenues({
+      network: "mainnet",
+      soroswapProxyUrl: PROXY,
+      rpcUrl: RPC,
+    })
+      .quote({ ...usdcToXlm, assetIn: STELLAR_USDT0, assetOut: USDC_MAIN })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    const message = (error as MavnaError).message;
+    expect(message).toMatch(/soroswap is unavailable \(.*testnet.*\)/);
+    expect(message).toMatch(/aquarius is unavailable \(.*503.*\)/);
+    expect(message).toMatch(/sushiswap is unavailable \(.*rpc\.example.*\)/);
+  });
+});

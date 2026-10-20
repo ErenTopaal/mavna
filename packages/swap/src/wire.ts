@@ -22,6 +22,15 @@ export async function fetchOrThrow(
   }
 }
 
+/** A short, plain account of why a request failed, for an operator. */
+export function causeOf(cause: unknown): string {
+  if (cause instanceof Error) {
+    const inner = cause.cause instanceof Error ? `: ${cause.cause.message}` : "";
+    return `${cause.name}: ${cause.message}${inner}`.slice(0, 200);
+  }
+  return String(cause).slice(0, 200);
+}
+
 /** A venue's own bound, cut short when the caller stops waiting first. */
 export function boundedBy(timeoutMs: number, caller: AbortSignal | undefined): AbortSignal {
   const own = AbortSignal.timeout(timeoutMs);

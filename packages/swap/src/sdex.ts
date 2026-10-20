@@ -8,8 +8,9 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
-import { boundedBy, fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
+import { boundedBy, causeOf, fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
 
 /**
  * Stellar's own exchange, as a swap provider.
@@ -95,13 +96,18 @@ export class SdexProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    const url = `${this.horizonUrl}/`;
     try {
-      const response = await fetch(`${this.horizonUrl}/`, {
-        signal: AbortSignal.timeout(8_000),
-      });
-      return response.ok;
-    } catch {
-      return false;
+      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+      return response.ok
+        ? { usable: true }
+        : { usable: false, because: `${url} answered HTTP ${response.status}` };
+    } catch (cause) {
+      return { usable: false, because: `${url} did not answer (${causeOf(cause)})` };
     }
   }
 
