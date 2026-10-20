@@ -69,13 +69,31 @@ export const fetchEthCall: EthCall = async (rpcUrl, to, data) => {
   // A revert arrives as a JSON-RPC error with a 200, so branching on the status
   // code alone would read every revert as a success with no result.
   if (body.error !== undefined) {
-    throw new EvmRevert(body.error.message ?? "an EVM read reverted with no reason given");
+    const message = body.error.message ?? "";
+    if (isRevert(body.error.code, message)) {
+      throw new EvmRevert(message || "an EVM read reverted with no reason given");
+    }
+    // Public nodes report rate limits, lag and internal faults this same way,
+    // and reading one as a revert would decline a token that is fine.
+    throw new MavnaError(`An EVM node could not answer: ${message || "no reason given"}`, {
+      retryable: true,
+    });
   }
   if (typeof body.result !== "string") {
     throw new MavnaError("An EVM node answered without a result.", { retryable: true });
   }
   return body.result;
 };
+
+/**
+ * Code 3 is the standard revert code. Older nodes send a revert as -32000 and
+ * Nethermind as -32015, so the message decides there; anything that does not say
+ * it reverted is not taken as the contract's answer.
+ */
+function isRevert(code: number | undefined, message: string): boolean {
+  if (code === 3) return true;
+  return /revert|invalid opcode/i.test(message);
+}
 
 export class EvmReader {
   // Declared and assigned rather than written as constructor parameters. The repo
