@@ -1183,7 +1183,9 @@ describe("runTransfer when the account pays its own reserve", () => {
       "iris /v2/messages/3",
       "stellar read destination",
       "stellar simulate delivery",
+      "deliver blocked",
       "stellar sign DELIVERY",
+      "deliver pending",
       "stellar send invokeHostFunction",
       "deliver done",
     ]);
@@ -1218,6 +1220,25 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/authorize more than the delivery/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, marks the delivery as waiting on the wallet while it asks to sign it", async () => {
+    funding = "self";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const order: string[] = [];
+    const { patch } = patches();
+    await run(cctp, routeFor("cctp"), (id, p) => {
+      if (id === "deliver" && p.phase !== undefined) order.push(`deliver ${String(p.phase)}`);
+      patch(id, p);
+    });
+    expect(order[0]).toBe("deliver blocked");
+    const signedAt = log.indexOf("stellar sign DELIVERY");
+    expect(signedAt).toBeGreaterThan(-1);
+    expect(order).toContain("deliver pending");
   });
 
   it("over Circle, stops at a declined delivery signature and leaves it to Activity", async () => {
@@ -1269,7 +1290,9 @@ describe("runTransfer when the account pays its own reserve", () => {
       "iris /v2/messages/3",
       "stellar read destination",
       "stellar simulate delivery",
+      "deliver blocked",
       "stellar sign DELIVERY",
+      "deliver pending",
       "stellar send invokeHostFunction",
       "deliver done",
     ]);

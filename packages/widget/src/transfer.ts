@@ -570,7 +570,10 @@ async function deliverToStellar(
     try {
       outcome =
         ownDelivery && owner !== undefined
-          ? await deliverOwn(engine, burnHash, domain, owner)
+          ? await deliverOwn(engine, burnHash, domain, owner, undefined, (open) =>
+              // the wallet's prompt is open: the page must not be closed under it
+              patch("deliver", { phase: open ? "blocked" : "pending" }),
+            )
           : await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
     } catch (cause) {
       // The burn is done, so a node or sponsor that did not answer this once is
