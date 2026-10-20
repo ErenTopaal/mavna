@@ -6,6 +6,7 @@ import {
   MavnaError,
   type Route,
   type RouteRejection,
+  sameAsset,
 } from "@mavna/core";
 
 /**
@@ -93,6 +94,18 @@ export async function attachSwapLeg(
   maxSlippageBps: number,
   signal?: AbortSignal,
 ): Promise<Route | RouteRejection> {
+  // the leg sells `delivered`, so a rail that brought anything else would be
+  // quoted for a sale of money it never delivered
+  if (!sameAsset(route.deliveredAtLeast.asset, attachment.delivered)) {
+    return {
+      source: route.source,
+      reason: "asset-unsupported",
+      retryable: false,
+      explanation:
+        `This route brings ${route.deliveredAtLeast.asset.symbol} to Stellar, not the ` +
+        `${attachment.delivered.symbol} the conversion into ${attachment.wanted.symbol} sells.`,
+    };
+  }
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;
   const ask = (amountIn: bigint) =>
     untilAborted(
@@ -115,6 +128,18 @@ export async function attachSwapLeg(
     attachment.repaysReserve === true &&
     reserve !== undefined &&
     route.steps.some((s) => s.kind === "settle-account");
+  // the reserve is in stroops and is priced through this conversion's own
+  // rate, which is a price in XLM only when XLM is what the user wants
+  if (repays && attachment.wanted.id !== "native") {
+    return {
+      source: route.source,
+      reason: "asset-unsupported",
+      retryable: false,
+      explanation:
+        `A new account's reserve is repaid out of this arrival, which can only be priced ` +
+        `here for a conversion into XLM. Receive ${attachment.delivered.symbol}, or XLM.`,
+    };
+  }
   let setAside = 0n;
   try {
     if (repays) {

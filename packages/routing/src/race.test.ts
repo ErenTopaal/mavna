@@ -146,7 +146,11 @@ describe("racing route sources", () => {
     const asset = { chainId: "stellar-testnet", id: "x", symbol: "X", decimals: 7, curatedBy: "t" };
     const result = await raceAdapters(
       [
-        adapter("stuck", async () => ({ ...route("stuck"), destination: "GDEST" })),
+        adapter("stuck", async () => ({
+          ...route("stuck"),
+          destination: "GDEST",
+          deliveredAtLeast: { asset, baseUnits: "1" },
+        })),
         adapter("declines", async () => ({
           source: "declines",
           reason: "no-liquidity",
@@ -194,7 +198,11 @@ describe("the conversion inside the rail's budget", () => {
       [
         adapter("rail", async () => {
           await sleep(60);
-          return { ...route("rail"), destination: "GDEST" };
+          return {
+            ...route("rail"),
+            destination: "GDEST",
+            deliveredAtLeast: { asset, baseUnits: "1" },
+          };
         }),
       ],
       { ...request, maxSlippageBps: 50 },
@@ -235,7 +243,13 @@ describe("a quoter that answers with what it has when the budget ends", () => {
         }),
     };
     const result = await raceAdapters(
-      [adapter("rail", async () => ({ ...route("rail"), destination: "GDEST" }))],
+      [
+        adapter("rail", async () => ({
+          ...route("rail"),
+          destination: "GDEST",
+          deliveredAtLeast: { asset, baseUnits: "1" },
+        })),
+      ],
       { ...request, maxSlippageBps: 50 },
       {
         timeoutMs: 50,
