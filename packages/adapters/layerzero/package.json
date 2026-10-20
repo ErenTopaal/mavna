@@ -23,6 +23,6 @@
     "@mavna/routing": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
-    "viem": "2.55.13"
+    "viem": "2.57.7"
   }
 }

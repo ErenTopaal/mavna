@@ -15,17 +15,17 @@
     "@fontsource/instrument-sans": "5.3.0",
     "@mavna/core": "workspace:*",
     "@mavna/widget": "workspace:*",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@mavna/swap": "workspace:*",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
-    "@vitejs/plugin-react": "6.0.5",
-    "vite": "8.2.1"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "vite": "8.3.4"
   }
 }

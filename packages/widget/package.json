@@ -31,7 +31,7 @@
     "react-dom": ">=19"
   },
   "dependencies": {
-    "@creit.tech/stellar-wallets-kit": "2.5.0",
+    "@creit.tech/stellar-wallets-kit": "2.7.1",
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
@@ -42,17 +42,17 @@
     "@mavna/stellar": "workspace:*",
     "@mavna/swap": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
-    "@web3icons/react": "4.1.20",
+    "@web3icons/react": "4.1.24",
     "motion": "13.1.0",
-    "viem": "2.55.13"
+    "viem": "2.57.7"
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "13.0.3",
     "@tsdown/css": "0.22.14",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "size-limit": "13.0.3"
   },
   "//size-limit": "Self-contained: the widget bundles the routing engine, the three rail adapters, the Stellar SDK, viem and the wallet kit, like the LI.FI widget it is modelled on. This is the gzipped budget for all of that, not a thin presentational component.",

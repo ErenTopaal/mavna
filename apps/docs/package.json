@@ -23,15 +23,15 @@
     "@mavna/status": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@mavna/widget": "workspace:*",
-    "next": "16.3.0",
+    "next": "16.4.2",
     "nextra": "4.6.1",
     "nextra-theme-docs": "4.6.1",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "pagefind": "1.5.2",
     "typescript": "6.0.3"
   }
