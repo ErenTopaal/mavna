@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertPlanIsSound, planTransfer, signatureCount } from "./plan.js";
+import { assertPlanIsSound, optionalSignatureCount, planTransfer, signatureCount } from "./plan.js";
 
 const usdcToUsdc = {
   bridgeDelivers: "USDC",
@@ -52,6 +52,25 @@ describe("what a transfer actually requires", () => {
     });
     expect(withApproval.map((s) => s.kind)).toEqual(["approve-source", "bridge"]);
     expect(signatureCount(withApproval)).toBe(2);
+  });
+
+  it("counts a reset the source token may need as one more it may ask for", () => {
+    // USDT refuses to change a non-zero allowance in place, so one left over from
+    // an earlier attempt is cleared first; with none left, that step is skipped
+    const steps = planTransfer({
+      destination: "ready",
+      ...usdcToUsdc,
+      sourceNeedsApproval: true,
+      sourceApprovalMayNeedReset: true,
+    });
+    expect(steps.map((s) => s.kind)).toEqual(["approve-source", "bridge"]);
+    expect(signatureCount(steps)).toBe(3);
+    expect(optionalSignatureCount(steps)).toBe(1);
+    expect(
+      optionalSignatureCount(
+        planTransfer({ destination: "ready", ...usdcToUsdc, sourceNeedsApproval: true }),
+      ),
+    ).toBe(0);
   });
 
   it("puts the approval before the bridge, never after", () => {

@@ -81,8 +81,13 @@ export interface Route {
   readonly fees: readonly Fee[];
   readonly estimatedSeconds: number;
   readonly steps: readonly Step[];
-  /** How many times the user will be asked to sign, told upfront. */
+  /** How many times the user will be asked to sign, told upfront. At most this many. */
   readonly signaturesRequired: number;
+  /**
+   * How many of those may be skipped, such as a reset of an allowance there may
+   * be nothing to clear. Absent or zero means every one is asked for.
+   */
+  readonly optionalSignatures?: number;
   /** When this quote stops being honoured. */
   readonly expiresAtUnix: number;
   /**

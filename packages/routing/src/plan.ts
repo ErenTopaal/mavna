@@ -41,6 +41,13 @@ export interface PlanInputs {
    * exactly the surprise that promise exists to prevent.
    */
   readonly sourceNeedsApproval: boolean;
+  /**
+   * Whether that approval may first have to clear an allowance left over from an
+   * earlier attempt, as USDT requires: it refuses to change a non-zero allowance
+   * in place. The reset is skipped when there is nothing to clear, so it is
+   * counted as a signature the user may be asked for, not one they will be.
+   */
+  readonly sourceApprovalMayNeedReset?: boolean;
 }
 
 export type PlannedStepKind =
@@ -55,6 +62,8 @@ export interface PlannedStep {
   readonly label: string;
   /** Whether the user must sign this one. Used to tell them the count upfront. */
   readonly needsUserSignature: boolean;
+  /** Further signatures this step may ask for, skipped when not needed. */
+  readonly mayAlsoSign?: number;
 }
 
 /**
@@ -89,6 +98,7 @@ export function planTransfer(inputs: PlanInputs): readonly PlannedStep[] {
       // Named for what the user is doing, not for the ERC-20 call underneath it.
       label: "Allow the transfer to move your USDC",
       needsUserSignature: true,
+      ...(inputs.sourceApprovalMayNeedReset === true ? { mayAlsoSign: 1 } : {}),
     });
   }
 
@@ -123,7 +133,15 @@ export function planTransfer(inputs: PlanInputs): readonly PlannedStep[] {
  * surprised by them one at a time.
  */
 export function signatureCount(steps: readonly PlannedStep[]): number {
-  return steps.filter((s) => s.needsUserSignature).length;
+  return steps.reduce(
+    (count, s) => count + (s.needsUserSignature ? 1 + (s.mayAlsoSign ?? 0) : 0),
+    0,
+  );
+}
+
+/** How many of those may not be asked for, so the count can be shown as "up to". */
+export function optionalSignatureCount(steps: readonly PlannedStep[]): number {
+  return steps.reduce((count, s) => count + (s.needsUserSignature ? (s.mayAlsoSign ?? 0) : 0), 0);
 }
 
 /**

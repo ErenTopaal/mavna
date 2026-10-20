@@ -12,6 +12,7 @@ import { fmt, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
+  approvalsLabel,
   enabledRailCount,
   type RailName,
   type RouteView,
@@ -96,7 +97,7 @@ export function renderSend(
   const destInk = c.destValid() ? "var(--mv-ink-2)" : "var(--mv-signal)";
   const priorityLabel = st.priority === "best" ? "Best return" : "Fastest";
   const railsShown = railsLabel(st.rails, c.availableRails());
-  const approvals = r === undefined ? "Nothing yet" : `${r.sigs} steps`;
+  const approvals = r === undefined ? "Nothing yet" : approvalsLabel(r);
 
   return (
     <div style={s("display:flex;flex-direction:column")}>
@@ -955,7 +956,7 @@ export function renderReview(
                 },
               ]
             : []),
-          { key: "sig", name: "Approvals", value: `${r.sigs} steps` },
+          { key: "sig", name: "Approvals", value: approvalsLabel(r) },
           { key: "eta", name: "Estimated time", value: `About ${r.minutes} minutes` },
         ];
   return (
@@ -1646,7 +1647,7 @@ export function renderRoutes(
                     style={s(
                       "display:flex;align-items:center;gap:6px;margin-left:auto;white-space:nowrap",
                     )}
-                    title={`${x.sigs} approvals in your wallet`}
+                    title={`${x.sigsUpTo ? "Up to " : ""}${x.sigs} approvals in your wallet`}
                   >
                     <svg
                       width="13"
@@ -1920,7 +1921,7 @@ function routeDetail(
           },
         ]
       : []),
-    { key: "sig", name: "Approvals", value: `${x.sigs} steps` },
+    { key: "sig", name: "Approvals", value: approvalsLabel(x) },
     { key: "eta", name: "Estimated time", value: `About ${x.minutes} min` },
     { key: "settle", name: "Settles on", value: "Stellar" },
   ];

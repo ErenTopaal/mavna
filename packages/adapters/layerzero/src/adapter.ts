@@ -17,7 +17,12 @@ import type {
   UnsignedTransaction,
 } from "@mavna/core";
 import { MavnaError, rejectionIsRetryable, SENDER_ADDRESS } from "@mavna/core";
-import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
+import {
+  optionalSignatureCount,
+  type PlannedStep,
+  planTransfer,
+  signatureCount,
+} from "@mavna/routing";
 import {
   type ArrivingValue,
   belowFloorGuidance,
@@ -526,6 +531,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
       // answers true on Ethereum, where it locks real USDT, and false on
       // Arbitrum, Optimism and Polygon, where it mints and burns.
       sourceNeedsApproval: route.approvalRequired,
+      // the build clears a leftover allowance first when the token locks, as USDT does
+      sourceApprovalMayNeedReset: route.approvalRequired,
     });
 
     const receives: Amount = { asset: arrives, baseUnits: delivered.toString() };
@@ -608,6 +615,9 @@ export class LayerZeroAdapter implements BridgeAdapter {
         execution: undefined,
       })),
       signaturesRequired: signatureCount(steps),
+      ...(optionalSignatureCount(steps) > 0
+        ? { optionalSignatures: optionalSignatureCount(steps) }
+        : {}),
       // The fee is a live read off the source chain rather than a held quote, so
       // this is a refresh interval and not a promise that expires.
       expiresAtUnix: Math.floor(Date.now() / 1000) + 120,

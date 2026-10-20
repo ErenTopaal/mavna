@@ -691,6 +691,24 @@ describe("the approval, where the OFT locks the token", () => {
     return { sent, allowance: current };
   }
 
+  it("tells the user up front that a reset may be asked for", async () => {
+    world.approvalRequired = true;
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    const route = routeOf(
+      await adapter.quote({
+        from,
+        to,
+        sends: { asset: from, baseUnits: "150000000" },
+        destination: READY,
+        maxSlippageBps: 50,
+      }),
+    );
+    // the reset, the approval and the send, of which the reset may be skipped
+    expect(route.signaturesRequired).toBe(3);
+    expect(route.optionalSignatures).toBe(1);
+  });
+
   it("clears a smaller allowance first, since USDT refuses to change one in place", async () => {
     // approved 100 earlier, declined the send, now sending 150
     const { sent, allowance } = await runApprovals(100_000_000n);

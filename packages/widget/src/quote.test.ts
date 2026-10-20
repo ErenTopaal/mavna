@@ -17,6 +17,7 @@ import { routeFor, ScriptedAdapter, SOURCE_USDC, STELLAR_XLM } from "./__fixture
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import {
   applySponsorTerms,
+  approvalsLabel,
   assetsFor,
   buildAssets,
   declineUnsettleable,
@@ -1126,5 +1127,14 @@ describe("a conversion on a route whose arrival repays the sponsor", () => {
   it("sets nothing aside when the account pays its own reserve", async () => {
     const [route] = (await quoted("self")).routes;
     expect(route?.fees.some((f) => f.kind === "reserve-repayment")).toBe(false);
+  });
+});
+
+describe("the approvals a route will ask for", () => {
+  it("is shown as at most that many when some may be skipped", () => {
+    const route = { ...routeFor("layerzero"), signaturesRequired: 3, optionalSignatures: 1 };
+    expect(approvalsLabel(toRouteView(route))).toBe("Up to 3 steps");
+    const every = { ...routeFor("layerzero"), signaturesRequired: 2 };
+    expect(approvalsLabel(toRouteView(every))).toBe("2 steps");
   });
 });

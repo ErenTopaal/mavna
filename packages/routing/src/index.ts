@@ -8,6 +8,11 @@ export {
 export type { IntegratorFee, SwapAttachment, SwapQuoter } from "./enrich.js";
 export { applyIntegratorFee, attachSwapLeg } from "./enrich.js";
 export type { DestinationReadiness, PlanInputs, PlannedStep, PlannedStepKind } from "./plan.js";
-export { assertPlanIsSound, planTransfer, signatureCount } from "./plan.js";
+export {
+  assertPlanIsSound,
+  optionalSignatureCount,
+  planTransfer,
+  signatureCount,
+} from "./plan.js";
 export type { RaceOptions } from "./race.js";
 export { raceAdapters } from "./race.js";

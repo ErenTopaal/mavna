@@ -22,6 +22,15 @@ ordered list of `PlannedStep`s, each with `needsUserSignature`, and
 carries `needsUserSignature: false`: the user signs it in advance, and the sponsor
 submits it for them, so it is not a prompt at the moment of transfer.
 
+Some signatures are asked for only when needed. USDT refuses to change a non-zero
+allowance in place, so a LayerZero route whose OFT locks the token (USDT0 on
+Ethereum) may first have to reset one left from an earlier attempt. Planned with
+`sourceApprovalMayNeedReset`, that approval step carries `mayAlsoSign: 1`.
+`signatureCount` counts it, so `signaturesRequired` is the most the user can be
+asked for, and `optionalSignatureCount` gives how many of those may be skipped. The
+route carries that as `Route.optionalSignatures`, and the widget then shows the
+count as "Up to N".
+
 ## A transaction can be unnecessary
 
 ```ts

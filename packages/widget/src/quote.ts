@@ -80,6 +80,8 @@ export interface RouteView {
   readonly exact: boolean;
   readonly minutes: number;
   readonly sigs: number;
+  /** Some of those may be skipped, so `sigs` is the most it asks for. */
+  readonly sigsUpTo: boolean;
   readonly newAccount: boolean;
   readonly reserveXlm: number | undefined;
   /**
@@ -115,6 +117,11 @@ export interface DeclineView {
   readonly source: string;
   readonly why: string;
   readonly retryable: boolean;
+}
+
+/** The approvals line, as "Up to N" when some of them may not be asked for. */
+export function approvalsLabel(r: Pick<RouteView, "sigs" | "sigsUpTo">): string {
+  return r.sigsUpTo ? `Up to ${r.sigs} steps` : `${r.sigs} steps`;
 }
 
 export function railDisplay(source: string): string {
@@ -184,6 +191,7 @@ export function toRouteView(route: Route): RouteView {
     exact: route.receivesAtLeast.baseUnits === route.receives.baseUnits,
     minutes: Math.max(1, Math.round(route.estimatedSeconds / 60)),
     sigs: route.signaturesRequired,
+    sigsUpTo: (route.optionalSignatures ?? 0) > 0,
     newAccount: route.steps.some((s) => s.kind === "prepare-account"),
     reserveXlm:
       reserve === undefined
