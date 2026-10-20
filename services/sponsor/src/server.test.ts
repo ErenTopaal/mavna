@@ -5155,6 +5155,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
       body: JSON.stringify({ txHash, domain: 0 }),
     });
 
+  // 600 requests over real HTTP, about 13 s on a loaded machine, so it has its own room
   it("leaves 600 made-up hashes off the list, and still delivers a real burn on schedule", async () => {
     const real = hash(9_999);
     const recipient = Keypair.random();
@@ -5191,7 +5192,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
     await server.server.stopSweep();
     expect(server.rpc.submissions.map((s) => s.label)).toContain("cctp delivery");
     expect(await watched(state)).toEqual([]);
-  });
+  }, 60_000);
 
   it("tries the burn due longest first, so pending ones ahead of it cannot starve it", async () => {
     const real = hash(7_777);
