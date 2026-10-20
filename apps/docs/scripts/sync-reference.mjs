@@ -29,6 +29,7 @@ const PACKAGES = [
   { name: "@mavna/adapter-cctp", dir: "packages/adapters/cctp" },
   { name: "@mavna/adapter-axelar", dir: "packages/adapters/axelar" },
   { name: "@mavna/adapter-layerzero", dir: "packages/adapters/layerzero" },
+  { name: "@mavna/adapter-near-intents", dir: "packages/adapters/near-intents" },
   { name: "@mavna/widget", dir: "packages/widget" },
 ];
 

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://docs.mavna.app"),
   title: { default: "Mavna", template: "%s | Mavna" },
   description:
-    "Move USDC into Stellar from other chains. An SDK that builds transactions " +
+    "Move USDC and USDT0 into Stellar from other chains. An SDK that builds transactions " +
     "and never signs them, and a widget that renders the whole transfer.",
 };
 

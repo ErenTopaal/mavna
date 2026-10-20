@@ -46,7 +46,7 @@ balance would be credited but could not be moved, and the sponsor is repaid in t
 asset it curates, which this is not.
 
 That contract-token case is the adapter's answer. The Mavna widget only asks for
-classic USDC, and before the first signature it checks the destination on Stellar
+classic assets, USDC or, when USDT0 is being sent, USDT0, and before the first signature it checks the destination on Stellar
 itself, which it can only do for a `CODE:ISSUER` asset, so a route that would land
 an Axelar contract token is declined there with a sentence saying why.
 
