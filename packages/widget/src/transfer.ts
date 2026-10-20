@@ -415,6 +415,11 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
   }
 }
 
+/** Whether the page went away. Read fresh each time: it can change during any await. */
+function gone(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 /** Said when the page stops after the burn: the money is past the point of failing. */
 const AFTER_BURN =
   "Your funds are safe on Circle's side and still deliverable: finish the delivery under Activity.";
@@ -447,7 +452,7 @@ async function deliverToStellar(
   let lastError: string | undefined;
   for (let attempt = 0; attempt < 90; attempt += 1) {
     // a page that is gone asks for no more signatures
-    if (signal?.aborted === true) throw new StillMoving(STOPPED_WATCHING);
+    if (gone(signal)) throw new StillMoving(STOPPED_WATCHING);
     let outcome: Awaited<ReturnType<typeof engine.sponsor.requestDelivery>> | OwnDelivery;
     try {
       outcome =
@@ -487,6 +492,7 @@ async function deliverToStellar(
     }
     if (outcome.kind === "recipient-not-ready") {
       if (owner !== undefined && !prepared) {
+        if (gone(signal)) throw new StillMoving(STOPPED_WATCHING);
         patch("prepare", { phase: "blocked" });
         try {
           // an account paying for itself gets the same check as at the start
@@ -936,6 +942,15 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
           `arrived is left to convert, ${stays}`,
       });
       return;
+    }
+    // a page that is gone does not ask for a signature nobody can see
+    if (gone(deps.signal)) {
+      throw new DeliveredAsCame(
+        `This page closed before the conversion, so it was not asked for. The ${swapFrom.symbol} ` +
+          "has arrived and is yours.",
+        swapFrom.symbol,
+        convertible.toString(),
+      );
     }
     let converted: Awaited<ReturnType<typeof convertOnStellar>>;
     try {

@@ -9,6 +9,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { type MavnaWidgetConfig, resolveConfig } from "./config.js";
@@ -80,7 +81,12 @@ export const MavnaWidget: ForwardRefExoticComponent<
     setClosing(false);
     setMounted(true);
   }, []);
+  // A running transfer still asks for signatures and still offers a conversion,
+  // and an unmounted flow could do neither visibly, so the drawer stays open
+  // until it has ended.
+  const running = useRef(false);
   const doClose = useCallback(() => {
+    if (running.current) return;
     setClosing(true);
     window.setTimeout(() => {
       setMounted(false);
@@ -136,6 +142,9 @@ export const MavnaWidget: ForwardRefExoticComponent<
     emit: resolved.onEvent,
     networks: resolved.networks,
     onNetworkChange: setActive,
+    onTransferChange: (now: boolean) => {
+      running.current = now;
+    },
   } as const;
 
   if (resolved.variant === "drawer") {

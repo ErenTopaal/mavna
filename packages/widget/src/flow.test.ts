@@ -266,3 +266,15 @@ describe("while a transfer runs", () => {
     }
   });
 });
+
+describe("Flow.props.onTransferChange", () => {
+  it("tells the host when a transfer starts and when it has ended", async () => {
+    const told: boolean[] = [];
+    const flow = new Flow({ engine, onTransferChange: (running) => told.push(running) });
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.start();
+    await flow.runTransfer(view, { kind: "other", name: "Somewhere", family: "move" });
+    expect(told).toEqual([true, false]);
+  });
+});

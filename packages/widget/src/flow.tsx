@@ -177,6 +177,8 @@ export interface FlowProps {
   readonly networks?: readonly ("testnet" | "mainnet")[];
   /** Asked to switch network; the host rebuilds the engine for it. */
   readonly onNetworkChange?: ((network: "testnet" | "mainnet") => void) | undefined;
+  /** Told when a transfer starts running and when it has ended, so the host keeps it mounted. */
+  readonly onTransferChange?: ((running: boolean) => void) | undefined;
 }
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
@@ -992,6 +994,7 @@ export class Flow extends React.Component<FlowProps, State> {
       return;
     }
     this.transferring = true;
+    this.props.onTransferChange?.(true);
     const chain = this.engine.sourceChainDetail(this.state.chainId);
     // Undefined only when the sponsor never answered, and then no route that
     // sets an account up was offered, which is the only kind it changes.
@@ -1008,6 +1011,7 @@ export class Flow extends React.Component<FlowProps, State> {
       await this.runTransferOnce(view, chain);
     } finally {
       this.transferring = false;
+      this.props.onTransferChange?.(false);
     }
   }
 

@@ -29,14 +29,27 @@ export interface DrawerChromeProps {
   readonly children: ReactNode;
 }
 
+/**
+ * Whether a key closes the drawer: Escape, pressed inside it. The wallet kit's
+ * picker is appended to the page outside the drawer, and an Escape that
+ * dismisses the picker must not take the drawer, and the transfer, with it.
+ */
+export function dismissesOnKey(
+  e: { readonly key: string; readonly target: unknown },
+  overlay: { contains(node: never): boolean } | null,
+): boolean {
+  return e.key === "Escape" && overlay !== null && overlay.contains(e.target as never);
+}
+
 export function DrawerChrome(props: DrawerChromeProps): ReactNode {
   const { mounted, closing, showTrigger, onOpen, onClose } = props;
   const dialogRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!mounted) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
+      if (dismissesOnKey(e, overlayRef.current)) onClose();
     };
     document.addEventListener("keydown", onKey);
     // The page behind a modal must not scroll under it.
@@ -63,6 +76,7 @@ export function DrawerChrome(props: DrawerChromeProps): ReactNode {
       {mounted
         ? createPortal(
             <div
+              ref={overlayRef}
               className="mv-root mv-overlay"
               data-mv-theme={props.themeAttr}
               data-mv-closing={closing ? "true" : undefined}

@@ -888,6 +888,63 @@ describe("after the money has left the wallet", () => {
   });
 });
 
+describe("a page that went away mid-transfer", () => {
+  it("asks for no more signatures once it is gone, and says the transfer is still moving", async () => {
+    const gone = new AbortController();
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    onDeliver = () => gone.abort();
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(
+      cctp,
+      routeFor("cctp", { newAccount: true }),
+      patches().patch,
+      connection(),
+      {
+        signal: gone.signal,
+      },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(1);
+    expect(log).not.toContain("sponsor /prepare");
+    expect(log).not.toContain("stellar sign PREPARATION");
+  });
+
+  it("does not ask for the conversion from a page that is gone, and says what arrived", async () => {
+    const gone = new AbortController();
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+        gone.abort();
+      },
+    });
+    const error = await run(adapter, route, patches().patch, connection(), {
+      signal: gone.signal,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DeliveredAsCame);
+    expect(conversionAmounts).toEqual([]);
+  });
+});
+
 describe("a Circle conversion on an account whose reserve the sponsor fronted", () => {
   const fronted = () => {
     const base = routeFor("cctp", { newAccount: true, swap: true });
