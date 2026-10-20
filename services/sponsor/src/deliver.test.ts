@@ -2,6 +2,7 @@ import { MavnaError } from "@mavna/core";
 import { type NetworkConfig, RpcClient } from "@mavna/stellar";
 import {
   Account,
+  Address,
   Keypair,
   Operation,
   rpc,
@@ -187,7 +188,11 @@ function deliveryOn(rpcClient: SequencedRpc): Deliverer {
     payerSecret: payer,
     rpc: rpcClient,
     buildDelivery: ({ payerAccount }) =>
-      new TransactionBuilder(payerAccount, { fee: "100", networkPassphrase: network.passphrase })
+      // the inclusion bid the CCTP adapter's builder sets
+      new TransactionBuilder(payerAccount, {
+        fee: "10000000",
+        networkPassphrase: network.passphrase,
+      })
         .addOperation(
           Operation.invokeContractFunction({
             contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
@@ -211,5 +216,71 @@ describe("a delivery whose sequence something else spent", () => {
     });
     expect(outcome.kind).toBe("delivered");
     expect(network.sent).toEqual([101n, 102n]);
+  });
+});
+
+/** The delivery as simulation hands it back, with what simulation set. */
+function simulated(
+  tx: Transaction,
+  { fee, auth = [] }: { fee: string; auth?: xdr.SorobanAuthorizationEntry[] },
+): Transaction {
+  return new TransactionBuilder(new Account(tx.source, (BigInt(tx.sequence) - 1n).toString()), {
+    fee,
+    networkPassphrase: network.passphrase,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+        function: "receive_message",
+        args: [],
+        auth,
+      }),
+    )
+    .setTimeout(300)
+    .build();
+}
+
+describe("what the sponsor will pay and authorize for a delivery", () => {
+  it("does not sign a delivery whose simulated fee is past its ceiling", async () => {
+    const rpc = new SequencedRpc();
+    rpc.simulate = (tx) => simulated(tx, { fee: "20000001" });
+    await expect(
+      deliveryOn(rpc).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow(/more than the .* XLM this sponsor pays/);
+    expect(rpc.sent).toEqual([]);
+  });
+
+  it("signs one within it", async () => {
+    const rpc = new SequencedRpc();
+    rpc.simulate = (tx) => simulated(tx, { fee: "10200000" });
+    const outcome = await deliveryOn(rpc).deliver({
+      messageHex: "0xabcd",
+      attestationHex: "0x1234",
+    });
+    expect(outcome.kind).toBe("delivered");
+  });
+
+  it("does not sign a delivery that asks for any authorization", async () => {
+    const rpc = new SequencedRpc();
+    const entry = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(
+              StrKey.encodeContract(Buffer.alloc(32, 9)),
+            ).toScAddress(),
+            functionName: "transfer",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
+    rpc.simulate = (tx) => simulated(tx, { fee: "10200000", auth: [entry] });
+    await expect(
+      deliveryOn(rpc).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow(/authorize/);
+    expect(rpc.sent).toEqual([]);
   });
 });

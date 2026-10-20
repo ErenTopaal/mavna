@@ -2,6 +2,7 @@ import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
 import { Keypair, type Transaction } from "@stellar/stellar-sdk";
+import { assertFeeWithin } from "./compose.js";
 
 /**
  * Performing the last mile of a CCTP transfer.
@@ -68,6 +69,29 @@ export interface DelivererOptions {
   }) => import("@stellar/stellar-sdk").Transaction;
 }
 
+/**
+ * What a delivery may cost beyond its inclusion bid: the simulated resource
+ * fee. A real mint measured about 0.03 XLM of resources; one XLM leaves room
+ * for a busy network and stops a simulation that asks for much more.
+ */
+const DELIVERY_RESOURCE_ALLOWANCE_STROOPS = 10_000_000n;
+
+/**
+ * A delivery calls Circle's forwarder, which needs no one's authorization. One
+ * that asks for any would have it granted by the payer's envelope signature
+ * (a source-account credential), so it is refused unsigned.
+ */
+function assertAsksNoAuthorization(tx: Transaction): void {
+  for (const op of tx.operations) {
+    if (op.type !== "invokeHostFunction" || (op.auth ?? []).length > 0) {
+      throw new MavnaError(
+        "This delivery would authorize more than the delivery itself, so it was not signed.",
+        { retryable: false },
+      );
+    }
+  }
+}
+
 /** Circle marks an unfinished attestation with this rather than omitting it. */
 const NOT_YET_SIGNED = "PENDING";
 
@@ -123,7 +147,16 @@ export class Deliverer {
         messageHex: request.messageHex,
         attestationHex: request.attestationHex,
       });
-      return this.options.rpc.prepare(unsigned);
+      const prepared = await this.options.rpc.prepare(unsigned);
+      // Simulation sets the fee and the authorizations, so both are bounded
+      // here before the payer signs anything.
+      assertFeeWithin(
+        BigInt(prepared.fee),
+        BigInt(unsigned.fee) + DELIVERY_RESOURCE_ALLOWANCE_STROOPS,
+        "This delivery",
+      );
+      assertAsksNoAuthorization(prepared);
+      return prepared;
     };
 
     let prepared: Transaction | undefined;
