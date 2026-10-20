@@ -1110,7 +1110,7 @@ export class Flow extends React.Component<FlowProps, State> {
       this.emit({
         type: "transferDeliveredUnverified",
         reason: error.message,
-        txHash: error.txHash,
+        stellarTxHash: error.txHash,
         explorerUrl: error.explorerUrl,
       });
       // ended, shown with its note on the step it ended on, never as failed

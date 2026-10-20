@@ -17,6 +17,7 @@ interface SponsorError {
   readonly error: string;
   readonly retryable: boolean;
   readonly prepareAgain?: boolean;
+  readonly watching?: boolean;
 }
 
 /** A refusal the sponsor answered, with what it said about trying again. */
@@ -25,13 +26,22 @@ export class SponsorRefusal extends Error {
   readonly retryable: boolean;
   /** The preparation can never land; a new one, signed again, can. */
   readonly prepareAgain: boolean;
+  /** The burn is on the sponsor's watch list, and it keeps delivering it by itself. */
+  readonly watching: boolean;
 
-  constructor(message: string, status: number, retryable: boolean, prepareAgain: boolean) {
+  constructor(
+    message: string,
+    status: number,
+    retryable: boolean,
+    prepareAgain: boolean,
+    watching = false,
+  ) {
     super(message);
     this.name = "SponsorRefusal";
     this.status = status;
     this.retryable = retryable;
     this.prepareAgain = prepareAgain;
+    this.watching = watching;
   }
 }
 
@@ -187,6 +197,7 @@ export function createSponsorClient(
       answer.status,
       body?.retryable === true,
       body?.prepareAgain === true,
+      body?.watching === true,
     );
   }
 

@@ -79,7 +79,7 @@ export type MavnaWidgetEvent =
       readonly type: "transferDeliveredUnverified";
       readonly reason: string;
       /** The Stellar transaction the rail reported. */
-      readonly txHash: string;
+      readonly stellarTxHash: string;
       readonly explorerUrl: string;
     };
 

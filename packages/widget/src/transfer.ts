@@ -625,7 +625,8 @@ async function deliverToStellar(
       // The burn is done, so a node or sponsor that did not answer this once is
       // asked again; it is not a reason to call the transfer failed.
       lastError = asError(cause).message;
-      tellClosing(false);
+      // a delivery sent with its outcome unknown is still the sponsor's to finish
+      tellClosing(cause instanceof SponsorRefusal && cause.watching);
       patch("attest", {
         phase: "pending",
         note: `The last check failed (${lastError}). Trying again.`,

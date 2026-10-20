@@ -94,7 +94,7 @@ describe("Flow.endWith", () => {
       {
         type: "transferDeliveredUnverified",
         reason: "The rail's record no longer says what arrived.",
-        txHash: "f00d",
+        stellarTxHash: "f00d",
         explorerUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
       },
     ]);

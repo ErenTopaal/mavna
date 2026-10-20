@@ -2128,6 +2128,24 @@ describe("whether closing the page is safe while Circle attests", () => {
     }
   });
 
+  it("is said when a sent delivery's outcome is not known yet but the sponsor is watching it", async () => {
+    deliverReplies = [
+      [
+        502,
+        {
+          error: "The delivery went out and its outcome is not known yet.",
+          retryable: true,
+          deliveryTxHash: "d311",
+          watching: true,
+        },
+      ],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    expect(attestNotes(seen)[0]).toMatch(/Safe to close this page: the sponsor delivers it/);
+  });
+
   it("is not said for a new account, which its own wallet still has to set up", async () => {
     deliverReplies = [
       [404, { error: "Not attested yet.", retryable: true, watching: true }],
