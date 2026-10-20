@@ -518,6 +518,7 @@ describe("runTransfer over a relayed rail", () => {
     await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /settlement",
@@ -655,7 +656,7 @@ describe("runTransfer over a relayed rail", () => {
 
     await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
     // who pays the reserve decides what can be set up, so only that is asked
-    expect(log).toEqual(["sponsor /health"]);
+    expect(log).toEqual(["stellar read destination", "sponsor /health"]);
     expect(adapter.built).toBe(0);
   });
 
@@ -747,6 +748,7 @@ describe("runTransfer over Circle", () => {
     await done;
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /settlement",
@@ -759,6 +761,7 @@ describe("runTransfer over Circle", () => {
       `history ${SEND_HASH}`,
       "sponsor /deliver",
       "sponsor /deliver",
+      "stellar read destination",
       "sponsor /prepare",
       "stellar sign PREPARATION",
       "sponsor /submit",
@@ -1010,6 +1013,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
 
     expect(log.filter((l) => !l.startsWith("status"))).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -1033,6 +1037,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(cctp, routeFor("cctp", { newAccount: true }), patches().patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -1092,6 +1097,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(cctp, routeFor("cctp"), patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "evm read balanceOf",
@@ -1221,6 +1227,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     );
 
     expect(log.filter((l) => !l.startsWith("status"))).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -1667,6 +1674,26 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(outcome).toMatchObject({ kind: "recipient-not-ready" });
     expect(outcome.kind === "recipient-not-ready" && outcome.detail).toMatch(/GAAZI…CWN7/);
     expect(log).not.toContain("sponsor /prepare");
+  });
+});
+
+describe("a destination that cannot receive at all", () => {
+  it("is refused over Circle with its reason, before any signature or trustline", async () => {
+    const pool = StrKey.encodeLiquidityPool(Buffer.alloc(32, 7));
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    for (const newAccount of [false, true]) {
+      log = [];
+      const route = { ...routeFor("cctp", { newAccount }), destination: pool };
+      await expect(run(cctp, route, patches().patch)).rejects.toThrow(
+        /liquidity-pool address cannot receive a payment.*Nothing has been sent/,
+      );
+      expect(log.some((l) => l.startsWith("evm") || l.startsWith("stellar sign"))).toBe(false);
+      expect(log).not.toContain("sponsor /prepare");
+    }
   });
 });
 

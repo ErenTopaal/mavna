@@ -497,6 +497,16 @@ async function deliverToStellar(
     if (outcome.kind === "recipient-not-ready") {
       if (owner !== undefined && !prepared) {
         if (gone(signal)) throw new StillMoving(STOPPED_WATCHING);
+        // a trustline that became unusable after the burn (unauthorised, full) is
+        // not one that opening fixes, so nothing is signed for it
+        const holds = route.deliveredAtLeast.asset;
+        const [code, issuer] = holds.id.split(":");
+        const { lane } = await inspectDestination(
+          engine.rpc,
+          route.destination,
+          new StellarAsset(code ?? "", issuer),
+        );
+        if (lane.kind === "unusable") throw new StillMoving(`${lane.reason} ${AFTER_BURN}`);
         patch("prepare", { phase: "blocked" });
         try {
           // an account paying for itself gets the same check as at the start
@@ -768,9 +778,6 @@ async function runRelayed(
   let selfFunded = false;
   let repaysAtMost = 0n;
 
-  const unready = await destinationBlocker(engine.rpc, route);
-  if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
-
   // A conversion on Stellar into anything but XLM needs that trustline too. It
   // is checked first, so no trustline is signed for a transfer that then
   // cannot go ahead; an account paying its own way opens it before the send.
@@ -888,6 +895,10 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
   const { engine, view, chainId, patch } = deps;
   const route = view.route;
   const adapter = adapterFor(engine, route);
+  // read on Stellar before the first signature, on every rail: a destination
+  // that cannot take what arrives is refused, and nothing is opened for it
+  const unready = await destinationBlocker(engine.rpc, route);
+  if (unready !== undefined) throw new Error(`${unready} Nothing has been sent.`);
   let owner: string | undefined;
   // what a repayment still to come may take from the arrival
   let unrepaid = 0n;
