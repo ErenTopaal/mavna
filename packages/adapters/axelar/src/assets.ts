@@ -56,7 +56,7 @@ async function fetchAssets(network: NetworkId): Promise<readonly ItsAsset[]> {
   const reply = await requestJson("Axelar's interchain token list", ASSETS_API[network]);
   if (!reply.ok) {
     throw new MavnaError(`Axelar's interchain token list answered HTTP ${reply.status}.`, {
-      retryable: reply.status >= 500,
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
 

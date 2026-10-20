@@ -99,7 +99,7 @@ async function fetchRegistry(network: NetworkId): Promise<readonly ChainRow[]> {
   const reply = await requestJson("Axelar's chain registry", CHAINS_API[network]);
   if (!reply.ok) {
     throw new MavnaError(`Could not reach Axelar's chain registry (HTTP ${reply.status}).`, {
-      retryable: reply.status >= 500,
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
   if (!Array.isArray(reply.body)) {

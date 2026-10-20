@@ -2,7 +2,9 @@ import { MavnaError, type TransferHandle } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AxelarAdapter } from "./adapter.js";
-import { forgetChains } from "./deployments.js";
+import { forgetItsAssets, loadItsAssets } from "./assets.js";
+import { forgetChains, loadChains } from "./deployments.js";
+import { discoverLiveChains } from "./discovery.js";
 import { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 
 /**
@@ -228,5 +230,27 @@ describe("the chain registry, per adapter", () => {
     await expect(instance.supportedChains()).rejects.toThrow(/503/);
     await expect(instance.supportedChains()).resolves.toEqual(["base-sepolia"]);
     expect(calls.filter((call) => call.url === CHAINS_URL).length).toBe(2);
+  });
+});
+
+describe("a rate limited Axelar endpoint", () => {
+  it("is a retry on every endpoint, not a permanent no", async () => {
+    // a burst of estimator calls during the audit came back 23 of 40 as HTTP 429
+    vi.stubGlobal("fetch", async () => json({ message: "Too Many Requests" }, 429));
+    const attempts: Array<[string, () => Promise<unknown>]> = [
+      ["deployments", () => loadChains("testnet")],
+      ["assets", () => loadItsAssets("testnet")],
+      ["chain registry", () => discoverLiveChains("testnet")],
+      ["gas estimator", () => estimateGasFee("testnet", "base-sepolia", STELLAR_ID, "ETH")],
+      ["its estimator", () => estimateItsFee("testnet", "base-sepolia", STELLAR_ID, "ETH")],
+      ["message search", () => adapter().status(HANDLE)],
+    ];
+    for (const [name, attempt] of attempts) {
+      forgetChains();
+      forgetItsAssets();
+      const failure = await attempt().catch((cause: unknown) => cause);
+      expect(failure, name).toBeInstanceOf(MavnaError);
+      expect((failure as MavnaError).retryable, name).toBe(true);
+    }
   });
 });

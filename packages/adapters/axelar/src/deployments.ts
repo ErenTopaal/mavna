@@ -112,7 +112,7 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
   if (!reply.ok) {
     throw new MavnaError(
       `Could not read Axelar's published deployment configuration (HTTP ${reply.status}).`,
-      { retryable: reply.status >= 500 },
+      { retryable: reply.status >= 500 || reply.status === 429 },
     );
   }
 

@@ -58,7 +58,7 @@ export async function estimateGasFee(
 
   if (!reply.ok) {
     throw new MavnaError(`Axelar's fee estimator returned HTTP ${reply.status}.`, {
-      retryable: reply.status >= 500,
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
 
@@ -165,7 +165,7 @@ export async function estimateItsFee(
 
   if (!reply.ok) {
     throw new MavnaError(`Axelar's transfer fee estimator returned HTTP ${reply.status}.`, {
-      retryable: reply.status >= 500,
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
 

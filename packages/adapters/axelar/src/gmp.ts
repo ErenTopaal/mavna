@@ -139,7 +139,7 @@ export class GmpApi {
 
     if (!reply.ok) {
       throw new MavnaError(`Axelar's message search answered HTTP ${reply.status}.`, {
-        retryable: reply.status >= 500,
+        retryable: reply.status >= 500 || reply.status === 429,
       });
     }
 
