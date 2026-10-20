@@ -46,11 +46,14 @@ export interface RpcClientOptions {
    * accepts the connection and never answers holds the caller forever.
    */
   readonly timeoutMs?: number;
-  /** Allow a plain http endpoint, such as a node on this machine. Never for a public one. */
+  /** Allow a plain http endpoint on this machine (localhost, 127.0.0.1, ::1) and nowhere else. */
   readonly allowHttp?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** Hostnames that can only be this machine, as `URL` writes them. */
+const LOOPBACK: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * How long past a transaction's time bound to keep asking when no node has yet
@@ -168,6 +171,15 @@ export class RpcClient {
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(options: RpcClientOptions) {
+    const url = new URL(options.url);
+    // plain http is for a node on this machine; anywhere else a reply could be
+    // rewritten in transit, and every answer here decides where money goes
+    if (options.allowHttp === true && url.protocol === "http:" && !LOOPBACK.has(url.hostname)) {
+      throw new MavnaError(
+        `Plain http is only allowed for a node on this machine, not ${url.hostname}.`,
+        { retryable: false },
+      );
+    }
     this.server = new rpc.Server(options.url, { allowHttp: options.allowHttp === true });
     // rpc.Server's own `timeout` option is declared but never applied (sdk
     // 16.2.0, and still in 17.2.1), so the bound goes on the client it builds

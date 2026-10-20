@@ -695,3 +695,23 @@ describe("a node that never answers", () => {
     }
   });
 });
+
+describe("plain http", () => {
+  it("is refused by default", () => {
+    expect(() => new RpcClient({ url: "http://127.0.0.1:8000" })).toThrow(/insecure/);
+  });
+
+  it("is allowed only for this machine, even when asked for", () => {
+    for (const url of ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"]) {
+      expect(() => new RpcClient({ url, allowHttp: true })).not.toThrow();
+    }
+    for (const url of [
+      "http://soroban-testnet.stellar.org",
+      "http://10.0.0.5:8000",
+      "http://localhost.example.com",
+      "http://127.0.0.1.nip.io",
+    ]) {
+      expect(() => new RpcClient({ url, allowHttp: true })).toThrow(MavnaError);
+    }
+  });
+});
