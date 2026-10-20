@@ -26,7 +26,7 @@ import {
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
-import { Address, xdr } from "@stellar/stellar-sdk";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import { tokenSymbolFromIndex } from "./assets.js";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
@@ -269,9 +269,6 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
-    const lane = await this.laneFor(request.destination, delivered);
-    if ("source" in lane) return lane;
-
     let deliveryFee: bigint;
     let feeAsset: Asset;
     let stellarDecimals: number;
@@ -299,6 +296,9 @@ export class AxelarAdapter implements BridgeAdapter {
           "chains, and would arrive as nothing.",
       );
     }
+
+    const lane = await this.laneFor(request.destination, delivered, arriving);
+    if ("source" in lane) return lane;
 
     const reserve = quoteReserve({
       lane,
@@ -417,62 +417,43 @@ export class AxelarAdapter implements BridgeAdapter {
   /**
    * What the destination needs before this token can land in it.
    *
-   * A classic asset is the usual question: an account, and a trustline for it.
-   * A token the service deployed keeps its own balances and needs no trustline,
-   * so only the account matters, and a missing one is declined rather than
-   * prepared. The token would be credited to the address anyway, but nothing can
-   * move it until the account exists, and the sponsor's preparation is repaid in
-   * the asset it curates, which this is not. XLM through its own contract is the
-   * same shape: no trustline, and it cannot be sent to an account that is not
-   * there.
+   * A classic asset is the usual question: an account, and a trustline with
+   * room for what arrives. A token the service deployed keeps its own balances
+   * and needs no trustline, so only the account matters (asking about XLM reads
+   * exactly that), and a missing one is declined rather than prepared. The token
+   * would be credited to the address anyway, but nothing can move it until the
+   * account exists, and the sponsor's preparation is repaid in the asset it
+   * curates, which this is not. A contract is read for its instance either way,
+   * since an asset contract credits an address where nothing is deployed.
    */
   private async laneFor(
     destination: string,
     delivered: DeliveredToken,
+    arriving: bigint,
   ): Promise<DestinationLane | RouteRejection> {
-    if (delivered.kind === "classic" && !delivered.asset.isNative()) {
-      let lane: DestinationLane;
-      try {
-        lane = (await inspectDestination(this.rpc, destination, delivered.asset)).lane;
-      } catch (cause) {
-        return this.unreadDestination(cause);
-      }
-      if (lane.kind === "unusable") return this.decline("destination-unsupported", lane.reason);
-      return lane;
-    }
-
-    // Muxed and unusable forms were refused before anything was read, so this
-    // is an account or a contract.
-    if (classifyAddress(destination).kind === "contract") {
-      return { kind: "contract-ready", slotsNeeded: 0 };
-    }
-
-    let exists: boolean;
+    const holds = delivered.kind === "classic" ? delivered.asset : StellarAsset.native();
+    let lane: DestinationLane;
     try {
-      exists = await this.accountExists(destination);
+      lane = (
+        await inspectDestination(
+          this.rpc,
+          destination,
+          holds,
+          holds.isNative() ? {} : { amountStroops: arriving },
+        )
+      ).lane;
     } catch (cause) {
       return this.unreadDestination(cause);
     }
-    if (!exists) {
+    if (lane.kind === "unusable") return this.decline("destination-unsupported", lane.reason);
+    if (holds.isNative() && lane.kind === "needs-account") {
       return this.decline(
         "destination-unsupported",
         "That Stellar account does not exist yet, and this token cannot be used from an " +
           "account that does not exist. Send to an account that already has some XLM in it.",
       );
     }
-    return { kind: "ready", slotsNeeded: 0 };
-  }
-
-  private async accountExists(address: string): Promise<boolean> {
-    const accountId = Address.fromString(address).toScAddress().accountId();
-    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }));
-    // Through the freshness guard: a lagging node's silence looks exactly like
-    // an account that is not there.
-    const entry = await this.rpc.read(`account ${address}`, async () => {
-      const response = await this.rpc.server.getLedgerEntries(key);
-      return { value: response.entries[0], ledger: response.latestLedger };
-    });
-    return entry !== undefined;
+    return lane;
   }
 
   private unreadDestination(cause: unknown): RouteRejection {

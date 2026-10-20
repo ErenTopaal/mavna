@@ -73,6 +73,8 @@ interface Ledger {
   symbol: string;
   account: boolean;
   trustline: boolean;
+  /** The trustline's limit, when a test makes it tight. */
+  trustlineLimit?: bigint;
   latestLedger: number;
 }
 
@@ -290,7 +292,7 @@ function stellarNode(): RpcClient {
             switch: () => ({ name: "trustline" }),
             trustLine: () => ({
               balance: () => 0n,
-              limit: () => 10n ** 15n,
+              limit: () => ledger.trustlineLimit ?? 10n ** 15n,
               flags: () => 1,
               ext: () => ({ switch: () => 0 }),
             }),
@@ -472,6 +474,14 @@ describe("a classic asset, by destination lane", () => {
     expect(route.fees.some((fee) => fee.kind === "account-reserve")).toBe(false);
     // nothing is lent, so the market is not asked for a price
     expect(asked).not.toContain("horizon order book");
+  });
+
+  it("declines an account whose trustline has no room for what arrives", async () => {
+    classicUsdc();
+    ledger.trustlineLimit = 50_000_000n;
+    const result = await adapter().quote(ask());
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+    expect((result as RouteRejection).explanation).toMatch(/room for only 5 USDC/);
   });
 
   it("prepares a trustline for an account that cannot hold it yet", async () => {
