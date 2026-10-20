@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Keypair } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSoroswapProxy, type ProxyRequest, type SoroswapProxyOptions } from "./soroswap.js";
 
@@ -12,7 +13,8 @@ import { createSoroswapProxy, type ProxyRequest, type SoroswapProxyOptions } fro
 const KEY = "sk_test_this_must_never_leave_the_server";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const XLM = "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA";
-const OWNER = "GBQJ4HBCQHJQKSKNT3JRKC5VKA3QJUXBVFWIVSMHKPQSJ7XP2IXTCAAK";
+// a real account key, so a checksum check anywhere on the way accepts it
+const OWNER = Keypair.random().publicKey();
 
 const quoteBody = {
   assetIn: USDC,
