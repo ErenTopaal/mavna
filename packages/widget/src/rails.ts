@@ -209,7 +209,20 @@ export async function destinationBlocker(
     return `This route delivers ${delivers.symbol} as ${delivers.id}, which is not a Stellar asset this page can check the destination for.`;
   }
 
-  const { lane } = await inspectDestination(rpc, route.destination, asset);
+  // held to the most the route says lands in that asset, so a trustline with
+  // some room under its limit but not enough is refused before anything is sent
+  const lands = [
+    route.deliveredAtLeast,
+    ...route.steps.filter((s) => s.kind === "bridge").map((s) => s.to),
+  ]
+    .filter((amount) => amount.asset.id === delivers.id)
+    .reduce(
+      (most, amount) => (BigInt(amount.baseUnits) > most ? BigInt(amount.baseUnits) : most),
+      0n,
+    );
+  const { lane } = await inspectDestination(rpc, route.destination, asset, {
+    amountStroops: lands,
+  });
   if (setsUp) return lane.kind === "unusable" ? lane.reason : undefined;
   switch (lane.kind) {
     case "ready":

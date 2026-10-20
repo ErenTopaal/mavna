@@ -137,6 +137,8 @@ beforeEach(() => {
   heldOnly = undefined;
   unreadable = undefined;
   usdcHeld = 0n;
+  usdcFlags = 1;
+  usdcLimit = 10n ** 15n;
   conversionAmounts = [];
   askedAssets = [];
   settlementXdr = settlementSpending("0.6");
@@ -299,8 +301,8 @@ function ledgerEntries(): unknown[] {
         accountId,
         asset: new Asset(code ?? "", issuer).toTrustLineXDRObject(),
         balance: xdr.Int64.fromString(usdcHeld.toString()),
-        limit: xdr.Int64.fromString((10n ** 15n).toString()),
-        flags: 1,
+        limit: xdr.Int64.fromString(usdcLimit.toString()),
+        flags: usdcFlags,
         ext: new xdr.TrustLineEntryExt(0),
       }),
     ),
@@ -312,6 +314,10 @@ function ledgerEntries(): unknown[] {
 
 /** How much each conversion quote asked to convert. */
 let conversionAmounts: string[];
+
+/** The destination's USDC trustline flags and limit, when a test makes it unusable. */
+let usdcFlags: number;
+let usdcLimit: bigint;
 
 /** The destination's USDC balance, in base units, as the node reports it now. */
 let usdcHeld: bigint;
@@ -594,6 +600,24 @@ describe("runTransfer over a relayed rail", () => {
     ]);
     expect(log.indexOf("stellar read destination")).toBeLessThan(log.indexOf("evm send value=777"));
   });
+
+  it.each([
+    ["its issuer has not authorised it", { flags: 0 }, /has not authorised/],
+    // 5 USDC arrive and the limit leaves room for 3
+    ["its limit has no room for what arrives", { limit: 30_000_000n }, /room for only 3 USDC/],
+  ] as const)(
+    "refuses a USDC trustline that cannot take the money because %s, before any signature",
+    async (_why, line, said) => {
+      if ("flags" in line) usdcFlags = line.flags;
+      if ("limit" in line) usdcLimit = line.limit;
+      const adapter = new ScriptedAdapter("axelar", [delivered()], {
+        transactions: [layerZeroSend("1")],
+      });
+      await expect(run(adapter, routeFor("axelar"), patches().patch)).rejects.toThrow(said);
+      expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+      expect(adapter.built).toBe(0);
+    },
+  );
 
   it("tells the rail which wallet is sending, for a rail that must name a refund address", async () => {
     const adapter = new ScriptedAdapter("near-intents", [delivered()], {
