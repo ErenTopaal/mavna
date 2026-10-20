@@ -387,13 +387,14 @@ describe("a compose route", () => {
     });
     const result = await quoteComposeRoute(ctx, request());
     expect(result).toMatchObject({ reason: "asset-unsupported" });
-    expect((result as RouteRejection).explanation).toMatch(/does not accept/);
+    expect((result as RouteRejection).detail).toMatch(/does not accept/);
   });
 
   it("refuses to guess gas for a compose the OApp does not pay for", async () => {
     const { ctx } = context({ enforced: SEND_ONLY });
     const result = await quoteComposeRoute(ctx, request());
-    expect((result as RouteRejection).explanation).toMatch(/lzComposeGas/);
+    // a configuration gap for the operator, kept off the user's screen
+    expect((result as RouteRejection).detail).toMatch(/lzComposeGas/);
   });
 
   it("is refused for a wanted asset the contract does not convert into", async () => {
@@ -463,6 +464,24 @@ describe("a compose route", () => {
   it("offers nothing when the wanted asset is what arrives anyway", async () => {
     const { ctx } = context();
     expect(await quoteComposeRoute(ctx, { ...request(), to: xlm })).toBeUndefined();
+  });
+});
+
+describe("what a compose decline shows the user", () => {
+  it("keeps a node's own words out of a discovery failure", async () => {
+    const { ctx } = context();
+    vi.spyOn(ctx.discovery, "routeFrom").mockRejectedValue(
+      new MavnaError(
+        "No usable node answered for chain 421614. Last problem: https://x.test answered HTTP 503.",
+        {
+          retryable: true,
+        },
+      ),
+    );
+    const result = (await quoteComposeRoute(ctx, request())) as RouteRejection;
+    expect(result.reason).toBe("temporarily-unavailable");
+    expect(result.explanation).not.toMatch(/x\.test|503/);
+    expect(result.detail).toMatch(/x\.test answered HTTP 503/);
   });
 });
 

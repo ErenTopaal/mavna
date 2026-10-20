@@ -59,7 +59,7 @@ export type {
   StellarDeployment,
   StellarOftFacts,
 } from "./discovery.js";
-export { Discovery, readStellarOft, readStellarToken } from "./discovery.js";
+export { Discovery, NoRouteHere, readStellarOft, readStellarToken } from "./discovery.js";
 export type { UlnConfig } from "./dvn.js";
 export {
   assertDvnStackIsSound,
