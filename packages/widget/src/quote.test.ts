@@ -541,6 +541,25 @@ describe("sending USDT0", () => {
     expect(set.rejected[0]?.retryable).toBe(true);
   });
 
+  it("keeps a node's own words out of every rail's explanation when finding USDT0 fails", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    const said =
+      "No OFT on Ethereum can reach Stellar right now. USDT0 at 0x6c96de32cea08842dcc4058c14d3aaad7fa41dee: " +
+      "No usable node answered for chain 1. Last problem: https://1rpc.io/eth answered HTTP 503.";
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const set = await quoteWith(async () => {
+      throw new MavnaError(said, { retryable: true });
+    }, rail);
+    expect(set.rejected[0]).toMatchObject({
+      reason: "temporarily-unavailable",
+      explanation: "USDT0 could not be looked up on this chain just now. Try again in a moment.",
+      detail: said,
+    });
+    expect(set.rejected.map((r) => r.explanation).join(" ")).not.toMatch(/1rpc|HTTP 503|0x6c96/);
+    expect(warned.mock.calls.flat().join(" ")).toMatch(/HTTP 503/);
+    warned.mockRestore();
+  });
+
   it("declines a new-account USDT0 route, saying the sponsor only curates USDC", () => {
     const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
     const ready = routeFor("layerzero", { delivers: usdt0To });

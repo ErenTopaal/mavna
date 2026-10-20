@@ -846,19 +846,26 @@ export function runQuote(
 
   // Nothing can be asked without the source token, and every enabled rail is
   // owed the reason rather than a picker that quietly shows nothing.
-  const declineAll = (cause: unknown): void => {
-    const explanation = cause instanceof Error ? cause.message : String(cause);
-    // A node that did not answer is not a chain with no route.
-    const reason =
-      cause instanceof MavnaError && cause.retryable
-        ? ("temporarily-unavailable" as const)
-        : ("asset-unsupported" as const);
+  const declineAll = (
+    cause: unknown,
+    /** Said instead of a node's own words when the cause is a node that did not answer. */
+    unreachable = "The chain could not be asked just now. Try again in a moment.",
+  ): void => {
+    const said = cause instanceof Error ? cause.message : String(cause);
+    // A node that did not answer is not a chain with no route, and its own text
+    // (addresses, endpoints, status codes) is for whoever runs the page.
+    const transient = cause instanceof MavnaError && cause.retryable;
+    const reason = transient
+      ? ("temporarily-unavailable" as const)
+      : ("asset-unsupported" as const);
+    if (transient) console.warn("[mavna] the quote could not start:", said);
     const declined: RouteSet = {
       routes: [],
       rejected: adapters.map((a) => ({
         source: a.id,
         reason,
-        explanation,
+        explanation: transient ? unreachable : said,
+        ...(transient ? { detail: said } : {}),
         retryable: rejectionIsRetryable(reason),
       })),
       complete: true,
@@ -949,7 +956,12 @@ export function runQuote(
         else race({ from: assets.from, to: wantedAsset }, engine.usdt0Swap(assets.to, wantedAsset));
       },
       (cause: unknown) => {
-        if (live) declineAll(cause);
+        if (live) {
+          declineAll(
+            cause,
+            "USDT0 could not be looked up on this chain just now. Try again in a moment.",
+          );
+        }
       },
     );
     return handle;
