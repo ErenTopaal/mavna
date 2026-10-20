@@ -1,5 +1,12 @@
 {
   "extends": "../../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "types": ["node"] },
-  "include": ["src/**/*"]
+  "compilerOptions": {
+    "rootDir": "src",
+    // shipped to browsers: no Node globals, so the checker refuses Buffer and process
+    "types": [],
+    "lib": ["es2023", "dom", "dom.iterable"]
+  },
+  "include": ["src/**/*"],
+  // tests and fixtures run in Node and are checked by tsconfig.test.json
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/__fixtures__/**"]
 }

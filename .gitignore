@@ -19,3 +19,6 @@ shot.png
 target/
 test_snapshots/
 .claude/
+
+# type probes the browser-types test writes and removes
+.probe-*/

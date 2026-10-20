@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "types": ["node"],
+    "types": [],
     "jsx": "react-jsx",
     "lib": ["es2023", "dom", "dom.iterable"],
     // The widget now bundles a whole app-sized flow rather than a few presentational
@@ -11,5 +11,7 @@
     // and tsdown generates the published .d.ts from that surface.
     "isolatedDeclarations": false
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  // tests and fixtures run in Node and are checked by tsconfig.test.json
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/__fixtures__/**"]
 }
