@@ -485,6 +485,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     swapVenues: createSwapVenues({ network: "testnet" }),
     rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
+    xlmOnStellar: STELLAR_XLM,
     stellarNetwork: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
   };
 }
@@ -1830,10 +1831,12 @@ describe("finishing a Circle delivery from Activity", () => {
   });
 
   /** An attested burn whose hook data names `recipient`, laid out as Circle's v2 message is. */
-  const attestedTo = (recipient: string) => {
+  const attestedTo = (recipient: string, mintedBaseUnits = 0) => {
     const hook = buildForwarderHookData(recipient);
     const message = new Uint8Array(148 + 228 + hook.length);
     message.set(hook, 148 + 228);
+    // the burn body's amount, a big-endian uint256 at body + 68; the fee at body + 164 stays 0
+    new DataView(message.buffer).setUint32(148 + 68 + 28, mintedBaseUnits, false);
     irisReplies = [
       [
         200,
@@ -1863,6 +1866,31 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
   });
 
+  it("signs a new repayment first when the one held for a new account has lapsed", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    lane = "needs-account";
+    settleReplies = [[404, { error: "Nothing is held for that account.", retryable: false }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    const asked = log.filter((l) => l.startsWith("sponsor") || l.startsWith("stellar sign"));
+    expect(asked).toEqual([
+      "sponsor /health",
+      "sponsor /deliver",
+      "sponsor /settle",
+      "sponsor /settlement",
+      "stellar sign SETTLEMENT",
+      "sponsor /settlement/commit",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "sponsor /deliver",
+    ]);
+  });
+
   it("prepares a new account the flow never got to, checked, then delivers", async () => {
     attestedTo(DESTINATION);
     deliverReplies = [
@@ -1876,6 +1904,8 @@ describe("finishing a Circle delivery from Activity", () => {
       "sponsor /deliver",
       "iris /v2/messages/3",
       "stellar connect",
+      // whether the sponsor still holds the repayment it is set up against
+      "sponsor /settle",
       "sponsor /prepare",
       "stellar sign PREPARATION",
       "sponsor /submit",

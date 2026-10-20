@@ -140,7 +140,7 @@ export function preparationProblem(
 export function readSettlement(
   xdr: string,
   passphrase: string,
-  route: Route,
+  route: Pick<Route, "destination" | "deliveredAtLeast" | "fees">,
   channel: string,
   /**
    * The order book's mid price for what arrives, in stroops per whole unit: the

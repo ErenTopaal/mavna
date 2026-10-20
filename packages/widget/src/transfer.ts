@@ -11,7 +11,7 @@
  * than as module singletons, so the same runner serves the app (env config) and
  * the widget (an integrator's config).
  */
-import { AttestationService, fromHex, parseForwarderHookData } from "@mavna/adapter-cctp";
+import { AttestationService, fromHex, parseForwarderHookData, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
 import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
@@ -161,6 +161,7 @@ export type TransferEngine = Pick<
   | "sponsorTerms"
   | "stellarNetwork"
   | "xlmStroopsPerUsdc"
+  | "xlmOnStellar"
 >;
 
 export interface TransferDeps {
@@ -191,9 +192,11 @@ export interface TransferDeps {
  */
 async function collectSettlement(
   engine: TransferEngine,
-  route: Route,
+  route: Pick<Route, "destination" | "deliveredAtLeast" | "fees" | "steps">,
   chainId: string,
   patch: Patch,
+  /** What to tell the user about their funds if this is refused. */
+  funds = "Nothing has been sent.",
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
@@ -202,7 +205,7 @@ async function collectSettlement(
       address,
       route.destination,
       "Only the owner of the receiving account can allow it to hold USDC.",
-      "Nothing has been sent.",
+      funds,
     );
   }
   let built: Awaited<ReturnType<typeof engine.sponsor.requestSettlement>>;
@@ -217,10 +220,12 @@ async function collectSettlement(
       (cause.status === 429 || cause.status === 503)
     ) {
       throw new Error(
-        `${cause.message} Nothing has been sent, and the transfer is ready to start again in a moment.`,
+        funds === "Nothing has been sent."
+          ? `${cause.message} Nothing has been sent, and the transfer is ready to start again in a moment.`
+          : `${cause.message} ${funds} Try again in a moment.`,
       );
     }
-    throw cause;
+    throw withFunds(cause, funds);
   }
   // held and submitted later against the arrival, so it is read in full first,
   // and held to the ceiling the quote offered this setup on
@@ -230,7 +235,7 @@ async function collectSettlement(
   } catch (cause) {
     throw new Error(
       "The sponsor's repayment could not be held to the order book's price " +
-        `(${asError(cause).message}), so it was not signed. Nothing has been sent.`,
+        `(${asError(cause).message}), so it was not signed. ${funds}`,
     );
   }
   const read = readSettlement(
@@ -241,9 +246,7 @@ async function collectSettlement(
     price,
   );
   if ("problem" in read) {
-    throw new Error(
-      `The sponsor's repayment was not signed: ${read.problem}. Nothing has been sent.`,
-    );
+    throw new Error(`The sponsor's repayment was not signed: ${read.problem}. ${funds}`);
   }
   const holds = route.deliveredAtLeast.asset;
   patch("settle", {
@@ -254,7 +257,7 @@ async function collectSettlement(
   const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
   const signed = await engine.stellar.sign(built.xdr, address);
   await engine.sponsor.commitSettlement(route.destination, signed).catch((cause: unknown) => {
-    throw withFunds(cause, "Nothing has been sent.");
+    throw withFunds(cause, funds);
   });
   return { owner: address, repaysAtMost };
 }
@@ -697,8 +700,9 @@ export async function finishDelivery(
   // A new account the flow never got to prepare: the page closed during the
   // attestation, or the prompt was missed. The account Circle will mint to is
   // read from the attested message, and only its own wallet may open it.
-  const recipient = await attestedRecipient(engine, burnHash, domain);
-  if (recipient === undefined) return first;
+  const attested = await attestedBurn(engine, burnHash, domain);
+  if (attested === undefined) return first;
+  const { recipient } = attested;
   const address = await engine.stellar.connect();
   if (address !== recipient) {
     // remembered from before, maybe for another account: asked afresh next time
@@ -710,12 +714,47 @@ export async function finishDelivery(
         "Stellar wallet to let it hold USDC.",
     };
   }
+  const funds = "The funds are safe on Circle's side and still deliverable.";
+  const chainId = sourceChainId ?? "unknown";
+  // The sponsor accepts a preparation only against a repayment it holds, and it
+  // holds one about a day. Past that, a new one is signed first, held to the
+  // same checks as at the start, for what Circle will actually mint.
+  if ((await engine.sponsor.settle(recipient)).held === false) {
+    const usdc = engine.usdcOnStellar;
+    const { lane } = await inspectDestination(
+      engine.rpc,
+      recipient,
+      new StellarAsset("USDC", usdc.id.split(":")[1]),
+    );
+    const slots = lane.kind === "needs-account" ? 3n : 1n;
+    const reserve = slots * BigInt(engine.stellarNetwork.baseReserveStroops);
+    await collectSettlement(
+      engine,
+      {
+        destination: recipient,
+        // minted at six decimals, held on Stellar at seven
+        deliveredAtLeast: { asset: usdc, baseUnits: (attested.minted * 10n).toString() },
+        fees: [
+          {
+            kind: "account-reserve",
+            total: { asset: engine.xlmOnStellar, baseUnits: reserve.toString() },
+            recipients: [],
+            includedInQuote: true,
+          },
+        ],
+        steps: [],
+      },
+      chainId,
+      () => {},
+      funds,
+    );
+  }
   await prepareSponsored(
     engine,
     { destination: recipient, holds: engine.usdcOnStellar },
-    sourceChainId ?? "unknown",
+    chainId,
     address,
-    "The funds are safe on Circle's side and still deliverable.",
+    funds,
   );
   return engine.sponsor.requestDelivery(burnHash, domain, recipient);
 }
@@ -755,17 +794,28 @@ const MESSAGE_BODY_INDEX = 148;
 const HOOK_DATA_INDEX = 228;
 
 /** The Stellar account the attested burn's hook data names, or undefined when there is none yet. */
-async function attestedRecipient(
+async function attestedBurn(
   engine: Pick<TransferEngine, "network">,
   burnHash: string,
   domain: number,
-): Promise<string | undefined> {
+): Promise<{ readonly recipient: string; readonly minted: bigint } | undefined> {
   const found = await new AttestationService(engine.network).byTransaction(domain, burnHash);
   const message = found.find((a) => a.status === "complete" && a.message !== undefined)?.message;
   if (message === undefined) return undefined;
-  return parseForwarderHookData(fromHex(message).subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX))
-    .recipient;
+  const bytes = fromHex(message);
+  const { recipient } = parseForwarderHookData(
+    bytes.subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX),
+  );
+  // what Circle mints: the amount burned less the fee it took, both big-endian uint256
+  const uint = (at: number): bigint =>
+    BigInt(toHex(bytes.subarray(MESSAGE_BODY_INDEX + at, MESSAGE_BODY_INDEX + at + 32)));
+  const minted = uint(BURN_AMOUNT_INDEX) - uint(BURN_FEE_EXECUTED_INDEX);
+  return { recipient, minted: minted > 0n ? minted : 0n };
 }
+
+/** Where the amount and the fee Circle took sit in a v2 burn body. */
+const BURN_AMOUNT_INDEX = 68;
+const BURN_FEE_EXECUTED_INDEX = 164;
 
 /** Why a delivery the account would pay for was left unsigned. */
 export function tooCostly(feeStroops: bigint): string {
