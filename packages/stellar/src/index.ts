@@ -5,7 +5,7 @@ export {
   memoIsEncodedInAddress,
   underlyingAccountOfMuxed,
 } from "./address.js";
-export type { DestinationLane, DestinationState } from "./destination.js";
+export type { DestinationLane, DestinationState, InspectOptions } from "./destination.js";
 export { inspectDestination } from "./destination.js";
 export type { NetworkConfig } from "./network.js";
 export {

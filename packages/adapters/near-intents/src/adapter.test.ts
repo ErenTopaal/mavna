@@ -177,7 +177,12 @@ function stellarNode(): RpcClient {
           key,
           val: {
             switch: () => ({ name: "trustline" }),
-            trustLine: () => ({ balance: () => 0n, limit: () => 10n ** 15n, flags: () => 1 }),
+            trustLine: () => ({
+              balance: () => 0n,
+              limit: () => 10n ** 15n,
+              flags: () => 1,
+              ext: () => ({ switch: () => 0 }),
+            }),
           },
         });
       }

@@ -1,4 +1,4 @@
-import { Asset, Keypair, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Asset, Keypair, Operation, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
 import { beforeAll, describe, expect, it } from "vitest";
 import { inspectDestination } from "./destination.js";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL } from "./network.js";
@@ -34,10 +34,12 @@ async function fundedAccount(): Promise<Keypair> {
 
 let noTrustline: Keypair;
 let withTrustline: Keypair;
+let fullTrustline: Keypair;
 
 beforeAll(async () => {
   noTrustline = await fundedAccount();
   withTrustline = await fundedAccount();
+  fullTrustline = await fundedAccount();
 
   // Rebuilt on each attempt: a stale sequence number must be rebuilt, not resent.
   await client.submit("fixture trustline", async () => {
@@ -50,6 +52,19 @@ beforeAll(async () => {
       .setTimeout(300)
       .build();
     tx.sign(withTrustline);
+    return tx;
+  });
+  // a limit of zero: the trustline exists and is authorised, and has no room
+  await client.submit("fixture full trustline", async () => {
+    const source = await client.loadAccount(fullTrustline.publicKey());
+    const tx = new TransactionBuilder(source, {
+      fee: "1000000",
+      networkPassphrase: network.passphrase,
+    })
+      .addOperation(Operation.changeTrust({ asset: usdc, limit: "0.0000001" }))
+      .setTimeout(300)
+      .build();
+    tx.sign(fullTrustline);
     return tx;
   });
 }, 300_000);
@@ -89,5 +104,30 @@ describe("inspectDestination against live testnet", () => {
   it("refuses an address that cannot receive", async () => {
     const state = await inspectDestination(client, Keypair.random().publicKey(), usdc);
     expect(state.lane.kind).not.toBe("unusable");
+  });
+
+  it("a contract id with nothing deployed behind it is unusable", async () => {
+    const empty = StrKey.encodeContract(Keypair.random().rawPublicKey());
+    const state = await inspectDestination(client, empty, usdc);
+    expect(state.lane.kind).toBe("unusable");
+  });
+
+  it("an existing account is ready for XLM without any trustline", async () => {
+    const state = await inspectDestination(client, noTrustline.publicKey(), Asset.native());
+    expect(state.lane.kind).toBe("ready");
+    expect(state.trustline).toBeUndefined();
+  });
+
+  it("an address that has never existed needs only the account for XLM", async () => {
+    const state = await inspectDestination(client, Keypair.random().publicKey(), Asset.native());
+    expect(state.lane).toEqual({ kind: "needs-account", slotsNeeded: 2 });
+  });
+
+  it("a trustline with no room under its limit is unusable for more than that", async () => {
+    const state = await inspectDestination(client, fullTrustline.publicKey(), usdc, {
+      amountStroops: 2n,
+    });
+    expect(state.trustline?.headroomStroops).toBe("1");
+    expect(state.lane.kind).toBe("unusable");
   });
 });
