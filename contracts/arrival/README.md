@@ -32,11 +32,27 @@ good, and this is an accepted consequence of having no admin:
   direct transfer);
 - a compose message written by a third party whose recipient cannot be decoded;
 - a compose whose recipient can never receive the arriving token (for example, the issuer has
-  deauthorised its trustline for good). It stays queued and runs if the recipient ever can.
+  deauthorised its trustline for good, or its trustline limit has no room for the amount). It stays
+  queued and runs if the recipient ever can;
+- a compose whose recipient is the Arrival Contract itself, which only a third party's message can
+  name: the contract pays itself and the funds stay here.
 
-Mavna's SDK never builds the second or third case: it refuses a recipient it cannot encode, and
-checks when quoting and again when building that the recipient can hold both the arriving token and
-the asset it wants. For any recipient it can decode, the contract converts or delivers as it came.
+Mavna's SDK never builds the second, third or fourth case: it refuses a recipient it cannot encode,
+and checks when quoting and again when building that the recipient can hold both the arriving token
+and the asset it wants. For any other recipient it can decode, the contract converts or delivers as
+it came.
+
+A trustline limit is the one refusal the contract cannot see before it swaps, because an asset
+contract does not expose it. So the payout is attempted rather than assumed:
+
+- the recipient refuses the converted amount: the output is swapped back through the same pools,
+  holding the venue to its own estimate, and everything is delivered as it came. The recipient gets
+  less than arrived by the venue's fees both ways. If the venue will not take it back, the call
+  reverts and the compose stays queued until the recipient raises its limit;
+- the integrator's fee account refuses the fee: the fee goes to the recipient, and if the recipient
+  has no room for it either, it is swapped back and sent to the recipient as the arriving token. An
+  integrator's account never holds up a user's funds;
+- a fee account equal to the Arrival Contract is treated as no fee.
 
 ## Build
 

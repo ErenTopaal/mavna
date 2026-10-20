@@ -49,6 +49,7 @@ pub struct Arrival {
     pub instructions: Instructions,
 }
 
+#[derive(Clone, Copy)]
 pub enum Outcome {
     Converted,
     AsCame,
@@ -60,11 +61,8 @@ pub fn arrive(env: &Env, venue: &Venue, arrival: Arrival) -> Outcome {
         Some(conversion) if arrival.amount > 0 => convert(env, venue, &arrival, conversion),
         _ => None,
     };
-    match converted {
-        Some(delivery) => {
-            publish(env, &arrival, &recipient, &delivery, Outcome::Converted);
-            Outcome::Converted
-        }
+    let delivery = match converted {
+        Some(delivery) => delivery,
         None => {
             if arrival.amount > 0 {
                 TokenClient::new(env, &arrival.token).transfer(
@@ -73,20 +71,22 @@ pub fn arrive(env: &Env, venue: &Venue, arrival: Arrival) -> Outcome {
                     &arrival.amount,
                 );
             }
-            let delivery = Delivery {
+            Delivery {
+                outcome: Outcome::AsCame,
                 asset: arrival.token.clone(),
                 amount: arrival.amount,
                 fee: 0,
                 fee_recipient: None,
                 unconverted: 0,
-            };
-            publish(env, &arrival, &recipient, &delivery, Outcome::AsCame);
-            Outcome::AsCame
+            }
         }
-    }
+    };
+    publish(env, &arrival, &recipient, &delivery);
+    delivery.outcome
 }
 
 struct Delivery {
+    outcome: Outcome,
     asset: Address,
     amount: i128,
     fee: i128,
@@ -156,6 +156,63 @@ fn on_lists(venue: &Venue, arriving: &Address, conversion: &Conversion) -> bool 
         .all(|(tokens, _, out)| allowed(&out) && tokens.iter().all(|t| allowed(&t)))
 }
 
+/// Sends `amount` of `token` from this contract, reporting a refusal instead of
+/// trapping. The asset contract's own effects are rolled back when it refuses.
+fn pay(env: &Env, token: &TokenClient, to: &Address, amount: i128) -> bool {
+    matches!(
+        token.try_transfer(&env.current_contract_address(), to, &amount),
+        Ok(Ok(()))
+    )
+}
+
+/// Swaps `amount` of the wanted asset back along the conversion's path into the
+/// arriving token and returns what came back. Used when the recipient refuses what
+/// the conversion produced, which only a trustline limit can do once `can_hold`
+/// has passed: the swap cannot be undone in place, so it is undone through the
+/// venue, holding the venue to its own estimate. When that fails too the call
+/// traps, which leaves the compose queued for after the recipient raises its limit.
+fn swap_back(
+    env: &Env,
+    venue: &Venue,
+    arrival: &Arrival,
+    conversion: &Conversion,
+    amount: i128,
+) -> i128 {
+    let mut holding = Vec::new(env);
+    holding.push_back(arrival.token.clone());
+    for (_, _, token_out) in conversion.path.iter() {
+        holding.push_back(token_out);
+    }
+    let mut back = Vec::new(env);
+    for i in (0..conversion.path.len()).rev() {
+        let (tokens, pool_index, _) = conversion.path.get_unchecked(i);
+        back.push_back((tokens, pool_index, holding.get_unchecked(i)));
+    }
+
+    let me = env.current_contract_address();
+    let arriving = TokenClient::new(env, &arrival.token);
+    let wanted = TokenClient::new(env, &conversion.wanted);
+    let before = arriving.balance(&me);
+    let wanted_before = wanted.balance(&me);
+    let swapped = match venue::estimate(env, &venue.router, &conversion.wanted, amount, &back) {
+        Some(estimate) if estimate > 0 => venue::swap(
+            env,
+            &venue.router,
+            &conversion.wanted,
+            amount,
+            &back,
+            estimate,
+        ),
+        _ => false,
+    };
+    let returned = arriving.balance(&me) - before;
+    // any of it left here would belong to no arrival, so all of it must go back
+    if !swapped || returned <= 0 || wanted_before - wanted.balance(&me) != amount {
+        panic_with_error!(env, Error::NoWayBack);
+    }
+    returned
+}
+
 /// Attempts the conversion. None means nothing moved and the arrival is to be
 /// delivered as it came.
 fn convert(
@@ -176,14 +233,17 @@ fn convert(
     if !on_lists(venue, &arrival.token, conversion) {
         return None;
     }
-    let charges_fee = conversion.fee_bps > 0;
+    let me = env.current_contract_address();
+    // a fee paid to this contract would never leave it, so it is not charged
+    let charges_fee = conversion.fee_bps > 0 && conversion.fee_recipient != me;
+    let fee_bps = if charges_fee { conversion.fee_bps } else { 0 };
     if !can_hold(env, &conversion.wanted, recipient) {
         return None;
     }
     if charges_fee && !can_hold(env, &conversion.wanted, &conversion.fee_recipient) {
         return None;
     }
-    let floor = venue_floor(conversion.min_out, conversion.fee_bps)?;
+    let floor = venue_floor(conversion.min_out, fee_bps)?;
     match venue::estimate(
         env,
         router,
@@ -195,7 +255,6 @@ fn convert(
         _ => return None,
     }
 
-    let me = env.current_contract_address();
     let wanted = TokenClient::new(env, &conversion.wanted);
     let arriving = TokenClient::new(env, &arrival.token);
     let wanted_before = wanted.balance(&me);
@@ -215,27 +274,52 @@ fn convert(
     // measured, not taken from the router's return value
     let out = wanted.balance(&me) - wanted_before;
     let taken = arriving_before - arriving.balance(&me);
-    let fee = fee_of(out, conversion.fee_bps);
+    let fee = fee_of(out, fee_bps);
     let net = out - fee;
     if net < conversion.min_out || taken < 0 || taken > arrival.amount {
         // unreachable when the venue honours out_min; trapping reverts the swap and
         // leaves the compose queued rather than delivering under the floor
         panic_with_error!(env, Error::VenueOutsideFloor);
     }
+    let mut unconverted = arrival.amount - taken;
 
-    wanted.transfer(&me, recipient, &net);
-    if fee > 0 {
-        wanted.transfer(&me, &conversion.fee_recipient, &fee);
+    if !pay(env, &wanted, recipient, net) {
+        // the recipient's trustline limit has no room for the conversion
+        unconverted += swap_back(env, venue, arrival, conversion, out);
+        arriving.transfer(&me, recipient, &unconverted);
+        return Some(Delivery {
+            outcome: Outcome::AsCame,
+            asset: arrival.token.clone(),
+            amount: unconverted,
+            fee: 0,
+            fee_recipient: None,
+            unconverted: 0,
+        });
     }
-    let unconverted = arrival.amount - taken;
+
+    // An integrator that cannot take its fee must not hold up the user's funds,
+    // so the fee goes to the recipient instead, and failing that back to them as
+    // the arriving token.
+    let mut amount = net;
+    let mut fee_paid = 0;
+    if fee > 0 {
+        if pay(env, &wanted, &conversion.fee_recipient, fee) {
+            fee_paid = fee;
+        } else if pay(env, &wanted, recipient, fee) {
+            amount += fee;
+        } else {
+            unconverted += swap_back(env, venue, arrival, conversion, fee);
+        }
+    }
     if unconverted > 0 {
         arriving.transfer(&me, recipient, &unconverted);
     }
     Some(Delivery {
+        outcome: Outcome::Converted,
         asset: conversion.wanted.clone(),
-        amount: net,
-        fee,
-        fee_recipient: if charges_fee {
+        amount,
+        fee: fee_paid,
+        fee_recipient: if fee_paid > 0 {
             Some(conversion.fee_recipient.clone())
         } else {
             None
@@ -244,13 +328,7 @@ fn convert(
     })
 }
 
-fn publish(
-    env: &Env,
-    arrival: &Arrival,
-    recipient: &Address,
-    delivery: &Delivery,
-    outcome: Outcome,
-) {
+fn publish(env: &Env, arrival: &Arrival, recipient: &Address, delivery: &Delivery) {
     let id = &arrival.identity;
     Arrived {
         guid: id.guid.clone(),
@@ -260,7 +338,7 @@ fn publish(
         src_eid: id.src_eid,
         sender: id.sender.clone(),
         recipient: recipient.clone(),
-        outcome: match outcome {
+        outcome: match delivery.outcome {
             Outcome::Converted => Symbol::new(env, "converted"),
             Outcome::AsCame => Symbol::new(env, "as_came"),
         },
