@@ -4567,3 +4567,169 @@ describe("round 2: a built ledger written by the earlier version", () => {
     expect(await legacy.readLog("built")).toBeDefined();
   });
 });
+
+describe("round 3: a burn asked about before Circle attested it is delivered by the sweep", () => {
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const burnHash = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
+
+  /** Iris as a switch: nothing attested until `attest` names a message for a hash. */
+  function irisSwitch(): { attest: (hash: string, messageHex: string) => void; asked: URL[] } {
+    const attested = new Map<string, string>();
+    const asked = stubIris((url) => {
+      const message = attested.get(url.searchParams.get("transactionHash") ?? "");
+      return message === undefined
+        ? new Response("{}", { status: 404 })
+        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+            status: 200,
+          });
+    });
+    return { attest: (hash, messageHex) => attested.set(hash, messageHex), asked };
+  }
+
+  function sweepClock(): void {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  }
+
+  async function sweepFor(server: TestServer, ms: number): Promise<void> {
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(ms);
+    await server.server.stopSweep();
+  }
+
+  async function watched(state: MemoryDocumentStore): Promise<{ txHash: string }[]> {
+    const document = (await state.read("delivery-watch")) as
+      | { entries: { txHash: string }[] }
+      | undefined;
+    return document?.entries ?? [];
+  }
+
+  it("delivers it once attested, and settles the recipient, with no further call", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    const early = await server.post("/deliver", { txHash: burnHash(1), domain: 0 });
+    expect(early.status).toBe(404);
+    expect(await watched(state)).toHaveLength(1);
+
+    // the page is closed; Circle attests meanwhile
+    iris.attest(burnHash(1), cctpMessage(user.publicKey()));
+    sweepClock();
+    await sweepFor(server, 120_000);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("watches one burn once however often it is asked about", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    for (const hash of [burnHash(2), burnHash(2), burnHash(2).toUpperCase().replace("0X", "0x")]) {
+      expect((await server.post("/deliver", { txHash: hash, domain: 0 })).status).toBe(404);
+    }
+    expect(await watched(state)).toHaveLength(1);
+  });
+
+  it("watches only so many burns for one client, and in all", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({
+      buildDelivery,
+      state,
+      trustProxy: true,
+      watchLimits: { perClient: 2, total: 3 },
+    });
+    const ask = (client: string, n: number) =>
+      fetch(`${server.url}/deliver`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": client },
+        body: JSON.stringify({ txHash: burnHash(n), domain: 0 }),
+      });
+    for (const n of [10, 11, 12]) expect((await ask("203.0.113.1", n)).status).toBe(404);
+    expect(await watched(state)).toHaveLength(2);
+    for (const n of [20, 21]) expect((await ask("198.51.100.9", n)).status).toBe(404);
+    expect(await watched(state)).toHaveLength(3);
+  });
+
+  it("keeps a watched burn while the day's budget is spent, and pays nothing", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, deliveryBudgetStroops: 0n });
+    await server.post("/deliver", { txHash: burnHash(3), domain: 0 });
+    iris.attest(burnHash(3), cctpMessage(Keypair.random().publicKey()));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    await sweepFor(server, 120_000);
+    logged.mockRestore();
+    expect(server.rpc.submissions).toEqual([]);
+    expect(await watched(state)).toHaveLength(1);
+  });
+
+  it("drops, and says so, a watched burn that can never be paid for", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    await server.post("/deliver", { txHash: burnHash(4), domain: 0 });
+    // attested, but below the sponsor's minimum
+    iris.attest(burnHash(4), cctpMessage(Keypair.random().publicKey(), { amount: 10n }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    await sweepFor(server, 120_000);
+    const lines = logged.mock.calls.flat().join(" ");
+    logged.mockRestore();
+    expect(await watched(state)).toEqual([]);
+    expect(lines).toMatch(/stopped watching/);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("stops watching a burn Circle never attests, after two days", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    await server.post("/deliver", { txHash: burnHash(5), domain: 0 });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    vi.setSystemTime(Date.now() + 48 * 3_600_000 + 1_000);
+    const before = iris.asked.length;
+    await sweepFor(server, 120_000);
+    const lines = logged.mock.calls.flat().join(" ");
+    logged.mockRestore();
+    expect(await watched(state)).toEqual([]);
+    expect(lines).toMatch(/stopped watching/);
+    expect(iris.asked.length).toBe(before);
+  });
+
+  it("asks Circle again only on its backoff, not on every sweep", async () => {
+    const iris = irisSwitch();
+    const server = await startServer({ buildDelivery, settleSweepSeconds: 10 });
+    await server.post("/deliver", { txHash: burnHash(6), domain: 0 });
+    const before = iris.asked.length;
+    sweepClock();
+    // the first retry is a minute out, so five ten-second sweeps ask nothing
+    await sweepFor(server, 50_000);
+    expect(iris.asked.length).toBe(before);
+    await sweepFor(server, 20_000);
+    expect(iris.asked.length).toBe(before + 1);
+  });
+
+  it("watches nothing when accounts fund themselves", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, reserveFunding: "self" });
+    expect((await server.post("/deliver", { txHash: burnHash(7), domain: 0 })).status).toBe(409);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("keeps what it watches across a restart", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ buildDelivery, state });
+    await first.post("/deliver", { txHash: burnHash(8), domain: 0 });
+    const second = await startServer({ buildDelivery, state }, { restartOf: first });
+    await second.server.ready();
+    expect(await watched(state)).toHaveLength(1);
+  });
+});

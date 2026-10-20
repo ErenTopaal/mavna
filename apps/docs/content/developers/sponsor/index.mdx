@@ -140,6 +140,12 @@ settlement the network refuses because its channel cannot pay the fee stays held
 and is tried again rather than counted as a stranding. `/health` reports
 `channels: { size, leased, maxSize }`.
 
+The sweep also delivers Circle burns asked about before they were attested, so a
+page closed mid-attestation does not leave a new account's settlement waiting for
+the user to come back. It retries each on a backoff for up to two days, within the
+daily delivery budget, and keeps the list in the state directory
+(`delivery-watch.json`); see [`POST /deliver`](/developers/sponsor/api#post-deliver).
+
 Once an hour the sweep also cross-checks what the sponsor carries: the reserve
 slots Horizon says it sponsors against those its own held, prepared settlements
 account for, with any sponsored account its records do not know. It is one log
