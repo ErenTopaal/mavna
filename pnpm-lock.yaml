@@ -587,9 +587,6 @@ importers:
       '@stellar/stellar-sdk':
         specifier: 16.2.0
         version: 16.2.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
-      dnum:
-        specifier: 2.17.0
-        version: 2.17.0
 
   packages/swap:
     dependencies:
@@ -4655,9 +4652,6 @@ packages:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
     engines: {node: '>=8'}
 
-  dnum@2.17.0:
-    resolution: {integrity: sha512-Abo8RU2ZoABVO2R051XlJEgDIXAlA8/ZjOT2F1uAWvm6Vb8TphmN4k7qgu5nWKSv/JUGLVty6QPEeLTvaxNRYQ==}
-
   dompurify@3.4.13:
     resolution: {integrity: sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ==}
 
@@ -4917,9 +4911,6 @@ packages:
         optional: true
       react-dom:
         optional: true
-
-  from-exponential@1.1.1:
-    resolution: {integrity: sha512-VBE7f5OVnYwdgB3LHa+Qo29h8qVpxhVO9Trlc+AWm+/XNAgks1tAwMFHb33mjeiof77GglsJzeYF7OqXrROP/A==}
 
   fs-extra@7.0.1:
     resolution: {integrity: sha512-YJDaCJZEnBmcbw13fvdAM9AwNOJwOzrE4pqMqBq5nFiEqXUqHwlK4B+3pUw6JNvfSPtX05xFHtYy/1ni01eGCw==}
@@ -13156,10 +13147,6 @@ snapshots:
     dependencies:
       path-type: 4.0.0
 
-  dnum@2.17.0:
-    dependencies:
-      from-exponential: 1.1.1
-
   dompurify@3.4.13:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
@@ -13435,8 +13422,6 @@ snapshots:
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
-
-  from-exponential@1.1.1: {}
 
   fs-extra@7.0.1:
     dependencies:
