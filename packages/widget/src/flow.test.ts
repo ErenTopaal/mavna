@@ -518,3 +518,31 @@ describe("how many wallet approvals a route says", () => {
     expect(toRouteView(routeFor("axelar")).sigsUpTo).toBe(false);
   });
 });
+
+describe("the header's Stellar address", () => {
+  it("follows the wallet: a forgotten or switched account does not stay on screen", async () => {
+    let tell: ((address: string | undefined) => void) | undefined;
+    const flow = applied(
+      new Flow({
+        engine: {
+          ...engine,
+          stellar: {
+            connect: async () => "GOLD",
+            sign: async (x: string) => x,
+            disconnect: async () => {},
+            onChange: (listener: (a: string | undefined) => void) => {
+              tell = listener;
+              return () => {};
+            },
+          },
+        } as unknown as Engine,
+      }),
+    );
+    flow.followStellar();
+    flow.state = { ...flow.state, stellarAddress: "GOLD" };
+    tell?.("GNEW");
+    expect(flow.state.stellarAddress).toBe("GNEW");
+    tell?.(undefined);
+    expect(flow.state.stellarAddress).toBeNull();
+  });
+});

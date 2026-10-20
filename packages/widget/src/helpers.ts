@@ -34,25 +34,47 @@ export const shortAddr = (a: string): string =>
 export function rememberConnection(wallet: StellarWalletApi): StellarWalletApi {
   // the ask itself is kept, so two steps asking at once share one picker
   let connected: Promise<string> | undefined;
+  const listeners = new Set<(address: string | undefined) => void>();
+  const tell = (address: string | undefined): void => {
+    for (const listener of listeners) listener(address);
+  };
+  // an account switched or disconnected in the wallet replaces what was remembered
+  wallet.onChange?.((address) => {
+    connected = address === undefined ? undefined : Promise.resolve(address);
+    tell(address);
+  });
   return {
     connect() {
       if (connected === undefined) {
         const asked = wallet.connect();
         connected = asked;
-        // a dismissed picker is not remembered: the next connect asks again
-        asked.catch(() => {
-          if (connected === asked) connected = undefined;
-        });
+        asked.then(
+          (address) => {
+            if (connected === asked) tell(address);
+          },
+          // a dismissed picker is not remembered: the next connect asks again
+          () => {
+            if (connected === asked) connected = undefined;
+          },
+        );
       }
       return connected;
     },
     sign: (xdr, address) => wallet.sign(xdr, address),
     async disconnect() {
       connected = undefined;
+      tell(undefined);
       await wallet.disconnect();
     },
     forget() {
       connected = undefined;
+      tell(undefined);
+    },
+    onChange(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }

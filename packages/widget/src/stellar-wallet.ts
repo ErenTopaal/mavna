@@ -1,12 +1,13 @@
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit";
 import { AlbedoModule } from "@creit.tech/stellar-wallets-kit/modules/albedo";
-import { FreighterModule } from "@creit.tech/stellar-wallets-kit/modules/freighter";
+import { FREIGHTER_ID, FreighterModule } from "@creit.tech/stellar-wallets-kit/modules/freighter";
 import { HanaModule } from "@creit.tech/stellar-wallets-kit/modules/hana";
 import { LobstrModule } from "@creit.tech/stellar-wallets-kit/modules/lobstr";
 import { RabetModule } from "@creit.tech/stellar-wallets-kit/modules/rabet";
 import { xBullModule } from "@creit.tech/stellar-wallets-kit/modules/xbull";
-import { Networks } from "@creit.tech/stellar-wallets-kit/types";
+import { KitEventType, Networks } from "@creit.tech/stellar-wallets-kit/types";
 import type { NetworkId } from "@mavna/core";
+import { WatchWalletChanges } from "@stellar/freighter-api";
 import { asError } from "./helpers";
 
 /**
@@ -45,6 +46,11 @@ export interface StellarWalletApi {
    * connect asks it again. Present on the engine's own wrapper.
    */
   forget?(): void;
+  /**
+   * Hear the connected account change, or go (undefined), without being asked.
+   * Returns a function that stops listening.
+   */
+  onChange?(listener: (address: string | undefined) => void): () => void;
 }
 
 const PASSPHRASE: Readonly<Record<NetworkId, string>> = {
@@ -60,8 +66,21 @@ const PASSPHRASE: Readonly<Record<NetworkId, string>> = {
  * product has (a page runs one network), and it is called out here rather than
  * papered over.
  */
+/** How often Freighter is asked which account it is on; it offers no push. */
+const FREIGHTER_WATCH_MS = 3_000;
+
 export function createStellarWallet(network: NetworkId): StellarWalletApi {
   let initialised = false;
+  const listeners = new Set<(address: string | undefined) => void>();
+  let known: string | undefined;
+  let stopKit: (() => void) | undefined;
+  let freighter: WatchWalletChanges | undefined;
+
+  const tell = (address: string | undefined): void => {
+    if (address === known) return;
+    known = address;
+    for (const listener of listeners) listener(address);
+  };
 
   const ensureInit = (): void => {
     if (initialised) return;
@@ -77,6 +96,24 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
       network: network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
     });
     initialised = true;
+    // the kit's own changes: an account picked again, or disconnected from its profile
+    stopKit = StellarWalletsKit.on(KitEventType.STATE_UPDATED, (event) =>
+      tell(event.payload.address),
+    );
+  };
+
+  // Of the kit's wallets only Freighter can say its account changed. The
+  // others are caught at signing: a connected account that is not the one that
+  // must sign is forgotten, and the header follows that.
+  const watchFreighter = (): void => {
+    freighter?.stop();
+    freighter = undefined;
+    if (StellarWalletsKit.selectedModule.productId !== FREIGHTER_ID) return;
+    const watch = new WatchWalletChanges(FREIGHTER_WATCH_MS);
+    watch.watch(({ address, error }) => {
+      if (error === undefined && address !== "") tell(address);
+    });
+    freighter = watch;
   };
 
   return {
@@ -84,6 +121,8 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
       ensureInit();
       try {
         const { address } = await StellarWalletsKit.authModal();
+        known = address;
+        watchFreighter();
         return address;
       } catch (cause) {
         // the kit rejects with plain objects; their message is the wallet's reason
@@ -103,8 +142,21 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
       }
     },
     async disconnect(): Promise<void> {
+      freighter?.stop();
+      freighter = undefined;
       if (!initialised) return;
       await StellarWalletsKit.disconnect();
+    },
+    onChange(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          freighter?.stop();
+          stopKit?.();
+          stopKit = undefined;
+        }
+      };
     },
   };
 }

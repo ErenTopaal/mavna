@@ -400,6 +400,7 @@ export class Flow extends React.Component<FlowProps, State> {
     document.addEventListener("keydown", this.onKey);
     this.stopWallets = watchWallets((wallets) => this.setState({ discovered: [...wallets] }));
     this.setState({ history: readHistory(this.engine.historyKey) });
+    this.followStellar();
     this.entrance();
     this.runQuote();
   }
@@ -419,8 +420,19 @@ export class Flow extends React.Component<FlowProps, State> {
     if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
   }
 
+  private stopStellar: (() => void) | undefined;
+
+  /** Keep the header's Stellar address to what the wallet says now, not what it said once. */
+  followStellar(): void {
+    this.stopStellar?.();
+    this.stopStellar = this.engine.stellar.onChange?.((address) =>
+      this.setState({ stellarAddress: address ?? null }),
+    );
+  }
+
   override componentWillUnmount(): void {
     this.unmounted.abort();
+    this.stopStellar?.();
     document.removeEventListener("mousedown", this.onDown);
     document.removeEventListener("keydown", this.onKey);
     this.timers.forEach(clearTimeout);

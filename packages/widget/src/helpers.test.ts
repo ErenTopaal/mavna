@@ -80,3 +80,45 @@ describe("rememberConnection, when the wallet changes underneath it", () => {
     expect(opened()).toBe(2);
   });
 });
+
+describe("rememberConnection, telling the header", () => {
+  const changing = () => {
+    let tell: ((address: string | undefined) => void) | undefined;
+    let opened = 0;
+    const wallet = rememberConnection({
+      connect: async () => {
+        opened += 1;
+        return "GOLD";
+      },
+      sign: async (xdr) => xdr,
+      disconnect: async () => {},
+      onChange: (listener) => {
+        tell = listener;
+        return () => {
+          tell = undefined;
+        };
+      },
+    });
+    return { wallet, change: (a: string | undefined) => tell?.(a), opened: () => opened };
+  };
+
+  it("says the connected address, then nothing once it is forgotten", async () => {
+    const { wallet } = changing();
+    const heard: Array<string | undefined> = [];
+    wallet.onChange?.((a) => heard.push(a));
+    await wallet.connect();
+    wallet.forget?.();
+    expect(heard).toEqual(["GOLD", undefined]);
+  });
+
+  it("follows an account switched in the wallet, without opening the picker again", async () => {
+    const { wallet, change, opened } = changing();
+    const heard: Array<string | undefined> = [];
+    wallet.onChange?.((a) => heard.push(a));
+    await wallet.connect();
+    change("GNEW");
+    expect(heard).toEqual(["GOLD", "GNEW"]);
+    expect(await wallet.connect()).toBe("GNEW");
+    expect(opened()).toBe(1);
+  });
+});
