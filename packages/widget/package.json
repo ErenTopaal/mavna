@@ -43,7 +43,7 @@
     "@mavna/swap": "workspace:*",
     "@stellar/stellar-sdk": "16.2.0",
     "@web3icons/react": "4.1.24",
-    "motion": "13.1.0",
+    "motion": "14.4.0",
     "viem": "2.57.7"
   },
   "devDependencies": {
