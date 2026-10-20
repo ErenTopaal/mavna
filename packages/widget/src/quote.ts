@@ -21,7 +21,7 @@ import { raceAdapters, type SwapAttachment } from "@mavna/routing";
 import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
-import { amountValue, fromBaseUnits, toBaseUnits } from "./format";
+import { amountValue, fmtUnits, fromBaseUnits, toBaseUnits } from "./format";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS, OWN_TRUSTLINE_FEE_STROOPS } from "./own-delivery";
 import type { SponsorTerms } from "./sponsor";
 
@@ -100,6 +100,8 @@ export interface RouteView {
   readonly integratorFee:
     | { readonly amount: number; readonly symbol: string; readonly recipient: string }
     | undefined;
+  /** The transfer fee as a figure in its own asset's decimals. */
+  readonly feeAmount: string;
   /** What the transfer fee is counted in, read off the fee itself. */
   readonly feeSymbol: string;
   /**
@@ -214,6 +216,8 @@ export function toRouteView(route: Route): RouteView {
             recipient: integrator.recipients[0]?.name ?? "the integrator",
           },
     feeSymbol: bridge?.total.asset.symbol ?? route.sends.asset.symbol,
+    feeAmount:
+      bridge === undefined ? "0.00" : fmtUnits(bridge.total.baseUnits, bridge.total.asset.decimals),
     compose:
       route.compose === undefined
         ? undefined

@@ -1,11 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DESTINATION, routeFor, STELLAR_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
+import {
+  DESTINATION,
+  routeFor,
+  SOURCE_USDC,
+  STELLAR_USDC,
+  STELLAR_XLM,
+} from "./__fixtures__/scripted";
 import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
-import { renderFlight, renderReview } from "./screens";
+import { renderFlight, renderReview, routeDetail } from "./screens";
 import { DeliveredAsCame, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
@@ -336,5 +342,54 @@ describe("an integrator fee on a route", () => {
     );
     expect(html).toContain("Integrator fee");
     expect(html).toContain("0.25 XLM to Acme Wallet");
+  });
+});
+
+describe("fees and rates on a route", () => {
+  const ETH = {
+    chainId: "arbitrum-sepolia",
+    id: "native",
+    symbol: "ETH",
+    decimals: 18,
+    curatedBy: "Ethereum",
+  };
+  const withFee = (asset: typeof ETH | typeof SOURCE_USDC, baseUnits: string) => {
+    const base = routeFor("layerzero", { swap: true, delivers: STELLAR_XLM });
+    return toRouteView({
+      ...base,
+      fees: [
+        {
+          kind: "bridge" as const,
+          total: { asset, baseUnits },
+          recipients: [],
+          includedInQuote: false,
+        },
+      ],
+    });
+  };
+
+  it("shows a small native fee in its own decimals, not as 0.00", () => {
+    expect(withFee(ETH, "300000000000000").feeAmount).toBe("0.0003");
+    expect(withFee(SOURCE_USDC, "250000").feeAmount).toBe("0.25");
+  });
+
+  it("prices the rate per unit sent, without taking a fee paid in another asset off it", () => {
+    // 5 sent, 5 XLM received (fixture), the fee is gas in ETH
+    const rows = routeDetail(withFee(ETH, "300000000000000"), "XLM", true);
+    expect(rows.find((r) => r.key === "rate")?.value).toBe("1 USDC ≈ 1.0000 XLM");
+  });
+
+  it("names the asset actually sent in the rate", () => {
+    const view = withFee(SOURCE_USDC, "0");
+    const usdt0 = {
+      ...view,
+      route: {
+        ...view.route,
+        sends: { ...view.route.sends, asset: { ...SOURCE_USDC, symbol: "USDT0" } },
+      },
+    };
+    expect(routeDetail(usdt0, "XLM", true).find((r) => r.key === "rate")?.value).toMatch(
+      /^1 USDT0 ≈/,
+    );
   });
 });

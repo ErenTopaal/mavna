@@ -8,7 +8,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
-import { amountValue, fmt, short } from "./format";
+import { amountValue, fmt, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
@@ -924,7 +924,7 @@ export function renderReview(
       : [
           { key: "dest", name: "Recipient", value: short(r.route.destination) },
           { key: "rail", name: "Rail", value: railLabel(r) },
-          { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} ${r.feeSymbol}` },
+          { key: "fee", name: "Transfer fee", value: `${r.feeAmount} ${r.feeSymbol}` },
           ...(r.integratorFee === undefined
             ? []
             : [
@@ -1507,13 +1507,7 @@ export function renderRoutes(
             fastest.id !== best.id;
           const badged = isBest || isFastest;
           const open = st.expanded === x.id;
-          const detail = routeDetail(
-            x,
-            sym,
-            xlm,
-            c.amountNumber(),
-            c.state.reserveFunding === "self",
-          );
+          const detail = routeDetail(x, sym, xlm, c.state.reserveFunding === "self");
           const cardStyle: CSSProperties = {
             position: "relative",
             width: "100%",
@@ -1634,7 +1628,7 @@ export function renderRoutes(
                       <circle cx="12" cy="12" r="8.5" />
                       <path d="M12 8v8M9.5 10.2c0-1.2 1.1-2.2 2.5-2.2s2.5 1 2.5 2.2c0 2.6-5 1.4-5 3.9 0 1.2 1.1 2.1 2.5 2.1s2.5-.9 2.5-2.1" />
                     </svg>
-                    <span>{x.fee === 0 ? "0.00" : fmt(x.fee)}</span>
+                    <span>{x.feeAmount}</span>
                   </span>
                   <span
                     style={s("display:flex;align-items:center;gap:6px;white-space:nowrap")}
@@ -1877,22 +1871,27 @@ export function renderRoutes(
 }
 
 /** The expanded route detail rows, from real route figures. */
-function routeDetail(
+export function routeDetail(
   x: RouteView,
   sym: string,
   xlm: boolean,
-  amount: number,
   /** The account pays its own way, so finishing a conversion by hand is its cost. */
   selfFunded = false,
 ): { key: string; name: string; value: string }[] {
-  const net = amount - x.fee;
-  const perUsdc = net > 0 ? x.receives / net : 0;
+  // the rate is per unit of what was sent; a fee only comes off it when it is
+  // paid in that same asset, never gas in another
+  const sends = x.route.sends;
+  const bridgeFee = x.route.fees.find((f) => f.kind === "bridge");
+  const sameAsset = bridgeFee !== undefined && bridgeFee.total.asset.id === sends.asset.id;
+  const netBase = BigInt(sends.baseUnits) - (sameAsset ? BigInt(bridgeFee.total.baseUnits) : 0n);
+  const net = fromBaseUnits(netBase > 0n ? netBase.toString() : "0", sends.asset.decimals);
+  const perUnit = net > 0 ? x.receives / net : 0;
   return [
     { key: "rail", name: "Rail", value: x.source },
     {
       key: "fee",
       name: "Transfer fee",
-      value: x.fee === 0 ? "None" : `${fmt(x.fee)} ${x.feeSymbol}`,
+      value: x.fee === 0 ? "None" : `${x.feeAmount} ${x.feeSymbol}`,
     },
     {
       key: "min",
@@ -1900,7 +1899,13 @@ function routeDetail(
       value: `${fmt(x.floor)} ${sym}`,
     },
     ...(xlm
-      ? [{ key: "rate", name: "Conversion rate", value: `1 USDC ≈ ${perUsdc.toFixed(4)} XLM` }]
+      ? [
+          {
+            key: "rate",
+            name: "Conversion rate",
+            value: `1 ${sends.asset.symbol} ≈ ${perUnit.toFixed(4)} XLM`,
+          },
+        ]
       : []),
     ...(x.swapVenue !== undefined
       ? [{ key: "venue", name: "Converted on", value: x.swapVenue }]

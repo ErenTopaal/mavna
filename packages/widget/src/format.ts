@@ -50,3 +50,20 @@ export function fromBaseUnits(baseUnits: string, decimals: number): number {
 export function amountValue(amount: Amount): number {
   return fromBaseUnits(amount.baseUnits, amount.asset.decimals);
 }
+
+/**
+ * Base units to a figure in the asset's own decimals: at least two places, and
+ * as many more as the amount needs up to eight, so 0.0003 ETH of gas reads as
+ * that and not as 0.00. String arithmetic, so nothing is rounded up.
+ */
+export function fmtUnits(baseUnits: string, decimals: number): string {
+  const value = BigInt(baseUnits);
+  const scale = 10n ** BigInt(decimals);
+  const whole = TWO_DP.format(Number(value / scale)).split(".")[0] ?? "0";
+  const fraction = (value % scale)
+    .toString()
+    .padStart(decimals, "0")
+    .slice(0, 8)
+    .replace(/0+$/, "");
+  return `${whole}.${fraction.padEnd(2, "0")}`;
+}
