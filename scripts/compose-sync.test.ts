@@ -132,6 +132,82 @@ describe("syncing the checkout into compose's volume", () => {
     }
   });
 
+  it("copies only the file types a build reads inside the allowed directories", () => {
+    const src = tree({
+      "package.json": "{}",
+      "apps/app/src/main.tsx": "app",
+      "apps/app/index.html": "<html>",
+      "apps/app/public/mark.png": "png",
+      "packages/core/package.json": "{}",
+      "packages/core/tsconfig.json": "{}",
+      "packages/core/src/index.ts": "export {}",
+      "contracts/arrival/Cargo.toml": "[package]",
+      "contracts/build.sh": "#!/bin/sh",
+      "apps/docs/biome.jsonc": "{}",
+      // secrets a dropped file could carry, none matching the old patterns
+      "apps/app/.npmrc": "//registry.npmjs.org/:_authToken=npm_secret",
+      "packages/core/.envrc": "export SPONSOR_SECRET_KEY=S",
+      "services/sponsor/credentials.json": '{"key":"S"}',
+      "services/sponsor/secrets.json": '{"key":"S"}',
+      "services/sponsor/sponsor.secret": "S",
+      "services/sponsor/SPONSOR_SECRET_KEY": "S",
+      "apps/app/sponsor.env.bak": "SPONSOR_SECRET_KEY=S",
+      "packages/core/src/.env.local": "SPONSOR_SECRET_KEY=S",
+      "scripts/notes.txt": "not a file type the build reads",
+    });
+    const dest = tree({});
+    sync(src, dest);
+    for (const copied of [
+      "apps/app/src/main.tsx",
+      "apps/app/index.html",
+      "apps/app/public/mark.png",
+      "packages/core/package.json",
+      "packages/core/tsconfig.json",
+      "packages/core/src/index.ts",
+      "contracts/arrival/Cargo.toml",
+      "contracts/build.sh",
+      "apps/docs/biome.jsonc",
+    ]) {
+      expect(existsSync(join(dest, copied)), copied).toBe(true);
+    }
+    for (const left of [
+      "apps/app/.npmrc",
+      "packages/core/.envrc",
+      "services/sponsor/credentials.json",
+      "services/sponsor/secrets.json",
+      "services/sponsor/sponsor.secret",
+      "services/sponsor/SPONSOR_SECRET_KEY",
+      "apps/app/sponsor.env.bak",
+      "packages/core/src/.env.local",
+      "scripts/notes.txt",
+    ]) {
+      expect(existsSync(join(dest, left)), left).toBe(false);
+    }
+  });
+
+  it("honours a .gitignore inside a directory, relative to it", () => {
+    const src = tree({
+      "package.json": "{}",
+      "apps/docs/.gitignore": "generated/\npublic/_pagefind/\nnext-env.d.ts\n",
+      "apps/docs/generated/exports.mdx": "generated",
+      "apps/docs/public/_pagefind/index.js": "generated",
+      "apps/docs/public/logo.png": "png",
+      "apps/docs/next-env.d.ts": "generated",
+      "apps/docs/content/index.mdx": "docs",
+    });
+    const dest = tree({});
+    sync(src, dest);
+    expect(existsSync(join(dest, "apps/docs/content/index.mdx"))).toBe(true);
+    expect(existsSync(join(dest, "apps/docs/public/logo.png"))).toBe(true);
+    for (const left of [
+      "apps/docs/generated",
+      "apps/docs/public/_pagefind",
+      "apps/docs/next-env.d.ts",
+    ]) {
+      expect(existsSync(join(dest, left)), left).toBe(false);
+    }
+  });
+
   it("removes from the volume a secret an earlier sync copied", () => {
     const src = tree({ "package.json": "{}" });
     const dest = tree({ "sponsor.env": "SPONSOR_SECRET_KEY=S", "resources/x": "internal" });
