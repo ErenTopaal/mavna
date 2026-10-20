@@ -14,9 +14,12 @@ import {
   parseDisabledSources,
   type SwapAttachment,
 } from "@mavna/routing";
-import { createNetworkConfig, type NetworkConfig, RpcClient } from "@mavna/stellar";
+import { createNetworkConfig, type NetworkConfig, RpcClient, XlmPriceSource } from "@mavna/stellar";
 import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { IntegratorFeeConfig } from "./config.js";
+import { circleDomain, usdcSourceChains } from "./domains";
+import { rememberConnection } from "./helpers";
 import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
 import { layerZeroSourceDetail, usdt0ChainsFor, usdt0SwapFor } from "./usdt0.js";
@@ -126,6 +129,12 @@ export interface Engine {
    * next quote asks again rather than repeating an outage forever.
    */
   sponsorTerms(): Promise<SponsorTerms>;
+  /**
+   * The XLM order book's mid price for Stellar USDC, in stroops per whole USDC,
+   * read from Horizon the way the sponsor prices its settlement. Rejects when the
+   * book cannot price it.
+   */
+  xlmStroopsPerUsdc(): Promise<bigint>;
   /** Chains USDT0 can be sent from, filtered by the same allow and deny lists. */
   readonly usdt0Chains: ReadonlyArray<{ id: string; name: string }>;
   /**
@@ -151,6 +160,7 @@ export function createEngine(config: EngineConfig): Engine {
   const { network } = config;
   const netConfig = createNetworkConfig({ id: network, rpcUrl: config.rpcUrl });
   const rpc = new RpcClient({ url: netConfig.rpcUrl });
+  const xlmPrices = new XlmPriceSource({ horizonUrl: netConfig.horizonUrl });
 
   const breaker = createCircuitBreaker(() => parseDisabledSources(config.disabledSources));
 
@@ -215,21 +225,7 @@ export function createEngine(config: EngineConfig): Engine {
     wantedContract: "native",
   };
 
-  // Both families, not just the EVM one: the adapters quote Solana and Starknet
-  // too, so leaving them off the picker would understate what the engine can do.
-  const allChains: ReadonlyArray<{ id: string; name: string }> = [
-    ...Object.entries(EVM_DEPLOYMENTS[network]).map(([id, chain]) => ({ id, name: chain.name })),
-    ...Object.entries(NON_EVM_CHAINS[network]).map(([id, chain]) => ({ id, name: chain.name })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
-
-  // An integrator can narrow the picker; the filter is over the real list, so it
-  // can only remove chains, never invent one.
-  const allow = config.chains?.allow;
-  const deny = config.chains?.deny;
-  const sourceChains = allChains.filter(
-    (c) =>
-      (allow === undefined || allow.includes(c.id)) && (deny === undefined || !deny.includes(c.id)),
-  );
+  const sourceChains = usdcSourceChains(network, config.chains);
   const usdt0Chains = usdt0ChainsFor(network, config.chains);
 
   // Ethereum is where most people hold USDC and where the test funds are, so it
@@ -277,12 +273,12 @@ export function createEngine(config: EngineConfig): Engine {
     integratorFee: config.integratorFee,
     sponsor,
     // A host can bring its own Stellar signer; otherwise the built-in wallet kit.
-    stellar: config.stellar ?? createStellarWallet(network),
+    stellar: rememberConnection(config.stellar ?? createStellarWallet(network)),
     historyKey: config.historyKey,
+    xlmStroopsPerUsdc: () =>
+      xlmPrices.xlmStroopsPerUnit(new StellarAsset("USDC", STELLAR_USDC_ISSUER[network])),
     sourceDomain(chainId) {
-      return (
-        EVM_DEPLOYMENTS[network][chainId]?.domain ?? NON_EVM_CHAINS[network][chainId]?.domain ?? 0
-      );
+      return circleDomain(network, chainId);
     },
     sourceChainDetail(chainId) {
       const evm = EVM_DEPLOYMENTS[network][chainId];

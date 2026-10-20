@@ -1,3 +1,4 @@
+import { fromHex } from "@mavna/adapter-cctp";
 import {
   COMPOSE_RECEIVED,
   composeMessageHash,
@@ -13,7 +14,7 @@ import {
   rpc as rpcApi,
   type Transaction,
   TransactionBuilder,
-  xdr,
+  type xdr,
 } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import type { SponsorCompose } from "./sponsor";
@@ -94,13 +95,15 @@ async function composeOwn(
     });
   }
 
+  // bytes go through nativeToScVal, which wraps them in the SDK's own Buffer;
+  // a browser has no global one
   const args = [
     new Address(payer).toScVal(),
     new Address(finish.from).toScVal(),
-    xdr.ScVal.scvBytes(Buffer.from(finish.guid.replace(/^0x/, ""), "hex")),
+    nativeToScVal(fromHex(finish.guid), { type: "bytes" }),
     nativeToScVal(finish.index, { type: "u32" }),
-    xdr.ScVal.scvBytes(Buffer.from(message.slice(2), "hex")),
-    xdr.ScVal.scvBytes(Buffer.alloc(0)),
+    nativeToScVal(fromHex(message), { type: "bytes" }),
+    nativeToScVal(new Uint8Array(0), { type: "bytes" }),
     nativeToScVal(0n, { type: "i128" }),
   ];
   const build = async (auth: xdr.SorobanAuthorizationEntry[]): Promise<Transaction> =>

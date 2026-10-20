@@ -5,7 +5,14 @@ import {
   SENDER_ADDRESS,
   type UnsignedTransaction,
 } from "@mavna/core";
-import type { Abi, AbiFunction, AbiParameter, Address, Hash } from "viem";
+import {
+  type Abi,
+  type AbiFunction,
+  type AbiParameter,
+  type Address,
+  type Hash,
+  WaitForTransactionReceiptTimeoutError,
+} from "viem";
 import { type Connection, chainFor, isUserRejection, switchChain } from "./wallet.js";
 
 /**
@@ -22,6 +29,8 @@ export type ExecutionEvent =
   | { readonly kind: "skipped"; readonly index: number; readonly why: string }
   | { readonly kind: "awaiting-signature"; readonly index: number; readonly describes: string }
   | { readonly kind: "sent"; readonly index: number; readonly hash: Hash }
+  /** The wallet sped the transaction up: `hash` is the one that landed, `was` the one sent. */
+  | { readonly kind: "replaced"; readonly index: number; readonly hash: Hash; readonly was: Hash }
   | { readonly kind: "confirmed"; readonly index: number; readonly hash: Hash };
 
 export interface ExecuteOptions {
@@ -33,6 +42,28 @@ export interface ExecuteOptions {
   /** Undefined for a chain the registry does not carry. Nothing is guessed. */
   readonly nativeCurrency: NativeCurrency | undefined;
   readonly onEvent: (event: ExecutionEvent) => void;
+}
+
+/**
+ * How long a transaction is waited for. viem gives up after three minutes, and a
+ * send at a low gas price on a busy chain can take longer and still land.
+ */
+const RECEIPT_PATIENCE_MS = 30 * 60_000;
+
+/**
+ * A sent transaction that had not landed by the time this page stopped waiting.
+ * It may well land, so it is not a failure: the caller keeps the hash.
+ */
+export class ReceiptTimedOut extends Error {
+  readonly index: number;
+  readonly hash: Hash;
+
+  constructor(index: number, hash: Hash, message: string) {
+    super(message);
+    this.name = "ReceiptTimedOut";
+    this.index = index;
+    this.hash = hash;
+  }
 }
 
 /** What an `evm-tx` payload carries. Parsed, never trusted as-is. */
@@ -103,7 +134,44 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     }
 
     onEvent({ kind: "sent", index, hash });
-    const receipt = await connection.reader.waitForTransactionReceipt({ hash });
+    const what = index === transactions.length - 1 ? "transfer" : "approval";
+    // viem follows a sped-up or cancelled transaction to its replacement and
+    // resolves with that one's receipt, so the reason is kept to read it
+    let replaced: string | undefined;
+    let receipt: Awaited<ReturnType<typeof connection.reader.waitForTransactionReceipt>>;
+    try {
+      receipt = await connection.reader.waitForTransactionReceipt({
+        hash,
+        timeout: RECEIPT_PATIENCE_MS,
+        onReplaced: (replacement) => {
+          replaced = replacement.reason;
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof WaitForTransactionReceiptTimeoutError) {
+        throw new ReceiptTimedOut(
+          index,
+          hash,
+          what === "transfer"
+            ? `The transfer was sent but has not confirmed after ${RECEIPT_PATIENCE_MS / 60_000} ` +
+                "minutes. It may still land; find it under Activity."
+            : "The approval was sent but has not confirmed, so the transfer was not sent.",
+        );
+      }
+      throw cause;
+    }
+    if (replaced === "cancelled" || replaced === "replaced") {
+      // a cancel is a self-send that succeeds, and moved none of the funds
+      throw new Error(
+        what === "transfer"
+          ? "The transfer was cancelled in your wallet, so nothing was sent."
+          : "The approval was cancelled in your wallet, so nothing was sent.",
+      );
+    }
+    if (receipt.transactionHash !== hash) {
+      onEvent({ kind: "replaced", index, hash: receipt.transactionHash, was: hash });
+      hash = receipt.transactionHash;
+    }
     if (receipt.status !== "success") {
       throw new Error(
         `The ${index === transactions.length - 1 ? "transfer" : "approval"} was rejected by the network. ` +
@@ -214,9 +282,18 @@ async function unnecessary(
   if (condition === undefined) return undefined;
 
   const allowance = await readAllowance(condition, connection);
-  return allowance >= BigInt(condition.atLeastBaseUnits)
-    ? "You have already allowed this, so there is nothing to sign."
-    : undefined;
+  if (allowance >= BigInt(condition.atLeastBaseUnits)) {
+    return "You have already allowed this, so there is nothing to sign.";
+  }
+  // a reset to zero, for a token that refuses to change one non-zero allowance
+  // into another, has nothing to do when the allowance is already zero
+  if (
+    condition.skipAlsoWhenExactly !== undefined &&
+    allowance === BigInt(condition.skipAlsoWhenExactly)
+  ) {
+    return "Nothing is allowed yet, so there is nothing to reset.";
+  }
+  return undefined;
 }
 
 function readAllowance(condition: AllowanceCheck, connection: Connection): Promise<bigint> {

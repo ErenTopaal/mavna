@@ -24,6 +24,7 @@ import type {
   WalletConfig,
 } from "./config";
 import type { Engine, SourceDetail } from "./engine";
+import { fromBaseUnits, toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
@@ -64,6 +65,7 @@ import {
 import { s } from "./style";
 import {
   buildSteps,
+  burnDomain,
   DeliveredAsCame,
   type FlightRow,
   type FlightStep,
@@ -144,6 +146,8 @@ interface State {
   found: FoundState | null;
   finishTries: number;
   history: readonly TransferRecord[];
+  /** What arrived when a transfer landed unconverted, for the flight's headline. */
+  arrivedAs: { readonly amount: number; readonly symbol: string } | null;
 }
 
 export interface FlowProps {
@@ -175,6 +179,8 @@ export interface FlowProps {
   readonly networks?: readonly ("testnet" | "mainnet")[];
   /** Asked to switch network; the host rebuilds the engine for it. */
   readonly onNetworkChange?: ((network: "testnet" | "mainnet") => void) | undefined;
+  /** Told when a transfer starts running and when it has ended, so the host keeps it mounted. */
+  readonly onTransferChange?: ((running: boolean) => void) | undefined;
 }
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
@@ -208,8 +214,8 @@ export class Flow extends React.Component<FlowProps, State> {
     dir: "push",
     chainId: this.props.init?.chainId ?? this.engine.defaultSourceChain,
     send: this.props.init?.send ?? "USDC",
-    // a USDT0 send has no conversion leg, so it lands as USDT0
-    wanted: this.props.init?.send === "USDT0" ? "USDT0" : (this.props.init?.wanted ?? "USDC"),
+    // a USDT0 send lands as USDT0 unless the config asks for USDC or XLM from it
+    wanted: this.props.init?.wanted ?? (this.props.init?.send === "USDT0" ? "USDT0" : "USDC"),
     amount: this.props.init?.amount ?? "",
     destination: this.props.init?.destination ?? "",
     routes: [],
@@ -262,8 +268,11 @@ export class Flow extends React.Component<FlowProps, State> {
     found: null,
     finishTries: 0,
     history: [],
+    arrivedAs: null,
   };
 
+  /** The widget's own outermost element; nothing outside it is the widget's to touch. */
+  rootRef = React.createRef<HTMLDivElement>();
   rowRef = React.createRef<HTMLDivElement>();
   cardRef = React.createRef<HTMLDivElement>();
   bodyRef = React.createRef<HTMLDivElement>();
@@ -327,7 +336,13 @@ export class Flow extends React.Component<FlowProps, State> {
         ? preferred
         : (chains[0]?.id ?? "");
     this.setState(
-      { send, chainId, wanted: send === "USDT0" ? "USDT0" : "USDC", balance: null },
+      {
+        send,
+        chainId,
+        // each send lands as itself by default; a choice of XLM holds across both
+        wanted: this.state.wanted === "XLM" ? "XLM" : send,
+        balance: null,
+      },
       () => {
         this.runQuote();
         void this.refreshBalance({ align: true });
@@ -374,24 +389,28 @@ export class Flow extends React.Component<FlowProps, State> {
       )
         this.setState({ menuOpen: false });
     };
-    this.onKey = (e) => {
-      if (e.key !== "Escape") return;
-      if (this.state.menuOpen) {
-        this.setState({ menuOpen: false });
-        return;
-      }
-      if (this.state.walletOpen) {
-        this.closeWallet();
-        return;
-      }
-      if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
-    };
+    this.onKey = (e) => this.handleKey(e);
     document.addEventListener("mousedown", this.onDown);
     document.addEventListener("keydown", this.onKey);
     this.stopWallets = watchWallets((wallets) => this.setState({ discovered: [...wallets] }));
     this.setState({ history: readHistory(this.engine.historyKey) });
     this.entrance();
     this.runQuote();
+  }
+
+  /** Escape closes a popover or goes back, but only when it was pressed in the widget. */
+  handleKey(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    if (this.rootRef.current === null || !this.rootRef.current.contains(e.target as Node)) return;
+    if (this.state.menuOpen) {
+      this.setState({ menuOpen: false });
+      return;
+    }
+    if (this.state.walletOpen) {
+      this.closeWallet();
+      return;
+    }
+    if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
   }
 
   override componentWillUnmount(): void {
@@ -450,7 +469,10 @@ export class Flow extends React.Component<FlowProps, State> {
 
   entrance(): void {
     if (!this.m || this.reduced) return;
-    const nodes = Array.from(document.querySelectorAll("header, main > div, footer"));
+    const root = this.rootRef.current;
+    if (root === null) return;
+    // the widget's own parts only: a host page's header is not ours to animate
+    const nodes = Array.from(root.querySelectorAll("header, main > div, footer"));
     this.anim(
       nodes,
       { opacity: [0, 1], y: [12, 0] },
@@ -637,6 +659,9 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   go(screen: Screen, dir?: "push" | "pop"): void {
+    // The running transfer owns the flight: the form behind it would re-quote and
+    // wipe its progress while the transfer keeps asking for signatures.
+    if (this.transferring && screen !== "flight" && screen !== "activity") return;
     const way = dir ?? "push";
     const wantPanel = screen === "send";
     const node = this.routesRef.current;
@@ -758,11 +783,20 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   runQuote(): void {
+    if (this.transferring) return;
     this.currentQuote?.cancel();
     this.rows = [];
     const cap = this.lockHeight();
     this.setState(
-      { routes: [], rejected: [], complete: false, quoting: true, phase: "quote", steps: [] },
+      {
+        routes: [],
+        rejected: [],
+        complete: false,
+        quoting: true,
+        phase: "quote",
+        steps: [],
+        arrivedAs: null,
+      },
       () => this.animateHeight(cap),
     );
     this.sweep();
@@ -937,13 +971,56 @@ export class Flow extends React.Component<FlowProps, State> {
     );
   }
 
+  /**
+   * Change the recipient. The routes on screen were quoted for the old one and
+   * would still sign for it, so they go at once and a fresh quote follows.
+   */
+  setDestination(destination: string): void {
+    if (this.transferring) return;
+    this.currentQuote?.cancel();
+    this.setState({ destination, routes: [], complete: false, quoting: true }, () =>
+      this.requote(),
+    );
+  }
+
+  /** Change the amount. As with the recipient, the old routes are dropped at once. */
+  setAmount(amount: string): void {
+    if (this.transferring) return;
+    this.currentQuote?.cancel();
+    this.setState({ amount, routes: [], complete: false, quoting: true }, () => this.requote());
+  }
+
+  /**
+   * Why a route can no longer be sent as the form now reads, or undefined. A
+   * route carries the recipient, amount and chain it was quoted for, and those
+   * are what get signed, so they must be what review showed.
+   */
+  staleFor(view: RouteView): string | undefined {
+    const route = view.route;
+    if (route.destination !== this.state.destination.trim()) return "recipient";
+    if (route.fromChain.id !== this.state.chainId) return "chain";
+    if (route.sends.baseUnits !== toBaseUnits(this.state.amount, route.sends.asset.decimals))
+      return "amount";
+    return undefined;
+  }
+
   start(): void {
     // Set here and not through setState, which only lands on the next render:
     // a second press before then would otherwise start a second transfer.
     if (this.transferring) return;
     const view = this.chosen();
     if (view === undefined) return;
+    const stale = this.staleFor(view);
+    if (stale !== undefined) {
+      this.setState({
+        note: `The ${stale} changed after this quote. Quoting again; review the new figures before starting.`,
+        noteKind: "fault",
+      });
+      this.runQuote();
+      return;
+    }
     this.transferring = true;
+    this.props.onTransferChange?.(true);
     const chain = this.engine.sourceChainDetail(this.state.chainId);
     // Undefined only when the sponsor never answered, and then no route that
     // sets an account up was offered, which is the only kind it changes.
@@ -960,6 +1037,7 @@ export class Flow extends React.Component<FlowProps, State> {
       await this.runTransferOnce(view, chain);
     } finally {
       this.transferring = false;
+      this.props.onTransferChange?.(false);
     }
   }
 
@@ -1006,7 +1084,25 @@ export class Flow extends React.Component<FlowProps, State> {
         asset: error.asset,
         baseUnits: error.baseUnits,
       });
-      this.failFlight(error.message, false);
+      // it arrived, so the flight ends arrived, headlined with what it arrived as
+      this.setState(
+        (st) => ({
+          phase: "arrived" as const,
+          arrivedAs: {
+            amount: fromBaseUnits(error.baseUnits, error.decimals),
+            symbol: error.asset,
+          },
+          steps: st.steps.map((step) =>
+            step.phase === "blocked" || step.phase === "pending"
+              ? { ...step, phase: "done" as const, note: error.message }
+              : step,
+          ),
+          note: error.message,
+          noteKind: "quiet" as const,
+          history: readHistory(this.engine.historyKey),
+        }),
+        () => this.advanceStep(),
+      );
       return;
     }
     this.failFlight(msg(error, "The transfer did not go through."));
@@ -1121,7 +1217,13 @@ export class Flow extends React.Component<FlowProps, State> {
 
   // ------------------------------------------------------------ real lookup ---
 
+  /** Counts lookups, so an older one that lands late does not overwrite a newer one. */
+  private lookupSeq = 0;
+  /** True while a Finish runs: a second press must not sign a second delivery. */
+  private finishing = false;
+
   async onFind(): Promise<void> {
+    const seq = ++this.lookupSeq;
     // whatever was priced belonged to the transfer shown before this lookup
     this.pricedFinish = undefined;
     const v = this.state.lookup.trim();
@@ -1138,6 +1240,7 @@ export class Flow extends React.Component<FlowProps, State> {
       // The chain is known only for a transfer this browser sent. Without it
       // every rail is asked, which is slower and still finds it.
       const answer = await lookupAcross(this.engine.adapters, toHandle(key, rec?.sourceChainId));
+      if (seq !== this.lookupSeq) return;
       let phase = answer.phase;
       if (rec !== undefined && phase.phase === "pending") {
         phase = escalateIfOverdue(
@@ -1169,6 +1272,7 @@ export class Flow extends React.Component<FlowProps, State> {
         lookupNoteKind: "quiet",
       });
     } catch (e) {
+      if (seq !== this.lookupSeq) return;
       this.setState({ found: null, lookupNote: msg(e), lookupNoteKind: "fault" });
     }
   }
@@ -1182,6 +1286,16 @@ export class Flow extends React.Component<FlowProps, State> {
     | undefined;
 
   async onFinish(): Promise<void> {
+    if (this.finishing) return;
+    this.finishing = true;
+    try {
+      await this.finishOnce();
+    } finally {
+      this.finishing = false;
+    }
+  }
+
+  private async finishOnce(): Promise<void> {
     const compose = this.state.found?.compose;
     if (compose !== undefined) {
       try {
@@ -1228,12 +1342,27 @@ export class Flow extends React.Component<FlowProps, State> {
     const known = this.state.history.find(
       (r) => r.sourceTxHash.toLowerCase() === hash.toLowerCase(),
     );
-    const domain = known === undefined ? 0 : this.engine.sourceDomain(known.sourceChainId);
     try {
+      // a burn this browser did not send is looked for on every chain Circle serves
+      const domain =
+        known === undefined
+          ? await burnDomain(this.engine, hash.startsWith("0x") ? hash : `0x${hash}`)
+          : this.engine.sourceDomain(known.sourceChainId);
+      if (domain === undefined) {
+        this.setState({
+          lookupNote:
+            "Circle has no record of this transaction on any chain this page sends from. " +
+            "If it was sent moments ago, try again in a minute.",
+          lookupNoteKind: "quiet",
+          finishTries: this.state.finishTries + 1,
+        });
+        return;
+      }
       const outcome = await finishDelivery(
         this.engine,
         hash.startsWith("0x") ? hash : `0x${hash}`,
         domain,
+        known?.sourceChainId,
       );
       if (outcome.kind === "too-costly") {
         this.setState({ lookupNote: tooCostly(outcome.feeStroops), lookupNoteKind: "fault" });
@@ -1293,6 +1422,7 @@ function renderApp(c: Flow): ReactNode {
 
   return (
     <div
+      ref={c.rootRef}
       style={s(
         "position:relative;isolation:isolate;min-height:100dvh;background:var(--mv-ground);display:flex;flex-direction:column",
       )}
@@ -1408,15 +1538,18 @@ function renderApp(c: Flow): ReactNode {
 
             {st.screen === "send" ? (
               <div style={s("flex:0 0 auto;padding-top:12px")}>
-                {st.note !== null ? (
-                  <p
-                    style={s(
-                      `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
-                    )}
-                  >
-                    {st.note}
-                  </p>
-                ) : null}
+                {/* always there, so a note that appears is announced */}
+                <div role="status" aria-live="polite">
+                  {st.note !== null ? (
+                    <p
+                      style={s(
+                        `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
+                      )}
+                    >
+                      {st.note}
+                    </p>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={() => onPrimary(c, { r, chain: chainDetail })}
@@ -1805,6 +1938,7 @@ function renderCompact(c: Flow): ReactNode {
 
   return (
     <div
+      ref={c.rootRef}
       style={s(
         // 650 = the app card's 624 content height plus the 26px "Powered by Mavna"
         // strip below it, so the body keeps the full height and never scrolls for it.
@@ -1866,15 +2000,18 @@ function renderCompact(c: Flow): ReactNode {
 
       {st.screen === "send" ? (
         <div style={s("flex:0 0 auto;padding:10px 16px 16px")}>
-          {st.note !== null ? (
-            <p
-              style={s(
-                `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
-              )}
-            >
-              {st.note}
-            </p>
-          ) : null}
+          {/* always there, so a note that appears is announced */}
+          <div role="status" aria-live="polite">
+            {st.note !== null ? (
+              <p
+                style={s(
+                  `margin:0 2px 10px;font-size:12.5px;line-height:1.5;color:${st.noteKind === "fault" ? "var(--mv-signal)" : "var(--mv-muted-2)"};text-wrap:pretty`,
+                )}
+              >
+                {st.note}
+              </p>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={() => onPrimaryCompact(c, { chain: chainDetail })}

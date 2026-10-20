@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { routeFor } from "./__fixtures__/scripted";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DESTINATION,
+  routeFor,
+  SOURCE_USDC,
+  STELLAR_USDC,
+  STELLAR_XLM,
+} from "./__fixtures__/scripted";
 import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
+import { renderChains, renderFlight, renderReview, routeDetail } from "./screens";
 import { DeliveredAsCame, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
@@ -16,11 +24,14 @@ const engine = {
   sourceChainDetail: () => ({ kind: "other", name: "Somewhere", family: "move" }),
 } as unknown as Engine;
 
+// what the fixture route was quoted for
+const FORM = { amount: "5", destination: DESTINATION, chainId: "arbitrum-sepolia" };
+
 function flowWithRoute(): { flow: Flow; started: () => number } {
   const events: MavnaWidgetEvent[] = [];
   const flow = new Flow({ engine, emit: (event) => events.push(event) });
   const view = toRouteView(routeFor("layerzero"));
-  flow.state = { ...flow.state, routes: [view], selected: view.id };
+  flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
   return { flow, started: () => events.filter((e) => e.type === "transferStarted").length };
 }
 
@@ -58,7 +69,7 @@ describe("Flow.endWith", () => {
   it("tells the host a conversion delivered as it came apart from a failure, with what arrived", () => {
     const events: MavnaWidgetEvent[] = [];
     const flow = new Flow({ engine, emit: (event) => events.push(event) });
-    flow.endWith(new DeliveredAsCame("USDT0 arrived as it came.", "USDT0", "5000000"));
+    flow.endWith(new DeliveredAsCame("USDT0 arrived as it came.", "USDT0", "5000000", 7));
     expect(events).toEqual([
       {
         type: "transferDeliveredAsCame",
@@ -105,9 +116,383 @@ describe("Flow.setNetwork", () => {
       onNetworkChange: (network) => asked.push(network),
     });
     const view = toRouteView(routeFor("layerzero"));
-    flow.state = { ...flow.state, routes: [view], selected: view.id };
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
     flow.start();
     flow.setNetwork("mainnet");
     expect(asked).toEqual([]);
+  });
+});
+
+const OTHER = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
+
+/** React only applies setState once mounted; this applies it at once so the
+    flow's own handlers can be driven without a renderer. */
+function applied(flow: Flow): Flow {
+  flow.setState = ((patch: unknown, done?: () => void) => {
+    const next =
+      typeof patch === "function"
+        ? (patch as (s: Flow["state"], p: Flow["props"]) => Partial<Flow["state"]>)(
+            flow.state,
+            flow.props,
+          )
+        : (patch as Partial<Flow["state"]>);
+    flow.state = { ...flow.state, ...next };
+    done?.();
+  }) as Flow["setState"];
+  return flow;
+}
+
+function quotedFlow(asked: { terms: number }, emit?: (event: MavnaWidgetEvent) => void): Flow {
+  const quoting = {
+    ...engine,
+    usdcOnStellar: STELLAR_USDC,
+    xlmOnStellar: STELLAR_XLM,
+    adapters: [],
+    // the sponsor is the first thing a quote asks, so counting it counts quotes
+    sponsorTerms: () => {
+      asked.terms += 1;
+      return new Promise(() => {});
+    },
+  } as unknown as Engine;
+  const flow = applied(new Flow({ engine: quoting, emit }));
+  const view = toRouteView(routeFor("layerzero"));
+  flow.state = {
+    ...flow.state,
+    amount: "5",
+    destination: DESTINATION,
+    chainId: "arbitrum-sepolia",
+    routes: [view],
+    selected: view.id,
+  };
+  return flow;
+}
+
+describe("Flow.setDestination", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("drops the routes quoted for the old recipient at once and quotes again", () => {
+    vi.useFakeTimers();
+    const asked = { terms: 0 };
+    const flow = quotedFlow(asked);
+    flow.setDestination(OTHER);
+    expect(flow.state.destination).toBe(OTHER);
+    expect(flow.state.routes).toEqual([]);
+    vi.advanceTimersByTime(500);
+    expect(asked.terms).toBe(1);
+  });
+});
+
+describe("Flow.start against the form", () => {
+  it("refuses a route quoted for another recipient", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = quotedFlow({ terms: 0 }, (event) => events.push(event));
+    flow.state = { ...flow.state, destination: OTHER };
+    flow.start();
+    expect(events.filter((e) => e.type === "transferStarted")).toEqual([]);
+    expect(flow.state.phase).toBe("quote");
+  });
+
+  it("refuses a route quoted for another amount", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = quotedFlow({ terms: 0 }, (event) => events.push(event));
+    flow.state = { ...flow.state, amount: "100" };
+    flow.start();
+    expect(events.filter((e) => e.type === "transferStarted")).toEqual([]);
+  });
+
+  it("refuses a route quoted from another chain", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = quotedFlow({ terms: 0 }, (event) => events.push(event));
+    flow.state = { ...flow.state, chainId: "base-sepolia" };
+    flow.start();
+    expect(events.filter((e) => e.type === "transferStarted")).toEqual([]);
+  });
+
+  it("starts a route quoted for exactly what the form holds", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = quotedFlow({ terms: 0 }, (event) => events.push(event));
+    flow.start();
+    expect(events.filter((e) => e.type === "transferStarted")).toHaveLength(1);
+  });
+});
+
+describe("review and flight", () => {
+  it("show the recipient, amount and chain the route will sign for, not the form", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: OTHER, amount: "100", chainId: "base-sepolia" };
+    const r = flow.chosen();
+    const d = { r, chain: { id: "base-sepolia", name: "Base Sepolia" }, sym: "USDC" };
+    for (const html of [
+      renderToStaticMarkup(renderReview(flow, d)),
+      renderToStaticMarkup(renderFlight(flow, { ...d, arrived: false })),
+    ]) {
+      expect(html).toContain("GBZXN…MADI");
+      expect(html).not.toContain("GBRPY…OX2H");
+      expect(html).toContain("5.00 USDC");
+      expect(html).not.toContain("100.00");
+      expect(html).toContain("Arbitrum Sepolia");
+      expect(html).not.toContain("Base Sepolia");
+    }
+  });
+});
+
+describe("Flow.setAmount", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("drops the routes quoted for the old amount at once and quotes again", () => {
+    vi.useFakeTimers();
+    const asked = { terms: 0 };
+    const flow = quotedFlow(asked);
+    flow.setAmount("100");
+    expect(flow.state.amount).toBe("100");
+    expect(flow.state.routes).toEqual([]);
+    vi.advanceTimersByTime(500);
+    expect(asked.terms).toBe(1);
+  });
+});
+
+describe("while a transfer runs", () => {
+  it("does not leave the flight for the form, and does not quote over it", () => {
+    vi.useFakeTimers();
+    try {
+      const asked = { terms: 0 };
+      const flow = quotedFlow(asked);
+      flow.start();
+      vi.advanceTimersByTime(1);
+      expect(flow.state.screen).toBe("flight");
+      const steps = flow.state.steps;
+      flow.go("send", "pop");
+      flow.runQuote();
+      expect(flow.state.screen).toBe("flight");
+      expect(flow.state.steps).toBe(steps);
+      expect(flow.state.phase).toBe("sending");
+      expect(asked.terms).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Flow.props.onTransferChange", () => {
+  it("tells the host when a transfer starts and when it has ended", async () => {
+    const told: boolean[] = [];
+    const flow = new Flow({ engine, onTransferChange: (running) => told.push(running) });
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.start();
+    await flow.runTransfer(view, { kind: "other", name: "Somewhere", family: "move" });
+    expect(told).toEqual([true, false]);
+  });
+});
+
+describe("the host page around the widget", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is not animated on mount: only the widget's own parts are", () => {
+    const flow = new Flow({ engine });
+    const own = [{ own: 1 }];
+    const animated: unknown[] = [];
+    vi.stubGlobal("document", {
+      querySelectorAll: () => [{ host: "header" }],
+    });
+    flow.m = { animate: (nodes: unknown) => animated.push(nodes), stagger: () => 0 } as never;
+    flow.reduced = false;
+    (flow.rootRef as { current: unknown }).current = { querySelectorAll: () => own };
+    flow.entrance();
+    expect(animated).toEqual([own]);
+  });
+
+  it("does not take an Escape pressed elsewhere on the page as going back", () => {
+    const flow = applied(new Flow({ engine }));
+    flow.state = { ...flow.state, screen: "chains", cameFrom: "send" };
+    const inside = {};
+    (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
+    flow.handleKey({ key: "Escape", target: {} } as unknown as KeyboardEvent);
+    expect(flow.state.screen).toBe("chains");
+    flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
+    expect(flow.state.screen).toBe("send");
+  });
+});
+
+describe("an integrator fee on a route", () => {
+  it("is shown on review as its own line, with who receives it", () => {
+    const base = routeFor("layerzero");
+    const route = {
+      ...base,
+      fees: [
+        {
+          kind: "integrator" as const,
+          total: { asset: STELLAR_XLM, baseUnits: "2500000" },
+          recipients: [
+            {
+              name: "Acme Wallet",
+              amount: { asset: STELLAR_XLM, baseUnits: "2500000" },
+              address: DESTINATION,
+            },
+          ],
+          includedInQuote: true,
+        },
+      ],
+    };
+    const view = toRouteView(route);
+    expect(view.integratorFee).toEqual({ amount: 0.25, symbol: "XLM", recipient: "Acme Wallet" });
+    const flow = quotedFlow({ terms: 0 });
+    const html = renderToStaticMarkup(
+      renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM" }),
+    );
+    expect(html).toContain("Integrator fee");
+    expect(html).toContain("0.25 XLM to Acme Wallet");
+  });
+});
+
+describe("fees and rates on a route", () => {
+  const ETH = {
+    chainId: "arbitrum-sepolia",
+    id: "native",
+    symbol: "ETH",
+    decimals: 18,
+    curatedBy: "Ethereum",
+  };
+  const withFee = (asset: typeof ETH | typeof SOURCE_USDC, baseUnits: string) => {
+    const base = routeFor("layerzero", { swap: true, delivers: STELLAR_XLM });
+    return toRouteView({
+      ...base,
+      fees: [
+        {
+          kind: "bridge" as const,
+          total: { asset, baseUnits },
+          recipients: [],
+          includedInQuote: false,
+        },
+      ],
+    });
+  };
+
+  it("shows a small native fee in its own decimals, not as 0.00", () => {
+    expect(withFee(ETH, "300000000000000").feeAmount).toBe("0.0003");
+    expect(withFee(SOURCE_USDC, "250000").feeAmount).toBe("0.25");
+  });
+
+  it("prices the rate per unit sent, without taking a fee paid in another asset off it", () => {
+    // 5 sent, 5 XLM received (fixture), the fee is gas in ETH
+    const rows = routeDetail(withFee(ETH, "300000000000000"), "XLM", true);
+    expect(rows.find((r) => r.key === "rate")?.value).toBe("1 USDC ≈ 1.0000 XLM");
+  });
+
+  it("names the asset actually sent in the rate", () => {
+    const view = withFee(SOURCE_USDC, "0");
+    const usdt0 = {
+      ...view,
+      route: {
+        ...view.route,
+        sends: { ...view.route.sends, asset: { ...SOURCE_USDC, symbol: "USDT0" } },
+      },
+    };
+    expect(routeDetail(usdt0, "XLM", true).find((r) => r.key === "rate")?.value).toMatch(
+      /^1 USDT0 ≈/,
+    );
+  });
+});
+
+describe("an arrival that stayed as it came", () => {
+  it("is headlined with what arrived, not the conversion it did not get", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = applied(new Flow({ engine, emit: (event) => events.push(event) }));
+    const view = toRouteView(routeFor("layerzero", { swap: true, delivers: STELLAR_XLM }));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.endWith(new DeliveredAsCame("Not converted.", "USDC", "40000000", 7));
+    expect(events.map((e) => e.type)).toEqual(["transferDeliveredAsCame"]);
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM", arrived: true }),
+    );
+    expect(html).toContain("Arrived on Stellar, not converted");
+    expect(html).toContain("4.00");
+    expect(html).toContain("USDC");
+  });
+});
+
+describe("what the user wants to receive", () => {
+  it("follows the configured wanted on a USDT0 send", () => {
+    const flow = new Flow({ engine, init: { send: "USDT0", wanted: "XLM" } });
+    expect(flow.state.wanted).toBe("XLM");
+    expect(new Flow({ engine, init: { send: "USDT0" } }).state.wanted).toBe("USDT0");
+  });
+
+  it("is kept when the sent asset changes and can still deliver it", () => {
+    const flow = applied(
+      new Flow({
+        engine: {
+          ...engine,
+          usdt0Chains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+          sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+        } as unknown as Engine,
+        init: { wanted: "XLM" },
+      }),
+    );
+    // nothing to send and no wallet, so the quote and balance it asks for end at once
+    flow.setSend("USDT0");
+    expect(flow.state.wanted).toBe("XLM");
+    flow.state = { ...flow.state, wanted: "USDT0" };
+    flow.setSend("USDC");
+    expect(flow.state.wanted).toBe("USDC");
+    // the receive side follows a plain switch: USDT0 lands as USDT0
+    flow.setSend("USDT0");
+    expect(flow.state.wanted).toBe("USDT0");
+  });
+});
+
+describe("the NEAR Intents trust line", () => {
+  it("names the HOT Bridge that pays out on Stellar, not only the solvers", () => {
+    expect(toRouteView(routeFor("near-intents")).trust).toMatch(/HOT Bridge/);
+  });
+});
+
+describe("the chain picker on a USDT0 send", () => {
+  it("counts the chains it lists, not the USDC ones", () => {
+    const chains = new Flow({
+      engine: {
+        ...engine,
+        sourceChains: [
+          { id: "a", name: "A" },
+          { id: "b", name: "B" },
+          { id: "c", name: "C" },
+        ],
+        usdt0Chains: [{ id: "a", name: "A" }],
+      } as unknown as Engine,
+      init: { send: "USDT0", chainId: "a" },
+    });
+    chains.state = { ...chains.state, chainQuery: "zzz" };
+    const html = renderToStaticMarkup(renderChains(chains));
+    expect(html).toContain("sends from 1 chain.");
+    expect(html).not.toContain("3 chains");
+  });
+});
+
+describe("what a screen reader hears", () => {
+  it("is told the step the flight is on, and what it says", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      phase: "sending",
+      steps: [
+        {
+          id: "burn",
+          label: "Send from Arbitrum",
+          user: true,
+          actor: "Your wallet",
+          phase: "failed",
+          note: "The network refused it.",
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      renderFlight(flow, {
+        r: flow.chosen(),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+        arrived: false,
+      }),
+    );
+    expect(html).toMatch(/role="status"[^>]*>[^<]*Send from Arbitrum[^<]*The network refused it\./);
   });
 });

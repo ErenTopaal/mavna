@@ -153,7 +153,18 @@ export function routeFor(
     receives,
     receivesAtLeast: receives,
     deliveredAtLeast: receives,
-    fees: [],
+    // a new account carries the reserve the rails quote for it: three slots at 0.5 XLM
+    fees:
+      options.newAccount === true
+        ? [
+            {
+              kind: "account-reserve",
+              total: { asset: STELLAR_XLM, baseUnits: "15000000" },
+              recipients: [],
+              includedInQuote: true,
+            },
+          ]
+        : [],
     estimatedSeconds: 120,
     steps,
     signaturesRequired: 1,

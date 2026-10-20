@@ -9,11 +9,13 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { type MavnaWidgetConfig, resolveConfig } from "./config.js";
 import { DrawerChrome } from "./Drawer.js";
 import { createEngine } from "./engine.js";
+import { engineKeyOf } from "./engine-key.js";
 import { Flow } from "./flow.js";
 import "./widget.css";
 
@@ -61,17 +63,16 @@ export const MavnaWidget: ForwardRefExoticComponent<
   useEffect(() => setActive(undefined), [config.network]);
   const resolved = useMemo(() => resolveConfig(config, active), [config, active]);
   const ec = resolved.engineConfig;
-  const engineKey = [
-    ec.network,
-    ec.rpcUrl,
-    ec.sponsorUrl,
-    ec.disabledSources ?? "",
-    ec.ranking,
-    ec.integratorFee ? `${ec.integratorFee.bps}:${ec.integratorFee.recipient}` : "",
-    ec.arrivalContract ?? "",
-  ].join("|");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: engineKey captures every field of ec that changes the engine.
-  const engine = useMemo(() => createEngine(ec), [engineKey]);
+  const engineKey = engineKeyOf(ec);
+  // A running transfer keeps the engine and the flow it started with: a config
+  // change rebuilds both only once it has ended, never under it.
+  const running = useRef(false);
+  const [, setEnded] = useState(0);
+  const held = useRef<{ key: string; engine: ReturnType<typeof createEngine> } | null>(null);
+  if (held.current === null || (held.current.key !== engineKey && !running.current)) {
+    held.current = { key: engineKey, engine: createEngine(ec) };
+  }
+  const { engine, key: flowKey } = held.current;
 
   const [mounted, setMounted] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -80,7 +81,11 @@ export const MavnaWidget: ForwardRefExoticComponent<
     setClosing(false);
     setMounted(true);
   }, []);
+  // A running transfer still asks for signatures and still offers a conversion,
+  // and an unmounted flow could do neither visibly, so the drawer stays open
+  // until it has ended.
   const doClose = useCallback(() => {
+    if (running.current) return;
     setClosing(true);
     window.setTimeout(() => {
       setMounted(false);
@@ -136,6 +141,11 @@ export const MavnaWidget: ForwardRefExoticComponent<
     emit: resolved.onEvent,
     networks: resolved.networks,
     onNetworkChange: setActive,
+    onTransferChange: (now: boolean) => {
+      running.current = now;
+      // pick up any config change that waited for the transfer
+      if (!now) setEnded((n) => n + 1);
+    },
   } as const;
 
   if (resolved.variant === "drawer") {
@@ -150,7 +160,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
         themeAttr={themeAttr}
         themeStyle={themeStyle}
       >
-        <Flow key={engine.network} {...flowProps} variant="compact" />
+        <Flow key={flowKey} {...flowProps} variant="compact" />
       </DrawerChrome>
     );
   }
@@ -158,7 +168,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
   return (
     <div className="mv-root" data-mv-theme={themeAttr} style={themeStyle}>
       <Flow
-        key={engine.network}
+        key={flowKey}
         {...flowProps}
         variant={resolved.variant === "compact" ? "compact" : "wide"}
       />

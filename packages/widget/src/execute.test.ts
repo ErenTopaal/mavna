@@ -1,9 +1,21 @@
 import { INTERCHAIN_TOKEN_SERVICE_ABI } from "@mavna/adapter-axelar";
+import { ERC20_ABI } from "@mavna/adapter-cctp";
 import { buildSendParam, OFT_ABI } from "@mavna/adapter-layerzero";
-import { type Route, SENDER_ADDRESS, type UnsignedTransaction } from "@mavna/core";
-import type { Address } from "viem";
+import {
+  type AllowanceCheck,
+  type Route,
+  SENDER_ADDRESS,
+  type UnsignedTransaction,
+} from "@mavna/core";
+import { type Address, type Hash, WaitForTransactionReceiptTimeoutError } from "viem";
 import { describe, expect, it } from "vitest";
-import { assertBalanceCovers, parseCall } from "./execute";
+import {
+  assertBalanceCovers,
+  type ExecutionEvent,
+  execute,
+  parseCall,
+  ReceiptTimedOut,
+} from "./execute";
 import type { Connection } from "./wallet";
 
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
@@ -176,5 +188,178 @@ describe("assertBalanceCovers", () => {
         nativeCurrency,
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("execute", () => {
+  const TOKEN = "0x3333333333333333333333333333333333333333";
+  const SPENDER = "0x4444444444444444444444444444444444444444";
+  const APPROVE_HASH = `0x${"a1".repeat(32)}` as Hash;
+  const SEND = `0x${"b2".repeat(32)}` as Hash;
+  const FASTER = `0x${"c3".repeat(32)}` as Hash;
+  const route = { sends: { asset: { symbol: "USDC", decimals: 6 } } } as unknown as Route;
+
+  const approve = (extra: Partial<AllowanceCheck> = {}): UnsignedTransaction => ({
+    chainId: "arbitrum-sepolia",
+    format: "evm-tx",
+    describes: "Allow the transfer to move 5 USDC",
+    ephemeralSigners: [],
+    payload: JSON.stringify({
+      to: TOKEN,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [SPENDER, "5000000"],
+    }),
+    unnecessaryWhen: {
+      kind: "erc20-allowance",
+      token: TOKEN,
+      spender: SPENDER,
+      atLeastBaseUnits: "5000000",
+      ...extra,
+    },
+  });
+  const send: UnsignedTransaction = {
+    chainId: "arbitrum-sepolia",
+    format: "evm-tx",
+    describes: "Send 5 USDC",
+    ephemeralSigners: [],
+    payload: layerZeroPayload(undefined),
+    unnecessaryWhen: undefined,
+  };
+
+  /** The wallet and its node, at their boundary, answering what a test scripts. */
+  function wallet(script: {
+    allowance?: bigint;
+    reject?: boolean;
+    receipt?: (hash: Hash, onReplaced?: (r: { reason: string }) => void) => Promise<unknown>;
+  }) {
+    const seen: string[] = [];
+    const waits: Array<{ timeout: number | undefined }> = [];
+    const connection = {
+      address: SENDER,
+      chainId: 421_614,
+      wallet: {
+        writeContract: async (call: { functionName: string }) => {
+          seen.push(`sign ${call.functionName}`);
+          if (script.reject === true) throw Object.assign(new Error("denied"), { code: 4001 });
+          return call.functionName === "approve" ? APPROVE_HASH : SEND;
+        },
+      },
+      reader: {
+        getBalance: async () => 10n ** 18n,
+        readContract: async (call: { functionName: string }) =>
+          call.functionName === "allowance" ? (script.allowance ?? 0n) : 10n ** 12n,
+        waitForTransactionReceipt: async (args: {
+          hash: Hash;
+          timeout?: number;
+          onReplaced?: (r: { reason: string }) => void;
+        }) => {
+          seen.push(`wait ${args.hash.slice(0, 4)}`);
+          waits.push({ timeout: args.timeout });
+          return script.receipt === undefined
+            ? { status: "success", transactionHash: args.hash }
+            : script.receipt(args.hash, args.onReplaced);
+        },
+      },
+    } as unknown as Connection;
+    return { connection, seen, waits };
+  }
+
+  function run(connection: Connection, transactions: readonly UnsignedTransaction[]) {
+    const events: ExecutionEvent[] = [];
+    const done = execute({
+      connection,
+      route,
+      transactions,
+      chainName: "Arbitrum Sepolia",
+      evmChainId: 421_614,
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      onEvent: (event) => events.push(event),
+    });
+    return { done, events };
+  }
+
+  it("approves, waits for it, then sends, and tells each step as it happens", async () => {
+    const { connection, seen } = wallet({});
+    const { done, events } = run(connection, [approve(), send]);
+    await expect(done).resolves.toEqual([APPROVE_HASH, SEND]);
+    expect(seen).toEqual(["sign approve", "wait 0xa1", "sign send", "wait 0xb2"]);
+    expect(events.map((e) => `${e.kind} ${e.index}`)).toEqual([
+      "awaiting-signature 0",
+      "sent 0",
+      "confirmed 0",
+      "awaiting-signature 1",
+      "sent 1",
+      "confirmed 1",
+    ]);
+  });
+
+  it("skips an approval the allowance already covers", async () => {
+    const { connection, seen } = wallet({ allowance: 5_000_000n });
+    const { done, events } = run(connection, [approve(), send]);
+    await expect(done).resolves.toEqual([SEND]);
+    expect(seen).toEqual(["sign send", "wait 0xb2"]);
+    expect(events[0]?.kind).toBe("skipped");
+  });
+
+  it("skips a reset to zero when the allowance is already exactly zero, and runs it otherwise", async () => {
+    const reset = approve({ skipAlsoWhenExactly: "0" });
+    const none = wallet({ allowance: 0n });
+    await expect(run(none.connection, [reset, send]).done).resolves.toEqual([SEND]);
+    const some = wallet({ allowance: 7n });
+    await expect(run(some.connection, [reset, send]).done).resolves.toEqual([APPROVE_HASH, SEND]);
+  });
+
+  it("says a declined approval sent nothing", async () => {
+    const { connection } = wallet({ reject: true });
+    await expect(run(connection, [approve(), send]).done).rejects.toThrow(
+      "You did not approve, so nothing was sent.",
+    );
+  });
+
+  it("says a reverted send moved nothing", async () => {
+    const { connection } = wallet({ receipt: async () => ({ status: "reverted" }) });
+    await expect(run(connection, [send]).done).rejects.toThrow(
+      "The transfer was rejected by the network. Your funds have not moved.",
+    );
+  });
+
+  it("waits far longer than viem's three minutes, and a send that outlasts it is still in flight with its hash", async () => {
+    const { connection, waits } = wallet({
+      receipt: async (hash) => {
+        throw new WaitForTransactionReceiptTimeoutError({ hash });
+      },
+    });
+    const { done, events } = run(connection, [send]);
+    const error = await done.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ReceiptTimedOut);
+    expect((error as ReceiptTimedOut).hash).toBe(SEND);
+    expect(events.map((e) => e.kind)).toEqual(["awaiting-signature", "sent"]);
+    expect(waits[0]?.timeout).toBeGreaterThanOrEqual(30 * 60_000);
+  });
+
+  it("follows a send the wallet sped up to the transaction that landed", async () => {
+    const { connection } = wallet({
+      receipt: async (_hash, onReplaced) => {
+        onReplaced?.({ reason: "repriced" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    const { done, events } = run(connection, [send]);
+    await expect(done).resolves.toEqual([FASTER]);
+    expect(events).toContainEqual({ kind: "replaced", index: 0, hash: FASTER, was: SEND });
+    expect(events.at(-1)).toEqual({ kind: "confirmed", index: 0, hash: FASTER });
+  });
+
+  it("treats a send cancelled in the wallet as not sent, even though the cancel succeeded", async () => {
+    const { connection } = wallet({
+      receipt: async (_hash, onReplaced) => {
+        onReplaced?.({ reason: "cancelled" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    await expect(run(connection, [send]).done).rejects.toThrow(
+      "The transfer was cancelled in your wallet, so nothing was sent.",
+    );
   });
 });

@@ -8,7 +8,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
-import { fmt, short } from "./format";
+import { amountValue, fmt, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
@@ -22,7 +22,7 @@ import {
   type Wanted,
 } from "./quote";
 import { s } from "./style";
-import type { FlightRow } from "./transfer";
+import type { FlightRow, FlightStep } from "./transfer";
 
 /**
  * The rail label, with the swap venue when the route converts.
@@ -133,9 +133,7 @@ export function renderSend(
         <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
           <input
             value={st.amount}
-            onChange={(e) =>
-              c.setState({ amount: e.target.value.replace(/[^0-9.]/g, "") }, () => c.requote())
-            }
+            onChange={(e) => c.setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
             spellCheck={false}
             autoComplete="off"
@@ -512,7 +510,9 @@ export function renderChains(c: Flow): ReactElement {
           style={s(
             "flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.12em;color:var(--mv-faint-2)",
           )}
-        >{`${c.engine.sourceChains.length} chains`}</span>
+        >
+          {chainCount(c)}
+        </span>
       </div>
 
       {signable.length > 0 ? (
@@ -597,7 +597,7 @@ export function renderChains(c: Flow): ReactElement {
           style={s(
             "margin:0;padding:4px 2px;font-size:13px;line-height:1.5;color:var(--mv-muted-2)",
           )}
-        >{`No chain called “${st.chainQuery}”. Mavna sends from ${c.engine.sourceChains.length} chains.`}</p>
+        >{`No chain called “${st.chainQuery}”. Mavna sends from ${chainCount(c)}.`}</p>
       ) : null}
     </div>
   );
@@ -653,6 +653,12 @@ export function renderPriority(c: Flow, sym: string): ReactElement {
   );
 }
 
+/** The chains the picker lists for what is being sent, counted. */
+function chainCount(c: Flow): string {
+  const n = c.list().length;
+  return `${n} chain${n === 1 ? "" : "s"}`;
+}
+
 // ---------------------------------------------------------------- address ---
 
 export function renderAddress(c: Flow): ReactElement {
@@ -664,7 +670,7 @@ export function renderAddress(c: Flow): ReactElement {
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <input
         value={st.destination}
-        onChange={(e) => c.setState({ destination: e.target.value.trim() })}
+        onChange={(e) => c.setDestination(e.target.value.trim())}
         ref={c.destRef}
         placeholder="G…"
         spellCheck={false}
@@ -906,21 +912,37 @@ export function renderRails(c: Flow): ReactElement {
 
 // ----------------------------------------------------------------- review ---
 
+function sentLabel(r: RouteView): string {
+  return `${fmt(amountValue(r.route.sends))} ${r.route.sends.asset.symbol}`;
+}
+
 export function renderReview(
   c: Flow,
   d: { r: RouteView | undefined; chain: { id: string; name: string }; sym: string },
 ): ReactElement {
-  const { r, chain, sym } = d;
-  const reviewSend = r === undefined ? "-" : `${fmt(c.amountNumber())} ${c.state.send}`;
+  // what is shown is what the route signs for, never the form, which may have
+  // moved on since the quote
+  const { r, sym } = d;
+  const chain = r === undefined ? d.chain : r.route.fromChain;
+  const reviewSend = r === undefined ? "-" : sentLabel(r);
   const reviewGet = r === undefined ? "-" : `${fmt(r.receives)} ${sym}`;
   const reviewGetOn = r === undefined ? "Stellar" : `Stellar · ${r.source}`;
   const reviewRows =
     r === undefined
       ? []
       : [
-          { key: "dest", name: "Recipient", value: short(c.state.destination) },
+          { key: "dest", name: "Recipient", value: short(r.route.destination) },
           { key: "rail", name: "Rail", value: railLabel(r) },
-          { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} ${r.feeSymbol}` },
+          { key: "fee", name: "Transfer fee", value: `${r.feeAmount} ${r.feeSymbol}` },
+          ...(r.integratorFee === undefined
+            ? []
+            : [
+                {
+                  key: "integrator",
+                  name: "Integrator fee",
+                  value: `${fmt(r.integratorFee.amount)} ${r.integratorFee.symbol} to ${r.integratorFee.recipient}`,
+                },
+              ]),
           ...(r.newAccount && r.reserveXlm !== undefined
             ? [
                 {
@@ -1058,6 +1080,16 @@ export function renderReview(
 
 // ----------------------------------------------------------------- flight ---
 
+/** The step the flight is on, and what it says, for a screen reader. */
+function flightAnnouncement(steps: readonly FlightStep[], eyebrow: string): string {
+  const now =
+    steps.find((step) => step.phase === "failed") ??
+    steps.find((step) => step.phase === "blocked" || step.phase === "pending");
+  if (now === undefined) return eyebrow;
+  const lead = now.phase === "failed" ? "Stopped" : eyebrow;
+  return [`${lead}: ${now.label}.`, now.note ?? ""].join(" ").trim();
+}
+
 export function renderFlight(
   c: Flow,
   d: {
@@ -1067,17 +1099,26 @@ export function renderFlight(
     arrived: boolean;
   },
 ): ReactElement {
-  const { r, chain, sym, arrived } = d;
-  const flightEyebrow = arrived ? "Arrived on Stellar" : "Arriving on Stellar";
-  const flightFigure = r === undefined ? "-" : fmt(r.receives);
+  const { r, sym, arrived } = d;
+  const chain = r === undefined ? d.chain : r.route.fromChain;
+  const asCame = c.state.arrivedAs;
+  const flightEyebrow =
+    asCame !== null
+      ? "Arrived on Stellar, not converted"
+      : arrived
+        ? "Arrived on Stellar"
+        : "Arriving on Stellar";
+  const flightFigure =
+    asCame !== null ? fmt(asCame.amount) : r === undefined ? "-" : fmt(r.receives);
+  const flightSym = asCame !== null ? asCame.symbol : sym;
   const flightMeta =
     r === undefined
       ? []
       : [
           { key: "from", name: "From", value: chain.name },
-          { key: "sent", name: "Sent", value: `${fmt(c.amountNumber())} ${c.state.send}` },
+          { key: "sent", name: "Sent", value: sentLabel(r) },
           { key: "rail", name: "Rail", value: railLabel(r) },
-          { key: "to", name: "Recipient", value: short(c.state.destination) },
+          { key: "to", name: "Recipient", value: short(r.route.destination) },
           {
             key: "eta",
             name: arrived ? "Took" : "Estimated time",
@@ -1109,7 +1150,7 @@ export function renderFlight(
                 "font-size:13px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:8px",
               )}
             >
-              {sym}
+              {flightSym}
             </span>
           </p>
         </div>
@@ -1145,6 +1186,10 @@ export function renderFlight(
           <span>{stepEyebrow}</span>
           <span>{stepCount}</span>
         </div>
+        {/* read out as the flight moves, since the step list itself only changes colour */}
+        <p role="status" aria-live="polite" className="mv-sr-only">
+          {flightAnnouncement(c.state.steps, stepEyebrow)}
+        </p>
         <div
           style={s(
             "flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:8px;margin-right:-8px",
@@ -1493,13 +1538,7 @@ export function renderRoutes(
             fastest.id !== best.id;
           const badged = isBest || isFastest;
           const open = st.expanded === x.id;
-          const detail = routeDetail(
-            x,
-            sym,
-            xlm,
-            c.amountNumber(),
-            c.state.reserveFunding === "self",
-          );
+          const detail = routeDetail(x, sym, xlm, c.state.reserveFunding === "self");
           const cardStyle: CSSProperties = {
             position: "relative",
             width: "100%",
@@ -1620,7 +1659,7 @@ export function renderRoutes(
                       <circle cx="12" cy="12" r="8.5" />
                       <path d="M12 8v8M9.5 10.2c0-1.2 1.1-2.2 2.5-2.2s2.5 1 2.5 2.2c0 2.6-5 1.4-5 3.9 0 1.2 1.1 2.1 2.5 2.1s2.5-.9 2.5-2.1" />
                     </svg>
-                    <span>{x.fee === 0 ? "0.00" : fmt(x.fee)}</span>
+                    <span>{x.feeAmount}</span>
                   </span>
                   <span
                     style={s("display:flex;align-items:center;gap:6px;white-space:nowrap")}
@@ -1728,7 +1767,7 @@ export function renderRoutes(
                     "font-family:var(--mv-font-mono);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
                   )}
                 >
-                  {c.engine.sourceChains.length}
+                  {c.list().length}
                 </span>
                 <span
                   style={s(
@@ -1863,22 +1902,27 @@ export function renderRoutes(
 }
 
 /** The expanded route detail rows, from real route figures. */
-function routeDetail(
+export function routeDetail(
   x: RouteView,
   sym: string,
   xlm: boolean,
-  amount: number,
   /** The account pays its own way, so finishing a conversion by hand is its cost. */
   selfFunded = false,
 ): { key: string; name: string; value: string }[] {
-  const net = amount - x.fee;
-  const perUsdc = net > 0 ? x.receives / net : 0;
+  // the rate is per unit of what was sent; a fee only comes off it when it is
+  // paid in that same asset, never gas in another
+  const sends = x.route.sends;
+  const bridgeFee = x.route.fees.find((f) => f.kind === "bridge");
+  const sameAsset = bridgeFee !== undefined && bridgeFee.total.asset.id === sends.asset.id;
+  const netBase = BigInt(sends.baseUnits) - (sameAsset ? BigInt(bridgeFee.total.baseUnits) : 0n);
+  const net = fromBaseUnits(netBase > 0n ? netBase.toString() : "0", sends.asset.decimals);
+  const perUnit = net > 0 ? x.receives / net : 0;
   return [
     { key: "rail", name: "Rail", value: x.source },
     {
       key: "fee",
       name: "Transfer fee",
-      value: x.fee === 0 ? "None" : `${fmt(x.fee)} ${x.feeSymbol}`,
+      value: x.fee === 0 ? "None" : `${x.feeAmount} ${x.feeSymbol}`,
     },
     {
       key: "min",
@@ -1886,7 +1930,13 @@ function routeDetail(
       value: `${fmt(x.floor)} ${sym}`,
     },
     ...(xlm
-      ? [{ key: "rate", name: "Conversion rate", value: `1 USDC ≈ ${perUsdc.toFixed(4)} XLM` }]
+      ? [
+          {
+            key: "rate",
+            name: "Conversion rate",
+            value: `1 ${sends.asset.symbol} ≈ ${perUnit.toFixed(4)} XLM`,
+          },
+        ]
       : []),
     ...(x.swapVenue !== undefined
       ? [{ key: "venue", name: "Converted on", value: x.swapVenue }]

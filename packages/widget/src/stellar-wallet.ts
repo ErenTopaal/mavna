@@ -7,6 +7,7 @@ import { RabetModule } from "@creit.tech/stellar-wallets-kit/modules/rabet";
 import { xBullModule } from "@creit.tech/stellar-wallets-kit/modules/xbull";
 import { Networks } from "@creit.tech/stellar-wallets-kit/types";
 import type { NetworkId } from "@mavna/core";
+import { asError } from "./helpers";
 
 /**
  * The Stellar side of signing, through the kit and its own modal.
@@ -76,16 +77,25 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
   return {
     async connect(): Promise<string> {
       ensureInit();
-      const { address } = await StellarWalletsKit.authModal();
-      return address;
+      try {
+        const { address } = await StellarWalletsKit.authModal();
+        return address;
+      } catch (cause) {
+        // the kit rejects with plain objects; their message is the wallet's reason
+        throw asError(cause);
+      }
     },
     async sign(xdr: string, address: string): Promise<string> {
       ensureInit();
-      const { signedTxXdr } = await StellarWalletsKit.signTransaction(xdr, {
-        address,
-        networkPassphrase: PASSPHRASE[network],
-      });
-      return signedTxXdr;
+      try {
+        const { signedTxXdr } = await StellarWalletsKit.signTransaction(xdr, {
+          address,
+          networkPassphrase: PASSPHRASE[network],
+        });
+        return signedTxXdr;
+      } catch (cause) {
+        throw asError(cause);
+      }
     },
     async disconnect(): Promise<void> {
       if (!initialised) return;

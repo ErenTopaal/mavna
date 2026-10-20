@@ -32,11 +32,11 @@ One component and one config object. `integrator` is the only required field; it
 identifies you and attributes an [integrator fee](/widget/configuration) if you set
 one. The network defaults to the test network.
 
-The `sponsorUrl` above points at a sponsor you run. Its default is a local
-development sponsor (`http://localhost:8787`), so [zero-XLM
+The `sponsorUrl` above points at a sponsor you run. On testnet its default is a
+local development sponsor (`http://localhost:8787`), so [zero-XLM
 arrival](/developers/concepts/sponsorship) to brand-new accounts works out of the box
-only against a local sponsor: point it at your own [sponsor
-service](/developers/sponsor) for production.
+only against a local sponsor. On mainnet there is no default: point it at your own
+[sponsor service](/developers/sponsor), or the widget will not mount.
 
 ## Next
 

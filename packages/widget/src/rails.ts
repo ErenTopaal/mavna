@@ -195,7 +195,9 @@ export async function destinationBlocker(
   rpc: RpcClient,
   route: Route,
 ): Promise<string | undefined> {
-  if (route.steps.some((s) => s.kind === "prepare-account")) return undefined;
+  // a route that sets the account up handles a missing account or trustline,
+  // but nothing it does makes an address that cannot receive at all receive
+  const setsUp = route.steps.some((s) => s.kind === "prepare-account");
   const delivers = route.deliveredAtLeast.asset;
   const [code, issuer] = delivers.id.split(":");
   let asset: StellarAsset;
@@ -208,6 +210,7 @@ export async function destinationBlocker(
   }
 
   const { lane } = await inspectDestination(rpc, route.destination, asset);
+  if (setsUp) return lane.kind === "unusable" ? lane.reason : undefined;
   switch (lane.kind) {
     case "ready":
     case "contract-ready":

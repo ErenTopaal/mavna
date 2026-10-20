@@ -1,5 +1,10 @@
-import { AttestationService, buildDelivery, deliveryFailureOf } from "@mavna/adapter-cctp";
-import { type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  AttestationService,
+  buildDelivery,
+  CCTP_CONTRACTS,
+  deliveryFailureOf,
+} from "@mavna/adapter-cctp";
+import { Address, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 
 /**
@@ -33,7 +38,9 @@ export type OwnDelivery =
   | { readonly kind: "not-attested-yet" }
   | { readonly kind: "recipient-not-ready"; readonly detail: string }
   /** Simulated dearer than the budget, so it was not signed and stays deliverable. */
-  | { readonly kind: "too-costly"; readonly feeStroops: bigint };
+  | { readonly kind: "too-costly"; readonly feeStroops: bigint }
+  /** It would authorize more than the delivery, so it was not signed. */
+  | { readonly kind: "refused"; readonly detail: string };
 
 /**
  * Deliver one attested burn on Stellar, signed and paid by `payer`.
@@ -74,6 +81,17 @@ export async function deliverOwn(
   } catch (cause) {
     return refused(cause);
   }
+  // The payer's signature covers whatever the simulation recorded. Circle's
+  // forwarder asks for nothing today; anything beyond the payer's own root call
+  // to it would be the payer's authority spent on someone else's code.
+  if (!authorizesOnlyDelivery(prepared, payer, CCTP_CONTRACTS[engine.network].cctpForwarder)) {
+    return {
+      kind: "refused",
+      detail:
+        "Delivering this would authorize more than the delivery itself, so it was not signed. " +
+        "The funds are safe on Circle's side and still deliverable.",
+    };
+  }
   const fee = BigInt(prepared.fee);
   if (fee > OWN_DELIVERY_FEE_BUDGET_STROOPS) return { kind: "too-costly", feeStroops: fee };
 
@@ -89,6 +107,27 @@ export async function deliverOwn(
   } catch (cause) {
     return refused(cause);
   }
+}
+
+function authorizesOnlyDelivery(prepared: Transaction, payer: string, forwarder: string): boolean {
+  const op = prepared.operations[0];
+  if (prepared.operations.length !== 1 || op?.type !== "invokeHostFunction") return false;
+  return (op.auth ?? []).every((entry) => {
+    const credentials = entry.credentials();
+    const own =
+      credentials.switch().name === "sorobanCredentialsSourceAccount" ||
+      (credentials.switch().name === "sorobanCredentialsAddress" &&
+        Address.fromScAddress(credentials.address().address()).toString() === payer);
+    const root = entry.rootInvocation();
+    const fn = root.function();
+    return (
+      own &&
+      root.subInvocations().length === 0 &&
+      fn.switch().name === "sorobanAuthorizedFunctionTypeContractFn" &&
+      Address.fromScAddress(fn.contractFn().contractAddress()).toString() === forwarder &&
+      fn.contractFn().functionName().toString() === "mint_and_forward"
+    );
+  });
 }
 
 function refused(cause: unknown): OwnDelivery {

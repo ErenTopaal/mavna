@@ -21,7 +21,7 @@ import { raceAdapters, type SwapAttachment } from "@mavna/routing";
 import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
-import { amountValue, fromBaseUnits, toBaseUnits } from "./format";
+import { amountValue, fmtUnits, fromBaseUnits, toBaseUnits } from "./format";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS, OWN_TRUSTLINE_FEE_STROOPS } from "./own-delivery";
 import type { SponsorTerms } from "./sponsor";
 
@@ -30,7 +30,7 @@ const USDC_DECIMALS_ON_EVM = 6;
 
 export type RailName = "Circle" | "Axelar" | "LayerZero" | "NEAR Intents";
 export type Priority = "best" | "fast";
-/** USDT0 lands as itself: no conversion leg is offered for it here. */
+/** What lands on Stellar. USDT0 needs a USDT0 send; USDC and XLM can come of either send. */
 export type Wanted = "USDC" | "XLM" | "USDT0";
 /** What the user sends, as the picker names it. */
 export type SendAsset = "USDC" | "USDT0";
@@ -54,7 +54,9 @@ export const TRUST_LABEL: Readonly<Record<RailName, string>> = {
   Circle: "Issuer mint & burn",
   Axelar: "Validator set",
   LayerZero: "Issuer-chosen verifiers",
-  "NEAR Intents": "Competing solvers",
+  // solvers fill the intent, then HOT Bridge pays out on Stellar: its locker
+  // contract releases the funds on HOT's MPC signature, so HOT is trusted too
+  "NEAR Intents": "Competing solvers, HOT Bridge payout",
 };
 
 export interface QuoteInputs {
@@ -95,6 +97,15 @@ export interface RouteView {
    * not convert has none and a route through a different venue shows that venue.
    */
   readonly swapVenue: string | undefined;
+  /**
+   * The integrator's cut, when the route takes one: only a conversion on arrival
+   * does, where the Arrival Contract pays it out. Already off `receives`.
+   */
+  readonly integratorFee:
+    | { readonly amount: number; readonly symbol: string; readonly recipient: string }
+    | undefined;
+  /** The transfer fee as a figure in its own asset's decimals. */
+  readonly feeAmount: string;
   /** What the transfer fee is counted in, read off the fee itself. */
   readonly feeSymbol: string;
   /**
@@ -176,6 +187,7 @@ export function toRouteView(route: Route): RouteView {
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
   const repayment = route.fees.find((f) => f.kind === "reserve-repayment");
   const swapStep = route.steps.find((s) => s.kind === "swap");
+  const integrator = route.fees.find((f) => f.kind === "integrator");
   const receives = amountValue(route.receives);
   const floor = amountValue(route.receivesAtLeast);
   return {
@@ -205,7 +217,17 @@ export function toRouteView(route: Route): RouteView {
             symbol: repayment.total.asset.symbol,
           },
     swapVenue: swapStep === undefined ? undefined : venueLabel(swapStep.source),
+    integratorFee:
+      integrator === undefined
+        ? undefined
+        : {
+            amount: amountValue(integrator.total),
+            symbol: integrator.total.asset.symbol,
+            recipient: integrator.recipients[0]?.name ?? "the integrator",
+          },
     feeSymbol: bridge?.total.asset.symbol ?? route.sends.asset.symbol,
+    feeAmount:
+      bridge === undefined ? "0.00" : fmtUnits(bridge.total.baseUnits, bridge.total.asset.decimals),
     compose:
       route.compose === undefined
         ? undefined
@@ -242,24 +264,6 @@ export function buildAssets(
     curatedBy: "Circle",
   };
   return { from, to: wanted === "XLM" ? engine.xlmOnStellar : engine.usdcOnStellar };
-}
-
-/**
- * The assets for what the user picked to send.
- *
- * USDT0's come from the LayerZero deployment through the engine, never from a
- * symbol: the source id is the token the chain's OFT moves and the Stellar id is
- * the classic asset its Stellar token wraps. Nothing converts USDT0 here, so
- * what it lands as is what the recipient gets whatever `wanted` says.
- */
-export async function assetsFor(
-  engine: Pick<Engine, "network" | "usdcOnStellar" | "xlmOnStellar" | "usdt0Assets">,
-  chainId: string,
-  send: SendAsset,
-  wanted: Wanted,
-): Promise<{ from: Asset; to: Asset }> {
-  if (send === "USDT0") return engine.usdt0Assets(chainId);
-  return buildAssets(engine, chainId, wanted);
 }
 
 /**
@@ -372,7 +376,21 @@ export interface SponsorCheck {
    * recipient's own transaction whoever funds reserves.
    */
   readonly convertsInto?: Asset;
-  readonly holdsWanted?: "ready" | "missing" | "unauthorized" | "no-account" | Error | undefined;
+  /**
+   * The XLM order book's mid price for USDC, in stroops per whole USDC: the same
+   * figure the sponsor prices its settlement's most it may spend by. Read only
+   * when the sponsor fronts reserves, for a route that sets an account up.
+   */
+  readonly xlmStroopsPerUsdc?: bigint | Error;
+  readonly holdsWanted?:
+    | "ready"
+    | "missing"
+    | "unauthorized"
+    | "no-account"
+    /** The trustline is there but cannot take the arrival (unauthorised, or full), and why. */
+    | { readonly unusable: string }
+    | Error
+    | undefined;
 }
 
 const message = (cause: unknown): string =>
@@ -447,6 +465,11 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
 
+  if (setsUp && terms.reserveFunding === "sponsor") {
+    const blocked = repaymentBlocker(route, check.xlmStroopsPerUsdc);
+    if (blocked !== undefined) return decline(blocked[0], blocked[1]);
+  }
+
   const holds = convertBlocker(route, check);
   if (holds !== undefined) return decline(holds[0], holds[1]);
 
@@ -486,6 +509,43 @@ function convertsInto(route: Route, check: SponsorCheck): Asset | undefined {
 }
 
 /**
+ * Why the arrival could not repay a reserve the sponsor fronts, or undefined.
+ *
+ * The settlement buys the reserve back out of what arrives and may spend up to
+ * twice its value at the order book's mid price (the sponsor's documented
+ * ceiling). An arrival short of that ceiling is a settlement the user signs
+ * that may never be taken, leaving the sponsor's XLM stranded in the account.
+ */
+function repaymentBlocker(
+  route: Route,
+  price: bigint | Error | undefined,
+): [RouteRejection["reason"], string] | undefined {
+  if (price === undefined || price instanceof Error) {
+    return [
+      "temporarily-unavailable",
+      "What repaying the new account's reserve would take could not be priced just now" +
+        (price instanceof Error ? `: ${message(price)}` : "."),
+    ];
+  }
+  const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  if (reserve === undefined || price <= 0n) {
+    return ["temporarily-unavailable", "This route does not say what reserve it sets up."];
+  }
+  const arrives = route.deliveredAtLeast;
+  const scale = 10n ** BigInt(arrives.asset.decimals);
+  const mostItMayTake = (BigInt(reserve.total.baseUnits) * 2n * scale) / price;
+  if (BigInt(arrives.baseUnits) > mostItMayTake) return undefined;
+  const symbol = arrives.asset.symbol;
+  return [
+    "amount-too-small",
+    `Setting up this new account is repaid from what arrives, and that repayment may take up ` +
+      `to ${fmtUnits(mostItMayTake.toString(), arrives.asset.decimals)} ${symbol}. Only at ` +
+      `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
+      "may not cover it. Send more, or send to an account that can already receive it.",
+  ];
+}
+
+/**
  * Why the recipient could not hold what this route converts into. The
  * conversion is their own transaction after the money lands, so a missing or
  * unauthorised trustline would fail it with the funds already arrived.
@@ -503,6 +563,12 @@ function convertBlocker(
     return [
       "temporarily-unavailable",
       `Whether the receiving account can hold ${wanted.symbol} could not be checked: ${message(state)}`,
+    ];
+  }
+  if (typeof state === "object") {
+    return [
+      "destination-unsupported",
+      `${state.unusable} Converting into ${wanted.symbol} would fail. Receive ${arrives} instead.`,
     ];
   }
   if (state === "unauthorized") {
@@ -619,7 +685,10 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
 
 /** Ask the sponsor for its terms, and the network for the destination if they need it. */
 async function checkSponsor(
-  engine: Pick<Engine, "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops">,
+  engine: Pick<
+    Engine,
+    "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops" | "xlmStroopsPerUsdc"
+  >,
   destination: string,
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
@@ -632,6 +701,7 @@ async function checkSponsor(
   }
   let found: SponsorCheck["destination"] = "exists";
   let spare: bigint | undefined;
+  let price: bigint | Error | undefined;
   const { baseReserveStroops } = engine;
   if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
     // read too, so a decline can say whether the account or only the trustline is missing
@@ -642,6 +712,14 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
+      // something will be set up, and repaid from the arrival at this price
+      if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
+        try {
+          price = await engine.xlmStroopsPerUsdc();
+        } catch (cause) {
+          price = cause instanceof Error ? cause : new Error(String(cause));
+        }
+      }
     } catch (cause) {
       found = cause instanceof Error ? cause : new Error(String(cause));
     }
@@ -674,13 +752,15 @@ async function checkSponsor(
         new StellarAsset(code ?? "", issuer),
       );
       holdsWanted =
-        state.lane.kind === "needs-account"
-          ? "no-account"
-          : state.lane.kind === "needs-trustline"
-            ? "missing"
-            : state.trustline !== undefined && !state.trustline.authorized
-              ? "unauthorized"
-              : "ready";
+        state.lane.kind === "unusable"
+          ? { unusable: state.lane.reason }
+          : state.lane.kind === "needs-account"
+            ? "no-account"
+            : state.lane.kind === "needs-trustline"
+              ? "missing"
+              : state.trustline !== undefined && !state.trustline.authorized
+                ? "unauthorized"
+                : "ready";
     } catch (cause) {
       holdsWanted = cause instanceof Error ? cause : new Error(String(cause));
     }
@@ -691,6 +771,7 @@ async function checkSponsor(
     destination: found,
     spareStroops: spare,
     baseReserveStroops,
+    ...(price === undefined ? {} : { xlmStroopsPerUsdc: price }),
     ...(convertsInto === undefined ? {} : { convertsInto, holdsWanted }),
   };
 }
@@ -720,6 +801,7 @@ export function runQuote(
     | "usdt0Assets"
     | "usdt0Swap"
     | "baseReserveStroops"
+    | "xlmStroopsPerUsdc"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,
@@ -807,8 +889,8 @@ export function runQuote(
             swap:
               swap === undefined || funding !== "sponsor" ? swap : { ...swap, repaysReserve: true },
             ranking: inputs.priority === "fast" ? "fastest" : "best-received",
-            // No transaction builder pays a fee out yet, so nothing may be shown as
-            // taken. Revisit when a collector exists for a route.
+            // Only a conversion on arrival collects a fee, and its route carries the
+            // fee itself; no other route's builder pays one out, so none is applied here.
             integratorFee:
               engine.integratorFee === undefined
                 ? undefined

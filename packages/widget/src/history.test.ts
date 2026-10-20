@@ -25,7 +25,7 @@ class MapStorage {
 
 (globalThis as { window?: unknown }).window = { localStorage: new MapStorage() };
 
-import { forgetHistory, readHistory, remember, type TransferRecord } from "./history.js";
+import { forget, forgetHistory, readHistory, remember, type TransferRecord } from "./history.js";
 
 /**
  * The browser's own record of transfers, which is untrusted input like any
@@ -72,6 +72,27 @@ describe("what this browser remembers", () => {
   it("treats unreadable storage as empty rather than throwing", () => {
     window.localStorage.setItem("mavna.transfers.v1", "{not json");
     expect(readHistory()).toEqual([]);
+  });
+
+  it("never links to anything but an https explorer from stored data", () => {
+    window.localStorage.setItem(
+      "mavna.transfers.v1",
+      JSON.stringify([
+        record({ sourceTxHash: "0x1", explorerUrl: "javascript:alert(1)" }),
+        record({ sourceTxHash: "0x2", explorerUrl: "https://sepolia.etherscan.io/tx/0x2" }),
+      ]),
+    );
+    expect(readHistory().map((r) => r.explorerUrl)).toEqual([
+      undefined,
+      "https://sepolia.etherscan.io/tx/0x2",
+    ]);
+  });
+
+  it("forgets one transfer by its transaction, keeping the rest", () => {
+    remember(record({ sourceTxHash: "0x1" }));
+    remember(record({ sourceTxHash: "0x2" }));
+    forget("0x1");
+    expect(readHistory().map((r) => r.sourceTxHash)).toEqual(["0x2"]);
   });
 
   it("forgets everything when asked, because the data is the user's", () => {

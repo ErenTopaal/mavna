@@ -82,7 +82,12 @@ function readStored(key: string): readonly TransferRecord[] {
     // Storage is user-writable and shared with anything else on this origin, so
     // it is untrusted input like any other. A malformed record is dropped rather
     // than rendered.
-    return parsed.filter(isRecord);
+    // the link is rendered as an href, so only an https one survives being stored
+    return parsed
+      .filter(isRecord)
+      .map((r) =>
+        httpsOnly(r.explorerUrl) === r.explorerUrl ? r : { ...r, explorerUrl: undefined },
+      );
   } catch {
     return [];
   }
@@ -107,6 +112,16 @@ export function remember(record: TransferRecord, key: string = KEY): readonly Tr
   return next;
 }
 
+/** Drop one transfer, by the source transaction it was recorded under. */
+export function forget(sourceTxHash: string, key: string = KEY): void {
+  const next = readHistory(key).filter((r) => r.sourceTxHash !== sourceTxHash);
+  try {
+    window.localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Same reasoning as in remember.
+  }
+}
+
 export function forgetHistory(key: string = KEY): void {
   try {
     window.localStorage.removeItem(key);
@@ -128,4 +143,13 @@ function isRecord(value: unknown): value is TransferRecord {
     typeof r.decimals === "number" &&
     typeof r.startedAtUnix === "number"
   );
+}
+
+function httpsOnly(url: unknown): string | undefined {
+  if (typeof url !== "string") return undefined;
+  try {
+    return new URL(url).protocol === "https:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }

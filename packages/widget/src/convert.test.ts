@@ -236,6 +236,29 @@ describe("converting on Stellar", () => {
     expect(run.sent).toHaveLength(1);
   });
 
+  it("does not resend a signed conversion the network turned away for its sequence", async () => {
+    const run = setUp();
+    const node = run.engine.rpc;
+    let sends = 0;
+    vi.spyOn(node.server, "sendTransaction").mockImplementation(async () => {
+      sends += 1;
+      return {
+        status: "ERROR",
+        hash: "ab".repeat(32),
+        latestLedger: 10,
+        errorResult: new xdr.TransactionResult({
+          feeCharged: xdr.Int64.fromString("100"),
+          result: xdr.TransactionResultResult.txBadSeq(),
+          ext: new xdr.TransactionResultExt(0),
+        }),
+      } as never;
+    });
+    await expect(
+      convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "50000000"),
+    ).rejects.toThrow(/txBadSeq/);
+    expect(sends).toBe(1);
+  });
+
   it("leaves an amount the venue would turn into nothing as it arrived", async () => {
     quoteOut = () => 0;
     const run = setUp();

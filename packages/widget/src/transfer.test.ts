@@ -1,6 +1,6 @@
-import { CctpAdapter } from "@mavna/adapter-cctp";
+import { buildForwarderHookData, CctpAdapter, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
-import { createNetworkConfig, RpcClient } from "@mavna/stellar";
+import { buildPreparation, createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { createSwapVenues } from "@mavna/swap";
 import {
   Account,
@@ -14,7 +14,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Address, Hash } from "viem";
+import { type Address, type Hash, WaitForTransactionReceiptTimeoutError } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DESTINATION,
@@ -32,8 +32,10 @@ import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
 import {
+  burnDomain,
   DeliveredAsCame,
   finishDelivery,
+  holdBlocker,
   runTransfer,
   StillMoving,
   type TransferDeps,
@@ -44,14 +46,21 @@ import type { Connection } from "./wallet";
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
 const ARBITRUM_SEPOLIA = 421_614;
 const HISTORY_KEY = "test.transfers";
-/** A Stellar address other than the one the wallet connects. */
+/** A Stellar address other than the one the wallet connects; the sponsor's settlement channel. */
 const SENDER_STELLAR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const SPONSOR_STELLAR = Keypair.random().publicKey();
 
 /** Everything that crossed a boundary, in the order it crossed. */
 let log: string[];
 let stored: Map<string, string>;
 let settleReplies: Array<[number, unknown]>;
+/** Status 0 is no answer at all: the connection dropped. */
 let deliverReplies: Array<[number, unknown]>;
+/** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
+let refuses: "PREPARATION" | "CONVERSION" | undefined;
+/** What /submit and /settlement answer before their usual 200, in turn. */
+let submitRefusals: Array<[number, unknown]>;
+let settlementRefusals: Array<[number, unknown]>;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
@@ -65,6 +74,8 @@ let preparedSource: string | undefined;
 let preparedShape: { fee?: string; limit?: string; timeout?: number };
 /** What Circle's attestation service answers, in turn; the last one repeats. */
 let irisReplies: Array<[number, unknown]>;
+/** When set, Circle answers per source domain instead, and a domain not listed has nothing. */
+let irisByDomain: Record<string, unknown> | undefined;
 const attested = {
   messages: [{ status: "complete", message: "0x0102", attestation: "0x0304", decodedMessage: {} }],
 };
@@ -72,6 +83,8 @@ const attested = {
 let askedAssets: string[][];
 /** The settlement the sponsor builds for a new account it fronts. */
 let settlementXdr: string;
+/** The preparation the sponsor builds for a new account it fronts. */
+let sponsoredPreparation: string;
 /** What happens on Stellar as the sponsor delivers a Circle transfer. */
 let onDeliver: (() => void) | undefined;
 
@@ -115,7 +128,9 @@ beforeEach(() => {
   preparation = "";
   preparedFee = "182612";
   simulationFailures = [];
+  preparedAuth = undefined;
   irisReplies = [[200, attested]];
+  irisByDomain = undefined;
   preparedLine = undefined;
   preparedSource = undefined;
   preparedShape = {};
@@ -124,9 +139,19 @@ beforeEach(() => {
   usdcHeld = 0n;
   conversionAmounts = [];
   askedAssets = [];
-  settlementXdr = "SETTLEMENT";
+  settlementXdr = settlementSpending("0.6");
+  sponsoredPreparation = buildPreparation({
+    network: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
+    sponsorAccount: new Account(SPONSOR_STELLAR, "1"),
+    userAddress: DESTINATION,
+    createAccount: true,
+    assets: [new Asset("USDC", STELLAR_USDC.id.split(":")[1])],
+  }).toXDR();
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
+  refuses = undefined;
+  submitRefusals = [];
+  settlementRefusals = [];
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -146,6 +171,10 @@ beforeEach(() => {
     if (url.includes("/api/external/v1/pools/")) return reply(200, { count: 1 });
     if (path.startsWith("/v2/messages/")) {
       log.push(`iris ${path}`);
+      if (irisByDomain !== undefined) {
+        const body = irisByDomain[path.split("/").at(-1) ?? ""];
+        return body === undefined ? reply(404, { error: "Not found" }) : reply(200, body);
+      }
       const next = irisReplies.length > 1 ? irisReplies.shift() : irisReplies[0];
       if (next === undefined) throw new Error("no iris reply scripted");
       return reply(next[0], next[1]);
@@ -159,8 +188,11 @@ beforeEach(() => {
           reserveFunding: funding,
           minDeliveryBaseUnits: "1000000",
         });
-      case "/settlement":
-        return reply(200, { xdr: settlementXdr, channel: "GCHANNEL" });
+      case "/settlement": {
+        const refusal = settlementRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
+        return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
+      }
       case "/settlement/commit":
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
@@ -170,7 +202,9 @@ beforeEach(() => {
       case "/prepare": {
         const asked = bodyOf(init) as { assets: string[] };
         askedAssets.push(asked.assets);
-        if (funding === "sponsor") return reply(200, { xdr: "PREPARATION", sponsor: "GSPONSOR" });
+        if (funding === "sponsor") {
+          return reply(200, { xdr: sponsoredPreparation, sponsor: SPONSOR_STELLAR });
+        }
         // the real shape of a self-funded preparation: one changeTrust the account sources
         const [code] = asked.assets;
         const line = preparedLine ?? (code === "USDT0" ? STELLAR_USDT0.id : STELLAR_USDC.id);
@@ -190,15 +224,19 @@ beforeEach(() => {
           .toXDR();
         return reply(200, { xdr: preparation, selfFunded: true });
       }
-      case "/submit":
+      case "/submit": {
         expect(bodyOf(init)).toEqual({
-          signedXdr: `signed ${funding === "self" ? preparation : "PREPARATION"}`,
+          signedXdr: `signed ${funding === "self" ? preparation : sponsoredPreparation}`,
         });
+        const refusal = submitRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { txHash: "9e9", ledger: 1 });
+      }
       case "/deliver": {
         onDeliver?.();
         const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
         if (next === undefined) throw new Error("no deliver reply scripted");
+        if (next[0] === 0) throw new TypeError("Failed to fetch");
         return reply(next[0], next[1]);
       }
       case "/settle": {
@@ -216,7 +254,8 @@ beforeEach(() => {
     localStorage: {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => {
-        log.push(`history ${JSON.parse(value)[0].sourceTxHash}`);
+        const first = (JSON.parse(value) as Array<{ sourceTxHash: string }>)[0];
+        if (first !== undefined) log.push(`history ${first.sourceTxHash}`);
         stored.set(key, value);
       },
       removeItem: (key: string) => stored.delete(key),
@@ -287,6 +326,8 @@ let heldOnly: Set<string> | undefined;
 let preparedFee: string;
 /** What simulating the delivery answers instead, in turn, when a test makes it fail. */
 let simulationFailures: Error[];
+/** What the node's simulation says the delivery must authorize, when a test makes it more. */
+let preparedAuth: xdr.SorobanAuthorizationEntry[] | undefined;
 
 /**
  * A real client whose node is a double, so the destination check reads what a
@@ -338,7 +379,8 @@ function stellarNode(): RpcClient {
     log.push("stellar simulate delivery");
     const failure = simulationFailures.shift();
     if (failure !== undefined) throw failure;
-    // priced so the prepared transaction costs preparedFee in all
+    // priced so the prepared transaction costs preparedFee in all; what it must
+    // authorize is whatever the test says the node simulated
     const resourceFee = BigInt(preparedFee) - BigInt((tx as Transaction).fee);
     return {
       _parsed: true,
@@ -347,7 +389,7 @@ function stellarNode(): RpcClient {
       latestLedger: 100,
       minResourceFee: resourceFee.toString(),
       transactionData: new SorobanDataBuilder().setResourceFee(resourceFee),
-      result: { retval: xdr.ScVal.scvVoid(), auth: [] },
+      result: { retval: xdr.ScVal.scvVoid(), auth: preparedAuth ?? [] },
     } as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
@@ -378,7 +420,10 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         return DESTINATION;
       },
       sign: async (xdr: string) => {
-        if (xdr === preparation) {
+        const kind =
+          xdr === preparation || xdr === sponsoredPreparation ? "PREPARATION" : "CONVERSION";
+        if (refuses === kind) throw { code: -4, message: "The user rejected this request." };
+        if (xdr === preparation || xdr === sponsoredPreparation) {
           log.push("stellar sign PREPARATION");
           return `signed ${xdr}`;
         }
@@ -406,7 +451,16 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
 }
 
 /** The EVM wallet, at its boundary: it signs, the node answers. */
-function connection(options: { reject?: boolean; allowance?: bigint } = {}): Connection {
+function connection(
+  options: {
+    reject?: boolean;
+    allowance?: bigint;
+    receipt?: (args: {
+      hash: Hash;
+      onReplaced?: (r: { reason: string }) => void;
+    }) => Promise<unknown>;
+  } = {},
+): Connection {
   return {
     address: SENDER,
     chainId: ARBITRUM_SEPOLIA,
@@ -423,7 +477,13 @@ function connection(options: { reject?: boolean; allowance?: bigint } = {}): Con
         log.push(`evm read ${call.functionName}`);
         return call.functionName === "allowance" ? (options.allowance ?? 0n) : 10n ** 12n;
       },
-      waitForTransactionReceipt: async () => ({ status: "success" }),
+      waitForTransactionReceipt: async (args: {
+        hash: Hash;
+        onReplaced?: (r: { reason: string }) => void;
+      }) =>
+        options.receipt === undefined
+          ? { status: "success", transactionHash: args.hash }
+          : options.receipt(args),
     },
   } as unknown as Connection;
 }
@@ -475,6 +535,7 @@ describe("runTransfer over a relayed rail", () => {
     await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /settlement",
@@ -612,7 +673,7 @@ describe("runTransfer over a relayed rail", () => {
 
     await expect(run(adapter, route, patches().patch)).rejects.toThrow(/Nothing has been sent/);
     // who pays the reserve decides what can be set up, so only that is asked
-    expect(log).toEqual(["sponsor /health"]);
+    expect(log).toEqual(["stellar read destination", "sponsor /health"]);
     expect(adapter.built).toBe(0);
   });
 
@@ -638,6 +699,42 @@ describe("runTransfer over a relayed rail", () => {
   });
 });
 
+describe("the send's hash", () => {
+  const FASTER = `0x${"c3".repeat(32)}` as Hash;
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+
+  it("is kept, and the transfer is still moving, when its confirmation outlasts the page's wait", async () => {
+    const conn = connection({
+      receipt: async ({ hash }) => {
+        throw new WaitForTransactionReceiptTimeoutError({ hash });
+      },
+    });
+    const { seen, patch } = patches();
+    const error = await run(relayed(), routeFor("layerzero"), patch, conn).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log).toContain(`history ${SEND_HASH}`);
+    expect(seen).toContainEqual({
+      id: "burn",
+      patch: { ref: "0xabab…abab", refUrl: `https://sepolia.arbiscan.io/tx/${SEND_HASH}` },
+    });
+  });
+
+  it("follows a send the wallet sped up, so history holds the one that landed", async () => {
+    const conn = connection({
+      receipt: async ({ onReplaced }) => {
+        onReplaced?.({ reason: "repriced" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    const adapter = relayed();
+    await run(adapter, routeFor("layerzero"), patches().patch, conn);
+    const kept = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{ sourceTxHash: string }>;
+    expect(kept.map((r) => r.sourceTxHash)).toEqual([FASTER]);
+    expect(adapter.asked[0]?.sourceTxHash).toBe(FASTER);
+  });
+});
+
 describe("runTransfer over Circle", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -657,7 +754,10 @@ describe("runTransfer over Circle", () => {
     });
     const { seen, patch } = patches();
 
-    const done = run(cctp, routeFor("cctp", { newAccount: true }), patch);
+    // waits on the clock here, so the twenty seconds between asks can be seen
+    const done = run(cctp, routeFor("cctp", { newAccount: true }), patch, connection(), {
+      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    });
     // the first ask finds no attestation, and the next waits twenty seconds
     await vi.advanceTimersByTimeAsync(19_999);
     expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(1);
@@ -665,6 +765,7 @@ describe("runTransfer over Circle", () => {
     await done;
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /settlement",
@@ -677,6 +778,7 @@ describe("runTransfer over Circle", () => {
       `history ${SEND_HASH}`,
       "sponsor /deliver",
       "sponsor /deliver",
+      "stellar read destination",
       "sponsor /prepare",
       "stellar sign PREPARATION",
       "sponsor /submit",
@@ -692,6 +794,185 @@ describe("runTransfer over Circle", () => {
         note: "Delivered, and the deposit repaid itself from the arrival.",
       },
     });
+  });
+});
+
+describe("a sponsor that fronts the reserve, read before the account signs", () => {
+  const ATTACKER = Keypair.random().publicKey();
+  const USDC = new Asset("USDC", STELLAR_USDC.id.split(":")[1]);
+
+  it("refuses a preparation that also hands the account to someone else", async () => {
+    sponsoredPreparation = new TransactionBuilder(new Account(SPONSOR_STELLAR, "1"), {
+      fee: "1000000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.beginSponsoringFutureReserves({ sponsoredId: DESTINATION }))
+      .addOperation(Operation.changeTrust({ asset: USDC, source: DESTINATION }))
+      .addOperation(Operation.endSponsoringFutureReserves({ source: DESTINATION }))
+      .addOperation(
+        Operation.setOptions({
+          source: DESTINATION,
+          signer: { ed25519PublicKey: ATTACKER, weight: 1 },
+          masterWeight: 0,
+        }),
+      )
+      .setTimeout(300)
+      .build()
+      .toXDR();
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/not signed: it does more than open the account\. Nothing has been sent/);
+    expect(log).not.toContain("stellar sign PREPARATION");
+    expect(log).not.toContain("sponsor /submit");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("refuses a settlement that pays the arrival to someone else, before the burn", async () => {
+    settlementXdr = new TransactionBuilder(new Account(SENDER_STELLAR, "1"), {
+      fee: "1000000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        Operation.pathPaymentStrictReceive({
+          source: DESTINATION,
+          sendAsset: USDC,
+          sendMax: "4.9",
+          destination: ATTACKER,
+          destAsset: Asset.native(),
+          destAmount: "1.5",
+          path: [],
+        }),
+      )
+      .setTimeout(86_400)
+      .build()
+      .toXDR();
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    await expect(
+      run(cctp, routeFor("cctp", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(
+      /not the receiving account buying back its own reserve.*Nothing has been sent/,
+    );
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+    expect(log).not.toContain("sponsor /settlement/commit");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("tells the user the most the repayment may take before they sign it", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    const { seen, patch } = patches();
+    await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
+    expect(seen).toContainEqual({
+      id: "settle",
+      patch: {
+        phase: "blocked",
+        note: "Repays the reserve from what arrives: at most 0.6 USDC.",
+      },
+    });
+  });
+});
+
+describe("after the money has left the wallet", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+
+  it("rides out a dropped connection to the sponsor and keeps asking for the delivery", async () => {
+    deliverReplies = [
+      [0, undefined],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch, connection(), { wait: instant });
+    expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(2);
+    expect(seen).toContainEqual({
+      id: "attest",
+      patch: { phase: "pending", note: "The last check failed (Failed to fetch). Trying again." },
+    });
+    expect(log.at(-1)).toBe("deliver done");
+  });
+
+  it("ends as still moving, with the wallet's own reason, when the late preparation is refused", async () => {
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    refuses = "PREPARATION";
+    const error = await run(
+      cctp(),
+      routeFor("cctp", { newAccount: true }),
+      patches().patch,
+      connection(),
+      { wait: instant },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/The user rejected this request\..*Activity/);
+  });
+});
+
+describe("a page that went away mid-transfer", () => {
+  it("asks for no more signatures once it is gone, and says the transfer is still moving", async () => {
+    const gone = new AbortController();
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    onDeliver = () => gone.abort();
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(
+      cctp,
+      routeFor("cctp", { newAccount: true }),
+      patches().patch,
+      connection(),
+      {
+        signal: gone.signal,
+      },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(1);
+    expect(log).not.toContain("sponsor /prepare");
+    expect(log).not.toContain("stellar sign PREPARATION");
+  });
+
+  it("does not ask for the conversion from a page that is gone, and says what arrived", async () => {
+    const gone = new AbortController();
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+        gone.abort();
+      },
+    });
+    const error = await run(adapter, route, patches().patch, connection(), {
+      signal: gone.signal,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DeliveredAsCame);
+    expect(conversionAmounts).toEqual([]);
   });
 });
 
@@ -749,6 +1030,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
 
     expect(log.filter((l) => !l.startsWith("status"))).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -772,6 +1054,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(cctp, routeFor("cctp", { newAccount: true }), patches().patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -791,6 +1074,35 @@ describe("runTransfer when the account pays its own reserve", () => {
     ]);
   });
 
+  it("over Circle, refuses unsigned a delivery that would authorize anything of the account's", async () => {
+    funding = "self";
+    // a forwarder that, after an upgrade, asked the payer to authorize a token transfer
+    preparedAuth = [
+      new xdr.SorobanAuthorizationEntry({
+        credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+        rootInvocation: new xdr.SorobanAuthorizedInvocation({
+          function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+            new xdr.InvokeContractArgs({
+              contractAddress: xdr.ScAddress.scAddressTypeContract(Buffer.alloc(32, 9) as never),
+              functionName: "transfer",
+              args: [],
+            }),
+          ),
+          subInvocations: [],
+        }),
+      }),
+    ];
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/authorize more than the delivery/);
+    expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
   it("over Circle, has the receiving account deliver and pay for the mint, never the sponsor", async () => {
     funding = "self";
     const cctp = new CctpAdapter({
@@ -802,6 +1114,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     await run(cctp, routeFor("cctp"), patch);
 
     expect(log).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "evm read balanceOf",
@@ -931,6 +1244,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     );
 
     expect(log.filter((l) => !l.startsWith("status"))).toEqual([
+      "stellar read destination",
       "sponsor /health",
       "stellar connect",
       "sponsor /prepare",
@@ -1181,16 +1495,21 @@ describe("runTransfer when the account pays its own reserve", () => {
     });
 
     it("skips the conversion and says the funds stay as they arrived when nothing would be left", async () => {
-      settlementXdr = settlementSpending("6");
+      // a repayment may never claim the whole arrival, so less arrives than it may take
+      settlementXdr = settlementSpending("4.9");
       settleReplies = [[200, { settled: false, settlementRetryable: true }]];
       const adapter = new ScriptedAdapter("layerzero", [delivered()], {
         transactions: [layerZeroSend("777")],
         onStatus: () => {
-          usdcHeld = 50_000_000n;
+          usdcHeld = 40_000_000n;
         },
       });
       const { seen, patch } = patches();
-      await run(adapter, fronted(), patch);
+      // arrived, and stays as it came: told apart from a completed conversion
+      const error = await run(adapter, fronted(), patch).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(DeliveredAsCame);
+      expect((error as DeliveredAsCame).baseUnits).toBe("40000000");
+      expect((error as DeliveredAsCame).decimals).toBe(7);
       expect(conversionAmounts).toEqual([]);
       expect(seen.filter((p) => p.id === "swap").at(-1)?.patch).toMatchObject({
         phase: "done",
@@ -1224,6 +1543,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(conversionAmounts).toEqual(["50000000"]);
   });
 
+  it("ends a conversion that could not run after the money arrived as delivered as it came", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+      },
+    });
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    // the exchange does not answer (the harness's find-path is a 503)
+    const error = await run(adapter, route, patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DeliveredAsCame);
+    expect((error as DeliveredAsCame).asset).toBe("USDC");
+    expect((error as DeliveredAsCame).baseUnits).toBe("50000000");
+  });
+
   it("will not start a conversion it could not tell apart from other arrivals", async () => {
     const base = routeFor("layerzero", { swap: true });
     const route = { ...base, steps: base.steps.filter((step) => step.kind !== "bridge") };
@@ -1249,6 +1595,33 @@ describe("runTransfer when the account pays its own reserve", () => {
   });
 });
 
+describe("burnDomain", () => {
+  it("finds the Circle domain a burn left from when this browser did not send it", async () => {
+    irisByDomain = { "6": attested };
+    const engine = {
+      ...engineWith(new ScriptedAdapter("cctp", [])),
+      sourceChains: [
+        { id: "ethereum-sepolia", name: "Ethereum Sepolia" },
+        { id: "base-sepolia", name: "Base Sepolia" },
+        { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" },
+      ],
+      sourceDomain: (id: string) =>
+        ({ "ethereum-sepolia": 0, "base-sepolia": 6, "arbitrum-sepolia": 3 })[id] ?? Number.NaN,
+    };
+    expect(await burnDomain(engine, SEND_HASH)).toBe(6);
+  });
+
+  it("says so when no domain Circle serves has the burn", async () => {
+    irisByDomain = {};
+    const engine = {
+      ...engineWith(new ScriptedAdapter("cctp", [])),
+      sourceChains: [{ id: "ethereum-sepolia", name: "Ethereum Sepolia" }],
+      sourceDomain: () => 0,
+    };
+    expect(await burnDomain(engine, SEND_HASH)).toBeUndefined();
+  });
+});
+
 describe("finishing a Circle delivery from Activity", () => {
   const cctp = () =>
     new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
@@ -1265,5 +1638,138 @@ describe("finishing a Circle delivery from Activity", () => {
     const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3);
     expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
     expect(log).toEqual(["sponsor /health", "sponsor /deliver"]);
+  });
+
+  /** An attested burn whose hook data names `recipient`, laid out as Circle's v2 message is. */
+  const attestedTo = (recipient: string) => {
+    const hook = buildForwarderHookData(recipient);
+    const message = new Uint8Array(148 + 228 + hook.length);
+    message.set(hook, 148 + 228);
+    irisReplies = [
+      [
+        200,
+        {
+          messages: [
+            {
+              status: "complete",
+              message: toHex(message),
+              attestation: "0x0304",
+              decodedMessage: {},
+            },
+          ],
+        },
+      ],
+    ];
+  };
+
+  it("prepares a new account the flow never got to, checked, then delivers", async () => {
+    attestedTo(DESTINATION);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log).toEqual([
+      "sponsor /health",
+      "sponsor /deliver",
+      "iris /v2/messages/3",
+      "stellar connect",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "sponsor /deliver",
+    ]);
+  });
+
+  it("prepares nothing when the connected wallet is not the account Circle will mint to", async () => {
+    attestedTo(SENDER_STELLAR);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "recipient-not-ready" });
+    expect(outcome.kind === "recipient-not-ready" && outcome.detail).toMatch(/GAAZI…CWN7/);
+    expect(log).not.toContain("sponsor /prepare");
+  });
+});
+
+describe("a destination that cannot receive at all", () => {
+  it("is refused over Circle with its reason, before any signature or trustline", async () => {
+    const pool = StrKey.encodeLiquidityPool(Buffer.alloc(32, 7));
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    for (const newAccount of [false, true]) {
+      log = [];
+      const route = { ...routeFor("cctp", { newAccount }), destination: pool };
+      await expect(run(cctp, route, patches().patch)).rejects.toThrow(
+        /liquidity-pool address cannot receive a payment.*Nothing has been sent/,
+      );
+      expect(log.some((l) => l.startsWith("evm") || l.startsWith("stellar sign"))).toBe(false);
+      expect(log).not.toContain("sponsor /prepare");
+    }
+  });
+});
+
+describe("what the sponsor answers back", () => {
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+  const stale = {
+    error: "The sponsor's account moved on before this preparation went out, so it can never land.",
+    retryable: true,
+    prepareAgain: true,
+  };
+
+  it("asks for a new preparation once when the old one can never land, and signs that", async () => {
+    submitRefusals = [[409, stale]];
+    await run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch);
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+    expect(log.filter((l) => l === "stellar sign PREPARATION")).toHaveLength(2);
+    expect(log.filter((l) => l === "sponsor /submit")).toHaveLength(2);
+    expect(log).toContain(`history ${SEND_HASH}`);
+  });
+
+  it("does not ask a third time, and says nothing was sent", async () => {
+    submitRefusals = [
+      [409, stale],
+      [409, stale],
+    ];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/can never land.*Nothing has been sent/);
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it.each([
+    [429, "This address already has as many settlements waiting as it may."],
+    [503, "Every settlement slot is in use. Try again shortly."],
+  ])(
+    "turns a busy settlement answer (%i) into a plain retry, signing nothing",
+    async (status, said) => {
+      settlementRefusals = [[status, { error: said, retryable: true }]];
+      const error = await run(
+        relayed(),
+        routeFor("layerzero", { newAccount: true }),
+        patches().patch,
+      ).catch((e: unknown) => e);
+      expect((error as Error).message).toBe(
+        `${said} Nothing has been sent, and the transfer is ready to start again in a moment.`,
+      );
+      expect(log.some((l) => l.startsWith("stellar sign") || l.startsWith("evm"))).toBe(false);
+    },
+  );
+});
+
+describe("holdBlocker", () => {
+  it("lets a ready trustline through, opens a missing one, and refuses an unusable one", () => {
+    expect(holdBlocker({ kind: "ready", slotsNeeded: 0 }, "USDC")).toBeUndefined();
+    expect(holdBlocker({ kind: "needs-trustline", slotsNeeded: 1 }, "USDC")).toBe("opens");
+    expect(
+      holdBlocker({ kind: "unusable", slotsNeeded: 0, reason: "It is not authorised." }, "USDC"),
+    ).toMatch(/not authorised.*Nothing has been sent/);
   });
 });

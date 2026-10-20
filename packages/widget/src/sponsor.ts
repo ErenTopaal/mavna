@@ -2,9 +2,10 @@
  * Talking to the sponsor service, which is the only server in the product.
  *
  * It exists because sponsorship needs a funded signer and a funded signer cannot
- * live in a browser. Everything it can do is three calls: build a preparation
- * for the user to sign, submit the signed result at its own expense, and
- * trigger the delivery of an attested transfer. Nothing here touches user funds.
+ * live in a browser. It builds what the user signs (a preparation, a held
+ * settlement), submits what they signed at its own expense, delivers attested
+ * Circle transfers, takes its repayment, and finishes overdue conversions on
+ * arrival. Nothing here touches user funds.
  *
  * The URL is configuration, so an integrator points this at a sponsor they run
  * with their own keys, and our limits are never silently theirs. `createSponsorClient`
@@ -15,6 +16,23 @@
 interface SponsorError {
   readonly error: string;
   readonly retryable: boolean;
+  readonly prepareAgain?: boolean;
+}
+
+/** A refusal the sponsor answered, with what it said about trying again. */
+export class SponsorRefusal extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+  /** The preparation can never land; a new one, signed again, can. */
+  readonly prepareAgain: boolean;
+
+  constructor(message: string, status: number, retryable: boolean, prepareAgain: boolean) {
+    super(message);
+    this.name = "SponsorRefusal";
+    this.status = status;
+    this.retryable = retryable;
+    this.prepareAgain = prepareAgain;
+  }
 }
 
 export type SponsorDelivery =
@@ -111,7 +129,18 @@ export interface SponsorClient {
   sponsorIsUp(): Promise<boolean>;
 }
 
-export function createSponsorClient(baseUrl: string): SponsorClient {
+/**
+ * How long one call to the sponsor is waited for. /deliver submits a mint and
+ * waits for its ledger, which takes seconds; a sponsor silent for a minute is
+ * not coming back on this call, and the caller's own retry asks again.
+ */
+const SPONSOR_PATIENCE_MS = 60_000;
+
+export function createSponsorClient(
+  baseUrl: string,
+  options: { readonly timeoutMs?: number } = {},
+): SponsorClient {
+  const patience = options.timeoutMs ?? SPONSOR_PATIENCE_MS;
   interface Answer {
     status: number;
     ok: boolean;
@@ -124,12 +153,22 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
    * error nobody can act on.
    */
   async function send(path: string, body: Record<string, unknown>): Promise<Answer> {
-    const response = await fetch(`${baseUrl}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(patience),
+      });
+      text = await response.text();
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "TimeoutError") {
+        throw new Error("The sponsor did not answer in time.");
+      }
+      throw cause;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -139,10 +178,15 @@ export function createSponsorClient(baseUrl: string): SponsorClient {
     return { status: response.status, ok: response.ok, body: parsed };
   }
 
-  function failure(answer: Answer): Error {
+  function failure(answer: Answer): SponsorRefusal {
     // The server writes its errors for people, so they pass through as said.
-    const said = (answer.body as Partial<SponsorError> | null)?.error;
-    return new Error(said ?? `The sponsor answered ${answer.status}.`);
+    const body = answer.body as Partial<SponsorError> | null;
+    return new SponsorRefusal(
+      body?.error ?? `The sponsor answered ${answer.status}.`,
+      answer.status,
+      body?.retryable === true,
+      body?.prepareAgain === true,
+    );
   }
 
   async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
