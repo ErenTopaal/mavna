@@ -21,7 +21,8 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "turbo run test test:scripts",
+    "test:scripts": "vitest run --project unit scripts",
     "test:live": "turbo run test:live",
     "typecheck": "turbo run typecheck",
     "lint": "biome check . && oxlint --type-aware && node scripts/check-exports.mjs",

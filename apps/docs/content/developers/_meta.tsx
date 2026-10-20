@@ -7,6 +7,7 @@ export default {
   concepts: { title: nav("concepts", "Concepts") },
   rails: { title: nav("rails", "Rails and networks") },
   sponsor: { title: nav("server", "Sponsor service") },
+  deploy: { title: nav("server", "Deploy to production") },
   reference: { title: nav("braces", "Reference") },
   security: { title: nav("shield", "Security") },
 };

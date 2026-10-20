@@ -4,7 +4,10 @@
  * Node 24 executes TypeScript directly, so there is no build step between reading
  * this and seeing a real quote:
  *
- *   node examples/quote.ts GDESTINATION... 25 ethereum-sepolia
+ *   node examples/quote.ts GDESTINATION... 25 ethereum-sepolia [0xSENDER]
+ *
+ * The sender is the wallet the USDC leaves from. Only NEAR Intents needs it, to
+ * know where a refund goes, and only when it is the route being built.
  *
  * Everything here talks to the live network. The fee comes from Circle and the
  * state of the destination is read off Stellar, so a wrong address produces a
@@ -13,7 +16,8 @@
 import { AxelarAdapter } from "@mavna/adapter-axelar";
 import { CCTP_CONTRACTS, CctpAdapter, EVM_DEPLOYMENTS } from "@mavna/adapter-cctp";
 import { LayerZeroAdapter } from "@mavna/adapter-layerzero";
-import type { Asset, NetworkId, Route } from "@mavna/core";
+import { NearIntentsAdapter } from "@mavna/adapter-near-intents";
+import type { Asset, BridgeAdapter, NetworkId, Route } from "@mavna/core";
 import { raceAdapters } from "@mavna/routing";
 import {
   createNetworkConfig,
@@ -58,12 +62,21 @@ const layerzero = new LayerZeroAdapter({
   baseReserveStroops: config.baseReserveStroops,
 });
 
+const nearIntents = new NearIntentsAdapter({
+  network: NETWORK,
+  rpc,
+  baseReserveStroops: config.baseReserveStroops,
+});
+
+const adapters: readonly BridgeAdapter[] = [cctp, axelar, layerzero, nearIntents];
+
 const destination = process.argv[2];
 const amount = process.argv[3] ?? "25";
 const sourceChainId = process.argv[4] ?? "ethereum-sepolia";
+const sender = process.argv[5];
 
 if (destination === undefined) {
-  console.error("Pass a Stellar address: node examples/quote.ts G... [amount] [chain]");
+  console.error("Pass a Stellar address: node examples/quote.ts G... [amount] [chain] [sender]");
   process.exit(1);
 }
 
@@ -84,7 +97,7 @@ const from: Asset = {
 };
 
 const to: Asset = {
-  chainId: "stellar-testnet",
+  chainId: NETWORK === "mainnet" ? "stellar" : "stellar-testnet",
   id: `USDC:${CCTP_CONTRACTS[NETWORK].usdcIssuer}`,
   symbol: "USDC",
   decimals: 7,
@@ -95,10 +108,10 @@ const to: Asset = {
 // a defect, not a shortcut.
 const baseUnits = toBaseUnits(amount, from.decimals);
 
-// All three rails at once. A slow one costs its own route and nothing else, and
+// Every rail at once. A slow one costs its own route and nothing else, and
 // onUpdate lets an interface render each answer as it lands instead of waiting
 // for the last of them.
-const routes = await raceAdapters([cctp, axelar, layerzero], {
+const routes = await raceAdapters(adapters, {
   from,
   to,
   sends: { asset: from, baseUnits },
@@ -106,8 +119,8 @@ const routes = await raceAdapters([cctp, axelar, layerzero], {
   maxSlippageBps: 50,
 });
 
-// A rail that cannot carry this transfer says so, and says why. On testnet two
-// of these three will decline, which is the honest picture rather than a fault.
+// A rail that cannot carry this transfer says so, and says why. On testnet all
+// but Circle decline, which is the honest picture rather than a fault.
 for (const rejection of routes.rejected) {
   console.error(`${rejection.source} declined (${rejection.reason}): ${rejection.explanation}`);
 }
@@ -118,8 +131,12 @@ if (route === undefined) process.exit(1);
 describe(route);
 
 // Building is separate from quoting, and it neither signs nor submits. What comes
-// back is what to send; the wallet is the only thing that holds a key.
-const transactions = await cctp.buildTransactions(route);
+// back is what to send; the wallet is the only thing that holds a key. Only the
+// rail that quoted a route can build it, and the best route can come from any of
+// them.
+const builder = adapters.find((adapter) => adapter.id === route.source);
+if (builder === undefined) throw new Error(`No adapter here quoted ${route.source}.`);
+const transactions = await builder.buildTransactions(route, { sender });
 console.log(`\n${transactions.length} transactions to sign, in this order:`);
 for (const tx of transactions) {
   const conditional = tx.unnecessaryWhen === undefined ? "" : "  (skippable, see unnecessaryWhen)";

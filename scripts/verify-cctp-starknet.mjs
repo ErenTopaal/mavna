@@ -20,7 +20,7 @@ import { keccak256, toBytes } from "viem";
 
 const NETWORKS = {
   testnet: {
-    rpc: ["https://starknet-sepolia-rpc.publicnode.com", "https://starknet-sepolia.drpc.org"],
+    rpc: ["https://starknet-sepolia.drpc.org", "https://starknet-sepolia-rpc.publicnode.com"],
     tokenMessengerMinterV2: "0x04bDdE1E09a4B09a2F95d893D94a967b7717eB85A3f6dEcA8c080Ee01fBc3370",
     messageTransmitterV2: "0x04db7926C64f1f32a840F3Fa95cB551f3801a3600Bae87aF87807A54DCE12Fe8",
     usdc: "0x512feac6339ff7889822cb5aa2a86c848e9d392bb0e3e237c008674feed8343",
@@ -29,8 +29,11 @@ const NETWORKS = {
     seedToken: 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238n,
   },
   mainnet: {
-    // lava has been discontinued and drpc does not serve starknet_getClassHashAt
-    rpc: ["https://starknet-rpc.publicnode.com", "https://starknet.api.onfinality.io/public"],
+    rpc: [
+      "https://starknet.drpc.org",
+      "https://starknet-rpc.publicnode.com",
+      "https://starknet.api.onfinality.io/public",
+    ],
     tokenMessengerMinterV2: "0x07d421B9cA8aA32DF259965cDA8ACb93F7599F69209A41872AE84638B2A20F2a",
     messageTransmitterV2: "0x02EBB5777B6dD8B26ea11D68Fdf1D2c85cD2099335328Be845a28c77A8AEf183",
     usdc: "0x33068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb",
@@ -60,38 +63,23 @@ const note = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
-/**
- * Whether a contract exists, or a thrown error when no endpoint could say.
- *
- * Only Starknet's own "Contract not found" (error 20) is a no. A rate limit or
- * an endpoint that does not serve the method says nothing about the contract,
- * and reading it as absent once printed a deployed transmitter as missing and
- * would pass the cross-network check for the wrong reason.
- */
-async function deployedAt(config, address) {
-  try {
-    await rpc(url(config), "starknet_getClassHashAt", {
-      block_id: "latest",
-      contract_address: address,
-    });
-    return true;
-  } catch (error) {
-    if (/Contract not found/i.test(String(error))) return false;
-    throw new Error(`could not check ${address}: ${String(error?.message ?? error)}`);
-  }
-}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const ABSENT = /Contract not found|entrypoint does not exist/i;
+const THROTTLED = /limit|quota|rate|too many/i;
 
 /**
- * Ask, trying each endpoint before believing a failure.
+ * Ask, trying each endpoint before believing a failure, and backing off when
+ * told to slow down.
  *
  * One provider answered `starknet_getClassAt` and then claimed `starknet_call`
  * did not exist, on the same host in the same run. A single flaky endpoint must
- * not be reported as a chain that has no deployment.
+ * not be reported as a chain that has no deployment, and neither must a public
+ * endpoint's 429: being throttled is not being absent.
  */
 async function rpc(urls, method, params) {
   let last;
   for (const url of [urls].flat()) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -99,31 +87,48 @@ async function rpc(urls, method, params) {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
           signal: AbortSignal.timeout(60_000),
         });
+        if (response.status === 429 || response.status >= 500) {
+          last = new Error(`${url} answered HTTP ${response.status}`);
+          await wait(600 * 2 ** attempt);
+          continue;
+        }
         const body = await response.json();
         if (body.error) {
-          const message = JSON.stringify(body.error);
+          const message = JSON.stringify(body.error).slice(0, 160);
           // A contract that is genuinely absent is an answer, not an outage, so it
           // is returned rather than retried against the next endpoint.
-          if (/Contract not found|entrypoint does not exist/i.test(message)) {
-            throw new Error(message.slice(0, 160));
-          }
-          last = new Error(message.slice(0, 160));
-          // slowed down is not refused: wait and ask the same endpoint again
-          if (/too many|rate limit|-32029/i.test(message)) {
-            await new Promise((resolve) => setTimeout(resolve, 1500 * 2 ** attempt));
+          if (ABSENT.test(message)) throw new Error(message);
+          last = new Error(message);
+          if (THROTTLED.test(message)) {
+            await wait(600 * 2 ** attempt);
             continue;
           }
           break;
         }
         return body.result;
       } catch (error) {
-        if (/Contract not found|entrypoint does not exist/i.test(String(error))) throw error;
+        if (ABSENT.test(String(error))) throw error;
         last = error;
         break;
       }
     }
   }
   throw last ?? new Error("no endpoint answered");
+}
+
+/**
+ * Whether a contract is deployed, from an answer: true when the class is
+ * found, false when the node says there is no contract. An outage throws,
+ * rather than reading as an absent deployment.
+ */
+async function deployedAt(urls, address) {
+  try {
+    await rpc(urls, "starknet_getClassHashAt", { block_id: "latest", contract_address: address });
+    return true;
+  } catch (error) {
+    if (ABSENT.test(String(error))) return false;
+    throw error;
+  }
 }
 
 const call = (url, contract, name, calldata) =>
@@ -136,13 +141,14 @@ for (const [network, config] of Object.entries(NETWORKS)) {
   console.log(`\n== ${network}`);
 
   for (const name of ["tokenMessengerMinterV2", "messageTransmitterV2"]) {
-    note(await deployedAt(config, config[name]), `${name} is deployed on ${network}`);
+    const deployed = await deployedAt(url(config), config[name]);
+    note(deployed, `${name} is deployed on ${network}`);
   }
 
   // The same address must NOT resolve on the other network, or we have simply
   // written the same contract down twice.
   const other = network === "testnet" ? NETWORKS.mainnet : NETWORKS.testnet;
-  const bleeds = await deployedAt(config, other.tokenMessengerMinterV2);
+  const bleeds = await deployedAt(url(config), other.tokenMessengerMinterV2);
   note(!bleeds, `the other network's messenger is absent here, so the two are distinct`);
 
   const cls = await rpc(url(config), "starknet_getClassAt", {

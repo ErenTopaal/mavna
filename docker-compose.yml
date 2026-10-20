@@ -4,23 +4,25 @@
 #
 #   SPONSOR_SECRET_KEY=S... docker compose up
 #
-# Two services. The app is static files behind a web server; the sponsor is the
-# one process with a key, and its section says exactly what that key can do.
+# Two services after a one-off build. The app is static files behind a web
+# server; the sponsor is the one process with a key, and its section says
+# exactly what that key can do.
 services:
-  app:
+  # Installs and builds once for both services. Two installs into the one
+  # checkout race on pnpm's store and fail. Built through turbo with the
+  # trailing "...", because the workspace packages resolve to their dist/ and a
+  # fresh checkout has none.
+  build:
     image: node:24.19.0-alpine
     working_dir: /repo
     volumes:
       - .:/repo
-    # Preview rather than dev: the dev server inlines CSS through Vite's own
-    # pipeline, which serves a bundle no integrator ever receives.
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
              pnpm install --frozen-lockfile &&
-             pnpm --filter @mavna/app build &&
-             pnpm --filter @mavna/app exec vite preview --host --port 4319 --strictPort"
-    ports:
-      - "4319:4319"
+             pnpm turbo run build --filter=@mavna/app... --filter=@mavna/sponsor-service..."
+    # The app's settings are inlined when it is built, so they belong here. The
+    # build refuses to run without a sponsor url; this one is the sponsor below.
     environment:
       VITE_MAVNA_NETWORK: ${MAVNA_NETWORK:-testnet}
       VITE_STELLAR_RPC_URL: ${STELLAR_RPC_URL:-}
@@ -32,6 +34,20 @@ services:
       VITE_MAVNA_MAINNET_RPC_URL: ${MAVNA_MAINNET_RPC_URL:-}
       VITE_MAVNA_MAINNET_SPONSOR_URL: ${MAVNA_MAINNET_SPONSOR_URL:-}
 
+  app:
+    image: node:24.19.0-alpine
+    working_dir: /repo/apps/app
+    volumes:
+      - .:/repo
+    depends_on:
+      build:
+        condition: service_completed_successfully
+    # Preview rather than dev: the dev server inlines CSS through Vite's own
+    # pipeline, which serves a bundle no integrator ever receives.
+    command: node_modules/.bin/vite preview --host --port 4319 --strictPort
+    ports:
+      - "4319:4319"
+
   # The only process holding a key. It prepares accounts it pays for, triggers
   # deliveries whose recipient Circle's attestation already fixed, finishes
   # overdue conversions on arrival as fee source, and funds its own channels,
@@ -40,11 +56,10 @@ services:
   sponsor:
     image: node:24.22.0-alpine
     working_dir: /repo
-    command: >
-      sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
-             pnpm install --frozen-lockfile &&
-             pnpm --filter @mavna/sponsor-service build &&
-             node services/sponsor/dist/main.mjs"
+    depends_on:
+      build:
+        condition: service_completed_successfully
+    command: node services/sponsor/dist/main.mjs
     # Loopback only. Clients reach it through the reverse proxy in front, which
     # is what MAVNA_TRUST_PROXY=true assumes: a port open to the world would let
     # anyone set X-Forwarded-For and choose their own rate-limit identity.

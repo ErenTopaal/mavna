@@ -9,7 +9,9 @@
     "STELLAR_RPC_URL",
     "STELLAR_RPC_URL_TESTNET",
     "STELLAR_RPC_URL_MAINNET",
-    "PHAROS_TESTNET_RPC_URL"
+    "PHAROS_TESTNET_RPC_URL",
+    "MAVNA_TEST_PORT",
+    "MAVNA_RECORD"
   ],
   "tasks": {
     "build": {
@@ -32,6 +34,13 @@
     "size": {
       "dependsOn": ["build"],
       "inputs": ["dist/**", "package.json"]
+    },
+    "//#test:scripts": {
+      "dependsOn": [
+        "@mavna/sponsor-service#build",
+        "@mavna/stellar#build",
+        "@mavna/adapter-cctp#build"
+      ]
     }
   }
 }

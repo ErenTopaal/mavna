@@ -63,12 +63,17 @@ carries a `because`, so a failure is never a message with nothing to do beside i
 because a returned transfer rendered as a plain success is a lie about someone's
 money.
 
-The last three belong to a conversion on arrival. `delivered-conversion-pending`
-means the money reached the converting contract and the conversion has not run;
-it is not terminal, and `finish` carries what completing it takes.
-`delivered-and-converted` is a success. `delivered-as-came` is an ending but not
-a success: the conversion could not meet the user's minimum, so the arriving
-asset was delivered unchanged.
+The last three belong to a route that converts on arrival, where the Arrival
+Contract swaps what LayerZero delivers into the asset the user asked for:
+
+- `delivered-conversion-pending` is not an ending. The funds are on Stellar, held
+  by a step anyone may complete, and `finish` (when it is known) carries the exact
+  queued message that completes it. See [delivery](/developers/concepts/delivery).
+- `delivered-and-converted` is success: the contract converted and sent the
+  wanted asset on, and `fee` is the integrator's cut when one was set.
+- `delivered-as-came` is an ending of its own and never a success: the conversion
+  could not meet the user's minimum, so the arriving token was sent on unchanged,
+  and `because` says so. `isSuccess` is false for it, while `isTerminal` is true.
 
 ## The state machine
 
@@ -78,8 +83,9 @@ becomes two. A finished step never changes again, and an unfinished one never
 moves to an earlier phase, with one exception: a `stalled` step goes back to
 `pending` when the update carries a new transaction, which is what acting on its
 remedy looks like. `progressOf` reports how far along a transfer is and whether
-it needs the user, and `outcomeOf` collapses the steps to one word, with
-`failed`, `refunded`, `partial` and then `delivered-as-came` taking precedence
-over `succeeded`. A transfer with no steps is `in-flight`, never `succeeded`. There is no single
+it needs the user, and `outcomeOf` collapses the steps to one word: `failed`, then
+`refunded`, then `partial`, then `delivered-as-came` take precedence, and
+`succeeded` needs every step at `done` or `delivered-and-converted`; anything else,
+including a transfer with no steps, is `in-flight`. There is no single
 "track this" call to make; you assemble tracking from these functions and a store,
 which is what lets the same machine drive a live transfer and a resumed one.

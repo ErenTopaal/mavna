@@ -18,3 +18,4 @@ apps/docs/generated/
 shot.png
 target/
 test_snapshots/
+.claude/

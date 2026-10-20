@@ -42,10 +42,21 @@ const keypair = Keypair.random();
 const response = await fetch(`https://friendbot.stellar.org?addr=${keypair.publicKey()}`, {
   signal: AbortSignal.timeout(30_000),
 });
-// 400 means Friendbot has already funded this address, which is a success here.
-if (!response.ok && response.status !== 400) {
-  console.error(`Friendbot refused: ${response.status}`);
-  process.exit(1);
+// Friendbot answers an address it already funded with a 400 saying so, which is
+// still a funded account. Any other refusal leaves the key unfunded, and an
+// unfunded key in .env would only fail later, at the first delivery it pays for.
+if (!response.ok) {
+  const text = await response.text();
+  let detail;
+  try {
+    detail = JSON.parse(text)?.detail;
+  } catch {
+    detail = undefined;
+  }
+  if (response.status !== 400 || !/already funded/i.test(String(detail))) {
+    console.error(`Friendbot refused: ${response.status} ${detail ?? text.slice(0, 200)}`);
+    process.exit(1);
+  }
 }
 
 appendFileSync(

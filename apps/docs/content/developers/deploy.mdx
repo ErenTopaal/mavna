@@ -1,0 +1,125 @@
+---
+title: Deploy to production
+description: The exact settings a hosted deployment needs, for the four pages and the sponsor, on testnet and mainnet, and how to check them once it is up.
+---
+
+# Deploy to production
+
+Everything a hosted Mavna needs is below, for Mavna's own deployment and for
+yours. [Run the whole thing](/developers/install#run-the-whole-thing) covers a
+local copy; this page is what changes when real users reach it.
+
+## The pages
+
+The app, the landing page, the playground and the docs are static builds. Each one
+inlines the sponsor it calls at build time, and a production build stops with the
+variable's name when it is missing, so a hosted page can never quietly call
+`http://localhost:8787`, which no visitor can reach.
+
+Build from the repository root through turbo, which builds the packages first:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm turbo run build --filter=@mavna/app... --filter=@mavna/web... \
+  --filter=@mavna/playground... --filter=@mavna/docs...
+```
+
+| Page | Variable | Mavna's testnet value |
+| --- | --- | --- |
+| App (`mavna.app`) | `VITE_MAVNA_SPONSOR_URL` | `https://sponsor.mavna.app` |
+| App | `VITE_MAVNA_NETWORK` | `testnet` |
+| App | `VITE_STELLAR_RPC_URL` | empty: the public testnet node |
+| Landing (`web.mavna.app`) | `VITE_MAVNA_SPONSOR_URL` | `https://sponsor.mavna.app` |
+| Playground (`playground.mavna.app`) | `VITE_MAVNA_SPONSOR_URL` | `https://sponsor.mavna.app` |
+| Docs (`docs.mavna.app`) | `NEXT_PUBLIC_MAVNA_SPONSOR_URL` | `https://sponsor.mavna.app` |
+
+The landing page, the playground and the docs run their widgets on testnet, so
+their sponsor is always a testnet one.
+
+For mainnet the app needs its own sponsor, since a sponsor serves one network:
+`VITE_MAVNA_NETWORK=mainnet`, `VITE_MAVNA_SPONSOR_URL` naming the mainnet sponsor,
+and `VITE_STELLAR_RPC_URL` naming your own Stellar RPC provider (the foundation
+runs no public mainnet node). To offer both networks behind the header toggle, set
+`VITE_MAVNA_NETWORKS=testnet,mainnet` with `VITE_MAVNA_TESTNET_SPONSOR_URL` and
+`VITE_MAVNA_MAINNET_SPONSOR_URL`; the build refuses a listed network without one.
+
+## The sponsor
+
+One sponsor per network, each its own process, key, state directory and hostname.
+
+| Variable | Testnet (`sponsor.mavna.app`) | Mainnet |
+| --- | --- | --- |
+| `MAVNA_NETWORK` | `testnet` | `mainnet` |
+| `SPONSOR_SECRET_KEY` | the testnet sponsor key | its own key, never the testnet one |
+| `STELLAR_RPC_URL` | empty: the public testnet node | your own provider |
+| `MAVNA_RESERVE_FUNDING` | `sponsor` | `self` |
+| `MAVNA_STATE_DIR` | a persistent private volume, e.g. `/var/lib/mavna` | a different persistent private volume |
+| `MAVNA_TRUST_PROXY` | `true` | `true` |
+| `MAVNA_ALLOWED_ORIGINS` | `https://mavna.app,https://www.mavna.app,https://web.mavna.app,https://playground.mavna.app,https://docs.mavna.app` | the app's origins only |
+| `SOROSWAP_API_KEY` | set | set |
+| `MAVNA_CHANNEL_POOL_SIZE` | sized to concurrent new-account transfers | not used in `self` mode |
+| `MAVNA_ARRIVAL_CONTRACT` | `CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A` | none: no mainnet deployment yet |
+| `MAVNA_ARRIVAL_EXECUTOR_SECRET` | a separate executor key | none |
+
+Why each one matters:
+
+- **`MAVNA_STATE_DIR` is not optional in production.** Without it the caps, held
+  settlements, built preparations and channel keys live in memory, and every
+  restart (a crash, a reboot, a redeploy) drops them: XLM funded into a channel
+  becomes unreachable, a reserve fronted for a settlement that was waiting on
+  delivery is never repaid, and the daily caps start again from zero. Mount it on
+  a volume that outlives the container, readable only by the sponsor; the process
+  creates it `0700`. Each network gets its own directory.
+- **`MAVNA_TRUST_PROXY=true`, with the port bound to loopback.** Behind a reverse
+  proxy every request otherwise arrives from the proxy's address, so all users
+  share one rate limit and one client could exhaust it for everyone. It is safe
+  only when the proxy is the one way in: publish the port as `127.0.0.1:8787` and
+  let the proxy, which appends the client to `X-Forwarded-For`, face the internet.
+- **`MAVNA_RESERVE_FUNDING`.** Testnet runs `sponsor`: the sponsor fronts new
+  accounts' reserves and pays Circle's deliveries on Stellar. Mainnet runs `self`:
+  the sponsor spends nothing, new addresses are declined, and the receiving account
+  pays its own trustline and delivery.
+- **`MAVNA_ALLOWED_ORIGINS`** must list every page whose widget calls this sponsor,
+  the docs included. A page left out gets its Circle routes declined as
+  unreachable.
+- **`SOROSWAP_API_KEY`** keeps the Soroswap venue in the conversion leg. The key
+  stays on the server; without it, conversions use SushiSwap and Aquarius only.
+- **`MAVNA_CHANNEL_POOL_SIZE`.** One channel carries one new-account settlement in
+  flight, and a signed settlement can hold its channel for up to a day. With one
+  channel, a second new-account transfer during that time is turned away with
+  `503`. Each channel costs 2 XLM of the sponsor's.
+- **The Arrival Contract** pair lets the testnet sponsor finish overdue
+  conversions on arrival and keep the contract alive. Mainnet has no contract
+  until it is independently audited.
+
+Run it with the state on a named volume and the port on loopback only:
+
+```sh
+docker run -d --restart unless-stopped --name mavna-sponsor \
+  --env-file sponsor.env \
+  -v mavna-sponsor-state:/var/lib/mavna \
+  -p 127.0.0.1:8787:8787 \
+  -v "$PWD":/repo -w /repo node:24.19.0-alpine \
+  node services/sponsor/dist/main.mjs
+```
+
+`sponsor.env` holds the variables above and is readable only by its owner. A
+reverse proxy in front, for example Caddy, which discards any `X-Forwarded-For` a
+client sends and sets its own:
+
+```
+sponsor.mavna.app {
+  reverse_proxy 127.0.0.1:8787
+}
+```
+
+## Check it once it is up
+
+- The start-up log has no line saying `MAVNA_STATE_DIR is not set`.
+- `curl https://sponsor.mavna.app/health` names the network and the reserve
+  funding you meant: `"network":"testnet"` and `"reserveFunding":"sponsor"` here,
+  `mainnet` and `self` on the mainnet sponsor.
+- After a restart the log still has no such line, and `ls` on the volume shows the
+  state files the sponsor wrote.
+- Open each page, pick a Circle route with a real address, and see it quote. A
+  page built without its sponsor never gets this far: its build stopped.

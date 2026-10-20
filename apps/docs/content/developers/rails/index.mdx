@@ -12,18 +12,12 @@ a different [trust model](/developers/concepts/trust), which is the comparison t
 routing engine exists to show. The engine races every rail on offer on each quote,
 and each one answers for itself.
 
-| | [Circle CCTP](/developers/rails/cctp) | [Axelar ITS](/developers/rails/axelar) | [LayerZero OFT](/developers/rails/layerzero) |
-| --- | --- | --- | --- |
-| Adapter | `@mavna/adapter-cctp`, id `cctp` | `@mavna/adapter-axelar`, id `axelar` | `@mavna/adapter-layerzero`, id `layerzero` |
-| Trust model | `native-mint` | `validator-set` | `dvn-stack` |
-| Mechanism | The issuer burns on the source and mints on Stellar | A validator set attests; tokens move through the Interchain Token Service hub | Tokens implement OFT; verifiers chosen per token check each message |
-| Assets | USDC | Interchain Token Service tokens; USDC arrives as Axelar-wrapped USDC.axl, not Circle USDC | USDT0 on mainnet, plus any OFT you name yourself |
-
-A fourth rail, [NEAR Intents](/developers/rails/near-intents)
-(`@mavna/adapter-near-intents`, id `near-intents`, trust model `solver-network`),
-takes an ERC-20 deposit into an address 1Click hands out and has competing solvers
-deliver USDC or XLM on Stellar. It runs on mainnet only, because 1Click has no test
-network.
+| | [Circle CCTP](/developers/rails/cctp) | [Axelar ITS](/developers/rails/axelar) | [LayerZero OFT](/developers/rails/layerzero) | [NEAR Intents](/developers/rails/near-intents) |
+| --- | --- | --- | --- | --- |
+| Adapter | `@mavna/adapter-cctp`, id `cctp` | `@mavna/adapter-axelar`, id `axelar` | `@mavna/adapter-layerzero`, id `layerzero` | `@mavna/adapter-near-intents`, id `near-intents` |
+| Trust model | `native-mint` | `validator-set` | `dvn-stack` | `solver-network` |
+| Mechanism | The issuer burns on the source and mints on Stellar | A validator set attests; tokens move through the Interchain Token Service hub | Tokens implement OFT; verifiers chosen per token check each message | An ERC-20 deposit into an address 1Click hands out; competing solvers fill it, and the HOT Bridge pays out on Stellar |
+| Assets | USDC | Interchain Token Service tokens; USDC arrives as Axelar-wrapped USDC.axl, not Circle USDC | USDT0 on mainnet, plus any OFT you name yourself; on testnet a compose route can convert on arrival | ERC-20 from 13 EVM chains, delivered as USDC or XLM. Mainnet only: 1Click has no test network |
 
 ## The network picture, stated precisely
 
@@ -40,7 +34,8 @@ LayerZero's OFT registry lists no obtainable testnet token, so there is nothing
 public to route; a team that has deployed its own OFT names it directly and quotes
 over it.
 
-So a testnet quote usually shows one route and two refusals, each refusal carrying
+So a testnet quote usually shows one route and three refusals (NEAR Intents
+always declines there), each refusal carrying
 its reason in a sentence. That is the honest picture, and the app shows it rather
 than hiding it.
 

@@ -22,6 +22,10 @@ const MavnaWidget = dynamic(() => import("@mavna/widget").then((m) => m.MavnaWid
   loading: () => <div className="mv-live-holding" aria-hidden="true" />,
 });
 
+// inlined at build time; next.config.mjs refuses a production build without it.
+// a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
+const SPONSOR_URL: string | undefined = process.env.NEXT_PUBLIC_MAVNA_SPONSOR_URL || undefined;
+
 function useDocsTheme(): "light" | "dark" | undefined {
   const [theme, setTheme] = useState<"light" | "dark" | undefined>(undefined);
   useEffect(() => {
@@ -44,7 +48,13 @@ export function LiveWidget({ variant = "compact" }: { readonly variant?: Variant
         <div className="mv-live-holding" aria-hidden="true" />
       ) : (
         <MavnaWidget
-          config={{ integrator: "docs.mavna.app", network: "testnet", variant, appearance }}
+          config={{
+            integrator: "docs.mavna.app",
+            network: "testnet",
+            ...(SPONSOR_URL === undefined ? {} : { sponsorUrl: SPONSOR_URL }),
+            variant,
+            appearance,
+          }}
         />
       )}
     </div>

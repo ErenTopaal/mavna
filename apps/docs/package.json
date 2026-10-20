@@ -8,6 +8,7 @@
     "build": "node scripts/sync-reference.mjs && next build && pagefind --site .next/server/app --output-path public/_pagefind",
     "start": "next start",
     "typecheck": "node scripts/sync-reference.mjs && tsc --noEmit",
+    "test": "vitest run --project unit --root ../.. apps/docs",
     "sync:reference": "node scripts/sync-reference.mjs",
     "example:quote": "node examples/quote.ts"
   },
@@ -16,6 +17,7 @@
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
+    "@mavna/adapter-near-intents": "workspace:*",
     "@mavna/core": "workspace:*",
     "@mavna/routing": "workspace:*",
     "@mavna/status": "workspace:*",

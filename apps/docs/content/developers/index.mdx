@@ -20,7 +20,7 @@ person, saying what signing it does.
 
 ## The packages
 
-Nine, all ESM with bundled types, all Apache-2.0.
+Ten, all ESM with bundled types, all Apache-2.0.
 
 | Package | What it is |
 | --- | --- |
@@ -31,12 +31,14 @@ Nine, all ESM with bundled types, all Apache-2.0.
 | `@mavna/swap` | Swap providers on Stellar behind one interface |
 | `@mavna/adapter-cctp` | Circle CCTP as a rail. Everything Circle-specific lives here |
 | `@mavna/adapter-axelar` | Axelar's Interchain Token Service as a rail |
-| `@mavna/adapter-layerzero` | LayerZero OFT as a rail |
+| `@mavna/adapter-layerzero` | LayerZero OFT as a rail, including compose routes that convert on arrival through the Arrival Contract |
+| `@mavna/adapter-near-intents` | NEAR Intents (1Click) as a rail: ERC-20 deposits from EVM chains, delivered as USDC or XLM. Mainnet only |
 | `@mavna/widget` | The React component layer, and the one package that imports React. See [the widget docs](/widget) |
 
 The layering is strict: adding a rail is one new package implementing
-[`BridgeAdapter`](/developers/reference/bridge-adapter), with no change anywhere
-else.
+[`BridgeAdapter`](/developers/reference/bridge-adapter). Routing races whatever
+adapters it is handed, so nothing else in the SDK changes; the widget lists the
+rails it offers, so it gains the new one with a line.
 
 ## Reading order
 

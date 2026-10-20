@@ -95,9 +95,13 @@ SPONSOR_SECRET_KEY=S... docker compose up
 Alone:
 
 ```sh
-pnpm --filter @mavna/sponsor-service build
+pnpm install
+pnpm turbo run build --filter=@mavna/sponsor-service...
 SPONSOR_SECRET_KEY=S... node services/sponsor/dist/main.mjs
 ```
+
+The trailing `...` builds the packages the sponsor imports first. Its bundle loads
+them from their own `dist/`, which a fresh checkout does not have.
 
 `GET /health` answers with the network and the sponsor's public address, which is
 the account you fund.

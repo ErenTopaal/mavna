@@ -39,6 +39,41 @@ adapter checks that this asset derives the contract's own address before using i
 Routes and delivered status are labelled with that classic asset. A token with no
 code and issuer is refused by `sendableAssets` with the reason.
 
+## Converting on arrival
+
+Given an Arrival Contract, the adapter also quotes a compose route: the same send,
+delivered to the [Mavna Arrival Contract](https://github.com/ErenTopaal/mavna/tree/main/contracts/arrival)
+with a message saying who receives it, in which asset, and the least they accept.
+LayerZero's executor then calls the contract, which converts through Aquarius on
+Stellar and sends the wanted asset on.
+
+```ts
+const layerzero = new LayerZeroAdapter({
+  network,
+  rpc,
+  baseReserveStroops,
+  // the testnet deployment, also exported as ARRIVAL_CONTRACTS.testnet
+  arrival: {
+    contract: "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+    venue: new AquariusProvider(network),
+  },
+});
+```
+
+The contract is deployed on testnet only; mainnet has none until it is
+independently audited, and the rail says so rather than quoting a compose route
+there. A compose route adds no step and no signature. It is declined, with the
+reason, for a muxed address (the message carries a 32-byte recipient), a
+recipient that cannot hold the wanted asset, a token or conversion path the
+contract was not built to accept, and a wanted asset that is what arrives anyway.
+A brand-new account is left to the plain route. The integrator fee, 0 to 1000
+basis points, is taken only here, by the contract, from the converted amount.
+
+If the conversion cannot meet the minimum, the arriving token is delivered as it
+came, which status reports as `delivered-as-came`. A step LayerZero's executor
+leaves unrun can be finished by anyone; [delivery](/developers/concepts/delivery)
+covers how arrival is proven and what finishing takes.
+
 ## Who could lie to you
 
 The verifier set is the answer to "who could lie to you," so the adapter refuses to

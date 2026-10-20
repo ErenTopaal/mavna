@@ -20,9 +20,9 @@ itself out of the arriving funds.
 
 Paste the new `G...` address as the recipient, exactly as you would an existing one.
 The quote grows one line, **Kept in your account**, showing the reserve in XLM: 1.5
-XLM for a new account able to hold one asset. The review summary says it plainly:
-
-> You need no XLM to start. The reserve is yours, refunded if you close the account.
+XLM for a new account able to hold one asset. The review summary lists it under the
+same name: the reserve stays in the new account, and Stellar returns it if the
+account is ever closed.
 
 Because it is a new account, the receiving Stellar wallet signs twice, and the page
 walks you through both:
@@ -35,6 +35,16 @@ walks you through both:
 
 The source-chain prompts happen in between, in your USDC wallet, exactly as for any
 transfer.
+
+## When the sponsor is not funding
+
+All of this relies on a sponsor fronting the reserve, which mavna.app's does. A
+Mavna deployment can run with the sponsor funding nothing
+(`MAVNA_RESERVE_FUNDING=self`). There an address that does not exist yet is
+declined at the quote, with the reason, because it would need XLM sent to it
+first; send it some XLM, or send to an account that already exists. An existing
+account without the asset opens its own trustline from its own XLM, shown in the
+review as **Reserve, from your own XLM**.
 
 ## What it costs you
 

@@ -22,7 +22,7 @@ ask for a quote. The switch beside it changes what you send to USDT0, which
 **Max** control that fills in the full amount.
 
 **Receive on Stellar** decides what you end up holding: `USDC`, or `XLM` through a
-conversion on Stellar's own exchange. With `XLM` selected, the quote shows the XLM
+conversion on a Stellar exchange (Soroswap, SushiSwap or Aquarius). With `XLM` selected, the quote shows the XLM
 amount you receive; [arrive as XLM](/guides/receive-xlm) covers the differences.
 
 **Recipient** takes the destination. Paste a `G...` address. If it is not a valid
@@ -66,7 +66,9 @@ too. [Send to a new address](/guides/new-account) walks through those prompts.
 ## While it moves
 
 The page narrates the wait step by step: sent, then Circle attests the transfer,
-then Mavna delivers it on Stellar. Attestation takes a few minutes, and the page
+then Mavna delivers it on Stellar. (On a deployment where the sponsor funds nothing,
+that last step is a prompt in the receiving wallet, which pays the delivery's small
+XLM fee. mavna.app's sponsor delivers it for you.) Attestation takes a few minutes, and the page
 says it is safe to close the page while it happens. Every on-chain step links to the
 block explorer for the chain it happened on.
 

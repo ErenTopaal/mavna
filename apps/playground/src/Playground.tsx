@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark.js";
+import { buildSource } from "./source.js";
 
 /*
  * A live configurator for the Mavna widget. The rail on the left writes a config;
@@ -39,6 +40,9 @@ const HIDEABLE: readonly HiddenUIElement[] = [
 const DOCK_MIN = 160;
 const DEFAULT_ACCENT = "#e5484d";
 const INTEGRATOR = "playground.mavna.app";
+// set at build time, and vite.config.ts refuses a production build without it.
+// a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
+const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
 
 export function Playground(): ReactElement {
   const [variant, setVariant] = useState<Exclude<Variant, "wide">>("compact");
@@ -92,6 +96,7 @@ export function Playground(): ReactElement {
     return {
       integrator: INTEGRATOR,
       network: "testnet",
+      ...(SPONSOR_URL !== undefined ? { sponsorUrl: SPONSOR_URL } : {}),
       variant,
       appearance,
       routePriority: priority,
@@ -478,14 +483,4 @@ function describeEvent(e: MavnaWidgetEvent): string {
     case "transferDeliveredAsCame":
       return `transferDeliveredAsCame · ${e.asset} · ${e.reason}`;
   }
-}
-
-/** Print the config as the JSX an integrator would paste, minus the onEvent hook. */
-function buildSource(config: MavnaWidgetConfig): string {
-  const { onEvent: _onEvent, ...rest } = config;
-  const body = JSON.stringify(rest, null, 2)
-    .split("\n")
-    .map((line, i) => (i === 0 ? line : `  ${line}`))
-    .join("\n");
-  return `import { MavnaWidget } from "@mavna/widget";\nimport "@mavna/widget/widget.css";\n\n<MavnaWidget\n  config={${body}}\n  onEvent={(e) => console.log(e)}\n/>`;
 }

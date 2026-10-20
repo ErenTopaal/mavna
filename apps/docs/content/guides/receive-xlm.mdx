@@ -1,6 +1,6 @@
 ---
 title: Arrive as XLM
-description: Send USDC and receive XLM instead, converted on Stellar's own exchange as one step in the same transfer.
+description: Send USDC and receive XLM instead, converted on a Stellar exchange as one step in the same transfer.
 ---
 
 # Arrive as XLM
@@ -18,8 +18,8 @@ the moment it executes.
 
 ## What happens
 
-The transfer bridges USDC exactly as before, and then a conversion step runs on
-Stellar's own exchange, turning the arrived USDC into XLM. The conversion spends from
+The transfer bridges USDC exactly as before, and then a conversion step runs on a
+Stellar exchange (Soroswap, SushiSwap or Aquarius, the first that can quote it), turning the arrived USDC into XLM. The conversion spends from
 the receiving account, so the recipient signs it in their Stellar wallet; a
 [Stellar wallet](/guides/wallets) is needed on the receiving side for this reason.
 

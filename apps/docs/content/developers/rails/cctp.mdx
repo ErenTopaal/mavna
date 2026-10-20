@@ -28,8 +28,10 @@ for its chain id and refuses the chain if any answers a different one, so the id
 wallet is asked to switch to is the chain's own; then it confirms there is code at
 the messenger address, asks that contract for its local minter, asks the minter
 which token is local USDC, and asks the token whether it agrees it is USDC with six
-decimals. A chain that cannot answer all of these is not in the list. The committed
-sweep records no failures. Circle's Stellar-side contracts were confirmed the same
+decimals. A chain that cannot answer all of that is not in the list, so the shipped
+list is what the last sweep verified. Rerun it with `node scripts/verify-cctp-chains.mjs`;
+it writes its findings, failures included, to `cctp-chains.verified.json`, which is
+not committed. Circle's Stellar-side contracts were confirmed the same
 way, by reading the contract instances from the ledger.
 
 ## Fees
@@ -47,7 +49,10 @@ real contract before a byte is encoded, and a missing or unverified deployment i
 a hard refusal rather than a guess. The ERC-20 approval before a burn is for the
 exact amount, never unlimited.
 
-The mint is triggered and paid for by the [sponsor service](/developers/sponsor),
-because Circle's forwarder does not serve a Stellar destination that sets a
-destination caller, which Stellar requires. [Delivery](/developers/concepts/delivery)
+The mint is triggered on Stellar by the [sponsor service](/developers/sponsor),
+which pays for it, because Circle's forwarder does not serve a Stellar destination
+that sets a destination caller, which Stellar requires. When the sponsor is not
+funding (`MAVNA_RESERVE_FUNDING=self`), the receiving account signs and pays for
+the mint itself, so the route needs an existing account with up to 0.1 XLM to
+spare. [Delivery](/developers/concepts/delivery)
 covers how arrival is proven and why a repeat delivery cannot mint twice.

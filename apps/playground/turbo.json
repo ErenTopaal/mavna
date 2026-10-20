@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "//": "Inlined at build time, so a cached build made for another sponsor is never served.",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": ["VITE_MAVNA_*"]
+    }
+  }
+}

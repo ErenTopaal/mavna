@@ -83,7 +83,12 @@ integer.
 
 Quoting and building are separate steps, and `buildTransactions` neither signs
 nor submits: what comes back is what to send, and the wallet is the only thing
-that holds a key. The number of signatures a route needs can differ from the
+that holds a key. Only the rail that quoted a route can build it, so the file
+picks the adapter whose `id` is the route's `source` rather than assuming which
+rail ranks first. Today Circle ranks first on the test network only because the
+others decline there; on mainnet any of them can. NEAR Intents also needs the
+sending wallet, `{ sender }`, so a refund has somewhere to go: pass it as the
+fourth argument. The number of signatures a route needs can differ from the
 number of transactions it returns, because some transactions are skippable.
 [Signing](/developers/concepts/signing) walks through the counting, the skippable
 approvals, and the Stellar-side signatures the sponsor flow collects.

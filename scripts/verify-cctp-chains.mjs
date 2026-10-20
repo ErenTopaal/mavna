@@ -15,10 +15,15 @@
  * draft of this project shipped a bridge's addresses that had been dead for
  * months, which is why deriving beats transcribing here.
  *
- * Run from the repository root: node scripts/verify-cctp-chains.mjs
+ * Run: node scripts/verify-cctp-chains.mjs
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { encodeFunctionData, pad } from "viem";
+
+// paths are the repository's, not the working directory's, so where it is run
+// from cannot send its output somewhere the adapter never reads
+const ROOT = new URL("../", import.meta.url);
+const ENV_PATH = new URL(".env", ROOT);
 
 /**
  * Endpoints that carry a credential in the URL, read from `.env` and never
@@ -26,8 +31,8 @@ import { encodeFunctionData, pad } from "viem";
  * failing the run: the rest of the registry does not depend on it.
  */
 const secrets = new Map();
-if (existsSync(".env")) {
-  for (const line of readFileSync(".env", "utf8").split("\n")) {
+if (existsSync(ENV_PATH)) {
+  for (const line of readFileSync(ENV_PATH, "utf8").split("\n")) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
     if (match?.[1] !== undefined) secrets.set(match[1], match[2]);
   }
@@ -441,47 +446,32 @@ async function verifyUsdc(rpc, address) {
 }
 
 /**
- * The endpoints that serve the chain this row claims to be, asked rather than
- * assumed.
- *
- * The id in the table above is typed by a person, and it is the one value handed
- * to a wallet to switch networks. A wrong one (Pharos once carried 688688, X
- * Layer testnet the retired 195) still verified every contract, because the
- * contracts were read through an RPC for the right chain. So every endpoint is
- * asked eth_chainId: one answering a different chain fails the row outright, one
- * that cannot be reached is left out, and a row with no endpoint confirming its
- * id is not written.
+ * The endpoints of a chain that serve the chain they are listed for. A wrong or
+ * repointed URL would otherwise derive another chain's messenger, minter and
+ * USDC, and the token checks would still pass, since USDC is USDC everywhere,
+ * so one that answers for another chain fails the chain. One that does not
+ * answer is left out, as the sweep already treats it.
  */
-async function confirmChainId(chain) {
-  const confirmed = [];
-  const unreachable = [];
+async function servingEndpoints(chain) {
+  const serving = [];
   for (const url of chain.rpc) {
-    let answer;
+    let served;
     try {
-      answer = await rpcCall([url], "eth_chainId", []);
-    } catch (error) {
-      unreachable.push(`${url}: ${error?.message ?? error}`);
+      served = Number.parseInt(String(await rpcCall([url], "eth_chainId", [])), 16);
+    } catch {
       continue;
     }
-    const observed = Number(BigInt(answer));
-    if (observed !== chain.evmChainId) {
-      throw new Error(
-        `${url} answers eth_chainId ${observed}, not the ${chain.evmChainId} this row names`,
-      );
+    if (served !== chain.evmChainId) {
+      throw new Error(`${url} serves chain id ${served}, not ${chain.evmChainId}`);
     }
-    confirmed.push(url);
+    serving.push(url);
   }
-  if (confirmed.length === 0) {
-    throw new Error(
-      `no endpoint confirmed chain id ${chain.evmChainId} (${unreachable.join("; ")})`,
-    );
-  }
-  return confirmed;
+  if (serving.length === 0) throw new Error("no endpoint answered eth_chainId");
+  return serving;
 }
 
 async function inspect(network, listed) {
-  // Only endpoints that confirmed the chain id are read from here on.
-  const chain = { ...listed, rpc: await confirmChainId(listed) };
+  const chain = { ...listed, rpc: await servingEndpoints(listed) };
   // A per-chain override wins. The deterministic address is a candidate to probe,
   // never a fact: EDGE keeps its mainnet messenger somewhere else entirely.
   const messenger = chain.messenger ?? MESSENGER[network];
@@ -594,7 +584,7 @@ const failures = [];
 for (const network of ["testnet", "mainnet"]) {
   // Confirm the seed is what we think it is before deriving anything from it.
   const seedChain = CHAINS[network][0];
-  await verifyUsdc(await confirmChainId(seedChain), SEED[network].usdc);
+  await verifyUsdc(await servingEndpoints(seedChain), SEED[network].usdc);
   console.log(`  ${network}: seed USDC verified on ${seedChain.id}`);
 
   const wanted =
@@ -616,7 +606,10 @@ for (const network of ["testnet", "mainnet"]) {
   });
 }
 
-writeFileSync("cctp-chains.verified.json", `${JSON.stringify({ results, failures }, null, 2)}\n`);
+writeFileSync(
+  new URL("cctp-chains.verified.json", ROOT),
+  `${JSON.stringify({ results, failures }, null, 2)}\n`,
+);
 
 /**
  * Write the registry the adapter actually imports.
@@ -630,7 +623,7 @@ writeFileSync("cctp-chains.verified.json", `${JSON.stringify({ results, failures
  * with every other chain missing, so it refuses.
  */
 if (only === undefined) {
-  writeFileSync("packages/adapters/cctp/src/chains.ts", renderChains(results));
+  writeFileSync(new URL("packages/adapters/cctp/src/chains.ts", ROOT), renderChains(results));
   console.log("  wrote packages/adapters/cctp/src/chains.ts");
 } else {
   console.log("  skipped writing chains.ts: --only= is a partial sweep");

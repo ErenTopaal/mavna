@@ -21,6 +21,10 @@ the current one, not a promise from this page.
 Your wallet pays the network fee for its own transactions, in that chain's own
 currency. Your wallet shows this before you confirm, and Mavna adds nothing to it.
 
+On LayerZero, the network fee you pay on the sending chain also carries
+LayerZero's own fee for its verifiers and executor, shown as its own line in that
+chain's currency.
+
 ## Account reserve, only for a brand-new address
 
 Sending to a Stellar address that does not exist yet shows one line in XLM, labelled
@@ -32,15 +36,28 @@ to you if the account is ever closed. [Send to a new
 address](/guides/new-account) and [how sponsorship
 works](/developers/concepts/sponsorship) explain it.
 
+When the transfer converts, a second line, **Left unconverted to repay the
+reserve**, shows the part of the arrival set aside for that repayment. It is the
+most the repayment can take, and what it does not use stays yours.
+
+On a Mavna deployment where the sponsor funds nothing, there is no sponsored
+reserve: an existing account opens its own trustline from its own XLM (**Reserve,
+from your own XLM**), and the receiving wallet pays Circle's delivery on Stellar,
+up to 0.1 XLM. mavna.app's sponsor pays both today.
+
 ## Conversion, only when you receive XLM
 
-Choosing to arrive as XLM converts the arrived USDC on Stellar's own exchange at the
-live rate. There is no separate conversion fee line: the rate is the market's, the
+Choosing to arrive as XLM converts the arrived USDC on a Stellar exchange
+(Soroswap, SushiSwap or Aquarius, the first that can quote it) at the live rate. There is no separate conversion fee line: the rate is the market's, the
 quote shows the least you can receive, and the conversion refuses whole rather than
 deliver below that floor.
+
+A route that converts on arrival (USDT0 to USDC or XLM through the Arrival
+Contract) adds no step to sign. If its conversion is left unrun and you finish it
+yourself, the review shows the cost in advance as **If you finish it yourself**.
 
 ## What Mavna charges
 
 Nothing. There is no Mavna fee on any route in the app. Products that
-[embed the widget](/widget) can add their own fee, and when they do it appears as
-its own line naming who receives it.
+[embed the widget](/widget) can add their own fee on routes that convert on
+arrival, and when they do it appears as its own line naming who receives it.
