@@ -31,7 +31,7 @@ const NETWORKS = {
   mainnet: {
     rpc: [
       "https://starknet.drpc.org",
-      "https://rpc.starknet.lava.build",
+      "https://starknet-rpc.publicnode.com",
       "https://starknet.api.onfinality.io/public",
     ],
     tokenMessengerMinterV2: "0x07d421B9cA8aA32DF259965cDA8ACb93F7599F69209A41872AE84638B2A20F2a",
@@ -63,41 +63,72 @@ const note = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const ABSENT = /Contract not found|entrypoint does not exist/i;
+const THROTTLED = /limit|quota|rate|too many/i;
+
 /**
- * Ask, trying each endpoint before believing a failure.
+ * Ask, trying each endpoint before believing a failure, and backing off when
+ * told to slow down.
  *
  * One provider answered `starknet_getClassAt` and then claimed `starknet_call`
  * did not exist, on the same host in the same run. A single flaky endpoint must
- * not be reported as a chain that has no deployment.
+ * not be reported as a chain that has no deployment, and neither must a public
+ * endpoint's 429: being throttled is not being absent.
  */
 async function rpc(urls, method, params) {
   let last;
   for (const url of [urls].flat()) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      const body = await response.json();
-      if (body.error) {
-        const message = JSON.stringify(body.error);
-        // A contract that is genuinely absent is an answer, not an outage, so it
-        // is returned rather than retried against the next endpoint.
-        if (/Contract not found|entrypoint does not exist/i.test(message)) {
-          throw new Error(message.slice(0, 160));
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (response.status === 429 || response.status >= 500) {
+          last = new Error(`${url} answered HTTP ${response.status}`);
+          await wait(600 * 2 ** attempt);
+          continue;
         }
-        last = new Error(message.slice(0, 160));
-        continue;
+        const body = await response.json();
+        if (body.error) {
+          const message = JSON.stringify(body.error).slice(0, 160);
+          // A contract that is genuinely absent is an answer, not an outage, so it
+          // is returned rather than retried against the next endpoint.
+          if (ABSENT.test(message)) throw new Error(message);
+          last = new Error(message);
+          if (THROTTLED.test(message)) {
+            await wait(600 * 2 ** attempt);
+            continue;
+          }
+          break;
+        }
+        return body.result;
+      } catch (error) {
+        if (ABSENT.test(String(error))) throw error;
+        last = error;
+        break;
       }
-      return body.result;
-    } catch (error) {
-      if (/Contract not found|entrypoint does not exist/i.test(String(error))) throw error;
-      last = error;
     }
   }
   throw last ?? new Error("no endpoint answered");
+}
+
+/**
+ * Whether a contract is deployed, from an answer: true when the class is
+ * found, false when the node says there is no contract. An outage throws,
+ * rather than reading as an absent deployment.
+ */
+async function deployedAt(urls, address) {
+  try {
+    await rpc(urls, "starknet_getClassHashAt", { block_id: "latest", contract_address: address });
+    return true;
+  } catch (error) {
+    if (ABSENT.test(String(error))) return false;
+    throw error;
+  }
 }
 
 const call = (url, contract, name, calldata) =>
@@ -110,26 +141,14 @@ for (const [network, config] of Object.entries(NETWORKS)) {
   console.log(`\n== ${network}`);
 
   for (const name of ["tokenMessengerMinterV2", "messageTransmitterV2"]) {
-    const deployed = await rpc(url(config), "starknet_getClassHashAt", {
-      block_id: "latest",
-      contract_address: config[name],
-    }).then(
-      () => true,
-      () => false,
-    );
+    const deployed = await deployedAt(url(config), config[name]);
     note(deployed, `${name} is deployed on ${network}`);
   }
 
   // The same address must NOT resolve on the other network, or we have simply
   // written the same contract down twice.
   const other = network === "testnet" ? NETWORKS.mainnet : NETWORKS.testnet;
-  const bleeds = await rpc(url(config), "starknet_getClassHashAt", {
-    block_id: "latest",
-    contract_address: other.tokenMessengerMinterV2,
-  }).then(
-    () => true,
-    () => false,
-  );
+  const bleeds = await deployedAt(url(config), other.tokenMessengerMinterV2);
   note(!bleeds, `the other network's messenger is absent here, so the two are distinct`);
 
   const cls = await rpc(url(config), "starknet_getClassAt", {

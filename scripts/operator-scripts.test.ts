@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { keccak256, toBytes } from "viem";
 import { afterEach, describe, expect, it } from "vitest";
 
 /*
@@ -27,12 +28,19 @@ afterEach(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+interface Answer {
+  readonly status?: number;
+  readonly body: unknown;
+}
+
 interface Stubbed {
   /**
-   * JSON answers by URL prefix; for JSON-RPC by `prefix#method`, and for an
-   * eth_call by `prefix#eth_call:<selector>` before a plain `prefix#eth_call`.
+   * JSON answers by URL prefix; for JSON-RPC by `prefix#method`, and by
+   * `prefix#method:<detail>` before that, where the detail is an eth_call's
+   * selector, a starknet_call's entry point or the contract a class is asked of.
+   * A list is answered in order, its last entry repeating.
    */
-  readonly answers: Record<string, { status?: number; body: unknown }>;
+  readonly answers: Record<string, Answer | readonly Answer[]>;
 }
 
 function layout(options: { link?: readonly string[]; env?: string }): string {
@@ -58,6 +66,7 @@ function run(
     preload,
     `import { appendFileSync } from "node:fs";
 const answers = ${JSON.stringify(stub.answers)};
+const served = new Map();
 globalThis.fetch = async (input, init) => {
   const url = String(input);
   let method;
@@ -66,6 +75,8 @@ globalThis.fetch = async (input, init) => {
     const call = JSON.parse(init?.body ?? "null");
     method = call?.method;
     if (method === "eth_call") selector = String(call.params?.[0]?.data ?? "").slice(0, 10);
+    if (method === "starknet_call") selector = call.params?.request?.entry_point_selector;
+    if (method === "starknet_getClassHashAt") selector = call.params?.contract_address;
   } catch {}
   appendFileSync(${JSON.stringify(log)}, url + (method ? "#" + method : "") + "\\n");
   const key = Object.keys(answers)
@@ -75,7 +86,10 @@ globalThis.fetch = async (input, init) => {
     })
     .sort((a, b) => b.length - a.length)[0];
   if (key === undefined) throw new TypeError("fetch failed: no stubbed answer for " + url);
-  const { status = 200, body } = answers[key];
+  const list = [answers[key]].flat();
+  const index = served.get(key) ?? 0;
+  served.set(key, index + 1);
+  const { status = 200, body } = list[Math.min(index, list.length - 1)];
   const wrapped = method !== undefined && body !== null && typeof body === "object" && !("jsonrpc" in body)
     ? { jsonrpc: "2.0", id: 1, result: body.result, error: body.error }
     : body;
@@ -169,6 +183,86 @@ describe("verify-cctp-chains", () => {
         reason: `${FUJI} serves chain id 84532, not 43113`,
       },
     ]);
+  });
+});
+
+describe("verify-cctp-starknet", () => {
+  const MASK = (1n << 250n) - 1n;
+  const selector = (name: string): string =>
+    `0x${(BigInt(keccak256(toBytes(name))) & MASK).toString(16)}`;
+  const ARGUMENTS = [
+    "amount",
+    "destination_domain",
+    "mint_recipient",
+    "burn_token",
+    "destination_caller",
+    "max_fee",
+    "min_finality_threshold",
+    "hook_data",
+  ];
+
+  /** One network's first endpoint answering for the contracts the script lists. */
+  function network(rpc: string, own: Record<string, string>, other: string, usdc: string) {
+    const absent = { body: { error: { code: 20, message: "Contract not found" } } };
+    return {
+      // throttled on the first ask, as OnFinality was during the audit
+      [`${rpc}#starknet_getClassHashAt:${own.messenger}`]: [
+        { status: 429, body: "Too Many Requests" },
+        { body: { result: "0x1" } },
+      ],
+      [`${rpc}#starknet_getClassHashAt:${own.transmitter}`]: { body: { result: "0x1" } },
+      [`${rpc}#starknet_getClassHashAt:${other}`]: absent,
+      [`${rpc}#starknet_getClassAt`]: {
+        body: {
+          result: {
+            entry_points_by_type: {
+              EXTERNAL: [{ selector: selector("deposit_for_burn_with_hook") }],
+            },
+            abi: [
+              {
+                type: "function",
+                name: "deposit_for_burn_with_hook",
+                inputs: ARGUMENTS.map((name) => ({ name })),
+              },
+            ],
+          },
+        },
+      },
+      [`${rpc}#starknet_call:${selector("get_local_token")}`]: { body: { result: [usdc] } },
+      [`${rpc}#starknet_call:${selector("remote_token_messenger")}`]: { body: { result: ["0x1"] } },
+    };
+  }
+
+  it("waits out a rate limit instead of calling the contract undeployed", {
+    timeout: 30_000,
+  }, () => {
+    const root = layout({ link: ["node_modules"] });
+    const testnet = {
+      messenger: "0x04bDdE1E09a4B09a2F95d893D94a967b7717eB85A3f6dEcA8c080Ee01fBc3370",
+      transmitter: "0x04db7926C64f1f32a840F3Fa95cB551f3801a3600Bae87aF87807A54DCE12Fe8",
+    };
+    const mainnet = {
+      messenger: "0x07d421B9cA8aA32DF259965cDA8ACb93F7599F69209A41872AE84638B2A20F2a",
+      transmitter: "0x02EBB5777B6dD8B26ea11D68Fdf1D2c85cD2099335328Be845a28c77A8AEf183",
+    };
+    const result = run(root, "verify-cctp-starknet.mjs", [], {
+      answers: {
+        ...network(
+          "https://starknet-sepolia.drpc.org",
+          testnet,
+          mainnet.messenger,
+          "0x512feac6339ff7889822cb5aa2a86c848e9d392bb0e3e237c008674feed8343",
+        ),
+        ...network(
+          "https://starknet.drpc.org",
+          mainnet,
+          testnet.messenger,
+          "0x33068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb",
+        ),
+      },
+    });
+    expect(result.out).toContain("Starknet constants agree with both networks");
+    expect(result.status).toBe(0);
   });
 });
 
