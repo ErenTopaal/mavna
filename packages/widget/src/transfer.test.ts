@@ -2084,8 +2084,8 @@ describe("a Stellar wallet that keeps its state on itself", () => {
     class Wallet {
       remembered: string | undefined = SENDER_STELLAR;
       connect = async () => SENDER_STELLAR;
-      sign = engine.stellar.sign;
-      disconnect = engine.stellar.disconnect;
+      sign = (xdr: string, address: string) => engine.stellar.sign(xdr, address);
+      disconnect = () => engine.stellar.disconnect();
       forget(): void {
         this.remembered = undefined;
       }
