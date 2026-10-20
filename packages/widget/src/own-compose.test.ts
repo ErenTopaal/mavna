@@ -187,6 +187,35 @@ describe("finishing a conversion on arrival from Activity", () => {
     expect(log.slice(4)).toEqual(["stellar sign compose", `send from ${USER}`]);
   });
 
+  it("reads no global Buffer of its own, which a browser does not have", async () => {
+    const engine = engineFor("self");
+    queued = xdr.ScVal.scvBytes(Buffer.from(composeMessageHash(MESSAGE).slice(2), "hex"));
+    recordedAuth = (args) => [composeAuth(args)];
+    // Deleting the global outright breaks the SDK's own Node-only base32 entry,
+    // which a browser bundle never loads, so every read of it is traced instead
+    // and only reads made from this package's source count.
+    const kept = Object.getOwnPropertyDescriptor(globalThis, "Buffer");
+    const real = globalThis.Buffer;
+    const readers: string[] = [];
+    Object.defineProperty(globalThis, "Buffer", {
+      configurable: true,
+      get() {
+        const caller = new Error().stack?.split("\n")[2] ?? "";
+        if (caller.includes("packages/widget/src/") && !caller.includes(".test.")) {
+          readers.push(caller.trim());
+        }
+        return real;
+      },
+    });
+    try {
+      const priced = await finishCompose(engine, finish);
+      expect(priced).toMatchObject({ kind: "priced", feeStroops: 500_000n });
+    } finally {
+      if (kept !== undefined) Object.defineProperty(globalThis, "Buffer", kept);
+    }
+    expect(readers).toEqual([]);
+  });
+
   it("asks the sponsor when it pays for finishing", async () => {
     const engine = engineFor("sponsor");
     const outcome = await finishCompose(engine, finish);
