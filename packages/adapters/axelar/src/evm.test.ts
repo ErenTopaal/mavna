@@ -1,7 +1,7 @@
 import { MavnaError } from "@mavna/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SELECTORS } from "./abi.js";
-import { EvmReader, EvmRevert, fetchEthCall } from "./evm.js";
+import { EvmReader, EvmRevert, fetchEthCall, forgetCheckedNodes } from "./evm.js";
 
 /**
  * A node's JSON-RPC error is either the contract saying no or the node failing
@@ -95,6 +95,92 @@ describe("which token service version answers the trust question", () => {
     });
     const failure = await reader.trustsChain(SERVICE, "stellar").catch((cause: unknown) => cause);
     expect(failure).not.toBeInstanceOf(EvmRevert);
+    expect((failure as MavnaError).retryable).toBe(true);
+  });
+});
+
+describe("failing over between a chain's nodes", () => {
+  const BASE = 8453;
+  const answers = (by: Record<string, number | Error>) => {
+    const asked: string[] = [];
+    const chainIdOf = async (url: string) => {
+      asked.push(url);
+      const answer = by[url];
+      if (answer instanceof Error || answer === undefined) throw answer ?? new Error("no route");
+      return answer;
+    };
+    return { asked, chainIdOf };
+  };
+
+  it("skips a dead node and one serving another chain, and reads through the next", async () => {
+    forgetCheckedNodes();
+    const { chainIdOf } = answers({
+      "https://dead.invalid": new MavnaError("could not be reached", { retryable: true }),
+      "https://wrong.chain": 10,
+      "https://right.chain": BASE,
+    });
+    const called: string[] = [];
+    const reader = new EvmReader(
+      ["https://dead.invalid", "https://wrong.chain", "https://right.chain"],
+      async (url) => {
+        called.push(url);
+        return `0x${word("1")}`;
+      },
+      { expectedChainId: BASE, chainIdOf },
+    );
+    expect(await reader.trustsChain(SERVICE, "stellar")).toBe(true);
+    // nothing is read through a node until it has said it is this chain
+    expect(called).toEqual(["https://right.chain"]);
+  });
+
+  it("asks each node its chain id once, not on every read", async () => {
+    forgetCheckedNodes();
+    const { asked, chainIdOf } = answers({ "https://right.chain": BASE });
+    const read = () =>
+      new EvmReader(["https://right.chain"], async () => `0x${word("1")}`, {
+        expectedChainId: BASE,
+        chainIdOf,
+      }).trustsChain(SERVICE, "stellar");
+    await read();
+    await read();
+    expect(asked).toEqual(["https://right.chain"]);
+  });
+
+  it("moves on when a confirmed node fails a read, but takes a revert as the answer", async () => {
+    forgetCheckedNodes();
+    const { chainIdOf } = answers({ "https://a.chain": BASE, "https://b.chain": BASE });
+    const busyThenFine = new EvmReader(
+      ["https://a.chain", "https://b.chain"],
+      async (url) => {
+        if (url === "https://a.chain") throw new MavnaError("server busy", { retryable: true });
+        return `0x${word("1")}`;
+      },
+      { expectedChainId: BASE, chainIdOf },
+    );
+    expect(await busyThenFine.trustsChain(SERVICE, "stellar")).toBe(true);
+
+    const called: string[] = [];
+    const reverting = new EvmReader(
+      ["https://a.chain", "https://b.chain"],
+      async (url) => {
+        called.push(url);
+        throw new EvmRevert("execution reverted");
+      },
+      { expectedChainId: BASE, chainIdOf },
+    );
+    await expect(reverting.decimals(SERVICE)).rejects.toBeInstanceOf(EvmRevert);
+    expect(called).toEqual(["https://a.chain"]);
+  });
+
+  it("is a retry when no node will say it is this chain", async () => {
+    forgetCheckedNodes();
+    const { chainIdOf } = answers({ "https://wrong.chain": 10 });
+    const reader = new EvmReader(["https://wrong.chain"], async () => "0x", {
+      expectedChainId: BASE,
+      chainIdOf,
+    });
+    const failure = await reader.decimals(SERVICE).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(MavnaError);
     expect((failure as MavnaError).retryable).toBe(true);
   });
 });

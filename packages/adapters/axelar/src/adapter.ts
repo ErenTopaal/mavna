@@ -30,7 +30,7 @@ import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import { tokenSymbolFromIndex } from "./assets.js";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
-import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
+import { type EthCall, type EthChainId, EvmReader, fetchEthCall, fetchEthChainId } from "./evm.js";
 import { type PricedIn, priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
@@ -74,6 +74,8 @@ export interface AxelarAdapterOptions {
   readonly horizonUrl?: string;
   /** How EVM reads reach a node. Injectable so tests can hold one still. */
   readonly ethCall?: EthCall;
+  /** How a node is asked which chain it serves. Injectable for the same reason. */
+  readonly ethChainId?: EthChainId;
 }
 
 /** What recovery needs that a handle cannot carry on its own. */
@@ -95,6 +97,7 @@ export class AxelarAdapter implements BridgeAdapter {
   private readonly baseReserveStroops: number;
   private readonly prices: XlmPriceSource;
   private readonly ethCall: EthCall;
+  private readonly ethChainId: EthChainId;
   private readonly gmp: GmpApi;
   private readonly registry: ChainRegistry;
 
@@ -112,6 +115,7 @@ export class AxelarAdapter implements BridgeAdapter {
             : "https://horizon-testnet.stellar.org"),
       });
     this.ethCall = options.ethCall ?? fetchEthCall;
+    this.ethChainId = options.ethChainId ?? fetchEthChainId;
     this.gmp = new GmpApi(options.network);
     this.registry = new ChainRegistry(options.network);
   }
@@ -136,7 +140,7 @@ export class AxelarAdapter implements BridgeAdapter {
         chain !== undefined &&
         chain.family === "evm" &&
         chain.interchainTokenService !== undefined &&
-        chain.rpcUrl !== undefined
+        chain.rpcUrls.length > 0
       );
     });
   }
@@ -160,7 +164,7 @@ export class AxelarAdapter implements BridgeAdapter {
     if (destination !== undefined) return destination;
 
     let stellar: AxelarStellarChain;
-    let source: { chain: AxelarChain; address: string; rpcUrl: string };
+    let source: { chain: AxelarChain; address: string; rpcUrls: readonly string[] };
     try {
       [stellar, source] = await Promise.all([
         this.registry.stellarChain(),
@@ -170,7 +174,7 @@ export class AxelarAdapter implements BridgeAdapter {
       return this.declineFrom(cause, "chain-unsupported", `Mavna cannot send from that chain yet.`);
     }
 
-    const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    const evm = this.readerFor(source);
     try {
       await confirmGasService(evm, source.address, source.chain);
     } catch (cause) {
@@ -492,7 +496,7 @@ export class AxelarAdapter implements BridgeAdapter {
       evmTokenService(this.network, route.fromChain.id),
     ]);
 
-    const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    const evm = this.readerFor(source);
     await confirmGasService(evm, source.address, source.chain);
     const stellarIts = await this.stellarReader();
 
@@ -853,6 +857,14 @@ export class AxelarAdapter implements BridgeAdapter {
         unnecessaryWhen: undefined,
       },
     ];
+  }
+
+  /** Reads the sending chain, failing over between its nodes, each checked to be on it. */
+  private readerFor(source: { chain: AxelarChain; rpcUrls: readonly string[] }): EvmReader {
+    return new EvmReader(source.rpcUrls, this.ethCall, {
+      expectedChainId: source.chain.evmChainId,
+      chainIdOf: this.ethChainId,
+    });
   }
 
   private async stellarReader(): Promise<StellarItsReader> {

@@ -83,23 +83,24 @@ describe("Axelar's deployment configuration", () => {
   });
 });
 
-describe("the node a confirmed chain is read through", () => {
-  it("is the one the sweep confirmed the chain through, not the config's", async () => {
-    // base mainnet's config node, developer-access-mainnet.base.org, has no
-    // address record; the sweep confirmed the chain through mainnet.base.org
-    const pinned = PINNED_DEPLOYMENTS.testnet["base-sepolia"] as { rpcUrl?: string } | undefined;
-    expect(pinned?.rpcUrl).toMatch(/^https:\/\//);
+describe("the nodes a confirmed chain is read through", () => {
+  it("are the ones the sweep confirmed, with the config's node only one more candidate", async () => {
+    const pinned = PINNED_DEPLOYMENTS.testnet["base-sepolia"];
+    expect(pinned?.rpcUrls.length).toBeGreaterThan(0);
     publish({
       "base-sepolia": { ...evmChain("base-sepolia", ITS, GAS), rpc: "https://dead.invalid" },
     });
-    expect((await evmTokenService("testnet", "base-sepolia")).rpcUrl).toBe(pinned?.rpcUrl);
+    const { rpcUrls } = await evmTokenService("testnet", "base-sepolia");
+    expect(rpcUrls.slice(0, pinned?.rpcUrls.length)).toEqual(pinned?.rpcUrls);
+    expect(rpcUrls).toContain("https://dead.invalid");
   });
 
-  it("is recorded for every confirmed EVM chain", () => {
+  it("are recorded for every confirmed EVM chain", () => {
     for (const network of ["testnet", "mainnet"] as const) {
       for (const [id, chain] of Object.entries(PINNED_DEPLOYMENTS[network])) {
         if (chain.gasService === undefined) continue; // Stellar
-        expect((chain as { rpcUrl?: string }).rpcUrl, `${network}/${id}`).toMatch(/^https:\/\//);
+        expect(chain.rpcUrls.length, `${network}/${id}`).toBeGreaterThan(0);
+        for (const url of chain.rpcUrls) expect(url, `${network}/${id}`).toMatch(/^https:\/\//);
       }
     }
   });

@@ -330,6 +330,7 @@ function adapter(): AxelarAdapter {
     baseReserveStroops: BASE_RESERVE,
     prices: new XlmPriceSource({ horizonUrl: HORIZON }),
     ethCall,
+    ethChainId: async () => 84532,
   });
 }
 
@@ -558,6 +559,7 @@ describe("a classic asset, by destination lane", () => {
       baseReserveStroops: BASE_RESERVE,
       prices: new XlmPriceSource({ horizonUrl: HORIZON }),
       ethCall,
+      ethChainId: async () => 84532,
     });
     const result = await instance.quote(ask());
 

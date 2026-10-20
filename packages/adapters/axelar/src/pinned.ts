@@ -11,7 +11,7 @@ import type { NetworkId } from "@mavna/core";
  * addresses below, each of which was confirmed on its own chain: the node's chain
  * id, code at both addresses, and the token service naming this gas service
  * itself. A chain missing here is not offered, and a chain listed here is read
- * through the node it was confirmed through.
+ * through the nodes it was confirmed through.
  */
 export const DEPLOYMENTS_COMMIT = "ce4c7b7d6b8673af570786005dba9f7fd96b5879";
 
@@ -20,12 +20,13 @@ export interface PinnedChain {
   /** Undefined on Stellar, where nothing is paid to a gas service. */
   readonly gasService: string | undefined;
   /**
-   * The node the chain was confirmed through, chain id checked, and the one the
-   * adapter reads it through. Axelar's own config node is used when it answered;
-   * several are dead, and a chain is only offered through a node that worked.
-   * Undefined on Stellar, which is read through the integrator's own node.
+   * Nodes that answered eth_chainId as this chain when the sweep ran: Axelar's
+   * own config node when it did, then public ones from the community registry.
+   * The adapter fails over through these, checking each node's chain id again
+   * before it believes it, with the config's node as one more candidate. Empty
+   * on Stellar, which is read through the integrator's own node.
    */
-  readonly rpcUrl: string | undefined;
+  readonly rpcUrls: readonly string[];
 }
 
 export const PINNED_DEPLOYMENTS: Readonly<
@@ -35,259 +36,371 @@ export const PINNED_DEPLOYMENTS: Readonly<
     "arbitrum-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://sepolia-rollup.arbitrum.io/rpc",
+      rpcUrls: [
+        "https://sepolia-rollup.arbitrum.io/rpc",
+        "https://arbitrum-sepolia-rpc.publicnode.com",
+        "https://arbitrum-sepolia-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     "arc-8": {
       interchainTokenService: "0x7ca8bF7326b870Eab4ef7A9B8E59fCDb47921389",
       gasService: "0xB2C575226fa1828F5101a42CaA5ba4Ce9140c108",
-      rpcUrl: "https://rpc.testnet.arc.io",
+      rpcUrls: [
+        "https://rpc.testnet.arc.io",
+        "https://rpc.blockdaemon.testnet.arc.io",
+        "https://rpc.drpc.testnet.arc.io",
+        "https://rpc.quicknode.testnet.arc.io",
+      ],
     },
     avalanche: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
+      rpcUrls: [
+        "https://api.avax-test.network/ext/bc/C/rpc",
+        "https://avalanche-fuji-c-chain-rpc.publicnode.com",
+      ],
     },
     "base-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://sepolia.base.org",
+      rpcUrls: [
+        "https://sepolia.base.org",
+        "https://base-sepolia-rpc.publicnode.com",
+        "https://base-sepolia-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     berachain: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://bepolia.rpc.berachain.com",
+      rpcUrls: ["https://bepolia.rpc.berachain.com"],
     },
     binance: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://bsc-testnet-rpc.publicnode.com",
+      rpcUrls: [
+        "https://bsc-testnet-rpc.publicnode.com",
+        "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+        "https://data-seed-prebsc-2-s1.bnbchain.org:8545",
+        "https://data-seed-prebsc-1-s2.bnbchain.org:8545",
+      ],
     },
     "blast-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://blast-sepolia.drpc.org",
+      rpcUrls: ["https://blast-sepolia.drpc.org", "https://sepolia.blast.io"],
     },
     "celo-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://forno.celo-sepolia.celo-testnet.org/",
+      rpcUrls: [
+        "https://forno.celo-sepolia.celo-testnet.org/",
+        "https://forno.celo-sepolia.celo-testnet.org",
+      ],
     },
     "ethereum-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://sepolia.drpc.org",
+      rpcUrls: [
+        "https://sepolia.drpc.org",
+        "https://rpc.sepolia.ethpandaops.io",
+        "https://sepolia.gateway.tenderly.co",
+        "https://ethereum-sepolia-rpc.publicnode.com",
+      ],
     },
     "filecoin-2": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbe406f0189a0b4cf3a05c286473d23791dd44cc6",
-      rpcUrl: "https://api.calibration.node.glif.io/rpc/v2",
+      rpcUrls: [
+        "https://api.calibration.node.glif.io/rpc/v2",
+        "https://api.calibration.node.glif.io/rpc/v1",
+        "https://rpc.ankr.com/filecoin_testnet",
+        "https://calibration.filfox.info/rpc/v1",
+      ],
     },
     flow: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://testnet.evm.nodes.onflow.org",
+      rpcUrls: ["https://testnet.evm.nodes.onflow.org"],
     },
     hedera: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://testnet.hashio.io/api",
+      rpcUrls: ["https://testnet.hashio.io/api"],
     },
     hyperliquid: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://rpc.hyperliquid-testnet.xyz/evm",
+      rpcUrls: ["https://rpc.hyperliquid-testnet.xyz/evm"],
     },
     immutable: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://rpc.testnet.immutable.com",
+      rpcUrls: ["https://rpc.testnet.immutable.com", "https://immutable-zkevm-testnet.drpc.org"],
     },
     kava: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://evm.testnet.kava.io",
+      rpcUrls: ["https://evm.testnet.kava.io", "https://kava-testnet.drpc.org"],
     },
     "linea-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://rpc.sepolia.linea.build",
+      rpcUrls: ["https://rpc.sepolia.linea.build", "https://linea-sepolia-rpc.publicnode.com"],
     },
     "mantle-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://rpc.sepolia.mantle.xyz",
+      rpcUrls: ["https://rpc.sepolia.mantle.xyz"],
     },
     "monad-3": {
       interchainTokenService: "0xF9c962bE1366cD9518D6BCCDcfC9CDFCa7a1EFE5",
       gasService: "0x5030D144E845e862B35B50E9C0610E2CD77F70D7",
-      rpcUrl: "https://testnet-rpc.monad.xyz",
+      rpcUrls: ["https://testnet-rpc.monad.xyz"],
     },
     moonbeam: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://moonbeam-alpha.api.onfinality.io/public",
+      rpcUrls: [
+        "https://moonbeam-alpha.api.onfinality.io/public",
+        "https://moonbase-alpha.drpc.org",
+      ],
     },
     "optimism-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://sepolia.optimism.io",
+      rpcUrls: [
+        "https://sepolia.optimism.io",
+        "https://optimism-sepolia.drpc.org",
+        "https://optimism-sepolia-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     plume: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://testnet-rpc.plume.org",
+      rpcUrls: ["https://testnet-rpc.plume.org"],
     },
     "polygon-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://polygon-amoy-bor-rpc.publicnode.com",
+      rpcUrls: [
+        "https://polygon-amoy-bor-rpc.publicnode.com",
+        "https://polygon-amoy.drpc.org",
+        "https://polygon-amoy-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     robinhood: {
       interchainTokenService: "0x3270540e5d2857E69BEC34c6EcFa02cD813aCb42",
       gasService: "0xef2e20AE1095C6bDb888e91E3c1a2443CBb76DB9",
-      rpcUrl: "https://rpc.testnet.chain.robinhood.com",
+      rpcUrls: [
+        "https://rpc.testnet.chain.robinhood.com",
+        "https://rpc.testnet.chain.robinhood.com/rpc",
+        "https://robinhood-sepolia-rpc.publicnode.com",
+        "https://robinhood-testnet.drpc.org",
+      ],
     },
     "stellar-2026-q1-2": {
       interchainTokenService: "CC7LAC4S7KAPIM26WKWFSOXWLNLSG7EXTC2EVY2H2UPKSTX3Z2A7M5YP",
       gasService: undefined,
-      rpcUrl: undefined,
+      rpcUrls: [],
     },
     "xrpl-evm": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
-      rpcUrl: "https://rpc.testnet.xrplevm.org",
+      rpcUrls: ["https://rpc.testnet.xrplevm.org"],
     },
   },
   mainnet: {
     arbitrum: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://arb1.arbitrum.io/rpc",
+      rpcUrls: [
+        "https://arb1.arbitrum.io/rpc",
+        "https://arbitrum-one-rpc.publicnode.com",
+        "https://xrpc.cl/arbitrum",
+        "https://arbitrum-one-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     avalanche: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+      rpcUrls: [
+        "https://api.avax.network/ext/bc/C/rpc",
+        "https://avalanche-c-chain-rpc.publicnode.com",
+        "https://xrpc.cl/avalanche",
+        "https://avalanche-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     base: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://mainnet.base.org/",
+      rpcUrls: [
+        "https://mainnet.base.org/",
+        "https://base.gateway.tenderly.co",
+        "https://base-rpc.publicnode.com",
+        "https://rpc.baseazul.dev",
+      ],
     },
     berachain: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.berachain.com/",
+      rpcUrls: [
+        "https://rpc.berachain.com/",
+        "https://rpc.berachain.com",
+        "https://berachain-rpc.publicnode.com",
+        "https://rpc.berachain-apis.com",
+      ],
     },
     binance: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://bsc-dataseed.bnbchain.org",
+      rpcUrls: [
+        "https://bsc-dataseed.bnbchain.org",
+        "https://bsc-dataseed1.bnbchain.org",
+        "https://bsc-dataseed2.bnbchain.org",
+        "https://bsc-dataseed3.bnbchain.org",
+      ],
     },
     blast: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.blast.io",
+      rpcUrls: ["https://rpc.blast.io", "https://blast-rpc.publicnode.com"],
     },
     celo: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://forno.celo.org",
+      rpcUrls: ["https://forno.celo.org", "https://celo-rpc.blockreq.com/v1/rpc/public"],
     },
     ethereum: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://ethereum-rpc.publicnode.com",
+      rpcUrls: [
+        "https://ethereum-rpc.publicnode.com",
+        "https://cloudflare-eth.com",
+        "https://mainnet.gateway.tenderly.co",
+        "https://rpc.flashbots.net",
+      ],
     },
     fantom: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.fantom.network",
+      rpcUrls: ["https://rpc.fantom.network", "https://fantom.drpc.org"],
     },
     filecoin: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://api.chain.love/rpc/v2",
+      rpcUrls: [
+        "https://api.chain.love/rpc/v2",
+        "https://api.node.glif.io/",
+        "https://rpc.ankr.com/filecoin",
+        "https://filfox.info/rpc/v1",
+      ],
     },
     flow: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://mainnet.evm.nodes.onflow.org",
+      rpcUrls: ["https://mainnet.evm.nodes.onflow.org"],
     },
     fraxtal: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.frax.com",
+      rpcUrls: ["https://rpc.frax.com", "https://fraxtal-rpc.publicnode.com"],
     },
     hedera: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://mainnet.hashio.io/api",
+      rpcUrls: ["https://mainnet.hashio.io/api", "https://hedera.linkpool.pro"],
     },
     hyperliquid: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.hyperliquid.xyz/evm",
+      rpcUrls: ["https://rpc.hyperliquid.xyz/evm", "https://gwan-ssl.wandevs.org:46891/"],
     },
     immutable: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x24C2b56128fF8E7bFaD578ABefB0fc7Dfa9ba358",
-      rpcUrl: "https://rpc.immutable.com/",
+      rpcUrls: [
+        "https://rpc.immutable.com/",
+        "https://rpc.immutable.com",
+        "https://immutable-zkevm.drpc.org",
+      ],
     },
     kava: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://kava-evm-rpc.publicnode.com",
+      rpcUrls: [
+        "https://kava-evm-rpc.publicnode.com",
+        "https://evm.kava.io",
+        "https://evm.kava-rpc.com",
+        "https://rpc.ankr.com/kava_evm",
+      ],
     },
     linea: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.linea.build",
+      rpcUrls: [
+        "https://rpc.linea.build",
+        "https://linea-rpc.publicnode.com",
+        "https://linea-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     mantle: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.mantle.xyz",
+      rpcUrls: ["https://rpc.mantle.xyz", "https://mantle-rpc.publicnode.com"],
     },
     monad: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.monad.xyz/",
+      rpcUrls: ["https://rpc.monad.xyz/", "https://rpc.monad.xyz"],
     },
     moonbeam: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://moonbeam.api.onfinality.io/public",
+      rpcUrls: ["https://moonbeam.api.onfinality.io/public", "https://moonbeam.drpc.org"],
     },
     optimism: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://optimism.drpc.org",
+      rpcUrls: [
+        "https://optimism.drpc.org",
+        "https://mainnet.optimism.io",
+        "https://optimism-rpc.publicnode.com",
+        "https://optimism.gateway.tenderly.co",
+      ],
     },
     plume: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.plume.org",
+      rpcUrls: ["https://rpc.plume.org"],
     },
     polygon: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://polygon.drpc.org",
+      rpcUrls: [
+        "https://polygon.drpc.org",
+        "https://rpc-mainnet.matic.quiknode.pro",
+        "https://polygon-bor-rpc.publicnode.com",
+        "https://polygon.gateway.tenderly.co",
+      ],
     },
     scroll: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.scroll.io",
+      rpcUrls: [
+        "https://rpc.scroll.io",
+        "https://scroll-rpc.publicnode.com",
+        "https://scroll-rpc.blockreq.com/v1/rpc/public",
+      ],
     },
     stellar: {
       interchainTokenService: "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
       gasService: undefined,
-      rpcUrl: undefined,
+      rpcUrls: [],
     },
     "xrpl-evm": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
-      rpcUrl: "https://rpc.xrplevm.org",
+      rpcUrls: ["https://rpc.xrplevm.org"],
     },
   },
 };

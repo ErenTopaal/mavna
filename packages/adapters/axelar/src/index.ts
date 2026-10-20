@@ -30,8 +30,14 @@ export {
   discoverLiveChains,
   discoverStellarChain,
 } from "./discovery.js";
-export type { EthCall } from "./evm.js";
-export { EvmReader, EvmRevert, fetchEthCall } from "./evm.js";
+export type { EthCall, EthChainId, EvmReaderOptions } from "./evm.js";
+export {
+  EvmReader,
+  EvmRevert,
+  fetchEthCall,
+  fetchEthChainId,
+  forgetCheckedNodes,
+} from "./evm.js";
 export type { GasEstimate, PricedIn, TransferPrice } from "./fees.js";
 export { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";

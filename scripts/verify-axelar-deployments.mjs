@@ -122,9 +122,14 @@ function alternates(chainId) {
  * another chain is a fact about the config, so it fails the chain; an alternate
  * doing so is only a bad registry entry and is skipped.
  */
-async function nodeFor(chain, tried) {
+/** How many confirmed nodes to keep per chain: enough to fail over, few enough to read. */
+const NODES_KEPT = 4;
+
+async function nodesFor(chain, tried) {
   const candidates = [...new Set([chain.rpc, ...alternates(chain.chainId)].filter(Boolean))];
+  const confirmed = [];
   for (const url of candidates) {
+    if (confirmed.length === NODES_KEPT) break;
     let answer;
     try {
       answer = Number(BigInt(await call(url, "eth_chainId", [])));
@@ -134,14 +139,16 @@ async function nodeFor(chain, tried) {
     }
     if (answer === chain.chainId) {
       tried.push(`${url}: chain id ${answer}`);
-      return url;
+      confirmed.push(url);
+      continue;
     }
     tried.push(`${url}: answers chain id ${answer}`);
     if (url === chain.rpc) {
       throw new Error(`config node answers chain id ${answer}, config says ${chain.chainId}`);
     }
   }
-  throw new Error(`no node reachable for chain id ${chain.chainId}`);
+  if (confirmed.length === 0) throw new Error(`no node reachable for chain id ${chain.chainId}`);
+  return confirmed;
 }
 
 async function inspectEvm(chain) {
@@ -151,12 +158,13 @@ async function inspectEvm(chain) {
   if (gas === undefined) throw new Error("no gas service in the config");
 
   const tried = [];
-  let node;
+  let nodes;
   try {
-    node = await nodeFor(chain, tried);
+    nodes = await nodesFor(chain, tried);
   } catch (error) {
     throw new Error(`${error.message} [tried ${tried.join("; ")}]`);
   }
+  const node = nodes[0];
 
   const code = await call(node, "eth_getCode", [its, "latest"]);
   if (typeof code !== "string" || code.length <= 2) {
@@ -170,7 +178,7 @@ async function inspectEvm(chain) {
   const gasCode = await call(node, "eth_getCode", [gas, "latest"]);
   if (typeof gasCode !== "string" || gasCode.length <= 2) throw new Error(`no code at ${gas}`);
 
-  return { pinned: { interchainTokenService: its, gasService: gas, rpcUrl: node }, via: node };
+  return { pinned: { interchainTokenService: its, gasService: gas, rpcUrls: nodes }, via: node };
 }
 
 async function inspectStellar(network, chain) {
@@ -186,7 +194,7 @@ async function inspectStellar(network, chain) {
   );
   const { entries } = await server.getLedgerEntries(key);
   if (entries.length === 0) throw new Error(`no contract instance at ${its}`);
-  return { pinned: { interchainTokenService: its, gasService: undefined, rpcUrl: undefined } };
+  return { pinned: { interchainTokenService: its, gasService: undefined, rpcUrls: [] } };
 }
 
 const pinned = { testnet: {}, mainnet: {} };
@@ -231,7 +239,7 @@ const rows = (network) =>
         `    ${JSON.stringify(id)}: {\n` +
         `      interchainTokenService: ${JSON.stringify(p.interchainTokenService)},\n` +
         `      gasService: ${p.gasService === undefined ? "undefined" : JSON.stringify(p.gasService)},\n` +
-        `      rpcUrl: ${p.rpcUrl === undefined ? "undefined" : JSON.stringify(p.rpcUrl)},\n` +
+        `      rpcUrls: ${JSON.stringify(p.rpcUrls)},\n` +
         "    },"
       );
     })
@@ -252,7 +260,7 @@ writeFileSync(
  * addresses below, each of which was confirmed on its own chain: the node's chain
  * id, code at both addresses, and the token service naming this gas service
  * itself. A chain missing here is not offered, and a chain listed here is read
- * through the node it was confirmed through.
+ * through the nodes it was confirmed through.
  */
 export const DEPLOYMENTS_COMMIT = ${JSON.stringify(commit)};
 
@@ -261,12 +269,13 @@ export interface PinnedChain {
   /** Undefined on Stellar, where nothing is paid to a gas service. */
   readonly gasService: string | undefined;
   /**
-   * The node the chain was confirmed through, chain id checked, and the one the
-   * adapter reads it through. Axelar's own config node is used when it answered;
-   * several are dead, and a chain is only offered through a node that worked.
-   * Undefined on Stellar, which is read through the integrator's own node.
+   * Nodes that answered eth_chainId as this chain when the sweep ran: Axelar's
+   * own config node when it did, then public ones from the community registry.
+   * The adapter fails over through these, checking each node's chain id again
+   * before it believes it, with the config's node as one more candidate. Empty
+   * on Stellar, which is read through the integrator's own node.
    */
-  readonly rpcUrl: string | undefined;
+  readonly rpcUrls: readonly string[];
 }
 
 export const PINNED_DEPLOYMENTS: Readonly<
