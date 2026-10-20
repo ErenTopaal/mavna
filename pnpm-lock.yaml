@@ -320,6 +320,9 @@ importers:
       '@mavna/adapter-layerzero':
         specifier: workspace:*
         version: link:../../packages/adapters/layerzero
+      '@mavna/adapter-near-intents':
+        specifier: workspace:*
+        version: link:../../packages/adapters/near-intents
       '@mavna/core':
         specifier: workspace:*
         version: link:../../packages/core
