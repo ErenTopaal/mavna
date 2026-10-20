@@ -10,6 +10,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import findPath from "./__fixtures__/aquarius-find-path-testnet.json" with { type: "json" };
+import { loadInBrowser } from "./__fixtures__/browser.js";
 import {
   bodyOf,
   type ContractCall,
@@ -362,5 +363,68 @@ describe("a conversion path built from the router's own pools between listed tok
         via: [AQUA],
       }),
     ).rejects.toThrow(/no pools that connect/);
+  });
+});
+
+describe("aquarius paths in a browser, where there is no Buffer", () => {
+  const entry = new URL("./aquarius.ts", import.meta.url).pathname;
+  type Aquarius = typeof import("./aquarius.js");
+
+  it("decodes the swap chain", async () => {
+    const { decodeSwapChain: decode } = await loadInBrowser<Aquarius>(entry);
+    const hops = decode(findPath.swap_chain_xdr);
+    expect(hops).toHaveLength(4);
+    for (const hop of hops) expect(hop.poolIndex).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("quotes a path through the find-path service", async () => {
+    const { AquariusProvider: Provider } = await loadInBrowser<Aquarius>(entry, {
+      fetch: async () => new Response(JSON.stringify(findPath)),
+    });
+    const quote = await new Provider("testnet").quotePath({
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 100,
+    });
+    expect(quote.path).toHaveLength(4);
+  });
+
+  it("builds a listed path from the router's pools, in the router's token order", async () => {
+    const AQUA = "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE";
+    const ordered = [XLM, USDC].sort((a, b) =>
+      Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+    );
+    const seen: string[][] = [];
+    const node = sorobanNode((call) => {
+      const tokens = (scValToNative(call.args[0] as xdr.ScVal) as string[]).map(String);
+      seen.push(tokens);
+      if (call.method === "get_pools") {
+        const direct = tokens.join(",") === ordered.join(",");
+        return xdr.ScVal.scvMap(
+          direct
+            ? [
+                new xdr.ScMapEntry({
+                  key: xdr.ScVal.scvBytes(Buffer.alloc(32, 0xab)),
+                  val: new Address(POOL).toScVal(),
+                }),
+              ]
+            : [],
+        );
+      }
+      return nativeToScVal(5_000_000n, { type: "u128" });
+    }, Networks.TESTNET);
+    const { AquariusProvider: Provider } = await loadInBrowser<Aquarius>(entry, {
+      fetch: routedFetch({ [RPC]: node }).fetch,
+    });
+    const quote = await new Provider("testnet", undefined, { rpcUrl: RPC }).quotePath({
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 20,
+      via: [AQUA],
+    });
+    expect(seen[0]).toEqual(ordered);
+    expect(quote.path).toEqual([{ tokens: ordered, poolIndex: "ab".repeat(32), tokenOut: USDC }]);
   });
 });
