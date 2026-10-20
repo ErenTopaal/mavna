@@ -64,6 +64,7 @@ Everything is environment variables, read once at start.
 | `MAVNA_DELIVERY_BUDGET_XLM` | no | `25` | Delivery fees, in XLM, the sponsor may pay in one UTC day, counted in the state directory. Each delivery sets its largest possible fee aside before it is signed, and the count comes down to what it was charged. Past it, `/deliver` answers `503`, retryable, until the next day. `0` pays for none |
 | `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. An IPv6 client is counted by its /64, since one host is usually given the whole of it. `0` turns it off |
 | `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. This also counts clients for the Soroswap proxy's limits. Set it only when the sponsor's port is reachable from the proxy alone (the compose file binds it to `127.0.0.1`); a port open to the world lets anyone send their own `X-Forwarded-For`. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
+| `MAVNA_CHANNEL_FLOOR` | no | `4` | Channels the sponsor keeps however long they sit idle. Above it, a channel no one has leased for a day, that no held settlement names, is merged back into the sponsor, returning its XLM |
 | `MAVNA_PROVISIONAL_SETTLEMENTS` | no | `16` | Settlements nothing has backed yet that may hold a channel at once, across every client, each for ten minutes at most. With the daily caps it sizes the channel pool; see [Capacity and caps](#capacity-and-caps). `MAVNA_CHANNEL_POOL_SIZE` is no longer read, and start-up says so if it is set |
 | `MAVNA_SETTLEMENTS_PER_CLIENT` | no | `2` | Settlements one client address (counted as the rate limit counts it) may have waiting on a preparation at once. `0` turns it off |
 | `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
@@ -132,13 +133,21 @@ start in a UTC day, C being the smaller daily volume cap, and each holds its
 channel for at most a day, so at most 2C are held at once (a day spans two UTC
 days). With P unbacked at most, the server funds up to 2C + P channels: 416 at
 the defaults (C = 200, P = 16), 832 XLM if every one is ever needed, funded only
-as they are. `/health` reports this bound as `channels.maxSize`.
+as they are. `/health` reports this bound as `channels.maxSize`. The pool shrinks
+again when the traffic is gone: the sweep merges a channel idle for a day back into
+the sponsor while more than `MAVNA_CHANNEL_FLOOR` (4) remain.
 
 Each settlement's fee is paid by its channel. The sweep tops a channel back up to
 2 XLM from the sponsor once it falls below 1.5 XLM, and logs each top-up; a
 settlement the network refuses because its channel cannot pay the fee stays held
 and is tried again rather than counted as a stranding. `/health` reports
 `channels: { size, leased, maxSize }`.
+
+The sweep also delivers Circle burns asked about before they were attested, so a
+page closed mid-attestation does not leave a new account's settlement waiting for
+the user to come back. It retries each on a backoff for up to two days, within the
+daily delivery budget, and keeps the list in the state directory
+(`delivery-watch.json`); see [`POST /deliver`](/developers/sponsor/api#post-deliver).
 
 Once an hour the sweep also cross-checks what the sponsor carries: the reserve
 slots Horizon says it sponsors against those its own held, prepared settlements

@@ -19,6 +19,7 @@ import { composeMessageHash } from "@mavna/adapter-layerzero";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
+  InclusionUnknown,
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
   type SubmitOptions,
@@ -4565,5 +4566,463 @@ describe("round 2: a built ledger written by the earlier version", () => {
     const second = await startServer({ state: legacy }, { restartOf: first });
     expect((await second.post("/submit", { signedXdr: signed })).status).toBe(200);
     expect(await legacy.readLog("built")).toBeDefined();
+  });
+});
+
+describe("round 3: a burn asked about before Circle attested it is delivered by the sweep", () => {
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const burnHash = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
+
+  /** Iris as a switch: nothing attested until `attest` names a message for a hash. */
+  function irisSwitch(): { attest: (hash: string, messageHex: string) => void; asked: URL[] } {
+    const attested = new Map<string, string>();
+    const asked = stubIris((url) => {
+      const message = attested.get(url.searchParams.get("transactionHash") ?? "");
+      return message === undefined
+        ? new Response("{}", { status: 404 })
+        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+            status: 200,
+          });
+    });
+    return { attest: (hash, messageHex) => attested.set(hash, messageHex), asked };
+  }
+
+  function sweepClock(): void {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  }
+
+  async function sweepFor(server: TestServer, ms: number): Promise<void> {
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(ms);
+    await server.server.stopSweep();
+  }
+
+  async function watched(state: MemoryDocumentStore): Promise<{ txHash: string }[]> {
+    const document = (await state.read("delivery-watch")) as
+      | { entries: { txHash: string }[] }
+      | undefined;
+    return document?.entries ?? [];
+  }
+
+  it("delivers it once attested, and settles the recipient, with no further call", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+
+    const early = await server.post("/deliver", { txHash: burnHash(1), domain: 0 });
+    expect(early.status).toBe(404);
+    expect(await watched(state)).toHaveLength(1);
+
+    // the page is closed; Circle attests meanwhile
+    iris.attest(burnHash(1), cctpMessage(user.publicKey()));
+    sweepClock();
+    await sweepFor(server, 120_000);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("watches one burn once however often it is asked about", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    for (const hash of [burnHash(2), burnHash(2), burnHash(2).toUpperCase().replace("0X", "0x")]) {
+      expect((await server.post("/deliver", { txHash: hash, domain: 0 })).status).toBe(404);
+    }
+    expect(await watched(state)).toHaveLength(1);
+  });
+
+  it("watches only so many burns for one client, and in all", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({
+      buildDelivery,
+      state,
+      trustProxy: true,
+      watchLimits: { perClient: 2, total: 3 },
+    });
+    const ask = (client: string, n: number) =>
+      fetch(`${server.url}/deliver`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": client },
+        body: JSON.stringify({ txHash: burnHash(n), domain: 0 }),
+      });
+    for (const n of [10, 11, 12]) expect((await ask("203.0.113.1", n)).status).toBe(404);
+    expect(await watched(state)).toHaveLength(2);
+    for (const n of [20, 21]) expect((await ask("198.51.100.9", n)).status).toBe(404);
+    expect(await watched(state)).toHaveLength(3);
+  });
+
+  it("keeps a watched burn while the day's budget is spent, and pays nothing", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, deliveryBudgetStroops: 0n });
+    await server.post("/deliver", { txHash: burnHash(3), domain: 0 });
+    iris.attest(burnHash(3), cctpMessage(Keypair.random().publicKey()));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    await sweepFor(server, 120_000);
+    logged.mockRestore();
+    expect(server.rpc.submissions).toEqual([]);
+    expect(await watched(state)).toHaveLength(1);
+  });
+
+  it("drops, and says so, a watched burn that can never be paid for", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    await server.post("/deliver", { txHash: burnHash(4), domain: 0 });
+    // attested, but below the sponsor's minimum
+    iris.attest(burnHash(4), cctpMessage(Keypair.random().publicKey(), { amount: 10n }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    await sweepFor(server, 120_000);
+    const lines = logged.mock.calls.flat().join(" ");
+    logged.mockRestore();
+    expect(await watched(state)).toEqual([]);
+    expect(lines).toMatch(/stopped watching/);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("stops watching a burn Circle never attests, after two days", async () => {
+    const iris = irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    await server.post("/deliver", { txHash: burnHash(5), domain: 0 });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    sweepClock();
+    vi.setSystemTime(Date.now() + 48 * 3_600_000 + 1_000);
+    const before = iris.asked.length;
+    await sweepFor(server, 120_000);
+    const lines = logged.mock.calls.flat().join(" ");
+    logged.mockRestore();
+    expect(await watched(state)).toEqual([]);
+    expect(lines).toMatch(/stopped watching/);
+    expect(iris.asked.length).toBe(before);
+  });
+
+  it("asks Circle again only on its backoff, not on every sweep", async () => {
+    const iris = irisSwitch();
+    const server = await startServer({ buildDelivery, settleSweepSeconds: 10 });
+    await server.post("/deliver", { txHash: burnHash(6), domain: 0 });
+    const before = iris.asked.length;
+    sweepClock();
+    // the first retry is a minute out, so five ten-second sweeps ask nothing
+    await sweepFor(server, 50_000);
+    expect(iris.asked.length).toBe(before);
+    await sweepFor(server, 20_000);
+    expect(iris.asked.length).toBe(before + 1);
+  });
+
+  it("watches nothing when accounts fund themselves", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, reserveFunding: "self" });
+    expect((await server.post("/deliver", { txHash: burnHash(7), domain: 0 })).status).toBe(409);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("keeps what it watches across a restart", async () => {
+    irisSwitch();
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ buildDelivery, state });
+    await first.post("/deliver", { txHash: burnHash(8), domain: 0 });
+    const second = await startServer({ buildDelivery, state }, { restartOf: first });
+    await second.server.ready();
+    expect(await watched(state)).toHaveLength(1);
+  });
+});
+
+describe("round 3: every /deliver answer says whether the burn is being watched", () => {
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const burn = (n: number) => `0x${(1000 + n).toString(16).padStart(64, "0")}`;
+
+  function irisAnswers(message: string | undefined): void {
+    stubIris(() =>
+      message === undefined
+        ? new Response("{}", { status: 404 })
+        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+            status: 200,
+          }),
+    );
+  }
+
+  async function watched(state: MemoryDocumentStore): Promise<string[]> {
+    const document = (await state.read("delivery-watch")) as
+      | { entries: { txHash: string }[] }
+      | undefined;
+    return (document?.entries ?? []).map((entry) => entry.txHash);
+  }
+
+  it("says watching on a 404, and the list is on disk when the answer arrives", async () => {
+    irisAnswers(undefined);
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const answered = await server.post("/deliver", { txHash: burn(1), domain: 0 });
+    expect(answered.status).toBe(404);
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(1)]);
+  });
+
+  it("says watching on a 409 for a recipient that cannot hold USDC yet", async () => {
+    irisAnswers(cctpMessage(Keypair.random().publicKey()));
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    server.rpc.prepare = async () => {
+      throw new Error("HostError: Error(Contract, #13) trustline entry is missing for account");
+    };
+    const answered = await server.post("/deliver", { txHash: burn(2), domain: 0 });
+    expect(answered.status).toBe(409);
+    expect(answered.body.kind).toBe("recipient-not-ready");
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(2)]);
+  });
+
+  it("says nothing of watching once delivered, and stops watching it", async () => {
+    const state = new MemoryDocumentStore();
+    irisAnswers(undefined);
+    const server = await startServer({ buildDelivery, state });
+    expect((await server.post("/deliver", { txHash: burn(3), domain: 0 })).body.watching).toBe(
+      true,
+    );
+    irisAnswers(cctpMessage(Keypair.random().publicKey()));
+    const delivered = await server.post("/deliver", { txHash: burn(3), domain: 0 });
+    expect(delivered.status).toBe(200);
+    expect(delivered.body.kind).toBe("delivered");
+    expect(delivered.body.watching ?? false).toBe(false);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("says nothing of watching when the burn could not be put on the list", async () => {
+    irisAnswers(undefined);
+    const state = new MemoryDocumentStore();
+    const full = await startServer({
+      buildDelivery,
+      state,
+      watchLimits: { perClient: 1, total: 1 },
+    });
+    expect((await full.post("/deliver", { txHash: burn(4), domain: 0 })).body.watching).toBe(true);
+    const past = await full.post("/deliver", { txHash: burn(5), domain: 0 });
+    expect(past.status).toBe(404);
+    expect(past.body.watching ?? false).toBe(false);
+    const malformed = await full.post("/deliver", { txHash: "nope", domain: 0 });
+    expect(malformed.body.watching ?? false).toBe(false);
+    const self = await startServer({ buildDelivery, reserveFunding: "self" });
+    expect(
+      (await self.post("/deliver", { txHash: burn(6), domain: 0 })).body.watching ?? false,
+    ).toBe(false);
+  });
+});
+
+describe("round 3: a preparation that lands after its window keeps its settlement's channel", () => {
+  it("keeps the lease when the preparation lands late, so the loan still settles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const at = (seconds: number) => vi.setSystemTime(t0 + seconds * 1000);
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    at(400);
+    const signed = await preparedAndSigned(server, user);
+    at(625);
+    const stall = server.rpc.stallNext("sponsored preparation");
+    const submitting = server.post("/submit", { signedXdr: signed });
+    await stall.reached;
+    // included only once the window and its grace are over
+    at(640);
+    stall.release();
+    expect((await submitting).status).toBe(200);
+
+    const other = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+  });
+
+  it("keeps it across a restart while the preparation is still on its way", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const at = (seconds: number) => vi.setSystemTime(t0 + seconds * 1000);
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    at(400);
+    const signed = await preparedAndSigned(first, user);
+    at(625);
+    const stall = first.rpc.stallNext("sponsored preparation");
+    const submitting = first.post("/submit", { signedXdr: signed });
+    await stall.reached;
+
+    at(700);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await second.server.ready();
+    const other = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+
+    stall.release();
+    await submitting;
+    second.rpc.holding(user, PLENTY);
+    const settled = await second.post("/settle", { destination: user.publicKey() });
+    logged.mockRestore();
+    expect(settled.body.settled).toBe(true);
+  });
+});
+
+describe("round 3: /deliver says a delivery of unknown outcome is unknown", () => {
+  it("answers that it may have landed, with the hash, and keeps watching the burn", async () => {
+    const ATTESTATION = `0x${"ef".repeat(65)}`;
+    const message = cctpMessage(Keypair.random().publicKey());
+    stubIris(
+      () =>
+        new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+          status: 200,
+        }),
+    );
+    const server = await startServer({ buildDelivery });
+    server.rpc.submit = async (_label, build) => {
+      await build();
+      throw new InclusionUnknown(
+        "cctp delivery (feed) was not seen included; it may still land.",
+        "feed",
+        false,
+      );
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const answered = await server.post("/deliver", { txHash: `0x${"9a".repeat(32)}`, domain: 0 });
+    logged.mockRestore();
+    expect(answered.status).toBe(502);
+    expect(answered.body.retryable).toBe(true);
+    expect(answered.body.error).toMatch(/may have landed/);
+    expect(answered.body.error).not.toMatch(/failed/);
+    expect(answered.body.deliveryTxHash).toBe("feed");
+    expect(answered.body.watching).toBe(true);
+  });
+});
+
+describe("round 3: idle channels go back to the sponsor above a floor", () => {
+  async function sweepOnce(server: TestServer): Promise<void> {
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+  }
+
+  it("merges channels idle for a day back into the sponsor, down to the floor", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer(
+      { provisionalSettlements: 4, settlementsPerClient: 0, channelFloor: 1 },
+      { fundsOwnChannel: true },
+    );
+    for (let i = 0; i < 3; i += 1) {
+      expect(
+        (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+      ).toBe(200);
+    }
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    // the slots lapse unused; the first sweep sees the channels idle
+    vi.setSystemTime(Date.now() + 700_000);
+    await sweepOnce(server);
+    expect(server.rpc.submissions.filter((s) => s.label === "channel merge")).toHaveLength(0);
+    // a day later they are still idle
+    vi.setSystemTime(Date.now() + 86_400_000);
+    await sweepOnce(server);
+    logged.mockRestore();
+
+    const merges = server.rpc.submissions.filter((s) => s.label === "channel merge");
+    expect(merges).toHaveLength(2);
+    for (const merge of merges) {
+      const tx = merge.tx as Transaction;
+      const op = tx.operations[0] as Operation.AccountMerge;
+      expect(op.type).toBe("accountMerge");
+      expect(op.destination).toBe(server.sponsor.publicKey());
+      expect(signedBy(tx, tx.source)).toBe(true);
+    }
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect((health.channels as Body).size).toBe(1);
+  });
+
+  it("never merges a channel a settlement holds or one used recently", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer(
+      { provisionalSettlements: 4, settlementsPerClient: 0, channelFloor: 0 },
+      { fundsOwnChannel: true },
+    );
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await sweepOnce(server);
+    vi.setSystemTime(Date.now() + 3_600_000);
+    await sweepOnce(server);
+    logged.mockRestore();
+    expect(server.rpc.submissions.filter((s) => s.label === "channel merge")).toEqual([]);
+  });
+});
+
+describe("round 3: a channel whose account is gone is dropped where it is found", () => {
+  it("drops a channel merged before a crash, and settles on another, never a 500", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const state = new MemoryDocumentStore();
+    const first = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    expect(
+      (await first.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    const written = (await state.read("channels")) as { secrets: string[] };
+    const merged = Keypair.fromSecret(written.secrets[0] ?? "").publicKey();
+    // the merge landed and the process died before the pool was rewritten
+    first.rpc.accounts.delete(merged);
+    vi.setSystemTime(Date.now() + 700_000);
+
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true, restartOf: first },
+    );
+    const next = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    logged.mockRestore();
+    expect(next.status).toBe(200);
+    expect(next.body.channel).not.toBe(merged);
+    const after = (await state.read("channels")) as { secrets: string[] };
+    expect(after.secrets.map((secret) => Keypair.fromSecret(secret).publicKey())).not.toContain(
+      merged,
+    );
+  });
+});
+
+describe("round 3: the sweep drops a free channel whose account is gone", () => {
+  it("takes it out of the pool on its first pass", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const state = new MemoryDocumentStore();
+    const server = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    await server.post("/settlement", { destination: Keypair.random().publicKey() });
+    const written = (await state.read("channels")) as { secrets: string[] };
+    const gone = Keypair.fromSecret(written.secrets[0] ?? "").publicKey();
+    server.rpc.accounts.delete(gone);
+    vi.setSystemTime(Date.now() + 700_000);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+    const after = (await state.read("channels")) as { secrets: string[] };
+    expect(after.secrets).toEqual([]);
   });
 });

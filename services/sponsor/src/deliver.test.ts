@@ -1,5 +1,5 @@
 import { MavnaError } from "@mavna/core";
-import { type NetworkConfig, RpcClient } from "@mavna/stellar";
+import { InclusionUnknown, type NetworkConfig, RpcClient } from "@mavna/stellar";
 import {
   Account,
   Address,
@@ -12,7 +12,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { Deliverer, DeliveryBudgetSpent } from "./deliver.js";
+import { Deliverer, DeliveryBudgetSpent, DeliveryOutcomeUnknown } from "./deliver.js";
 import { DeliveryBudget } from "./delivery-budget.js";
 import { MemoryDocumentStore } from "./state.js";
 
@@ -357,6 +357,28 @@ describe("round 2: duplicate deliveries of one burn", () => {
     expect(outcomes.every((outcome) => outcome.kind === "delivered")).toBe(true);
     expect(rpcClient.sent).toHaveLength(1);
     // one delivery's charge: the double reports none, so its whole share
+    expect(await budget.spentToday()).toBe(20_000_000n);
+  });
+});
+
+describe("round 3: a delivery sent and never seen to land", () => {
+  it("is reported as unknown with its hash, and keeps its budget share", async () => {
+    const rpcClient = new SequencedRpc();
+    // the node took it and then stopped answering
+    rpcClient.submit = async (_label, build) => {
+      await build();
+      throw new InclusionUnknown(
+        "cctp delivery (abc123) was not seen included; it may still land.",
+        "abc123",
+        false,
+      );
+    };
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 250_000_000n, () => "2026-10-20");
+    const failure = await deliveryOn(rpcClient, budget)
+      .deliver({ messageHex: "0xabcd", attestationHex: "0x1234" })
+      .catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(DeliveryOutcomeUnknown);
+    expect((failure as DeliveryOutcomeUnknown).txHash).toBe("abc123");
     expect(await budget.spentToday()).toBe(20_000_000n);
   });
 });

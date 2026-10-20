@@ -284,10 +284,13 @@ one of:
 ```
 
 or `404` when Circle has no attested record of the transaction yet (retryable:
-nothing is wrong, ask again in a minute), `502` when Circle's attestation service
+nothing is wrong, ask again in a minute; the sponsor also keeps asking by itself,
+see below), `502` when Circle's attestation service
 could not be reached or did not answer usefully (retryable), `502` (retryable) when
 the delivery reached Stellar and failed there, so its fee was paid and nothing was
-minted, `503` (retryable) once the sponsor has spent the day's delivery budget
+minted, `502` (retryable) with `deliveryTxHash` when the delivery was sent and no
+node has said whether it landed (it may have; the sponsor watches the burn and a
+retry answers `already-delivered` if it did), `503` (retryable) once the sponsor has spent the day's delivery budget
 (`MAVNA_DELIVERY_BUDGET_XLM`), or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
@@ -295,6 +298,25 @@ receive yet, which in the designed flow is
 submitted alongside a delivery, the response carries the settlement's result too,
 in the same `settled`, `settlementTxHash` and `settlementRetryable` fields
 `/settle` uses.
+
+Every answer to `/deliver` carries `"watching": true` exactly when the burn is on
+the sponsor's watch list after the request, and the list is written to disk before
+the answer goes out; otherwise there is no `watching` field. A client that sees it
+can leave delivering that burn to the sponsor.
+
+A burn asked about before Circle attested it (a `404`, or `not-attested-yet`), or
+whose recipient cannot hold USDC yet (`409` `recipient-not-ready`), is also
+written down, so a page closed while Circle attests still gets its transfer
+delivered. The sweep asks about it again on a backoff (a minute, doubling to half
+an hour) and delivers it once attested, through the same checks as this endpoint:
+the minimum, the daily delivery budget and the settlement for the attested
+recipient. It stops watching a burn once it is delivered or found already
+delivered, once it can never be paid for (below the minimum, or an amount that
+cannot be read), or two days after it was first asked about; each of those is
+logged. One burn is watched once however often it is asked about, and the sponsor
+watches at most 8 burns per client address and 1,000 in all; past that the answer
+is the same, only nothing is written down. With `MAVNA_RESERVE_FUNDING=self`
+nothing is watched.
 
 ## Soroswap proxy
 

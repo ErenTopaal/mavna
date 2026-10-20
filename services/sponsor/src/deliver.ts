@@ -1,6 +1,7 @@
 import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import {
+  InclusionUnknown,
   type NetworkConfig,
   type RpcClient,
   SubmitExhausted,
@@ -115,6 +116,23 @@ export class DeliveryFailedOnChain extends MavnaError {
       retryable: true,
     });
     this.name = "DeliveryFailedOnChain";
+  }
+}
+
+/**
+ * A delivery that was sent and that no node has said landed or not. It may
+ * have minted; asking again is safe, since a mint that landed is refused as
+ * already delivered. `txHash` is what to look it up by.
+ */
+export class DeliveryOutcomeUnknown extends MavnaError {
+  readonly txHash: string;
+
+  constructor(txHash: string) {
+    super(`The delivery ${txHash} was sent and has not been seen to land or fail.`, {
+      retryable: true,
+    });
+    this.name = "DeliveryOutcomeUnknown";
+    this.txHash = txHash;
   }
 }
 
@@ -246,6 +264,9 @@ export class Deliverer {
       await reservation?.settle(chargedBy(result, ceiling));
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
+      // Sent and never seen either way: it may have landed and been charged, so
+      // its share stays counted, and it is said as unknown, never as failed.
+      if (cause instanceof InclusionUnknown) throw new DeliveryOutcomeUnknown(cause.hash);
       // Refused before anything was sent costs nothing, and so does every send
       // refused at submission for a stale sequence. Anything else sent may have
       // been charged, so its share stays counted in full.

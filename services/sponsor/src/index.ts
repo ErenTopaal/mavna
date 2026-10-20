@@ -28,7 +28,12 @@ export {
 export type { ReserveFunding, SponsorConfig } from "./config.js";
 export { readSponsorConfig, SponsorConfigError } from "./config.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
-export { Deliverer, DeliveryBudgetSpent, DeliveryFailedOnChain } from "./deliver.js";
+export {
+  Deliverer,
+  DeliveryBudgetSpent,
+  DeliveryFailedOnChain,
+  DeliveryOutcomeUnknown,
+} from "./deliver.js";
 export type { BudgetReservation } from "./delivery-budget.js";
 export { DeliveryBudget } from "./delivery-budget.js";
 export { env } from "./env.js";

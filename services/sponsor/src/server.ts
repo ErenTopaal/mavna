@@ -43,7 +43,12 @@ import {
   signedBy,
 } from "./built.js";
 import { type CapDecision, CapLedger } from "./caps.js";
-import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
+import {
+  type Channel,
+  ChannelPool,
+  type ChannelPoolSnapshot,
+  type LeaseRecord,
+} from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
 import {
@@ -51,6 +56,7 @@ import {
   DeliveryBudgetSpent,
   DeliveryFailedOnChain,
   type DeliveryOutcome,
+  DeliveryOutcomeUnknown,
 } from "./deliver.js";
 import { DeliveryBudget } from "./delivery-budget.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
@@ -120,6 +126,11 @@ export interface SponsorServerOptions {
    */
   readonly provisionalSettlements?: number;
   /**
+   * Channels the server keeps for itself however long they sit idle. Above it,
+   * a channel idle for a day is merged back into the sponsor. Four by default.
+   */
+  readonly channelFloor?: number;
+  /**
    * Settlements one client address may have waiting on a channel at once,
    * before anything backs them. Zero turns the limit off. Two by default.
    */
@@ -131,6 +142,11 @@ export interface SponsorServerOptions {
    * against its own records. Horizon's, for this network, when not given.
    */
   readonly sponsorshipView?: ChainSponsorshipView;
+  /**
+   * How many burns Circle had not attested yet the sweep keeps asking about,
+   * per client address and in all. 8 and 1,000 by default.
+   */
+  readonly watchLimits?: { readonly perClient: number; readonly total: number };
   /** Quotes what a settlement's direct path spends now, for the balance check. */
   readonly spendQuote?: DirectSpendQuote;
   /**
@@ -434,6 +450,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
   const provisionalLimit = options.provisionalSettlements ?? DEFAULT_PROVISIONAL_SETTLEMENTS;
   const perClient = options.settlementsPerClient ?? DEFAULT_SETTLEMENTS_PER_CLIENT;
+  const channelFloor = options.channelFloor ?? DEFAULT_CHANNEL_FLOOR;
+  if (!Number.isSafeInteger(channelFloor) || channelFloor < 0) {
+    throw new Error(`The channel floor must be a whole number; got ${channelFloor}.`);
+  }
   for (const [name, value, least] of [
     ["number of provisional settlements", provisionalLimit, 1],
     ["settlements per client", perClient, 0],
@@ -454,6 +474,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * cannot hold a channel indefinitely by asking again as each one lapses.
    */
   const provisionalSince = new Map<string, number>();
+
+  /**
+   * Burns asked about before Circle attested them, by domain and hash. A page
+   * closed while Circle attests would otherwise leave the burn undelivered,
+   * and a held settlement for its recipient would run to its time bound, so
+   * the sweep keeps asking until it lands, is found delivered, can never be
+   * paid for, or is two days old. Written down with the rest of the state.
+   */
+  const watch = new Map<string, WatchEntry>();
+  /** Which client asked for each watched burn. Kept in memory only. */
+  const watchClients = new Map<string, string>();
+  const watchLimits = options.watchLimits ?? DEFAULT_WATCH_LIMITS;
 
   /**
    * The channels the server may fund for itself. A landed preparation holds
@@ -709,8 +741,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    */
   function backedByLanding(account: string, held: HeldSettlement): void {
     provisionalSince.delete(account);
-    if (held.channel !== undefined) {
-      channels?.extend(account, held.channel, held.maxTimeUnix, nowUnix());
+    if (held.channel === undefined || channels === undefined) return;
+    if (!channels.extend(account, held.channel, held.maxTimeUnix, nowUnix())) {
+      // the lease is kept while anything is in flight or landed on it, so this
+      // means it was lost some other way; said, since the loan now rides on it
+      console.error(
+        `[sponsor] a preparation landed for ${account}, and its settlement's channel ` +
+          `${held.channel} is no longer leased to it`,
+      );
     }
   }
 
@@ -907,7 +945,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       if (channels !== undefined) {
         adopt(channels).restoreLeases(leases, now);
       } else if (secrets.length > 0) {
-        channels = adopt(ChannelPool.fromSnapshot({ secrets, leases }, now));
+        channels = adopt(ChannelPool.fromSnapshot({ secrets, leases }, now, keptLease));
       }
       const pending = channelDocument.pending;
       if (pending !== undefined && !secretShape.safeParse(pending).success) {
@@ -916,6 +954,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         // a channel whose funding was under way when the process stopped,
         // finished on the next need for one
         pendingChannel = Keypair.fromSecret(pending as string);
+      }
+    }
+
+    const watchDocument = await state.read("delivery-watch");
+    if (watchDocument !== undefined) {
+      const parsed = watchDocumentShape.safeParse(watchDocument);
+      if (!parsed.success) {
+        reject("delivery-watch", watchDocument);
+      } else {
+        parsed.data.entries.forEach((value, index) => {
+          const entry = watchEntryShape.safeParse(value);
+          if (entry.success && sourceDomains.has(entry.data.domain)) {
+            watch.set(watchKey(entry.data.txHash, entry.data.domain), entry.data);
+          } else {
+            reject("delivery-watch", value, String(index));
+          }
+        });
       }
     }
 
@@ -959,6 +1014,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const documents: Record<string, unknown> = {
       channels: channelDocument,
       held: { held, settled: Object.fromEntries(recentlySettled) } satisfies HeldDocument,
+      "delivery-watch": { entries: [...watch.values()] },
     };
     // Most answers change nothing, and rewriting every file (secrets included)
     // for each anonymous refusal is wasted disk and a wider window for a
@@ -1056,8 +1112,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * reused, its sequence would go to someone else while the reserve is out.
    */
   function adopt(pool: ChannelPool): ChannelPool {
-    pool.holdWhile(inFlight);
+    pool.holdWhile(keptLease);
     return pool;
+  }
+
+  /**
+   * A lease the pool must not reclaim at its bound: a preparation may still
+   * land on it, or one has and the settlement that repays it rides on it.
+   */
+  function keptLease(owner: string): boolean {
+    return inFlight(owner) || landed(owner);
   }
 
   /** Failed fundings in a row, and when the next may be tried. */
@@ -1118,6 +1182,74 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return adopt(channels);
   }
 
+  /** When each free channel was first seen idle, by address. */
+  const idleSince = new Map<string, number>();
+
+  /**
+   * Merge channels that have sat idle for a day back into the sponsor, while
+   * the pool is above its floor. The pool grows to meet the caps' worst case,
+   * and without this the XLM moved into it would stay there after the traffic
+   * is gone. Only a channel no one leases, that no held settlement names and
+   * that carries nothing in flight is merged; it is leased to itself while the
+   * merge goes out, so nothing else can take it meanwhile.
+   */
+  async function shrinkPool(): Promise<void> {
+    const pool = channels;
+    if (pool === undefined) return;
+    const now = nowUnix();
+    const free = pool.freeAddresses(now);
+    for (const address of [...idleSince.keys()]) {
+      if (!free.includes(address)) idleSince.delete(address);
+    }
+    const named = new Set([...heldSettlements.values()].map((held) => held.channel));
+    for (const address of free) {
+      if (named.has(address)) continue;
+      const since = idleSince.get(address);
+      if (since === undefined) {
+        idleSince.set(address, now);
+        continue;
+      }
+      if (now - since < CHANNEL_IDLE_MERGE_SECONDS || pool.size <= channelFloor) continue;
+      const lease = pool.acquireThis(address, address, now + PROVISIONAL_LEASE_SECONDS, now);
+      if (lease === undefined) continue;
+      // written down leased before the merge, so a crash leaves it unusable, not reused
+      await persist();
+      try {
+        await mergeChannel(lease.keypair);
+        console.error(`[sponsor] merged idle channel ${address} back into the sponsor`);
+      } catch (cause) {
+        if (!(cause instanceof AccountNotFound)) {
+          pool.release(address, address);
+          console.error(
+            `[sponsor] could not merge idle channel ${address}:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          continue;
+        }
+        console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
+      }
+      pool.drop(address, address);
+      idleSince.delete(address);
+      await persist();
+    }
+  }
+
+  /** Send everything a channel holds back to the sponsor, closing the account. */
+  async function mergeChannel(channel: Keypair): Promise<void> {
+    await options.rpc.submit("channel merge", async () => {
+      const account = await options.rpc.loadAccount(channel.publicKey());
+      const merge = new TransactionBuilder(account, {
+        fee: "1000000",
+        networkPassphrase: options.network.passphrase,
+      })
+        .addOperation(Operation.accountMerge({ destination: keypair.publicKey() }))
+        .setTimeout(120)
+        .build();
+      merge.sign(channel);
+      return merge;
+    });
+  }
+
   /** Channels being topped up right now, so two asks send one payment. */
   const toppingUp = new Map<string, Promise<void>>();
 
@@ -1132,7 +1264,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (running !== undefined) return running;
     const work = (async () => {
       const entry = await readAccountEntry(options.rpc, address);
-      if (entry === undefined) return;
+      if (entry === undefined) {
+        // gone (merged back before a crash, say): out of the pool while free,
+        // so no settlement is ever built on it
+        const pool = channels;
+        if (pool?.acquireThis(address, address, nowUnix() + 60, nowUnix()) !== undefined) {
+          console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
+          pool.drop(address, address);
+          await persist();
+        }
+        return;
+      }
       const balance = entry.balance;
       if (balance >= CHANNEL_LOW_STROOPS) return;
       const amount = CHANNEL_TOP_UP_TO_STROOPS - balance;
@@ -1266,6 +1408,27 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
     }
     // a snapshot: settling an account removes it from the map mid-loop
+    // Burns first: delivering one may let its recipient's settlement go below.
+    if (reserveFunding === "sponsor") {
+      try {
+        await sweepWatched();
+      } catch (cause) {
+        console.error(
+          "[sponsor] could not sweep the watched burns:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
+    if (reserveFunding === "sponsor" && options.channels === undefined) {
+      try {
+        await shrinkPool();
+      } catch (cause) {
+        console.error(
+          "[sponsor] could not return idle channels:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     const destinations = Array.from(heldSettlements.keys());
     for (const destination of destinations) {
       try {
@@ -1507,7 +1670,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
-      await deliver(bodyOf(deliverBody, await readJson(req)), res, origin);
+      await deliver(bodyOf(deliverBody, await readJson(req)), res, origin, client);
       return;
     }
     if (req.method === "POST" && url.pathname === "/compose") {
@@ -1992,18 +2155,34 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // A fixed window from the first ask, lengthened only once a preparation has
     // landed. Asking again hands back the same channel and window, so asking,
     // signing and committing, all free, can never keep a slot.
-    let channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
-    while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
-      try {
-        pool = await fundOne();
-      } catch (cause) {
-        if (!(cause instanceof FundingBackoff)) throw cause;
-        await noSlot();
-        return;
-      }
+    let channel: Channel | undefined;
+    let channelAccount: Account | undefined;
+    // A channel whose account is gone (merged back, and the process stopped
+    // before the pool was rewritten) is dropped where it is found, and the
+    // next one taken, so this never answers for it with a failure.
+    while (channelAccount === undefined) {
       channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+      while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
+        try {
+          pool = await fundOne();
+        } catch (cause) {
+          if (!(cause instanceof FundingBackoff)) throw cause;
+          await noSlot();
+          return;
+        }
+        channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+      }
+      if (channel === undefined) break;
+      try {
+        channelAccount = await options.rpc.loadAccount(channel.address);
+      } catch (cause) {
+        if (!(cause instanceof AccountNotFound)) throw cause;
+        console.error(`[sponsor] channel ${channel.address} no longer exists; dropping it`);
+        pool.drop(account, channel.address);
+        await persist();
+      }
     }
-    if (channel === undefined) {
+    if (channel === undefined || channelAccount === undefined) {
       await answer(
         res,
         503,
@@ -2024,7 +2203,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const stroopsPerUsdc = await prices.xlmStroopsPerUnit(usdc);
     const maxSpendBase = (xlmNeededStroops * 2n * 10_000_000n) / stroopsPerUsdc;
 
-    const channelAccount = await options.rpc.loadAccount(channel.address);
     const transaction = buildSettlement({
       network: options.network,
       channelAccount,
@@ -2904,6 +3082,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     body: DeliverBody,
     res: ServerResponse,
     origin: string | undefined,
+    client: string,
   ): Promise<void> {
     // An account paying its own reserve also signs and pays its own delivery,
     // so a sponsor in that mode spends nothing here, whoever asks.
@@ -2944,17 +3123,112 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const unavailable = (): Promise<void> =>
-      answer(
-        res,
-        502,
-        { error: "Circle's attestation service did not answer usefully.", retryable: true },
-        origin,
-      );
+    const txHash = normalTxHash(body.txHash);
+    const result = await deliverBurn(txHash, domain);
+    const key = watchKey(txHash, domain);
+    if (result.next === "watch") watchBurn(txHash, domain, client);
+    if (result.next === "done" || result.next === "never") forgetBurn(key);
+    // Said only when it is true: the widget leaves the burn to the sponsor on
+    // it, and answer() writes the list down before this goes out.
+    await answer(
+      res,
+      result.status,
+      watch.has(key) ? { ...result.body, watching: true } : result.body,
+      origin,
+    );
+  }
+
+  /** Start watching a burn Circle has not attested yet, within the limits. */
+  function watchBurn(txHash: string, domain: number, client: string): void {
+    const key = watchKey(txHash, domain);
+    if (watch.has(key)) return;
+    const mine = [...watchClients.values()].filter((asker) => asker === client).length;
+    if (mine >= watchLimits.perClient || watch.size >= watchLimits.total) return;
+    const now = nowUnix();
+    watch.set(key, {
+      txHash,
+      domain,
+      addedAtUnix: now,
+      nextAtUnix: now + WATCH_FIRST_RETRY_SECONDS,
+      tries: 0,
+    });
+    watchClients.set(key, client);
+  }
+
+  function forgetBurn(key: string): void {
+    watch.delete(key);
+    watchClients.delete(key);
+  }
+
+  /**
+   * Ask about every watched burn that is due, a few each sweep, one at a time.
+   * Each is delivered through the same path /deliver takes, so the budget,
+   * the minimum and the settlement that follows all apply as they would there.
+   */
+  async function sweepWatched(): Promise<void> {
+    let tried = 0;
+    for (const [key, entry] of [...watch]) {
+      const now = nowUnix();
+      if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < now) {
+        forgetBurn(key);
+        console.error(
+          `[sponsor] stopped watching burn ${entry.txHash} on domain ${entry.domain}: ` +
+            "not delivered within two days",
+        );
+        continue;
+      }
+      if (entry.nextAtUnix > now || tried >= WATCH_PER_SWEEP) continue;
+      tried += 1;
+      let result: BurnResult;
+      try {
+        result = await deliverBurn(entry.txHash, entry.domain);
+      } catch (cause) {
+        console.error(
+          `[sponsor] could not deliver watched burn ${entry.txHash}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+        result = { status: 500, body: {}, next: "later" };
+      }
+      if (watch.get(key) !== entry) continue;
+      if (result.next === "done") {
+        forgetBurn(key);
+        console.error(`[sponsor] delivered watched burn ${entry.txHash} on domain ${entry.domain}`);
+      } else if (result.next === "never") {
+        forgetBurn(key);
+        console.error(
+          `[sponsor] stopped watching burn ${entry.txHash} on domain ${entry.domain}: ` +
+            String(result.body.error ?? "it can never be delivered"),
+        );
+      } else {
+        entry.tries += 1;
+        entry.nextAtUnix =
+          nowUnix() +
+          Math.min(WATCH_FIRST_RETRY_SECONDS * 2 ** entry.tries, WATCH_MAX_BACKOFF_SECONDS);
+      }
+    }
+    await persist();
+  }
+
+  /**
+   * Deliver one burn: ask Circle, check what it mints, deliver, and settle for
+   * the attested recipient. What to answer, and what the watch list should do
+   * next: keep watching (not attested yet), try later, or forget it.
+   */
+  async function deliverBurn(txHash: string, domain: number): Promise<BurnResult> {
+    const unavailable: BurnResult = {
+      status: 502,
+      body: { error: "Circle's attestation service did not answer usefully.", retryable: true },
+      next: "later",
+    };
+    const notYet: BurnResult = {
+      status: 404,
+      body: { error: "Circle has no attested record of that transaction yet.", retryable: true },
+      next: "watch",
+    };
     let iris: Response;
     try {
       iris = await fetch(
-        `${options.irisUrl}/v2/messages/${domain}?transactionHash=${encodeURIComponent(body.txHash)}`,
+        `${options.irisUrl}/v2/messages/${domain}?transactionHash=${encodeURIComponent(txHash)}`,
         { signal: AbortSignal.timeout(30_000) },
       );
     } catch (cause) {
@@ -2962,40 +3236,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         "[sponsor] iris could not be reached:",
         cause instanceof Error ? cause.message : cause,
       );
-      await unavailable();
-      return;
+      return unavailable;
     }
-    if (iris.status === 404) {
-      await answer(
-        res,
-        404,
-        { error: "Circle has no attested record of that transaction yet.", retryable: true },
-        origin,
-      );
-      return;
-    }
+    if (iris.status === 404) return notYet;
     if (!iris.ok) {
       console.error("[sponsor] iris answered", iris.status);
-      await unavailable();
-      return;
+      return unavailable;
     }
     let parsed: { messages?: readonly { message?: string; attestation?: string }[] };
     try {
       parsed = (await iris.json()) as typeof parsed;
     } catch (cause) {
       console.error("[sponsor] iris answered with something that is not JSON", cause);
-      await unavailable();
-      return;
+      return unavailable;
     }
     const message = parsed?.messages?.[0];
     if (typeof message?.message !== "string" || typeof message.attestation !== "string") {
-      await answer(
-        res,
-        404,
-        { error: "Circle has no attested record of that transaction yet.", retryable: true },
-        origin,
-      );
-      return;
+      return notYet;
     }
 
     // Paying to deliver dust is how a stream of tiny burns spends the
@@ -3005,10 +3262,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (message.attestation !== "PENDING") {
       const minted = mintedAmount(message.message);
       if (minted === undefined || minted < minDelivery) {
-        await answer(
-          res,
-          400,
-          {
+        return {
+          status: 400,
+          body: {
             error:
               minted === undefined
                 ? "Circle's record of that transfer has no amount this sponsor can read, so it will not pay to deliver it."
@@ -3016,9 +3272,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
                   `and this one mints ${usdcText(minted)} USDC.`,
             retryable: false,
           },
-          origin,
-        );
-        return;
+          next: "never",
+        };
       }
     }
 
@@ -3035,48 +3290,60 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
             "is paid for until it is repaired:",
           cause.message,
         );
-        await answer(
-          res,
-          503,
-          {
+        return {
+          status: 503,
+          body: {
             error:
               "This sponsor is not paying for deliveries while its records are repaired. Try " +
               "again later, or deliver the transfer from the receiving account.",
             retryable: true,
           },
-          origin,
-        );
-        return;
+          next: "later",
+        };
       }
       if (cause instanceof DeliveryBudgetSpent) {
         console.error("[sponsor] today's delivery budget is spent; a delivery was turned away");
-        await answer(
-          res,
-          503,
-          {
+        return {
+          status: 503,
+          body: {
             error:
               "This sponsor has spent today's budget for paying deliveries. Try again after " +
               "midnight UTC, or deliver the transfer from the receiving account.",
             retryable: true,
           },
-          origin,
-        );
-        return;
+          next: "later",
+        };
+      }
+      if (cause instanceof DeliveryOutcomeUnknown) {
+        console.error("[sponsor]", cause.message);
+        return {
+          status: 502,
+          body: {
+            error:
+              "The delivery was sent and has not been seen to land; it may have landed. " +
+              "Asking again is safe.",
+            retryable: true,
+            deliveryTxHash: cause.txHash,
+          },
+          // looked up again by the sweep, which finds it delivered if it landed
+          next: "watch",
+        };
       }
       if (!(cause instanceof DeliveryFailedOnChain)) throw cause;
       console.error("[sponsor]", cause.message);
-      await answer(
-        res,
-        502,
-        {
+      return {
+        status: 502,
+        body: {
           error:
             "The delivery reached Stellar and failed there, so its fee was paid and nothing " +
             "was minted. Asking again is safe.",
           retryable: true,
         },
-        origin,
-      );
-      return;
+        next: "later",
+      };
+    }
+    if (outcome.kind === "not-attested-yet") {
+      return { status: 200, body: { ...outcome }, next: "watch" };
     }
 
     // The lateness rule's payoff: the settlement was signed before anything
@@ -3092,12 +3359,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         ? await settleIfHeld(signerFor(recipient))
         : {};
 
-    await answer(
-      res,
-      outcome.kind === "recipient-not-ready" ? 409 : 200,
-      { ...outcome, ...settled },
-      origin,
-    );
+    return {
+      status: outcome.kind === "recipient-not-ready" ? 409 : 200,
+      body: { ...outcome, ...settled },
+      // not ready yet is a wait, so the sweep delivers it once the account is
+      next: outcome.kind === "recipient-not-ready" ? "watch" : "done",
+    };
   }
 }
 
@@ -3348,6 +3615,17 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  */
 const PROVISIONAL_LEASE_SECONDS = 600;
 
+/** Channels kept however idle, and how long one sits unused before it is merged back. */
+const DEFAULT_CHANNEL_FLOOR = 4;
+const CHANNEL_IDLE_MERGE_SECONDS = 24 * 60 * 60;
+
+/** Watched burns: per client and in all, first retry, longest wait, oldest, and per sweep. */
+const DEFAULT_WATCH_LIMITS = { perClient: 8, total: 1_000 } as const;
+const WATCH_FIRST_RETRY_SECONDS = 60;
+const WATCH_MAX_BACKOFF_SECONDS = 30 * 60;
+const WATCH_MAX_AGE_SECONDS = 48 * 60 * 60;
+const WATCH_PER_SWEEP = 25;
+
 /** Lines the built log may run past twice its open records before it is compacted. */
 const BUILT_LOG_SLACK = 1_000;
 
@@ -3523,6 +3801,40 @@ async function readTrustline(
  */
 const ALREADY_HOLDS_USDC =
   "That account already holds USDC, so there is no trustline for this sponsor to open.";
+
+/** One burn the sweep keeps asking about, as written down. */
+interface WatchEntry {
+  readonly txHash: string;
+  readonly domain: number;
+  readonly addedAtUnix: number;
+  nextAtUnix: number;
+  tries: number;
+}
+
+/** What delivering one burn came to, and what its watch should do next. */
+interface BurnResult {
+  readonly status: number;
+  readonly body: Record<string, unknown>;
+  readonly next: "watch" | "later" | "done" | "never";
+}
+
+const watchEntryShape = z.object({
+  txHash: z.string().max(200),
+  domain: z.number().int().nonnegative(),
+  addedAtUnix: z.number().int(),
+  nextAtUnix: z.number().int(),
+  tries: z.number().int().nonnegative(),
+});
+const watchDocumentShape = z.object({ entries: z.array(z.unknown()) });
+
+/** An EVM or Starknet hash in one case, so one burn is one watch; base58 is case-sensitive. */
+function normalTxHash(txHash: string): string {
+  return txHash.startsWith("0x") ? txHash.toLowerCase() : txHash;
+}
+
+function watchKey(txHash: string, domain: number): string {
+  return `${domain}:${normalTxHash(txHash)}`;
+}
 
 /** A cap reached is 429; the counts themselves unreadable is the sponsor's own 503. */
 function capStatus(decision: CapDecision): number {
