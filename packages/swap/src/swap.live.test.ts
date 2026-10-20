@@ -6,9 +6,11 @@ import { SushiSwapProvider } from "./sushiswap.js";
 import { STELLAR_USDT0 } from "./venues.js";
 
 /**
- * Against the live venues, read-only. Nothing here signs or submits: a build is
+ * Against the live venues. On mainnet nothing signs or submits: a build is
  * checked by the RPC simulating it for a real holder of the input asset, which
- * is as far as one can go on mainnet without spending someone's money.
+ * is as far as one can go there without spending someone's money. The one test
+ * named "executes on testnet" does sign and submit, with a throwaway
+ * Friendbot-funded key on the test network.
  *
  * Soroswap's live test sits with the sponsor's proxy, which is the only thing
  * that can reach it.

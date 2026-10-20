@@ -19,8 +19,8 @@ floor. If the market has moved past that floor the swap fails whole, and the use
 keeps the asset that arrived. That is the safe direction to fail. Slippage is
 applied by rounding the minimum down with integer math, never through a float.
 
-The swap leg walks the venues in this order and uses the first that is usable and
-can quote the pair:
+The swap leg asks every venue that serves the pair at the same time, then reads
+the answers in this order and uses the first that is usable and can quote it:
 
 1. **Soroswap**, wherever it serves. It aggregates Soroswap, Phoenix, Aquarius,
    SushiSwap and Comet pools, and Stellar's own orderbook when the money goes to an
@@ -44,7 +44,11 @@ can quote the pair:
 
 `createSwapVenues` builds that chain for a network, and the chain is itself a
 `SwapProvider`: its quote names the venue that gave it, and `build` goes back to
-that venue. The order is a preference, not a price race.
+that venue. The order is a preference, not a price race: a later venue that
+prices higher still loses to an earlier one that answered. A quote request can
+carry an `AbortSignal`. When it fires, the chain stops waiting for the earlier
+venues and takes the first quote that has already arrived, in the same order,
+and each venue stops its own quote requests.
 
 Stellar's orderbook is not a venue of its own in the chain. It is reached through
 Soroswap for account destinations, and `SdexProvider` with `buildPathPayment`
@@ -65,7 +69,16 @@ conversion, rewrites the route's `receives` and `receivesAtLeast` to the wanted
 asset, appends a `swap` step, adds its time to the estimate, and adds one to the
 signature count, because the user signs the conversion themselves. If no venue
 can quote the conversion, the whole route comes back as a `no-liquidity`
-rejection with each venue's reason, rather than a route that cannot complete.
+rejection that names the wanted asset, rather than a route that cannot complete.
+The venues' own reasons are not shown, because they can carry raw node errors.
+
+The rail's quote and its conversion share one budget (`ADAPTER_QUOTE_TIMEOUT_MS`
+in a route race). The conversion gets what the rail's quote left of it, and if
+nothing has priced it by then the route comes back as `timed-out`, saying the
+conversion did not price in time. A route whose rail delivered some other asset
+than the one the conversion sells is refused as `asset-unsupported`, and so is a
+reserve repaid out of the arrival when the wanted asset is not XLM, because that
+repayment is priced in XLM.
 
 When the transfer reaches the swap step, the widget quotes again through the same
 chain, builds with the venue that answered, and asks the user to sign.
