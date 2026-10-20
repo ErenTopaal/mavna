@@ -8,9 +8,10 @@
 # server; the sponsor is the one process with a key, and its section says
 # exactly what that key can do.
 #
-# The build installs into this checkout's node_modules from inside a Linux
-# container, so the packages it links are Linux ones. Run it from a checkout you
-# do not also build on the host, or run `pnpm install` on the host afterwards.
+# Every node_modules in the workspace is a named volume rather than part of the
+# bind-mounted checkout, so the Linux packages the container installs and a
+# host's own never share a directory. The list follows pnpm-workspace.yaml, and
+# scripts/compose.test.ts fails when a package is added without one.
 services:
   # Installs and builds once for both services. Two installs into the one
   # checkout race on pnpm's store and fail. Built through turbo with the
@@ -21,6 +22,22 @@ services:
     working_dir: /repo
     volumes:
       - .:/repo
+      - modules-root:/repo/node_modules
+      - modules-packages-core:/repo/packages/core/node_modules
+      - modules-packages-routing:/repo/packages/routing/node_modules
+      - modules-packages-status:/repo/packages/status/node_modules
+      - modules-packages-stellar:/repo/packages/stellar/node_modules
+      - modules-packages-swap:/repo/packages/swap/node_modules
+      - modules-packages-widget:/repo/packages/widget/node_modules
+      - modules-adapter-axelar:/repo/packages/adapters/axelar/node_modules
+      - modules-adapter-cctp:/repo/packages/adapters/cctp/node_modules
+      - modules-adapter-layerzero:/repo/packages/adapters/layerzero/node_modules
+      - modules-adapter-near-intents:/repo/packages/adapters/near-intents/node_modules
+      - modules-apps-app:/repo/apps/app/node_modules
+      - modules-apps-docs:/repo/apps/docs/node_modules
+      - modules-apps-playground:/repo/apps/playground/node_modules
+      - modules-apps-web:/repo/apps/web/node_modules
+      - modules-services-sponsor:/repo/services/sponsor/node_modules
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@12.14.0;
              pnpm install --frozen-lockfile &&
@@ -43,6 +60,22 @@ services:
     working_dir: /repo/apps/app
     volumes:
       - .:/repo
+      - modules-root:/repo/node_modules
+      - modules-packages-core:/repo/packages/core/node_modules
+      - modules-packages-routing:/repo/packages/routing/node_modules
+      - modules-packages-status:/repo/packages/status/node_modules
+      - modules-packages-stellar:/repo/packages/stellar/node_modules
+      - modules-packages-swap:/repo/packages/swap/node_modules
+      - modules-packages-widget:/repo/packages/widget/node_modules
+      - modules-adapter-axelar:/repo/packages/adapters/axelar/node_modules
+      - modules-adapter-cctp:/repo/packages/adapters/cctp/node_modules
+      - modules-adapter-layerzero:/repo/packages/adapters/layerzero/node_modules
+      - modules-adapter-near-intents:/repo/packages/adapters/near-intents/node_modules
+      - modules-apps-app:/repo/apps/app/node_modules
+      - modules-apps-docs:/repo/apps/docs/node_modules
+      - modules-apps-playground:/repo/apps/playground/node_modules
+      - modules-apps-web:/repo/apps/web/node_modules
+      - modules-services-sponsor:/repo/services/sponsor/node_modules
     depends_on:
       build:
         condition: service_completed_successfully
@@ -74,6 +107,22 @@ services:
     # its network, and the sponsor refuses to start on another one against it.
     volumes:
       - .:/repo
+      - modules-root:/repo/node_modules
+      - modules-packages-core:/repo/packages/core/node_modules
+      - modules-packages-routing:/repo/packages/routing/node_modules
+      - modules-packages-status:/repo/packages/status/node_modules
+      - modules-packages-stellar:/repo/packages/stellar/node_modules
+      - modules-packages-swap:/repo/packages/swap/node_modules
+      - modules-packages-widget:/repo/packages/widget/node_modules
+      - modules-adapter-axelar:/repo/packages/adapters/axelar/node_modules
+      - modules-adapter-cctp:/repo/packages/adapters/cctp/node_modules
+      - modules-adapter-layerzero:/repo/packages/adapters/layerzero/node_modules
+      - modules-adapter-near-intents:/repo/packages/adapters/near-intents/node_modules
+      - modules-apps-app:/repo/apps/app/node_modules
+      - modules-apps-docs:/repo/apps/docs/node_modules
+      - modules-apps-playground:/repo/apps/playground/node_modules
+      - modules-apps-web:/repo/apps/web/node_modules
+      - modules-services-sponsor:/repo/services/sponsor/node_modules
       - sponsor-state:/var/lib/mavna
     environment:
       MAVNA_NETWORK: ${MAVNA_NETWORK:-testnet}
@@ -102,3 +151,19 @@ services:
 
 volumes:
   sponsor-state:
+  modules-root:
+  modules-packages-core:
+  modules-packages-routing:
+  modules-packages-status:
+  modules-packages-stellar:
+  modules-packages-swap:
+  modules-packages-widget:
+  modules-adapter-axelar:
+  modules-adapter-cctp:
+  modules-adapter-layerzero:
+  modules-adapter-near-intents:
+  modules-apps-app:
+  modules-apps-docs:
+  modules-apps-playground:
+  modules-apps-web:
+  modules-services-sponsor:
