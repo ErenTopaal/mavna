@@ -21,9 +21,9 @@
  * an unreachable host is not mistaken for a missing deployment. A chain that
  * cannot be confirmed is left out of pinned.ts, and the adapter does not offer it.
  *
- * Run from the repository root:
- *   node scripts/verify-axelar-deployments.mjs                 (latest commit on main)
- *   node scripts/verify-axelar-deployments.mjs --commit=<sha>
+ * Run:
+ *   node scripts/verify-axelar-deployments.mjs                 (names main's latest commit, pins nothing)
+ *   node scripts/verify-axelar-deployments.mjs --commit=<sha>  (pins that commit)
  * Read-only. Nothing is signed or sent.
  */
 import { writeFileSync } from "node:fs";
@@ -41,8 +41,21 @@ const GAS_SERVICE_SELECTOR = "0x6a22d8cc"; // gasService()
 const TIMEOUT = 15_000;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const commitArg = process.argv.find((a) => a.startsWith("--commit="))?.slice("--commit=".length);
-const commit = commitArg ?? (await latestCommit());
+// written into the axelar package wherever this runs from
+const PINNED_PATH = new URL("../packages/adapters/axelar/src/pinned.ts", import.meta.url);
+
+// The commit is the one input this script exists to pin, so it is never taken
+// from main implicitly: main's latest is named for review, and nothing is written
+// until a commit is passed.
+const commit = process.argv.find((a) => a.startsWith("--commit="))?.slice("--commit=".length);
+if (commit === undefined) {
+  const latest = await latestCommit();
+  console.error(
+    `  ${REPO} main is at ${latest}. Review it, then pin it with:\n` +
+      `  node scripts/verify-axelar-deployments.mjs --commit=${latest}`,
+  );
+  process.exit(2);
+}
 if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`not a full commit hash: ${commit}`);
 console.log(`  pinning ${REPO} at ${commit}`);
 
@@ -237,7 +250,7 @@ const rows = (network) =>
     .join("\n");
 
 writeFileSync(
-  "packages/adapters/axelar/src/pinned.ts",
+  PINNED_PATH,
   `import type { NetworkId } from "@mavna/core";
 
 /**

@@ -313,6 +313,60 @@ describe("deliver-cctp", () => {
   });
 });
 
+describe("verify-axelar-deployments", () => {
+  const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+
+  /** The axelar package beside an empty src, so pinned.ts lands in scratch, never in the repo. */
+  function axelarLayout(): string {
+    const root = layout({});
+    const axelar = join(root, "packages", "adapters", "axelar");
+    mkdirSync(join(axelar, "src"), { recursive: true });
+    copyFileSync(
+      join(repo, "packages", "adapters", "axelar", "package.json"),
+      join(axelar, "package.json"),
+    );
+    symlinkSync(
+      join(repo, "packages", "adapters", "axelar", "node_modules"),
+      join(axelar, "node_modules"),
+    );
+    return root;
+  }
+
+  const answers: Stubbed["answers"] = {
+    "https://api.github.com/repos/axelarnetwork/axelar-contract-deployments/commits/main": {
+      body: { sha: COMMIT },
+    },
+    [`https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${COMMIT}/`]: {
+      body: { chains: {} },
+    },
+    "https://chainid.network/chains.json": { body: [] },
+  };
+
+  it("pins nothing until it is told which commit, and names the latest to review", () => {
+    const root = axelarLayout();
+    const result = run(root, "verify-axelar-deployments.mjs", [], { answers });
+    expect(result.status).toBe(2);
+    expect(result.out).toContain(COMMIT);
+    expect(existsSync(join(root, "packages", "adapters", "axelar", "src", "pinned.ts"))).toBe(
+      false,
+    );
+  });
+
+  it("writes pinned.ts into the axelar package whatever directory it runs from", () => {
+    const root = axelarLayout();
+    const result = run(
+      root,
+      "verify-axelar-deployments.mjs",
+      [`--commit=${COMMIT}`],
+      { answers },
+      join(root, "packages"),
+    );
+    expect(result.status, result.out).toBe(0);
+    const pinned = join(root, "packages", "adapters", "axelar", "src", "pinned.ts");
+    expect(readFileSync(pinned, "utf8")).toContain(`DEPLOYMENTS_COMMIT = "${COMMIT}"`);
+  });
+});
+
 describe("fund-sponsor", () => {
   it("does not record a key Friendbot refused", () => {
     const root = layout({ link: ["packages"], env: "" });
