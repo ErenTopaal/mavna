@@ -18,6 +18,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "build:test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "typecheck": {
       "dependsOn": ["^build"]
     },

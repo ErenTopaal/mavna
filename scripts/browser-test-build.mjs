@@ -18,7 +18,8 @@ const built = spawnSync(
   [
     "turbo",
     "run",
-    "build",
+    // its own task, whose cached outputs are only the test directories
+    "build:test",
     "--filter=@mavna/app...",
     "--filter=@mavna/playground...",
     "--filter=@mavna/web...",

@@ -1,11 +1,16 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "//": "Inlined at build time, so a cached build made for another sponsor is never served.",
+  "//": "Inlined at build time, so a cached build made for another sponsor is never served. The browser tests' build is its own task, so restoring it from the cache can only ever write dist-test/, never the dist/ a host is given.",
   "extends": ["//"],
   "tasks": {
     "build": {
       "env": ["MAVNA_BROWSER_HARNESS", "MAVNA_BUILD_OUT_DIR", "VITE_MAVNA_*"],
-      "outputs": ["dist/**", "dist-test/**"]
+      "outputs": ["dist/**"]
+    },
+    "build:test": {
+      "dependsOn": ["^build"],
+      "env": ["MAVNA_BROWSER_HARNESS", "MAVNA_BUILD_OUT_DIR", "VITE_MAVNA_*"],
+      "outputs": ["dist-test/**"]
     }
   }
 }

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/sync-reference.mjs && next dev",
     "build": "node scripts/sync-reference.mjs && next build && pagefind --site ${MAVNA_NEXT_DIST_DIR:-.next}/server/app --output-path public/_pagefind",
+    "build:test": "node scripts/sync-reference.mjs && MAVNA_NEXT_DIST_DIR=.next-test next build",
     "start": "next start",
     "typecheck": "node scripts/sync-reference.mjs && tsc --noEmit",
     "test": "vitest run --project unit --root ../.. apps/docs",

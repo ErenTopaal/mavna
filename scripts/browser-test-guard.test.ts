@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { hostBuildFingerprint, testBuildProblem } from "./browser-test-guard.mjs";
 
@@ -67,5 +68,32 @@ describe("the host build's fingerprint", () => {
     expect(hostBuildFingerprint(root)).toBe(before);
     writeFileSync(join(root, "apps/app/dist/index.html"), "b-longer");
     expect(hostBuildFingerprint(root)).not.toBe(before);
+  });
+});
+
+describe("what a cached browser-test build may restore", () => {
+  // turbo restores a task's declared outputs from its cache, from whichever
+  // checkout made them; the test build must declare only its own directories
+  const repo = fileURLToPath(new URL("..", import.meta.url));
+  const tasks = (app: string) =>
+    (
+      JSON.parse(readFileSync(join(repo, "apps", app, "turbo.json"), "utf8")) as {
+        tasks: Record<string, { outputs?: string[] }>;
+      }
+    ).tasks;
+  const host = ["dist/", ".next/", "public/"];
+
+  it.each(["app", "playground", "web", "docs"])("is only the test directories for %s", (app) => {
+    const test = tasks(app)["build:test"]?.outputs ?? [];
+    expect(test.length).toBeGreaterThan(0);
+    expect(test.filter((glob) => host.some((dir) => glob.startsWith(dir)))).toEqual([]);
+    const build = tasks(app).build?.outputs ?? [];
+    expect(build.filter((glob) => /-test/.test(glob))).toEqual([]);
+  });
+
+  it("is what the browser tests build", () => {
+    const script = readFileSync(join(repo, "scripts/browser-test-build.mjs"), "utf8");
+    expect(script).toMatch(/"build:test"/);
+    expect(script).not.toMatch(/"run",\s*"build",/);
   });
 });
