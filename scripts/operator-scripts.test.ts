@@ -329,6 +329,9 @@ describe("verify-axelar-deployments", () => {
       join(repo, "packages", "adapters", "axelar", "node_modules"),
       join(axelar, "node_modules"),
     );
+    // the root's tooling, which formats pinned.ts after it is written
+    symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
+    copyFileSync(join(repo, "biome.json"), join(root, "biome.json"));
     return root;
   }
 
@@ -364,6 +367,46 @@ describe("verify-axelar-deployments", () => {
     expect(result.status, result.out).toBe(0);
     const pinned = join(root, "packages", "adapters", "axelar", "src", "pinned.ts");
     expect(readFileSync(pinned, "utf8")).toContain(`DEPLOYMENTS_COMMIT = "${COMMIT}"`);
+  });
+
+  it("leaves pinned.ts formatted as the repository's lint requires", () => {
+    const root = axelarLayout();
+    const its = "0x1111111111111111111111111111111111111111";
+    const gas = "0x2222222222222222222222222222222222222222";
+    const answersWithChain: Stubbed["answers"] = {
+      ...answers,
+      [`https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${COMMIT}/axelar-chains-config/info/testnet.json`]:
+        {
+          body: {
+            chains: {
+              "ethereum-sepolia": {
+                chainType: "evm",
+                chainId: 11155111,
+                rpc: "https://evm.test",
+                contracts: {
+                  InterchainTokenService: { address: its },
+                  AxelarGasService: { address: gas },
+                },
+              },
+            },
+          },
+        },
+      "https://evm.test#eth_chainId": { body: { result: "0xaa36a7" } },
+      "https://evm.test#eth_getCode": { body: { result: "0x6080" } },
+      "https://evm.test#eth_call": { body: { result: word(gas) } },
+    };
+    const result = run(root, "verify-axelar-deployments.mjs", [`--commit=${COMMIT}`], {
+      answers: answersWithChain,
+    });
+    expect(result.status, result.out).toBe(0);
+    const pinned = join(root, "packages", "adapters", "axelar", "src", "pinned.ts");
+    expect(readFileSync(pinned, "utf8")).toContain(its);
+    const lint = spawnSync(
+      process.execPath,
+      [join(repo, "node_modules", "@biomejs", "biome", "bin", "biome"), "check", pinned],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(lint.status, `${lint.stdout}${lint.stderr}`).toBe(0);
   });
 });
 

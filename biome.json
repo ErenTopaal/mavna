@@ -10,6 +10,7 @@
       "!**/test-results",
       "!**/playwright-report",
       "!tests/fixtures",
+      "!**/.probe-*",
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml",

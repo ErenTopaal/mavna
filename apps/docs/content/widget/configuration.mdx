@@ -24,7 +24,12 @@ this page.
   real money. An empty string is refused as a configuration error.
 - **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. On
   testnet it defaults to a local development sponsor; on mainnet it is required,
-  and the widget refuses to mount without it. An empty string is refused.
+  and the widget refuses to mount without it. An empty string is refused. The
+  widget tells a user the page is safe to close during a Circle transfer only
+  once this sponsor's `/deliver` answers `"watching": true`, meaning it will
+  deliver the burn by itself; a sponsor that does not say so, an account that
+  still has to be set up by its own wallet, or one that signs its own delivery
+  keep the "closing this page pauses it" note.
 - **`networks`**. The networks the header's network toggle switches between,
   `network` among them. Defaults to `[network]`, which shows the other network
   disabled. Switching rebuilds the engine for that network and starts the form
@@ -99,14 +104,28 @@ this page.
 many declined), `routeSelected` (the source and the amount received),
 `walletConnected` (the ecosystem and address), `transferStarted`,
 `transferStepUpdated` (a step id and its phase), `transferCompleted`,
-`transferFailed` (with a reason), `transferStillMoving` (with a reason), and
-`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived: a
-conversion on arrival could not meet the minimum, so the money arrived in the asset
-it was sent in, which is neither a success nor a loss). The
-last one means the widget stopped watching a transfer that is still on its way: it
-outlived the widget's patience, or the widget went away. It is not a failure; the
-transfer can be checked on and finished from Activity. Each event is backed by a
-real signal in the flow.
+`transferFailed` (with a reason), `transferStillMoving` (with a reason),
+`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived),
+and `transferDeliveredUnverified` (with a reason, `stellarTxHash` and `explorerUrl`).
+
+`transferStillMoving` means the widget stopped watching a transfer that is still
+on its way: it outlived the widget's patience, or the widget went away (the drawer
+closed, for example). It is not a failure; the transfer can be checked on and
+finished from Activity.
+
+`transferDeliveredAsCame` means a conversion on arrival could not meet the
+minimum, so the money arrived in the asset it was sent in, which is neither a
+success nor a loss.
+
+`transferDeliveredUnverified` (`{ type: "transferDeliveredUnverified", reason,
+stellarTxHash, explorerUrl }`) is sent instead of `transferStillMoving` when the
+rail records the transfer as executed on Stellar but what arrived can no longer be
+read back. It ends the transfer: no `transferFailed` or `transferCompleted` follows
+it, and it is neither a failure nor still moving. `stellarTxHash` and
+`explorerUrl` name the Stellar transaction to check, and `reason` says why it could
+not be confirmed.
+
+Each event is backed by a real signal in the flow.
 
 ## The type
 

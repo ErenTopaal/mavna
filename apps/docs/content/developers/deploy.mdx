@@ -16,7 +16,7 @@ The workspace needs Node 24.22.0 and pnpm 12.14.0, and refuses any other pnpm
 in `node:24.22.0-slim` with pnpm installed at that version:
 
 ```sh
-docker run --rm -v "$PWD":/repo -w /repo \
+docker run --rm --memory=2500m -v "$PWD":/repo -w /repo \
   -e VITE_MAVNA_SPONSOR_URL -e VITE_MAVNA_NETWORK -e VITE_STELLAR_RPC_URL \
   -e NEXT_PUBLIC_MAVNA_SPONSOR_URL \
   node:24.22.0-slim sh -c "npm i -g pnpm@12.14.0 && \
@@ -26,8 +26,13 @@ docker run --rm -v "$PWD":/repo -w /repo \
 ```
 
 Turbo builds the packages first, which the apps and the sponsor import from their
-`dist/`. The docs' `next build` is the heaviest step; on a shared host, give its
-container a memory limit so it cannot starve its neighbours. Run the docs and the
+`dist/`. The docs' `next build` is the heaviest step, so the run is capped with
+`--memory` and cannot starve its neighbours on a shared host; 2500m is what Mavna's
+host uses. The one run gives the landing page and the playground the same testnet
+sponsor as the app, which is right for a testnet app. A mainnet app needs a build
+of its own: run it again with `--filter=@mavna/app...` alone and the mainnet
+variables, and copy `apps/app/dist` to the mainnet app's root before the next
+testnet build overwrites it. Run the docs and the
 sponsor in the same image they were built in, so the native packages pnpm linked
 match.
 

@@ -58,6 +58,8 @@ The app and the sponsor come up together from the repository root:
 SPONSOR_SECRET_KEY=S... docker compose up
 ```
 
-The app serves on `http://localhost:4319` and the sponsor on
+Compose mounts the checkout read-only and builds a copy of it in a volume of its
+own, so it never writes into your checkout and does not touch a host install. The
+app serves on `http://localhost:4319` and the sponsor on
 `http://localhost:8787`. The [sponsor service](/developers/sponsor) covers what
 that key can do and every variable the compose file reads.

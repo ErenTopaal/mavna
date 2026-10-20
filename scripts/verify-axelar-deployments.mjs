@@ -26,8 +26,10 @@
  *   node scripts/verify-axelar-deployments.mjs --commit=<sha>  (pins that commit)
  * Read-only. Nothing is signed or sent.
  */
+import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(new URL("../packages/adapters/axelar/package.json", import.meta.url));
 const { Address, rpc, xdr } = require("@stellar/stellar-sdk");
@@ -303,6 +305,22 @@ ${rows("mainnet")}
 };
 `,
 );
+
+// in the repository's own style, so a re-pin is a diff of addresses and not a
+// lint failure
+const formatted = spawnSync(
+  process.execPath,
+  [
+    fileURLToPath(new URL("../node_modules/@biomejs/biome/bin/biome", import.meta.url)),
+    "format",
+    "--write",
+    fileURLToPath(PINNED_PATH),
+  ],
+  { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" },
+);
+if (formatted.status !== 0) {
+  throw new Error(`biome could not format pinned.ts: ${formatted.stderr || formatted.stdout}`);
+}
 
 console.log(
   `\n  pinned ${Object.keys(pinned.testnet).length} testnet and ` +
