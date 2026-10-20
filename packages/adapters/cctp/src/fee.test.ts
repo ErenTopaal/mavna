@@ -106,6 +106,10 @@ describe("a pair Circle does not route", () => {
     );
     expect("reason" in result && result.reason).toBe("chain-unsupported");
     expect("reason" in result && result.retryable).toBe(false);
+    // Circle's own words go to the operator, never on screen
+    if (!("reason" in result)) return;
+    expect(result.explanation).not.toContain("Route not supported");
+    expect(result.detail).toContain("Route not supported");
   });
 
   it("is told apart from Circle being down", async () => {

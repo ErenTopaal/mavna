@@ -14,7 +14,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+} from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -83,6 +88,12 @@ export interface NearIntentsAdapterOptions extends OneClickOptions {
    * the deposit being included on the slowest chain listed.
    */
   readonly depositWindowSeconds?: number;
+  /**
+   * A Mavna Arrival Contract in use besides the one deployed on this network,
+   * which is refused by default. A plain transfer to either would be stuck
+   * there, so both are refused as destinations.
+   */
+  readonly arrivalContract?: string;
 }
 
 /** An hour: far longer than any listed chain takes to include a transfer. */
@@ -96,6 +107,7 @@ export class NearIntentsAdapter implements BridgeAdapter {
   readonly trustModel: TrustModel = "solver-network";
 
   private readonly network: NetworkId;
+  private readonly arrivalContract: string | undefined;
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
   private readonly prices: XlmPriceSource;
@@ -104,6 +116,7 @@ export class NearIntentsAdapter implements BridgeAdapter {
   private readonly depositWindowSeconds: number;
 
   constructor(options: NearIntentsAdapterOptions) {
+    this.arrivalContract = options.arrivalContract;
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
@@ -136,6 +149,11 @@ export class NearIntentsAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     const slippage = badSlippage(request.maxSlippageBps);
     if (slippage !== undefined) {
       // the caller's input, so asking again will not help
@@ -227,10 +245,9 @@ export class NearIntentsAdapter implements BridgeAdapter {
       } catch (cause) {
         return this.decline(
           "temporarily-unavailable",
-          cause instanceof MavnaError
-            ? cause.message
-            : "Stellar's market is not answering, so the smallest workable transfer " +
-                "cannot be worked out right now.",
+          "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+            "worked out right now.",
+          detailOf(cause),
         );
       }
       if (!meetsFloor(reserve, value)) {
@@ -307,6 +324,12 @@ export class NearIntentsAdapter implements BridgeAdapter {
     route: Route,
     context?: BuildContext,
   ): Promise<readonly UnsignedTransaction[]> {
+    // a route is data the caller hands back, so this is checked again
+    const stuck = arrivalContractRefusal(route.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
+    if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     const sender = context?.sender;
     if (sender === undefined || !EVM_ADDRESS.test(sender)) {
       throw new MavnaError(
@@ -701,7 +724,12 @@ export class NearIntentsAdapter implements BridgeAdapter {
 
   private unavailable(cause: unknown): RouteRejection {
     if (cause instanceof MavnaError && !cause.retryable) {
-      return this.decline("errored", cause.message);
+      // a configuration or contract problem for the operator; the user reads ours
+      return this.decline(
+        "errored",
+        "NEAR Intents could not quote this transfer. Nothing has been sent.",
+        detailOf(cause),
+      );
     }
     return this.decline(
       "temporarily-unavailable",
@@ -709,8 +737,19 @@ export class NearIntentsAdapter implements BridgeAdapter {
     );
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 }
 
@@ -843,4 +882,9 @@ function chainRefFor(chain: OriginChain): ChainRef {
     name: chain.name,
     explorerTxUrl: (hash) => `${chain.explorer}/tx/${hash}`,
   };
+}
+
+/** A failure's own words, kept for the operator in a rejection's `detail`. */
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }

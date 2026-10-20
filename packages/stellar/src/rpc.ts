@@ -133,11 +133,6 @@ export class SubmitExhausted extends MavnaError {
 }
 
 /**
- * A node at or past our high-water mark has no such account. Its own class so
- * callers can tell this answer from a read that failed, which says nothing
- * about whether the account exists.
- */
-/**
  * A transaction was sent and no node has said whether it landed: either the
  * wait ran out first or the endpoint stopped answering. `hash` is what to look it
  * up by before doing anything else. Retryable only for an envelope that is sent
@@ -153,6 +148,11 @@ export class InclusionUnknown extends MavnaError {
   }
 }
 
+/**
+ * A node at or past our high-water mark has no such account. Its own class so
+ * callers can tell this answer from a read that failed, which says nothing
+ * about whether the account exists.
+ */
 export class AccountNotFound extends MavnaError {
   readonly address: string;
 

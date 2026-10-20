@@ -9,7 +9,13 @@ export type {
   UnnecessaryWhen,
   UnsignedTransaction,
 } from "./adapter.js";
-export { ADAPTER_QUOTE_TIMEOUT_MS, isRejection, SENDER_ADDRESS } from "./adapter.js";
+export {
+  ADAPTER_QUOTE_TIMEOUT_MS,
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  isRejection,
+  SENDER_ADDRESS,
+} from "./adapter.js";
 export type {
   Blocked,
   ComposeFinish,

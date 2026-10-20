@@ -547,6 +547,15 @@ describe("quoting", () => {
     },
   );
 
+  it("keeps 1Click's configuration complaint out of what the user reads", async () => {
+    oneClick.tokens = () => new Response("unauthorized", { status: 401 });
+    const result = rejectionOf(await adapter().quote(ask()));
+    expect(result.explanation).toBe(
+      "NEAR Intents could not quote this transfer. Nothing has been sent.",
+    );
+    expect(result.detail).toMatch(/API key/);
+  });
+
   it("lists the EVM chains 1Click currently carries a token on", async () => {
     expect(await adapter().supportedChains()).toEqual(["arbitrum", "base", "bsc"]);
   });

@@ -212,3 +212,38 @@ export const ADAPTER_QUOTE_TIMEOUT_MS = 3000;
 export function isRejection(result: Route | RouteRejection): result is RouteRejection {
   return "reason" in result;
 }
+
+/**
+ * The Mavna Arrival Contract deployed on each network, by id. Every rail
+ * refuses it as a plain destination by default; the LayerZero rail also
+ * converts through it. None on mainnet yet.
+ */
+export const ARRIVAL_CONTRACT_IDS: {
+  readonly testnet: string;
+  readonly mainnet: string | undefined;
+} = {
+  testnet: "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ",
+  mainnet: undefined,
+};
+
+/**
+ * Why a plain transfer to a Mavna Arrival Contract is refused, or undefined
+ * when the destination is not one.
+ *
+ * The contract only acts on what LayerZero hands it with instructions. Anything
+ * sent to it any other way lands in a contract with no way to send it on, so
+ * every rail declines it, and says so in words the person can act on.
+ */
+export function arrivalContractRefusal(
+  destination: string,
+  arrivalContracts: readonly (string | undefined)[],
+): string | undefined {
+  if (!arrivalContracts.some((contract) => contract !== undefined && contract === destination)) {
+    return undefined;
+  }
+  return (
+    "That address is the Mavna Arrival Contract, which only accepts conversions sent to it " +
+    "on your behalf. A plain transfer to it would be stuck there. Send to your own Stellar " +
+    "address instead."
+  );
+}

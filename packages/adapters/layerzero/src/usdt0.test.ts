@@ -90,6 +90,8 @@ interface World {
   oftFunctions: string[];
   /** When set, simulations against the Stellar OFT fail the way a node that is down does. */
   simulationDown: boolean;
+  /** When set, the Arbitrum node answers every call with HTTP 503. */
+  evmDown: boolean;
 }
 
 let world: World;
@@ -214,6 +216,9 @@ function remoteServices(): void {
     }
     if (url === `${SCAN_BASE_URL.mainnet}/messages/tx/${SEND_HASH}`) {
       return json({ data: world.messages });
+    }
+    if (url === "https://arb1.arbitrum.io/rpc" && world.evmDown) {
+      return new Response("unavailable", { status: 503 });
     }
     if (url === "https://arb1.arbitrum.io/rpc") {
       const { method, params } = JSON.parse(init?.body as string) as {
@@ -511,6 +516,7 @@ beforeEach(() => {
     maxAmountLD: 10n ** 30n,
     oftFunctions: ["peer", "is_paused", "rate_limit_capacity", "quote_oft", "send"],
     simulationDown: false,
+    evmDown: false,
   };
   remoteServices();
 });
@@ -714,12 +720,37 @@ describe("the Stellar side of the pathway, checked before sending", () => {
     world.simulationDown = true;
     const result = await quoteFor();
     expect(result).toMatchObject({ reason: "temporarily-unavailable", retryable: true });
+    // what the node said is the operator's, not the user's
+    expect((result as RouteRejection).explanation).not.toMatch(/fetch failed|would not answer/);
+    expect((result as RouteRejection).detail).toMatch(/fetch failed|would not answer/);
   });
 
   it("quotes when every limit has room", async () => {
     world.inboundCapacity = 250_000_000n;
     world.maxAmountLD = 25_000_000n;
     expect(isRoute(await quoteFor())).toBe(true);
+  });
+});
+
+describe("what a decline shows the user", () => {
+  it("names no node and quotes no node when the source chain cannot be read", async () => {
+    world.evmDown = true;
+    const from = { chainId: "arbitrum", id: TOKEN, symbol: "USDT0", decimals: 6, curatedBy: "x" };
+    const to = { chainId: "stellar", id: USDT0_ID, symbol: "USDT0", decimals: 7, curatedBy: "x" };
+    const result = (await mainnet().quote({
+      from,
+      to,
+      sends: { asset: from, baseUnits: "25000000" },
+      destination: READY,
+      maxSlippageBps: 50,
+    })) as RouteRejection;
+    expect(result.reason).toBe("temporarily-unavailable");
+    expect(result.explanation).toBe(
+      "LayerZero could not be read for this chain right now. Nothing about your transfer is " +
+        "wrong; try again in a moment.",
+    );
+    expect(result.detail).toMatch(/No usable node answered for chain 42161/);
+    expect(result.explanation).not.toMatch(/http|chain 42161/);
   });
 });
 

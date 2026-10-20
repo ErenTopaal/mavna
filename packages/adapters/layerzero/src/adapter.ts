@@ -16,7 +16,13 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable, SENDER_ADDRESS } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+  SENDER_ADDRESS,
+} from "@mavna/core";
 import {
   optionalSignatureCount,
   type PlannedStep,
@@ -43,6 +49,7 @@ import {
   composedElsewhere,
   composePhase,
   composeSendFor,
+  operatorDetail,
   quoteComposeRoute,
 } from "./compose-route.js";
 import {
@@ -58,6 +65,7 @@ import {
 } from "./config.js";
 import {
   Discovery,
+  NoRouteHere,
   type OftLocation,
   type ResolvedRoute,
   readStellarOft,
@@ -273,6 +281,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, this.arrivalContracts());
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     const stellarChainId = STELLAR_SIDE[this.network].chainId;
     const slippage = badSlippage(request.maxSlippageBps);
     if (slippage !== undefined) {
@@ -299,12 +309,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
       // is temporary and ours; a token with no peer is permanent and the user's
       // to know about. Collapsing them would either tell someone to retry
       // forever or tell them a working route is broken.
+      // already written for the person reading it
+      if (cause instanceof NoRouteHere) return this.decline("asset-unsupported", cause.message);
       const retryable = cause instanceof MavnaError && cause.retryable;
+      // our sentence for the user; what the nodes and contracts said is the operator's
       return this.decline(
         retryable ? "temporarily-unavailable" : "asset-unsupported",
-        cause instanceof MavnaError
-          ? cause.message
-          : "LayerZero could not be read for this chain right now.",
+        retryable
+          ? "LayerZero could not be read for this chain right now. Nothing about your transfer " +
+              "is wrong; try again in a moment."
+          : `LayerZero has no working route from ${source.name} to Stellar right now. Another ` +
+              "route may.",
+        operatorDetail(cause),
       );
     }
 
@@ -353,8 +369,19 @@ export class LayerZeroAdapter implements BridgeAdapter {
     let extraOptions: `0x${string}`;
     try {
       extraOptions = this.optionsFor(route);
+    } catch (cause) {
+      // a configuration gap for whoever runs this, not something the user can act on
+      return this.decline(
+        "asset-unsupported",
+        `This route cannot pay for its delivery on Stellar for ${route.tokenSymbol}, so it is ` +
+          "not offered. Another route may.",
+        operatorDetail(cause),
+      );
+    }
+    try {
       // Fails here rather than at signing time for a muxed destination, which is
-      // the one address form this rail genuinely cannot carry.
+      // the one address form this rail genuinely cannot carry. The sentence is
+      // our own, written for the person who pasted the address.
       stellarRecipientToBytes32(request.destination);
     } catch (cause) {
       return this.decline(
@@ -476,9 +503,9 @@ export class LayerZeroAdapter implements BridgeAdapter {
     } catch (cause) {
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "The Stellar side of this route could not be read right now.",
+        "The Stellar side of this route could not be read right now. Nothing has been sent; " +
+          "try again in a moment.",
+        operatorDetail(cause),
       );
     }
     if (inbound.paused) {
@@ -510,10 +537,9 @@ export class LayerZeroAdapter implements BridgeAdapter {
     } catch (cause) {
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "Stellar's market is not answering, so the smallest workable transfer " +
-              "cannot be worked out right now.",
+        "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+          "worked out right now.",
+        operatorDetail(cause),
       );
     }
 
@@ -625,6 +651,12 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+    // a plain route is data the caller hands back, so this is checked again; a
+    // compose route sends to the contract on purpose and is checked in compose-route
+    if (route.compose === undefined) {
+      const stuck = arrivalContractRefusal(route.destination, this.arrivalContracts());
+      if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
+    }
     const resolved = await this.discovery.routeFrom(route.fromChain.id);
     const sends = BigInt(route.sends.baseUnits);
     const minAmount = minAmountFor(route, resolved);
@@ -1047,8 +1079,28 @@ export class LayerZeroAdapter implements BridgeAdapter {
     };
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /**
+   * The Arrival Contracts a plain transfer must never be sent to: the one this
+   * adapter converts through, and the one deployed on this network even when
+   * conversions are not set up here.
+   */
+  private arrivalContracts(): readonly (string | undefined)[] {
+    return [this.composing?.arrival.contract, ARRIVAL_CONTRACT_IDS[this.network]];
+  }
+
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 }
 

@@ -55,6 +55,19 @@ import {
  * no error message and no automatic recovery.
  */
 
+/**
+ * This rail has nothing to offer from a chain, said for the person reading it.
+ *
+ * Unlike every other discovery failure, its message is written for a user (no
+ * node, no contract, no jargon), so a decline may show it as it is.
+ */
+export class NoRouteHere extends MavnaError {
+  constructor(message: string) {
+    super(message, { retryable: false });
+    this.name = "NoRouteHere";
+  }
+}
+
 /** Registries answer in well under a second normally; this is the give-up point. */
 const REGISTRY_TIMEOUT_MS = 6000;
 
@@ -391,7 +404,7 @@ export class Discovery {
 
     const candidates = await this.candidatesFor(chainId);
     if (candidates.length === 0) {
-      throw new MavnaError(noCandidatesExplanation(this.network, chainId), { retryable: false });
+      throw new NoRouteHere(noCandidatesExplanation(this.network, chainId));
     }
 
     const stellar = await this.stellar();

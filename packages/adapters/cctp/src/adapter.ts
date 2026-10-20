@@ -13,7 +13,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+} from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -91,6 +96,12 @@ export interface CctpAdapterOptions {
   readonly horizonUrl?: string;
   /** Circle's attestation service. Overridable to an integrator's own proxy. */
   readonly irisUrl?: string;
+  /**
+   * A Mavna Arrival Contract in use besides the one deployed on this network,
+   * which is refused by default. A plain transfer to either would be stuck
+   * there, so both are refused as destinations.
+   */
+  readonly arrivalContract?: string;
 }
 
 export class CctpAdapter implements BridgeAdapter {
@@ -99,6 +110,7 @@ export class CctpAdapter implements BridgeAdapter {
   readonly trustModel: TrustModel = "native-mint";
 
   private readonly network: NetworkId;
+  private readonly arrivalContract: string | undefined;
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
   private readonly attestations: AttestationService;
@@ -108,6 +120,7 @@ export class CctpAdapter implements BridgeAdapter {
   private readonly proof: DeliveryProof;
 
   constructor(options: CctpAdapterOptions) {
+    this.arrivalContract = options.arrivalContract;
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
@@ -140,6 +153,11 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     // Circle's domain is all quoting needs; how the burn is built is a question
     // for later and differs per family.
     const domain = this.domainOf(request.from.chainId);
@@ -243,10 +261,9 @@ export class CctpAdapter implements BridgeAdapter {
     } catch (cause) {
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "Stellar's market is not answering, so the smallest workable transfer " +
-              "cannot be worked out right now.",
+        "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+          "worked out right now.",
+        detailOf(cause),
       );
     }
 
@@ -328,6 +345,12 @@ export class CctpAdapter implements BridgeAdapter {
     route: Route,
     options: BuildOptions = {},
   ): Promise<readonly UnsignedTransaction[]> {
+    // a route is data the caller hands back, so this is checked again
+    const stuck = arrivalContractRefusal(route.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
+    if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     // A rail builds its own routes and nobody else's. Without this, handing a
     // route quoted by another adapter to this one produces a Circle burn priced
     // against a fee that rail never charged, while the interface tells the user
@@ -637,7 +660,12 @@ export class CctpAdapter implements BridgeAdapter {
       // Circle's 400 is a pair it does not route, which no retry changes. Only
       // an outage or a rate limit is worth trying again.
       if (cause instanceof MavnaError && !cause.retryable) {
-        return this.decline("chain-unsupported", cause.message);
+        // Circle's own explanation is the operator's to read
+        return this.decline(
+          "chain-unsupported",
+          "Circle does not move USDC from this chain to Stellar. Another route may.",
+          detailOf(cause),
+        );
       }
       return this.decline(
         "temporarily-unavailable",
@@ -658,9 +686,8 @@ export class CctpAdapter implements BridgeAdapter {
       // quote answers with a reason rather than throwing.
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+        "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+        detailOf(cause),
       );
     }
   }
@@ -675,8 +702,19 @@ export class CctpAdapter implements BridgeAdapter {
     };
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 }
 
@@ -754,4 +792,9 @@ function chainRefFor(network: NetworkId, chainId: string): ChainRef {
     name: deployment?.name ?? chainId,
     explorerTxUrl: (hash) => explorerTxUrl(network, chainId, hash),
   };
+}
+
+/** A failure's own words, kept for the operator in a rejection's `detail`. */
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }

@@ -24,6 +24,7 @@ import { SELECTORS } from "./abi.js";
 import { AxelarAdapter } from "./adapter.js";
 import { forgetItsAssets } from "./assets.js";
 import { forgetChains } from "./deployments.js";
+import { EvmRevert } from "./evm.js";
 import { DEPLOYMENTS_COMMIT } from "./pinned.js";
 import { TOKEN_MANAGER } from "./token.js";
 
@@ -94,6 +95,8 @@ interface SendingChain {
   busy: boolean;
   /** What the token manager read throws instead, when a test makes it fail another way. */
   fault?: Error;
+  /** Thrown by the token manager's own type read, which nothing wraps. */
+  kindFault?: Error;
   /** The gas service the token service names on-chain. */
   gasService: string;
 }
@@ -129,6 +132,7 @@ async function ethCall(_rpcUrl: string, to: string, data: string): Promise<strin
     return `0x${word(TOKEN_MANAGER_ADDRESS)}`;
   }
   if (selector === SELECTORS.getImplementationTypeAndTokenAddress) {
+    if (sending.kindFault !== undefined) throw sending.kindFault;
     return `0x${word(sending.managerType.toString(16))}${word(sending.managed)}`;
   }
   // gasService(), asked of the token service to cross-check the configuration
@@ -856,10 +860,20 @@ describe("what the sending chain says about the token", () => {
         expect(result.reason).toBe("temporarily-unavailable");
       } else {
         expect(result.reason).toBe("errored");
-        expect(result.explanation).toContain(fault.message);
+        // what failed is the operator's to read; the user gets our sentence
+        expect(result.explanation).not.toContain(fault.message);
+        expect(result.detail).toContain(fault.message);
       }
     },
   );
+
+  it("keeps a node's revert text out of what the user reads", async () => {
+    classicUsdc();
+    sending.kindFault = new EvmRevert("execution reverted: TokenManagerDoesNotExist(0x0a0a)");
+    const result = (await adapter().quote(ask())) as RouteRejection;
+    expect(result.explanation).not.toMatch(/execution reverted|TokenManager/);
+    expect(result.detail).toMatch(/execution reverted/);
+  });
 
   it("says a busy node is a retry, not an unsupported token", async () => {
     classicUsdc();

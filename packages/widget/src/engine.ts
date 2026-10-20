@@ -168,11 +168,15 @@ export function createEngine(config: EngineConfig): Engine {
     network,
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
+    // a plain transfer into the contract that converts on arrival would be stuck
+    ...(config.arrivalContract === undefined ? {} : { arrivalContract: config.arrivalContract }),
   });
   const axelar = new AxelarAdapter({
     network,
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
+    // a plain transfer into the contract that converts on arrival would be stuck
+    ...(config.arrivalContract === undefined ? {} : { arrivalContract: config.arrivalContract }),
   });
   const layerzero = new LayerZeroAdapter({
     network,
@@ -191,6 +195,8 @@ export function createEngine(config: EngineConfig): Engine {
     network,
     rpc,
     baseReserveStroops: netConfig.baseReserveStroops,
+    // a plain transfer into the contract that converts on arrival would be stuck
+    ...(config.arrivalContract === undefined ? {} : { arrivalContract: config.arrivalContract }),
   });
 
   const stellarChainId = network === "mainnet" ? "stellar" : "stellar-testnet";

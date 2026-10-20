@@ -102,7 +102,7 @@ export interface ComposeContext {
 const BPS = 10_000n;
 
 /** A failure's words for an operator: its message, plus a swap refusal's own detail. */
-function operatorDetail(cause: unknown): string {
+export function operatorDetail(cause: unknown): string {
   if (!(cause instanceof Error)) return String(cause);
   const detail = (cause as { detail?: unknown }).detail;
   return typeof detail === "string" && detail !== "" ? `${cause.message} ${detail}` : cause.message;
@@ -261,12 +261,17 @@ export async function quoteComposeRoute(
   try {
     resolved = await ctx.discovery.routeFrom(request.from.chainId);
   } catch (cause) {
-    return ctx.decline(
-      cause instanceof MavnaError && cause.retryable
-        ? "temporarily-unavailable"
-        : "asset-unsupported",
-      cause instanceof MavnaError ? cause.message : "LayerZero could not be read for this chain.",
-    );
+    const retryable = cause instanceof MavnaError && cause.retryable;
+    return {
+      ...ctx.decline(
+        retryable ? "temporarily-unavailable" : "asset-unsupported",
+        retryable
+          ? "LayerZero could not be read for this chain right now. Try again in a moment."
+          : `LayerZero has no working route from this chain to Stellar for ${arriving.symbol} ` +
+              "right now. The plain route may still be offered.",
+      ),
+      detail: operatorDetail(cause),
+    };
   }
   if (request.arrivingContract !== resolved.stellar.token) {
     return ctx.decline(
@@ -281,12 +286,17 @@ export async function quoteComposeRoute(
     config = await assertArrivalServes(ctx, ctx.arrival.contract, resolved);
     options = await composeOptionsFor(ctx, resolved);
   } catch (cause) {
-    return ctx.decline(
-      cause instanceof MavnaError && cause.retryable
-        ? "temporarily-unavailable"
-        : "asset-unsupported",
-      cause instanceof MavnaError ? cause.message : "The Arrival Contract could not be read.",
-    );
+    const retryable = cause instanceof MavnaError && cause.retryable;
+    return {
+      ...ctx.decline(
+        retryable ? "temporarily-unavailable" : "asset-unsupported",
+        retryable
+          ? "The Arrival Contract could not be read right now. Try again in a moment."
+          : "The Arrival Contract on this network does not take this route, so nothing " +
+              "converts on arrival. The plain route is unaffected.",
+      ),
+      detail: operatorDetail(cause),
+    };
   }
 
   if (!config.wanted.includes(request.wantedContract)) {
