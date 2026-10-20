@@ -24,6 +24,7 @@ import type {
   WalletConfig,
 } from "./config";
 import type { Engine, SourceDetail } from "./engine";
+import { toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
@@ -937,12 +938,45 @@ export class Flow extends React.Component<FlowProps, State> {
     );
   }
 
+  /**
+   * Change the recipient. The routes on screen were quoted for the old one and
+   * would still sign for it, so they go at once and a fresh quote follows.
+   */
+  setDestination(destination: string): void {
+    if (this.transferring) return;
+    this.currentQuote?.cancel();
+    this.setState({ destination, routes: [], complete: false }, () => this.requote());
+  }
+
+  /**
+   * Why a route can no longer be sent as the form now reads, or undefined. A
+   * route carries the recipient, amount and chain it was quoted for, and those
+   * are what get signed, so they must be what review showed.
+   */
+  staleFor(view: RouteView): string | undefined {
+    const route = view.route;
+    if (route.destination !== this.state.destination.trim()) return "recipient";
+    if (route.fromChain.id !== this.state.chainId) return "chain";
+    if (route.sends.baseUnits !== toBaseUnits(this.state.amount, route.sends.asset.decimals))
+      return "amount";
+    return undefined;
+  }
+
   start(): void {
     // Set here and not through setState, which only lands on the next render:
     // a second press before then would otherwise start a second transfer.
     if (this.transferring) return;
     const view = this.chosen();
     if (view === undefined) return;
+    const stale = this.staleFor(view);
+    if (stale !== undefined) {
+      this.setState({
+        note: `The ${stale} changed after this quote. Quoting again; review the new figures before starting.`,
+        noteKind: "fault",
+      });
+      this.runQuote();
+      return;
+    }
     this.transferring = true;
     const chain = this.engine.sourceChainDetail(this.state.chainId);
     // Undefined only when the sponsor never answered, and then no route that

@@ -8,7 +8,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
-import { fmt, short } from "./format";
+import { amountValue, fmt, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
@@ -663,7 +663,7 @@ export function renderAddress(c: Flow): ReactElement {
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <input
         value={st.destination}
-        onChange={(e) => c.setState({ destination: e.target.value.trim() })}
+        onChange={(e) => c.setDestination(e.target.value.trim())}
         ref={c.destRef}
         placeholder="G…"
         spellCheck={false}
@@ -905,19 +905,26 @@ export function renderRails(c: Flow): ReactElement {
 
 // ----------------------------------------------------------------- review ---
 
+function sentLabel(r: RouteView): string {
+  return `${fmt(amountValue(r.route.sends))} ${r.route.sends.asset.symbol}`;
+}
+
 export function renderReview(
   c: Flow,
   d: { r: RouteView | undefined; chain: { id: string; name: string }; sym: string },
 ): ReactElement {
-  const { r, chain, sym } = d;
-  const reviewSend = r === undefined ? "-" : `${fmt(c.amountNumber())} ${c.state.send}`;
+  // what is shown is what the route signs for, never the form, which may have
+  // moved on since the quote
+  const { r, sym } = d;
+  const chain = r === undefined ? d.chain : r.route.fromChain;
+  const reviewSend = r === undefined ? "-" : sentLabel(r);
   const reviewGet = r === undefined ? "-" : `${fmt(r.receives)} ${sym}`;
   const reviewGetOn = r === undefined ? "Stellar" : `Stellar · ${r.source}`;
   const reviewRows =
     r === undefined
       ? []
       : [
-          { key: "dest", name: "Recipient", value: short(c.state.destination) },
+          { key: "dest", name: "Recipient", value: short(r.route.destination) },
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "fee", name: "Transfer fee", value: `${fmt(r.fee)} ${r.feeSymbol}` },
           ...(r.newAccount && r.reserveXlm !== undefined
@@ -1066,7 +1073,8 @@ export function renderFlight(
     arrived: boolean;
   },
 ): ReactElement {
-  const { r, chain, sym, arrived } = d;
+  const { r, sym, arrived } = d;
+  const chain = r === undefined ? d.chain : r.route.fromChain;
   const flightEyebrow = arrived ? "Arrived on Stellar" : "Arriving on Stellar";
   const flightFigure = r === undefined ? "-" : fmt(r.receives);
   const flightMeta =
@@ -1074,9 +1082,9 @@ export function renderFlight(
       ? []
       : [
           { key: "from", name: "From", value: chain.name },
-          { key: "sent", name: "Sent", value: `${fmt(c.amountNumber())} ${c.state.send}` },
+          { key: "sent", name: "Sent", value: sentLabel(r) },
           { key: "rail", name: "Rail", value: railLabel(r) },
-          { key: "to", name: "Recipient", value: short(c.state.destination) },
+          { key: "to", name: "Recipient", value: short(r.route.destination) },
           {
             key: "eta",
             name: arrived ? "Took" : "Estimated time",
