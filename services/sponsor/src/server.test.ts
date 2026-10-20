@@ -28,6 +28,7 @@ import {
   Asset,
   type FeeBumpTransaction,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   rpc,
@@ -1955,6 +1956,51 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(server.rpc.submissions).toHaveLength(1);
     expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
     expect((await caps.usage()).stranded).toBe(0);
+  });
+});
+
+describe("one account is one account however its address is written", () => {
+  function muxedOf(user: Keypair): string {
+    return new MuxedAccount(new Account(user.publicKey(), "0"), "7").accountId();
+  }
+
+  it("leases one channel and holds one settlement for an account and its muxed address", async () => {
+    const channels = [Keypair.random(), Keypair.random()];
+    const server = await startServer({ channels: new ChannelPool({ channels }) });
+    for (const channel of channels) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const user = Keypair.random();
+    const muxed = muxedOf(user);
+
+    const forMuxed = await server.post("/settlement", { destination: muxed, sourceChainId: "1" });
+    const forAccount = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(forMuxed.status).toBe(200);
+    expect(forAccount.status).toBe(200);
+    expect(forAccount.body.channel).toBe(forMuxed.body.channel);
+
+    // one account, one channel, one sequence: the second is the same settlement
+    const committed = await server.post("/settlement/commit", {
+      destination: muxed,
+      signedXdr: signXdr(forAccount.body.xdr as string, user),
+    });
+    expect(committed.status).toBe(200);
+
+    const prepared: number[] = [];
+    for (const destination of [muxed, user.publicKey()]) {
+      const built = await server.post("/prepare", {
+        destination,
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+      const submitted = await server.post("/submit", {
+        signedXdr: signXdr(built.body.xdr as string, user),
+      });
+      prepared.push(submitted.status);
+    }
+    expect(prepared).toEqual([200, 409]);
   });
 });
 

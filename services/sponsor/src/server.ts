@@ -559,7 +559,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         continue;
       }
       const { channel, preparation, ...rest } = parsed.data;
-      heldSettlements.set(destination, { ...rest, channel, preparation, preparing: false });
+      // written by the address as sent before held settlements were keyed by
+      // account; the account is the key now
+      heldSettlements.set(signerFor(destination), {
+        ...rest,
+        channel,
+        preparation,
+        preparing: false,
+      });
     }
     for (const [destination, value] of Object.entries(heldDocument?.settled ?? {})) {
       const parsed = settledShape.safeParse(value);
@@ -577,8 +584,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       const leases: LeaseRecord[] = [];
       channelDocument.leases.forEach((value, index) => {
         const parsed = leaseShape.safeParse(value);
-        if (parsed.success) leases.push(parsed.data);
-        else reject("channels", value, `lease ${index}`);
+        if (parsed.success && settlesOnStellar(parsed.data.owner)) {
+          // by account, as the held settlements are
+          leases.push({ ...parsed.data, owner: signerFor(parsed.data.owner) });
+        } else {
+          reject("channels", value, `lease ${index}`);
+        }
       });
       if (channels !== undefined) {
         channels.restoreLeases(leases, now);
@@ -1320,10 +1331,34 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await noLoans(res, origin);
       return;
     }
+    let classified: ReturnType<typeof classifyAddress>;
+    try {
+      classified = classifyAddress(body.destination);
+    } catch {
+      await answer(
+        res,
+        400,
+        { error: "That is not a usable Stellar address.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    if (!classified.needsTrustline) {
+      await answer(
+        res,
+        400,
+        { error: "That address needs no settling.", retryable: false },
+        origin,
+      );
+      return;
+    }
+    // Keyed by the account, not by how its address was written: a muxed address
+    // and its account are one sequence and one reserve.
+    const account = classified.trustlineHolder ?? body.destination;
     // A settlement being submitted may already have spent its channel's
     // sequence. Building now would put this one on the next sequence, which is
     // the next user's once the channel is released.
-    if (settling.has(body.destination)) {
+    if (settling.has(account)) {
       await answer(
         res,
         409,
@@ -1354,38 +1389,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    let classified: ReturnType<typeof classifyAddress>;
-    try {
-      classified = classifyAddress(body.destination);
-    } catch {
-      await answer(
-        res,
-        400,
-        { error: "That is not a usable Stellar address.", retryable: false },
-        origin,
-      );
-      return;
-    }
-    if (!classified.needsTrustline) {
-      await answer(
-        res,
-        400,
-        { error: "That address needs no settling.", retryable: false },
-        origin,
-      );
-      return;
-    }
-    const createdAccount = !(await accountExists(
-      options.rpc,
-      classified.trustlineHolder ?? body.destination,
-    ));
+    const createdAccount = !(await accountExists(options.rpc, account));
 
     const pool = await ensureChannels();
     const now = nowUnix();
     // Short until the settlement comes back signed, which settlementCommit
     // extends to the settlement's own bound. Anyone can ask for a settlement,
     // and a day-long lease per request would let one caller take every slot.
-    const channel = pool.acquire(body.destination, now + PROVISIONAL_LEASE_SECONDS, now);
+    const channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
     if (channel === undefined) {
       await answer(
         res,
@@ -1423,7 +1434,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         hash: transaction.hash().toString("hex"),
         kind: "settlement",
         destination: body.destination,
-        signer: signerFor(body.destination),
+        signer: account,
         sourceChainId: body.sourceChainId ?? "unknown",
         expiresAtUnix: expiryOf(transaction),
         channel: channel.address,
@@ -1496,7 +1507,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    if (body.destination !== undefined && body.destination !== record.destination) {
+    // the same account under another spelling is the same account
+    if (
+      body.destination !== undefined &&
+      (!settlesOnStellar(body.destination) || signerFor(body.destination) !== record.signer)
+    ) {
       await refuse(record, res, origin, 400, "That settlement was built for a different account.");
       return;
     }
@@ -1513,7 +1528,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     // Replacing a settlement whose preparation has landed would let the loan be
     // repaid by a cheaper settlement than the one it was made against.
-    const current = await liveSettlement(record.destination);
+    const current = await liveSettlement(record.signer);
     if (current?.prepared === true) {
       await refuse(
         record,
@@ -1546,7 +1561,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const pool = await ensureChannels();
     if (
       record.channel === undefined ||
-      !pool.extend(record.destination, record.channel, record.expiresAtUnix, nowUnix())
+      !pool.extend(record.signer, record.channel, record.expiresAtUnix, nowUnix())
     ) {
       await answer(
         res,
@@ -1560,7 +1575,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    heldSettlements.set(record.destination, {
+    heldSettlements.set(record.signer, {
       xdr: body.signedXdr,
       createdAtUnix: nowUnix(),
       sourceChainId: record.sourceChainId,
@@ -1861,7 +1876,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The governing order: no capital commits until the settlement that releases
     // it is already signed and held. Without this the deposit is a gift, which is
     // the model the cost decision explicitly rejected.
-    const held = await liveSettlement(record.destination);
+    const held = await liveSettlement(record.signer);
     if (held === undefined) {
       await refuse(
         record,
@@ -1940,7 +1955,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     } finally {
       held.preparing = false;
     }
-    if (heldSettlements.get(record.destination) === held) {
+    if (heldSettlements.get(record.signer) === held) {
       held.prepared = true;
       held.preparation = undefined;
     } else {
@@ -1986,8 +2001,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     res: ServerResponse,
     origin: string | undefined,
   ): Promise<void> {
-    const destination = body.destination;
-    if (typeof destination !== "string" || !settlesOnStellar(destination)) {
+    const asked = body.destination;
+    if (typeof asked !== "string" || !settlesOnStellar(asked)) {
       await answer(
         res,
         400,
@@ -1996,6 +2011,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    const destination = signerFor(asked);
 
     // Answered before the limit: with nothing to submit the answer costs a map
     // lookup, and a page asking right after a repayment should hear about it.
@@ -2297,8 +2313,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const recipient = attestedRecipient(message.message, domain, expected);
     const settled =
       (outcome.kind === "delivered" || outcome.kind === "already-delivered") &&
-      recipient !== undefined
-        ? await settleIfHeld(recipient)
+      recipient !== undefined &&
+      settlesOnStellar(recipient)
+        ? await settleIfHeld(signerFor(recipient))
         : {};
 
     await answer(
