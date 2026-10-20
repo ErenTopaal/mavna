@@ -227,10 +227,9 @@ export class NearIntentsAdapter implements BridgeAdapter {
       } catch (cause) {
         return this.decline(
           "temporarily-unavailable",
-          cause instanceof MavnaError
-            ? cause.message
-            : "Stellar's market is not answering, so the smallest workable transfer " +
-                "cannot be worked out right now.",
+          "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+            "worked out right now.",
+          detailOf(cause),
         );
       }
       if (!meetsFloor(reserve, value)) {
@@ -701,7 +700,12 @@ export class NearIntentsAdapter implements BridgeAdapter {
 
   private unavailable(cause: unknown): RouteRejection {
     if (cause instanceof MavnaError && !cause.retryable) {
-      return this.decline("errored", cause.message);
+      // a configuration or contract problem for the operator; the user reads ours
+      return this.decline(
+        "errored",
+        "NEAR Intents could not quote this transfer. Nothing has been sent.",
+        detailOf(cause),
+      );
     }
     return this.decline(
       "temporarily-unavailable",
@@ -709,8 +713,19 @@ export class NearIntentsAdapter implements BridgeAdapter {
     );
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 }
 
@@ -843,4 +858,9 @@ function chainRefFor(chain: OriginChain): ChainRef {
     name: chain.name,
     explorerTxUrl: (hash) => `${chain.explorer}/tx/${hash}`,
   };
+}
+
+/** A failure's own words, kept for the operator in a rejection's `detail`. */
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }

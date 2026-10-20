@@ -243,10 +243,9 @@ export class CctpAdapter implements BridgeAdapter {
     } catch (cause) {
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "Stellar's market is not answering, so the smallest workable transfer " +
-              "cannot be worked out right now.",
+        "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+          "worked out right now.",
+        detailOf(cause),
       );
     }
 
@@ -637,7 +636,12 @@ export class CctpAdapter implements BridgeAdapter {
       // Circle's 400 is a pair it does not route, which no retry changes. Only
       // an outage or a rate limit is worth trying again.
       if (cause instanceof MavnaError && !cause.retryable) {
-        return this.decline("chain-unsupported", cause.message);
+        // Circle's own explanation is the operator's to read
+        return this.decline(
+          "chain-unsupported",
+          "Circle does not move USDC from this chain to Stellar. Another route may.",
+          detailOf(cause),
+        );
       }
       return this.decline(
         "temporarily-unavailable",
@@ -658,9 +662,8 @@ export class CctpAdapter implements BridgeAdapter {
       // quote answers with a reason rather than throwing.
       return this.decline(
         "temporarily-unavailable",
-        cause instanceof MavnaError
-          ? cause.message
-          : "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+        "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+        detailOf(cause),
       );
     }
   }
@@ -675,8 +678,19 @@ export class CctpAdapter implements BridgeAdapter {
     };
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 }
 
@@ -754,4 +768,9 @@ function chainRefFor(network: NetworkId, chainId: string): ChainRef {
     name: deployment?.name ?? chainId,
     explorerTxUrl: (hash) => explorerTxUrl(network, chainId, hash),
   };
+}
+
+/** A failure's own words, kept for the operator in a rejection's `detail`. */
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }

@@ -182,11 +182,7 @@ export class AxelarAdapter implements BridgeAdapter {
     try {
       await confirmGasService(evm, source.address, source.chain);
     } catch (cause) {
-      return this.declineFrom(
-        cause,
-        "chain-unsupported",
-        cause instanceof MavnaError ? cause.message : "Mavna cannot send from that chain yet.",
-      );
+      return this.declineFrom(cause, "chain-unsupported", "Mavna cannot send from that chain yet.");
     }
     const stellarIts = await this.stellarReader();
 
@@ -243,9 +239,7 @@ export class AxelarAdapter implements BridgeAdapter {
       return this.declineFrom(
         cause,
         "asset-unsupported",
-        cause instanceof MavnaError
-          ? cause.message
-          : "What this token arrives as on Stellar could not be established.",
+        "What this token arrives as on Stellar could not be established.",
       );
     }
     if (delivered.id !== request.to.id) {
@@ -266,9 +260,7 @@ export class AxelarAdapter implements BridgeAdapter {
       return this.declineFrom(
         cause,
         "asset-unsupported",
-        cause instanceof MavnaError
-          ? cause.message
-          : "What this token is called could not be read.",
+        "What this token is called could not be read.",
       );
     }
 
@@ -324,10 +316,9 @@ export class AxelarAdapter implements BridgeAdapter {
       } catch (cause) {
         return this.decline(
           "temporarily-unavailable",
-          cause instanceof MavnaError
-            ? cause.message
-            : "Stellar's market is not answering, so the smallest workable transfer " +
-                "cannot be worked out right now.",
+          "Stellar's market is not answering, so the smallest workable transfer cannot be " +
+            "worked out right now.",
+          detailOf(cause),
         );
       }
       if (!meetsFloor(reserve, value)) {
@@ -1126,8 +1117,19 @@ export class AxelarAdapter implements BridgeAdapter {
     };
   }
 
-  private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
-    return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  /** `detail` is for whoever runs the integration and is never shown to the user. */
+  private decline(
+    reason: RouteRejection["reason"],
+    explanation: string,
+    detail?: string,
+  ): RouteRejection {
+    return {
+      source: this.id,
+      reason,
+      explanation,
+      retryable: rejectionIsRetryable(reason),
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 
   /**
@@ -1145,9 +1147,13 @@ export class AxelarAdapter implements BridgeAdapter {
         "Axelar did not answer just now. Nothing has been sent, and it is worth trying again.",
       );
     }
-    const why = cause instanceof Error ? cause.message : String(cause);
+    // what failed (a node's revert, a host error) is the operator's to read
     return {
-      ...this.decline("errored", `This route could not be checked: ${why} Nothing has been sent.`),
+      ...this.decline(
+        "errored",
+        "This route could not be checked, so it is not offered. Nothing has been sent.",
+        detailOf(cause),
+      ),
       retryable: false,
     };
   }
@@ -1163,9 +1169,10 @@ export class AxelarAdapter implements BridgeAdapter {
         "temporarily-unavailable",
         "Axelar did not answer just now. Nothing is wrong with what you asked for; " +
           "try again in a moment.",
+        detailOf(cause),
       );
     }
-    return this.decline(reason, explanation);
+    return this.decline(reason, explanation, detailOf(cause));
   }
 }
 
@@ -1312,4 +1319,9 @@ function toBaseUnits(amount: string): bigint {
   const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(amount);
   if (match === null) return -1n;
   return BigInt(match[1] ?? "0") * 10_000_000n + BigInt((match[2] ?? "").padEnd(7, "0"));
+}
+
+/** A failure's own words, kept for the operator in a rejection's `detail`. */
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }
