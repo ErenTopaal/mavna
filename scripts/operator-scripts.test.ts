@@ -38,7 +38,8 @@ interface Stubbed {
    * JSON answers by URL prefix; for JSON-RPC by `prefix#method`, and by
    * `prefix#method:<detail>` before that, where the detail is an eth_call's
    * selector, a starknet_call's entry point or the contract a class is asked of.
-   * A list is answered in order, its last entry repeating.
+   * A list is answered in order, its last entry repeating. Status 0 is no
+   * answer at all.
    */
   readonly answers: Record<string, Answer | readonly Answer[]>;
 }
@@ -90,6 +91,8 @@ globalThis.fetch = async (input, init) => {
   const index = served.get(key) ?? 0;
   served.set(key, index + 1);
   const { status = 200, body } = list[Math.min(index, list.length - 1)];
+  // status 0 stands for a node that did not answer at all
+  if (status === 0) throw new TypeError("fetch failed: no answer");
   const wrapped = method !== undefined && body !== null && typeof body === "object" && !("jsonrpc" in body)
     ? { jsonrpc: "2.0", id: 1, result: body.result, error: body.error }
     : body;
@@ -407,6 +410,86 @@ describe("verify-axelar-deployments", () => {
       { cwd: root, encoding: "utf8" },
     );
     expect(lint.status, `${lint.stdout}${lint.stderr}`).toBe(0);
+  });
+});
+
+describe("verify-axelar-deployments when nodes miss answers", () => {
+  const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+  const its = "0x1111111111111111111111111111111111111111";
+  const gas = "0x2222222222222222222222222222222222222222";
+  const silent = { status: 0, body: null };
+
+  function layoutWithTools(): string {
+    const root = layout({});
+    const axelar = join(root, "packages", "adapters", "axelar");
+    mkdirSync(join(axelar, "src"), { recursive: true });
+    copyFileSync(
+      join(repo, "packages", "adapters", "axelar", "package.json"),
+      join(axelar, "package.json"),
+    );
+    symlinkSync(
+      join(repo, "packages", "adapters", "axelar", "node_modules"),
+      join(axelar, "node_modules"),
+    );
+    symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
+    copyFileSync(join(repo, "biome.json"), join(root, "biome.json"));
+    return root;
+  }
+
+  function answersFor(chainId: Stubbed["answers"][string], alternates: string[]) {
+    return {
+      [`https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${COMMIT}/`]: {
+        body: { chains: {} },
+      },
+      [`https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${COMMIT}/axelar-chains-config/info/testnet.json`]:
+        {
+          body: {
+            chains: {
+              "ethereum-sepolia": {
+                chainType: "evm",
+                chainId: 11155111,
+                rpc: "https://evm.test",
+                contracts: {
+                  InterchainTokenService: { address: its },
+                  AxelarGasService: { address: gas },
+                },
+              },
+            },
+          },
+        },
+      "https://chainid.network/chains.json": { body: [{ chainId: 11155111, rpc: alternates }] },
+      "https://evm.test#eth_chainId": chainId,
+      "https://evm.test#eth_getCode": { body: { result: "0x6080" } },
+      "https://evm.test#eth_call": { body: { result: word(gas) } },
+      "https://alt.test#eth_chainId": silent,
+    } satisfies Stubbed["answers"];
+  }
+
+  it("asks a silent node again before leaving its chain out", { timeout: 60_000 }, () => {
+    const root = layoutWithTools();
+    const ok = { body: { result: "0xaa36a7" } };
+    // silent through one whole round of retries, then answers
+    const result = run(root, "verify-axelar-deployments.mjs", [`--commit=${COMMIT}`], {
+      answers: answersFor([silent, silent, silent, silent, ok], []),
+    });
+    expect(result.status, result.out).toBe(0);
+    const pinned = readFileSync(
+      join(root, "packages", "adapters", "axelar", "src", "pinned.ts"),
+      "utf8",
+    );
+    expect(pinned).toContain(its);
+    expect(pinned).toContain("https://evm.test");
+  });
+
+  it("names every node and chain it left out for not answering", { timeout: 60_000 }, () => {
+    const root = layoutWithTools();
+    const result = run(root, "verify-axelar-deployments.mjs", [`--commit=${COMMIT}`], {
+      answers: answersFor({ body: { result: "0xaa36a7" } }, ["https://alt.test"]),
+    });
+    expect(result.status, result.out).toBe(0);
+    const summary = result.out.slice(result.out.indexOf("did not answer"));
+    expect(summary).toContain("testnet/ethereum-sepolia: https://alt.test");
+    expect(summary).toMatch(/rerun/i);
   });
 });
 

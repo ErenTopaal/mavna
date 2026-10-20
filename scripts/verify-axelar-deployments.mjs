@@ -25,6 +25,11 @@
  *   node scripts/verify-axelar-deployments.mjs                 (names main's latest commit, pins nothing)
  *   node scripts/verify-axelar-deployments.mjs --commit=<sha>  (pins that commit)
  * Read-only. Nothing is signed or sent.
+ *
+ * A node that does not answer is asked again, then once more after a pause,
+ * before it is left out. What was left out only for not answering is listed at
+ * the end: rerun before committing a pin that drops any of it, since a passing
+ * outage is not a fact about the deployment.
  */
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -140,30 +145,47 @@ function alternates(chainId) {
 /** How many confirmed nodes to keep per chain: enough to fail over, few enough to read. */
 const NODES_KEPT = 4;
 
-async function nodesFor(chain, tried) {
+// a node that missed every retry of one round gets one more round after this
+// pause, so a passing outage does not drop it from the pin
+const ROUND_PAUSE_MS = 3_000;
+
+async function nodesFor(chain, tried, unanswered) {
   const candidates = [...new Set([chain.rpc, ...alternates(chain.chainId)].filter(Boolean))];
   const confirmed = [];
-  for (const url of candidates) {
-    if (confirmed.length === NODES_KEPT) break;
-    let answer;
-    try {
-      answer = Number(BigInt(await call(url, "eth_chainId", [])));
-    } catch (error) {
-      tried.push(`${url}: ${String(error?.message ?? error).slice(0, 80)}`);
-      continue;
+  let pending = candidates;
+  for (let round = 0; round < 2 && pending.length > 0; round += 1) {
+    if (round > 0) await wait(ROUND_PAUSE_MS);
+    const silent = [];
+    for (const url of pending) {
+      if (confirmed.length === NODES_KEPT) break;
+      let answer;
+      try {
+        answer = Number(BigInt(await call(url, "eth_chainId", [])));
+      } catch (error) {
+        tried.push(`${url}: ${String(error?.message ?? error).slice(0, 80)}`);
+        silent.push(url);
+        continue;
+      }
+      if (answer === chain.chainId) {
+        tried.push(`${url}: chain id ${answer}`);
+        confirmed.push(url);
+        continue;
+      }
+      tried.push(`${url}: answers chain id ${answer}`);
+      if (url === chain.rpc) {
+        throw new Error(`config node answers chain id ${answer}, config says ${chain.chainId}`);
+      }
     }
-    if (answer === chain.chainId) {
-      tried.push(`${url}: chain id ${answer}`);
-      confirmed.push(url);
-      continue;
-    }
-    tried.push(`${url}: answers chain id ${answer}`);
-    if (url === chain.rpc) {
-      throw new Error(`config node answers chain id ${answer}, config says ${chain.chainId}`);
-    }
+    pending = confirmed.length === NODES_KEPT ? [] : silent;
   }
-  if (confirmed.length === 0) throw new Error(`no node reachable for chain id ${chain.chainId}`);
-  return confirmed;
+  unanswered.push(...pending);
+  if (confirmed.length === 0) {
+    throw Object.assign(new Error(`no node reachable for chain id ${chain.chainId}`), {
+      unanswered: true,
+    });
+  }
+  // keep the configured order, whichever round a node answered in
+  return candidates.filter((url) => confirmed.includes(url));
 }
 
 async function inspectEvm(chain) {
@@ -173,11 +195,14 @@ async function inspectEvm(chain) {
   if (gas === undefined) throw new Error("no gas service in the config");
 
   const tried = [];
+  const unanswered = [];
   let nodes;
   try {
-    nodes = await nodesFor(chain, tried);
+    nodes = await nodesFor(chain, tried, unanswered);
   } catch (error) {
-    throw new Error(`${error.message} [tried ${tried.join("; ")}]`);
+    throw Object.assign(new Error(`${error.message} [tried ${tried.join("; ")}]`), {
+      unanswered: error.unanswered === true,
+    });
   }
   const node = nodes[0];
 
@@ -193,7 +218,11 @@ async function inspectEvm(chain) {
   const gasCode = await call(node, "eth_getCode", [gas, "latest"]);
   if (typeof gasCode !== "string" || gasCode.length <= 2) throw new Error(`no code at ${gas}`);
 
-  return { pinned: { interchainTokenService: its, gasService: gas, rpcUrls: nodes }, via: node };
+  return {
+    pinned: { interchainTokenService: its, gasService: gas, rpcUrls: nodes },
+    via: node,
+    unanswered,
+  };
 }
 
 async function inspectStellar(network, chain) {
@@ -214,6 +243,9 @@ async function inspectStellar(network, chain) {
 
 const pinned = { testnet: {}, mainnet: {} };
 const failures = [];
+// left out only because nothing answered, as opposed to failing a check
+const silentChains = [];
+const silentNodes = [];
 
 for (const network of ["testnet", "mainnet"]) {
   const chains = await config(network);
@@ -229,11 +261,14 @@ for (const network of ["testnet", "mainnet"]) {
     const [id] = rows[index];
     if (outcome.status === "rejected") {
       failures.push({ network, id, reason: String(outcome.reason?.message ?? outcome.reason) });
+      if (outcome.reason?.unanswered === true) silentChains.push(`${network}/${id}`);
       console.log(`  ✗ ${network}/${id}: ${outcome.reason?.message ?? outcome.reason}`);
     } else if (outcome.value.skip !== undefined) {
       console.log(`  - ${network}/${id}: ${outcome.value.skip}`);
     } else {
       pinned[network][id] = outcome.value.pinned;
+      for (const url of outcome.value.unanswered ?? [])
+        silentNodes.push(`${network}/${id}: ${url}`);
       const via = outcome.value.via === undefined ? "" : ` via ${outcome.value.via}`;
       console.log(`  ✓ ${network}/${id} ${outcome.value.pinned.interchainTokenService}${via}`);
     }
@@ -326,3 +361,11 @@ console.log(
   `\n  pinned ${Object.keys(pinned.testnet).length} testnet and ` +
     `${Object.keys(pinned.mainnet).length} mainnet chains; ${failures.length} unconfirmed`,
 );
+if (silentChains.length + silentNodes.length > 0) {
+  console.log(
+    "\n  Left out because they did not answer, not because a check failed. Rerun before\n" +
+      "  committing a pin that removes any of these:",
+  );
+  for (const chain of silentChains) console.log(`    ${chain} (whole chain)`);
+  for (const node of silentNodes) console.log(`    ${node}`);
+}
