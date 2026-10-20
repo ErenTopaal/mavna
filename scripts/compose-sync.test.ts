@@ -1,6 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { sync } from "./compose-sync.mjs";
 
@@ -71,5 +81,27 @@ describe("syncing the checkout into compose's volume", () => {
     const dest = tree({ "b.ts": "b" });
     sync(src, dest);
     expect(existsSync(join(src, "b.ts"))).toBe(false);
+  });
+
+  it("runs as a command even when reached through a symlinked path", () => {
+    const src = tree({ "a.ts": "a" });
+    const dest = join(tree({}), "workspace");
+    // /tmp on macOS is a symlink, as a mount path can be anywhere
+    const linked = join(tree({}), "scripts");
+    symlinkSync(fileURLToPath(new URL(".", import.meta.url)), linked);
+    const result = spawnSync(process.execPath, [join(linked, "compose-sync.mjs"), src, dest], {
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(dest, "a.ts"), "utf8")).toBe("a");
+  });
+
+  it("refuses to run without both paths", () => {
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./compose-sync.mjs", import.meta.url))],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(2);
   });
 });

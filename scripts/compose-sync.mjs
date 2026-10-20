@@ -17,11 +17,12 @@ import {
   mkdirSync,
   readdirSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const LEFT_OUT = new Set([
   "node_modules",
@@ -70,7 +71,10 @@ export function sync(src, dest) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// compared as real paths: a script reached through a symlink (/tmp on macOS, a
+// mount) would otherwise not recognise itself and quietly do nothing
+const invoked = process.argv[1] === undefined ? undefined : realpathSync(process.argv[1]);
+if (invoked === fileURLToPath(import.meta.url)) {
   const [src, dest] = process.argv.slice(2);
   if (src === undefined || dest === undefined) {
     console.error("usage: node scripts/compose-sync.mjs <checkout> <volume>");
