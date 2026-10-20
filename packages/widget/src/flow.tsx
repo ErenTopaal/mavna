@@ -150,6 +150,10 @@ interface State {
   history: readonly TransferRecord[];
   /** What arrived when a transfer landed unconverted, for the flight's headline. */
   arrivedAs: { readonly amount: number; readonly symbol: string } | null;
+  /** The route the flight is for. The form's own routes are gone once it ends. */
+  flying: RouteView | null;
+  /** A new send repeats one that may still arrive; it waits for an explicit yes. */
+  askAgain: boolean;
 }
 
 export interface FlowProps {
@@ -189,6 +193,17 @@ export interface FlowProps {
    * time the page can go, the transfer ending as still moving, finished under Activity.
    */
   readonly onAwaitingUser?: ((waiting: boolean) => void) | undefined;
+}
+
+/**
+ * How long after a transfer that may still arrive a repeat of it is asked about:
+ * the hour a relayed rail is watched for.
+ */
+const SEND_AGAIN_WINDOW_MS = 60 * 60_000;
+
+/** What is sent, by asset and base units, for telling a repeat apart. */
+function sendsKey(view: RouteView): string {
+  return `${view.route.sends.asset.id}:${view.route.sends.baseUnits}`;
 }
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
@@ -277,6 +292,8 @@ export class Flow extends React.Component<FlowProps, State> {
     finishTries: 0,
     history: [],
     arrivedAs: null,
+    flying: null,
+    askAgain: false,
   };
 
   /** The widget's own outermost element; nothing outside it is the widget's to touch. */
@@ -724,6 +741,11 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   back(): void {
+    // an ended transfer's review is its spent quote: back is the form, quoting afresh
+    if (this.state.phase === "ended" || this.state.phase === "arrived") {
+      this.sendAnother();
+      return;
+    }
     const from = this.state.cameFrom;
     this.go(from ?? "send", "pop");
   }
@@ -805,6 +827,7 @@ export class Flow extends React.Component<FlowProps, State> {
 
   runQuote(): void {
     if (this.transferring) return;
+    this.againConfirmed = false;
     this.currentQuote?.cancel();
     this.rows = [];
     const cap = this.lockHeight();
@@ -817,6 +840,8 @@ export class Flow extends React.Component<FlowProps, State> {
         phase: "quote",
         steps: [],
         arrivedAs: null,
+        // a yes to sending again was for the quote it was asked on
+        askAgain: false,
       },
       () => this.animateHeight(cap),
     );
@@ -1052,12 +1077,48 @@ export class Flow extends React.Component<FlowProps, State> {
     );
   }
 
+  /** Quotes already sent, by the quote itself: a fresh quote is a new object. */
+  private spent = new WeakSet<RouteView>();
+  /** The last transfer whose money moved before the page stopped following it. */
+  private moved:
+    | { readonly destination: string; readonly sends: string; readonly at: number }
+    | undefined;
+  private againConfirmed = false;
+
+  /** The user has read that the last transfer may still arrive, and sends again anyway. */
+  confirmSendAgain(): void {
+    this.againConfirmed = true;
+    this.start();
+  }
+
   start(): void {
     // Set here and not through setState, which only lands on the next render:
     // a second press before then would otherwise start a second transfer.
     if (this.transferring) return;
     const view = this.chosen();
     if (view === undefined) return;
+    if (this.spent.has(view)) {
+      this.setState({
+        note: "This quote was already sent. Quoting again; review the new figures before starting.",
+        noteKind: "fault",
+      });
+      this.runQuote();
+      return;
+    }
+    // the same money to the same place, soon after a transfer that may still
+    // land, is asked about first: it would be a second payment, not a retry
+    const repeat = this.moved;
+    if (
+      !this.againConfirmed &&
+      repeat !== undefined &&
+      Date.now() - repeat.at < SEND_AGAIN_WINDOW_MS &&
+      repeat.destination === view.route.destination &&
+      repeat.sends === sendsKey(view)
+    ) {
+      this.setState({ askAgain: true });
+      return;
+    }
+    this.againConfirmed = false;
     const stale = this.staleFor(view);
     if (stale !== undefined) {
       this.setState({
@@ -1068,13 +1129,14 @@ export class Flow extends React.Component<FlowProps, State> {
       return;
     }
     this.transferring = true;
+    this.spent.add(view);
     this.props.onTransferChange?.(true);
     const chain = this.engine.sourceChainDetail(this.state.chainId);
     // Undefined only when the sponsor never answered, and then no route that
     // sets an account up was offered, which is the only kind it changes.
     const steps = buildSteps(view, this.state.reserveFunding);
     this.emit({ type: "transferStarted" });
-    this.setState({ phase: "sending", steps }, () => {
+    this.setState({ phase: "sending", steps, flying: view, askAgain: false }, () => {
       this.go("flight", "push");
       this.timers.push(setTimeout(() => void this.runTransfer(view, chain), this.DUR * 1000 + 20));
     });
@@ -1084,10 +1146,15 @@ export class Flow extends React.Component<FlowProps, State> {
     try {
       await this.runTransferOnce(view, chain);
     } finally {
-      this.transferring = false;
-      this.tellWaiting(false);
-      this.props.onTransferChange?.(false);
+      this.runEnded();
     }
+  }
+
+  /** The transfer's run is over, however it ended: the form is free again. */
+  runEnded(): void {
+    this.transferring = false;
+    this.tellWaiting(false);
+    this.props.onTransferChange?.(false);
   }
 
   private async runTransferOnce(view: RouteView, chain: SourceDetail): Promise<void> {
@@ -1122,10 +1189,12 @@ export class Flow extends React.Component<FlowProps, State> {
   /** End the flight on an error: still moving is not a failure, anything else is. */
   endWith(error: unknown): void {
     if (error instanceof StillMoving) {
+      this.rememberMoved();
       this.stillMoving(error.message);
       return;
     }
     if (error instanceof DeliveredUnverified) {
+      this.rememberMoved();
       this.emit({
         type: "transferDeliveredUnverified",
         reason: error.message,
@@ -1143,6 +1212,7 @@ export class Flow extends React.Component<FlowProps, State> {
           note: error.message,
           noteKind: "quiet" as const,
           phase: "ended" as const,
+          ...this.afterEnding(),
           history: readHistory(this.engine.historyKey),
         }),
         () => this.advanceStep(),
@@ -1161,6 +1231,7 @@ export class Flow extends React.Component<FlowProps, State> {
       this.setState(
         (st) => ({
           phase: "arrived" as const,
+          ...this.afterEnding(),
           arrivedAs: {
             amount: fromBaseUnits(error.baseUnits, error.decimals),
             symbol: error.asset,
@@ -1202,6 +1273,7 @@ export class Flow extends React.Component<FlowProps, State> {
           note: message,
           noteKind: "quiet" as const,
           phase: "ended" as const,
+          ...this.afterEnding(),
           history: readHistory(this.engine.historyKey),
         };
       },
@@ -1225,6 +1297,7 @@ export class Flow extends React.Component<FlowProps, State> {
           note: message,
           noteKind: "fault" as const,
           phase: "ended" as const,
+          ...this.afterEnding(),
           history: readHistory(this.engine.historyKey),
         };
       },
@@ -1234,9 +1307,25 @@ export class Flow extends React.Component<FlowProps, State> {
 
   arrive(): void {
     this.emit({ type: "transferCompleted" });
-    this.setState({ phase: "arrived", history: readHistory(this.engine.historyKey) }, () =>
-      this.advanceStep(),
+    this.setState(
+      { phase: "arrived", ...this.afterEnding(), history: readHistory(this.engine.historyKey) },
+      () => this.advanceStep(),
     );
+  }
+
+  /**
+   * What every ending clears: the quote that was sent is spent, so the form's
+   * routes go and nothing leads back to its review.
+   */
+  private afterEnding(): Pick<State, "routes" | "selected" | "picked" | "complete" | "cameFrom"> {
+    return { routes: [], selected: null, picked: false, complete: false, cameFrom: null };
+  }
+
+  /** Remember a transfer whose money moved, so sending it again is asked about first. */
+  private rememberMoved(): void {
+    const view = this.state.flying;
+    if (view === null) return;
+    this.moved = { destination: view.route.destination, sends: sendsKey(view), at: Date.now() };
   }
 
   clearHistory(): void {
@@ -1490,7 +1579,8 @@ function renderApp(c: Flow): ReactNode {
   const sym = c.sym();
   const chain = c.chain();
   const chainDetail = c.engine.sourceChainDetail(st.chainId);
-  const r = c.chosen();
+  // the flight shows what was sent, which the form no longer holds once it ends
+  const r = st.screen === "flight" ? (st.flying ?? c.chosen()) : c.chosen();
   const resting = c.amountNumber() <= 0;
 
   const titles: Record<Screen, string> = {
@@ -2002,7 +2092,8 @@ function renderCompact(c: Flow): ReactNode {
   const sym = c.sym();
   const chain = c.chain();
   const chainDetail = c.engine.sourceChainDetail(st.chainId);
-  const r = c.chosen();
+  // the flight shows what was sent, which the form no longer holds once it ends
+  const r = st.screen === "flight" ? (st.flying ?? c.chosen()) : c.chosen();
   const resting = c.amountNumber() <= 0;
 
   const titles: Record<Screen, string> = {
