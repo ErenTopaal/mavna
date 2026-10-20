@@ -6,6 +6,7 @@ import type {
   ComposeArrival,
   ComposeQuoteRequest,
   NetworkId,
+  OnChainRef,
   QuoteRequest,
   Route,
   RouteRejection,
@@ -28,6 +29,7 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { encodePacked, isAddress, isHex, keccak256, pad } from "viem";
 import { decodeOftComposePayload } from "./compose.js";
 import {
   type ArrivalSetup,
@@ -48,7 +50,13 @@ import {
   sourceFor,
   stellarExplorerTxUrl,
 } from "./config.js";
-import { Discovery, type OftLocation, type ResolvedRoute } from "./discovery.js";
+import {
+  Discovery,
+  type OftLocation,
+  type ResolvedRoute,
+  readStellarOft,
+  readStellarToken,
+} from "./discovery.js";
 import { describeDvnStack } from "./dvn.js";
 import {
   buildApproval,
@@ -63,7 +71,13 @@ import {
   sharedToStellar,
   stellarRecipientToBytes32,
 } from "./oft.js";
-import { classifyScanStatus, remedyForStatus, ScanService, scanMessageUrl } from "./scan.js";
+import {
+  classifyScanStatus,
+  remedyForStatus,
+  type ScanMessage,
+  ScanService,
+  scanMessageUrl,
+} from "./scan.js";
 
 /**
  * LayerZero as a rail the routing engine can race.
@@ -659,32 +673,17 @@ export class LayerZeroAdapter implements BridgeAdapter {
     if (handle.sourceTxHash === undefined) return { phase: "idle" };
 
     const messages = await this.scan.byTransaction(handle.sourceTxHash);
-    // One transaction can carry several messages. Ours is the one bound for
-    // Stellar; anything else in the same transaction is not this transfer.
-    const stellarEid = STELLAR_SIDE[this.network].eid;
-    const message = messages.find((m) => m.pathway?.dstEid === stellarEid) ?? messages[0];
+    const pendingRef = this.sourceRef(handle.sourceTxHash, handle.sourceChainId);
+    // Nothing indexed yet is the normal first minute, not evidence of anything.
+    if (messages.length === 0) return { phase: "pending", ref: pendingRef, expectedByUnix: 0 };
 
-    // Which chain it left from, taken from the message when the caller did not
-    // say. Someone who closed the tab may have nothing but a hash, and this
-    // product's stated advantage over the prior art is recovering from whatever
-    // they still have rather than telling them it is lost.
-    const chainId =
-      handle.sourceChainId ??
-      chainIdForLayerZeroKey(this.network, message?.pathway?.sender?.chain ?? "");
-
-    const explorerUrl =
-      chainId === undefined
-        ? scanMessageUrl(this.network, handle.sourceTxHash)
-        : explorerTxUrl(this.network, chainId, handle.sourceTxHash);
-    const ref = {
-      chainId: chainId ?? "unknown",
-      txHash: handle.sourceTxHash,
-      explorerUrl,
-    };
-
-    if (message === undefined) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
-    }
+    // Indexed, but none of it is a transfer this rail can vouch for: a message
+    // to another chain, or another contract's message to Stellar. Answering
+    // for it would report someone else's transfer as this user's delivery.
+    const ours = await this.oursAmong(messages, handle.sourceChainId);
+    if (ours === undefined) return { phase: "idle" };
+    const { message, chainId } = ours;
+    const ref = this.sourceRef(handle.sourceTxHash, chainId);
 
     const name = message.status?.name;
     const outcome = classifyScanStatus(name);
@@ -706,7 +705,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
     }
 
     const deliveredTx = message.destination?.tx?.txHash;
-    if (this.composing !== undefined && chainId !== undefined) {
+    if (this.composing !== undefined) {
       const composed = await composePhase(this.composing, message, chainId, {
         chainId: STELLAR_SIDE[this.network].chainId,
         txHash: deliveredTx ?? handle.sourceTxHash,
@@ -727,7 +726,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
         });
       }
     }
-    const received = await this.receivedFrom(message.source?.tx, chainId);
+    const received = await this.receivedFrom(message.source?.tx, ours);
     if (received === undefined) {
       // Delivered, but the payload was not indexed with it, so the amount cannot
       // be stated. Claiming a number here would be inventing one.
@@ -759,6 +758,78 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   /**
+   * The source chain's ref, with a link to wherever the transaction can be seen.
+   */
+  private sourceRef(txHash: string, chainId: string | undefined): OnChainRef {
+    return {
+      chainId: chainId ?? "unknown",
+      txHash,
+      explorerUrl:
+        chainId === undefined
+          ? scanMessageUrl(this.network, txHash)
+          : explorerTxUrl(this.network, chainId, txHash),
+    };
+  }
+
+  /**
+   * The message in a transaction that is this rail's, checked against the
+   * chain rather than taken on the indexer's word.
+   *
+   * Bound for Stellar, sent by an OFT this rail would have sent through, from
+   * the endpoint that OFT is registered on, to the Stellar contract it peers
+   * to, and carrying the guid the endpoint derives from exactly that pathway.
+   * Anything short of all of it is not a transfer this rail can speak for.
+   */
+  private async oursAmong(
+    messages: readonly ScanMessage[],
+    sourceChainId: string | undefined,
+  ): Promise<OurMessage | undefined> {
+    const stellarEid = STELLAR_SIDE[this.network].eid;
+    for (const message of messages) {
+      const pathway = message.pathway;
+      if (pathway?.dstEid !== stellarEid) continue;
+      const chainId =
+        sourceChainId ?? chainIdForLayerZeroKey(this.network, pathway.sender?.chain ?? "");
+      const sender = pathway.sender?.address?.toLowerCase();
+      const receiver = pathway.receiver?.address?.toLowerCase();
+      const { nonce, srcEid } = pathway;
+      if (
+        chainId === undefined ||
+        sender === undefined ||
+        !isAddress(sender) ||
+        receiver === undefined ||
+        !isHex(receiver) ||
+        receiver.length !== 66 ||
+        nonce === undefined ||
+        srcEid === undefined ||
+        message.guid === undefined
+      ) {
+        continue;
+      }
+      const candidate = (await this.discovery.candidatesFor(chainId)).find(
+        (c) => c.address.toLowerCase() === sender,
+      );
+      if (candidate === undefined) continue;
+      const onChain = await this.discovery.pathwayOf(chainId, sender);
+      if (onChain.sourceEid !== srcEid || onChain.peer !== receiver) continue;
+      const guid = keccak256(
+        encodePacked(
+          ["uint64", "uint32", "bytes32", "uint32", "bytes32"],
+          [BigInt(nonce), srcEid, pad(sender), stellarEid, receiver],
+        ),
+      );
+      if (guid !== message.guid.toLowerCase()) continue;
+      return {
+        message,
+        chainId,
+        symbol: candidate.symbol,
+        stellarOft: bytes32ToStellarContract(receiver),
+      };
+    }
+    return undefined;
+  }
+
+  /**
    * What actually landed, decoded from the message rather than guessed.
    *
    * The wire payload carries the amount in shared decimals, which is the number
@@ -769,41 +840,38 @@ export class LayerZeroAdapter implements BridgeAdapter {
    */
   private async receivedFrom(
     tx: { readonly payload?: string } | undefined,
-    chainId: string | undefined,
+    ours: OurMessage,
   ): Promise<Amount | undefined> {
     const payload = tx?.payload;
-    if (payload === undefined || chainId === undefined) return undefined;
+    if (payload === undefined) return undefined;
 
     let amountSd: bigint;
     try {
       amountSd = decodeOftMessage(payload).amountSd;
     } catch {
+      // indexed without a readable payload yet, so there is no amount to state
       return undefined;
     }
 
-    // The payload counts in shared decimals and Stellar counts in seven, and
-    // only the OFT knows the difference between them. Resolving rather than
-    // reading a cache, because a caller polling status in a fresh process has
-    // no cache and would otherwise watch a delivered transfer sit at pending
-    // forever. Discovery caches it after the first call.
-    let route: ResolvedRoute;
-    try {
-      route = await this.discovery.routeFrom(chainId);
-    } catch {
-      return undefined;
-    }
+    // The scale and the asset come from the Stellar OFT the message was
+    // delivered to, read directly. Not from a full route resolution: those
+    // gates decide whether a new send is safe, and one failing today must not
+    // make yesterday's delivery unreadable. A read that fails is thrown, so
+    // the caller says it could not check rather than showing pending forever.
+    const facts = await readStellarOft(this.rpc, ours.stellarOft);
+    const delivers = await readStellarToken(this.rpc, facts.token, this.passphrase);
 
     return {
       asset: {
         chainId: STELLAR_SIDE[this.network].chainId,
         // The classic asset where there is one, so what Activity shows is a
         // Stellar asset a wallet recognises rather than its contract address.
-        id: route.delivers?.id ?? route.stellar.token,
-        symbol: route.delivers?.code ?? route.tokenSymbol,
+        id: delivers?.id ?? facts.token,
+        symbol: delivers?.code ?? ours.symbol,
         decimals: STELLAR_DECIMALS,
         curatedBy: "LayerZero",
       },
-      baseUnits: sharedToStellar(amountSd, route.stellar.decimalsDiff).toString(),
+      baseUnits: sharedToStellar(amountSd, facts.decimalsDiff).toString(),
     };
   }
 
@@ -877,6 +945,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
     return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
   }
+}
+
+/** A Scan message this rail has checked is its own, and what that check learned. */
+interface OurMessage {
+  readonly message: ScanMessage;
+  readonly chainId: string;
+  readonly symbol: string;
+  /** The Stellar OFT it was delivered to, from the pathway the chain confirmed. */
+  readonly stellarOft: string;
 }
 
 /** The plan layer speaks in readiness, the Stellar layer in reserve slots. */

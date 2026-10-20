@@ -8,7 +8,15 @@ import {
   StrKey,
   xdr,
 } from "@stellar/stellar-sdk";
-import { type Abi, decodeFunctionData, encodeFunctionResult, getAddress } from "viem";
+import {
+  type Abi,
+  decodeFunctionData,
+  encodeFunctionResult,
+  encodePacked,
+  getAddress,
+  keccak256,
+  pad,
+} from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
 import { SEND_ULN_ABI } from "./dvn.js";
@@ -57,6 +65,10 @@ interface World {
   assetInfoIssuer: string;
   account: boolean;
   trustline: boolean;
+  /** What LayerZero Scan holds for SEND_HASH. */
+  messages: unknown[];
+  /** Whether the OFT's verifier set is its own choice or inherited from the network. */
+  dvnInherited: boolean;
 }
 
 let world: World;
@@ -118,6 +130,10 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
     target === SEND_LIB &&
     (functionName === "getUlnConfig" || functionName === "getAppUlnConfig")
   ) {
+    // an inherited set reads back from getAppUlnConfig as all zeros
+    if (functionName === "getAppUlnConfig" && world.dvnInherited) {
+      return reply({ ...uln, requiredDVNCount: 0, requiredDVNs: [] });
+    }
     return reply(uln);
   }
   if (target === TOKEN) {
@@ -167,22 +183,7 @@ function remoteServices(): void {
       return json({ bids: [{ price: "0.2" }], asks: [{ price: "0.2" }] });
     }
     if (url === `${SCAN_BASE_URL.mainnet}/messages/tx/${SEND_HASH}`) {
-      return json({
-        data: [
-          {
-            status: { name: "DELIVERED" },
-            pathway: { srcEid: 30110, dstEid: 30600, sender: { chain: "arbitrum" } },
-            source: {
-              // 24.875 in six shared decimals, after the recipient bytes32
-              tx: {
-                txHash: SEND_HASH,
-                payload: `0x${"11".repeat(32)}${24_875_000n.toString(16).padStart(16, "0")}`,
-              },
-            },
-            destination: { tx: { txHash: "cd".repeat(32) } },
-          },
-        ],
-      });
+      return json({ data: world.messages });
     }
     if (url === "https://arb1.arbitrum.io/rpc") {
       const { method, params } = JSON.parse(init?.body as string) as {
@@ -197,6 +198,59 @@ function remoteServices(): void {
     }
     throw new Error(`the fetch double has no answer for ${url}`);
   });
+}
+
+const STELLAR_OFT_BYTES = `0x${StrKey.decodeContract(STELLAR_OFT).toString("hex")}` as const;
+
+/**
+ * A delivered USDT0 message from Arbitrum to Stellar, shaped the way Scan
+ * answered for the real Polygon one (guid 0x2dc98848...6dd7): sender and
+ * receiver as lowercase hex, the guid the endpoint derived from the pathway.
+ */
+function delivered(
+  pathway: {
+    srcEid?: number;
+    dstEid?: number;
+    sender?: string;
+    receiver?: `0x${string}`;
+    nonce?: number;
+  } = {},
+  guid?: string,
+): unknown {
+  const p = {
+    srcEid: 30110,
+    dstEid: 30600,
+    sender: OFT.toLowerCase(),
+    receiver: STELLAR_OFT_BYTES,
+    nonce: 43,
+    ...pathway,
+  };
+  return {
+    guid:
+      guid ??
+      keccak256(
+        encodePacked(
+          ["uint64", "uint32", "bytes32", "uint32", "bytes32"],
+          [BigInt(p.nonce), p.srcEid, pad(p.sender as `0x${string}`), p.dstEid, p.receiver],
+        ),
+      ),
+    status: { name: "DELIVERED" },
+    pathway: {
+      srcEid: p.srcEid,
+      dstEid: p.dstEid,
+      nonce: p.nonce,
+      sender: { address: p.sender, chain: "arbitrum" },
+      receiver: { address: p.receiver, chain: p.dstEid === 30600 ? "stellar" : "ethereum" },
+    },
+    source: {
+      // 24.875 in six shared decimals, after the recipient bytes32
+      tx: {
+        txHash: SEND_HASH,
+        payload: `0x${"11".repeat(32)}${24_875_000n.toString(16).padStart(16, "0")}`,
+      },
+    },
+    destination: { tx: { txHash: "cd".repeat(32) } },
+  };
 }
 
 const sym = (name: string): xdr.ScVal => xdr.ScVal.scvSymbol(name);
@@ -318,6 +372,8 @@ beforeEach(() => {
     assetInfoIssuer: ISSUER,
     account: true,
     trustline: true,
+    messages: [delivered()],
+    dvnInherited: false,
   };
   remoteServices();
 });
@@ -454,5 +510,68 @@ describe("status, for a USDT0 transfer", () => {
     expect(phase.received.asset.symbol).toBe("USDT0");
     expect(phase.received.baseUnits).toBe("248750000");
     expect(phase.ref.chainId).toBe("stellar");
+  });
+
+  const lookUp = () =>
+    mainnet().status({
+      sourceTxHash: SEND_HASH,
+      depositAddress: undefined,
+      destinationAddress: READY,
+      sourceChainId: undefined,
+    });
+
+  it("does not answer for a message bound for another chain", async () => {
+    // the shape of 0xa9658a79...f0e0, USDT0 Polygon to Ethereum, which was once
+    // reported here as delivered on Stellar
+    world.messages = [delivered({ dstEid: 30101 })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for another contract's message to Stellar", async () => {
+    world.messages = [delivered({ sender: `0x${"77".repeat(20)}` })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for a message delivered to another Stellar contract", async () => {
+    world.messages = [delivered({ receiver: `0x${"99".repeat(32)}` })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for a message from another endpoint", async () => {
+    world.messages = [delivered({ srcEid: 30109 })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not believe a record whose guid is not the one its pathway derives", async () => {
+    world.messages = [delivered({}, `0x${"ee".repeat(32)}`)];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("picks the Stellar-bound message out of several in one transaction", async () => {
+    world.messages = [delivered({ dstEid: 30101 }), delivered()];
+    const phase = await lookUp();
+    expect(phase.phase).toBe("done");
+  });
+
+  it("still calls an unindexed hash pending", async () => {
+    world.messages = [];
+    expect((await lookUp()).phase).toBe("pending");
+  });
+
+  it("still reads a delivered transfer when a send-time gate fails today", async () => {
+    // a new send would be refused, and yesterday's delivery is still a delivery
+    world.dvnInherited = true;
+    await expect(mainnet().sendableAssets("arbitrum")).rejects.toThrow();
+    const phase = await lookUp();
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    expect(phase.received.baseUnits).toBe("248750000");
+    expect(phase.received.asset.id).toBe(USDT0_ID);
+  });
+
+  it("says it could not read the amount rather than calling it pending", async () => {
+    // a token whose storage cannot be read is an error, never a quiet pending
+    world.token = StrKey.encodeContract(Buffer.alloc(32, 12));
+    await expect(lookUp()).rejects.toThrow(/does not derive its own address/);
   });
 });

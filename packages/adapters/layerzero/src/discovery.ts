@@ -519,6 +519,34 @@ export class Discovery {
   }
 
   /**
+   * Where a source OFT sends Stellar-bound messages from and to, read off the
+   * chain rather than taken from an indexer.
+   *
+   * Status uses this to decide whether a message it found is one of this
+   * rail's, so it skips the gates `routeFrom` applies before sending. Those
+   * gates are about whether a new transfer is safe; a transfer already sent
+   * has to stay readable even if one of them fails today.
+   */
+  async pathwayOf(
+    chainId: string,
+    oft: string,
+  ): Promise<{ readonly sourceEid: number; readonly peer: `0x${string}` }> {
+    const source = sourceFor(this.network, chainId);
+    if (source === undefined) {
+      throw new MavnaError(`This rail does not send from ${chainId}.`, { retryable: false });
+    }
+    const reader = this.readerFor(chainId, source);
+    const [peer, endpoint] = await Promise.all([
+      this.require(reader, oft, OFT_ABI, "peers", [STELLAR_SIDE[this.network].eid]),
+      this.require(reader, oft, OFT_ABI, "endpoint", []),
+    ]);
+    const sourceEid = Number(
+      await this.require(reader, endpoint as `0x${string}`, ENDPOINT_ABI, "eid", []),
+    );
+    return { sourceEid, peer: (peer as string).toLowerCase() as `0x${string}` };
+  }
+
+  /**
    * A route already resolved, without going near the network.
    *
    * Status is read after a transfer has been built, so the route it was built

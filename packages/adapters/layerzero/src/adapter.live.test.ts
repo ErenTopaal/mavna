@@ -462,6 +462,33 @@ describe("status, read from LayerZero's own indexer", () => {
     });
     expect(phase.phase).toBe("pending");
   });
+
+  it("reports a real Polygon to Stellar USDT0 transfer as delivered, with its amount", async () => {
+    const phase = await mainnet.status({
+      sourceTxHash: "0x7f531e1dfe096968f03551411c717f698d98576c7f42829a0e600e8d7016131f",
+      depositAddress: undefined,
+      destinationAddress: UNFUNDED,
+      sourceChainId: undefined,
+    });
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    // one USDT0, seven decimals on Stellar
+    expect(phase.received.baseUnits).toBe("10000000");
+    expect(phase.received.asset.symbol).toBe("USDT0");
+    expect(phase.ref.txHash).toBe(
+      "ace3893f10405ef834b1408e778223985f17ed7b03c2641f901d92f01a41e340",
+    );
+  }, 30_000);
+
+  it("does not answer for a USDT0 transfer from Polygon to Ethereum", async () => {
+    const phase = await mainnet.status({
+      sourceTxHash: "0xa9658a797e99f86d8b5d1080184042301badc53e1a7e308bdee9510f62f3f0e0",
+      depositAddress: undefined,
+      destinationAddress: UNFUNDED,
+      sourceChainId: undefined,
+    });
+    expect(phase).toEqual({ phase: "idle" });
+  }, 30_000);
 });
 
 /**
