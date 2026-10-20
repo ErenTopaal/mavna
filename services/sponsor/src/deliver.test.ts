@@ -325,3 +325,38 @@ describe("a delivery against the day's budget", () => {
     expect(await budget.spentToday()).toBe(0n);
   });
 });
+
+describe("round 2: duplicate deliveries of one burn", () => {
+  it("gives the share back when the rebuild finds the message already delivered", async () => {
+    const rpcClient = new SequencedRpc();
+    // another delivery of the same burn lands just before this one's first send
+    rpcClient.landsFirst.add(0);
+    let simulations = 0;
+    rpcClient.simulate = (tx) => {
+      simulations += 1;
+      if (simulations > 1) throw new Error("HostError: Error(Contract, #6908)");
+      return tx;
+    };
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 250_000_000n, () => "2026-10-20");
+    const outcome = await deliveryOn(rpcClient, budget).deliver({
+      messageHex: "0xabcd",
+      attestationHex: "0x1234",
+    });
+    expect(outcome.kind).toBe("already-delivered");
+    expect(await budget.spentToday()).toBe(0n);
+  });
+
+  it("holds one share for one burn however many ask at once", async () => {
+    const rpcClient = new SequencedRpc();
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 250_000_000n, () => "2026-10-20");
+    const deliverer = deliveryOn(rpcClient, budget);
+    const request = { messageHex: "0xabcd", attestationHex: "0x1234" };
+    const outcomes = await Promise.all(
+      Array.from({ length: 13 }, () => deliverer.deliver(request)),
+    );
+    expect(outcomes.every((outcome) => outcome.kind === "delivered")).toBe(true);
+    expect(rpcClient.sent).toHaveLength(1);
+    // one delivery's charge: the double reports none, so its whole share
+    expect(await budget.spentToday()).toBe(20_000_000n);
+  });
+});
