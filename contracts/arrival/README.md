@@ -50,8 +50,11 @@ contract does not expose it. So the payout is attempted rather than assumed:
   less than arrived by the venue's fees both ways. If the venue will not take it back, the call
   reverts and the compose stays queued until the recipient raises its limit;
 - the integrator's fee account refuses the fee: the fee goes to the recipient, and if the recipient
-  has no room for it either, it is swapped back and sent to the recipient as the arriving token. An
-  integrator's account never holds up a user's funds;
+  has no room for it either, it is swapped back and sent to the recipient as the arriving token. The
+  integrator's account alone never holds up a user's funds. But when the recipient has room for the
+  net amount and not for the fee, and the venue will not take the fee back (a fee so small the
+  venue's estimate for it is zero), the call reverts and the compose stays queued until the
+  recipient raises its limit;
 - a fee account equal to the Arrival Contract is treated as no fee.
 
 ## Build
