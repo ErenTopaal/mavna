@@ -160,7 +160,7 @@ describe("resolving LayerZero from the chains rather than from a table", () => {
     expect(verifierThreshold(ethereum.uln)).toBeGreaterThan(0);
     // The mainnet default names a DVN that is not deployed, so an application
     // relying on it cannot be quoted at all. This one set its own.
-    expect(isExplicitlyConfigured(ethereum.appUln)).toBe(true);
+    expect(isExplicitlyConfigured(ethereum.appUln, ethereum.uln)).toBe(true);
     expect(ethereum.uln.requiredDVNs.length).toBe(ethereum.uln.requiredDVNCount);
     expect(Number(ethereum.uln.confirmations)).toBeGreaterThan(0);
   });

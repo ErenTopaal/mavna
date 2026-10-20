@@ -122,11 +122,19 @@ export const SEND_ULN_ABI = [
   },
 ] as const;
 
-/** Whether an application chose its own verifiers, or is inheriting whatever is default. */
-export function isExplicitlyConfigured(app: UlnConfig): boolean {
-  return (
-    app.requiredDVNCount !== COUNT_MEANS_DEFAULT || app.optionalDVNCount !== COUNT_MEANS_DEFAULT
-  );
+/**
+ * Whether an application chose every verifier the effective set relies on.
+ *
+ * Each half of the config inherits on its own: a required count of zero takes
+ * the network's required set, an optional count of zero takes its optional pool
+ * and threshold. Choosing one half and inheriting the other is still a set
+ * LayerZero can change under the application, so the required half must be
+ * chosen (a list, or 255 for none), and the optional half must be chosen too
+ * unless the effective set uses no optional verifier at all.
+ */
+export function isExplicitlyConfigured(app: UlnConfig, effective: UlnConfig): boolean {
+  if (app.requiredDVNCount === COUNT_MEANS_DEFAULT) return false;
+  return app.optionalDVNCount !== COUNT_MEANS_DEFAULT || effective.optionalDVNThreshold === 0;
 }
 
 /**
@@ -164,10 +172,10 @@ export function assertDvnStackIsSound(inputs: {
     );
   }
 
-  if (!isExplicitlyConfigured(app)) {
+  if (!isExplicitlyConfigured(app, effective)) {
     throw new MavnaError(
-      `The OFT at ${oft} has set no DVN configuration of its own for endpoint ${eid} and is ` +
-        "inheriting the network default. That default is not a fixed set: LayerZero can change " +
+      `The OFT at ${oft} has not chosen all of its DVNs for endpoint ${eid} and is ` +
+        "inheriting some or all of them from the network default. That default is not a fixed set: LayerZero can change " +
         "who verifies this token's transfers without the token's owner acting, and on Stellar " +
         "mainnet the default currently names a DVN that is not deployed at all, which turns " +
         "into a failure at send time rather than a refusal here. Refusing to route money " +

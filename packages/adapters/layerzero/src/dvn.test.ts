@@ -44,7 +44,7 @@ const inheriting: UlnConfig = {
 
 describe("telling a chosen verifier set from an inherited one", () => {
   it("recognises a set the application configured", () => {
-    expect(isExplicitlyConfigured(usdt0OnEthereum)).toBe(true);
+    expect(isExplicitlyConfigured(usdt0OnEthereum, usdt0OnEthereum)).toBe(true);
   });
 
   /**
@@ -53,7 +53,39 @@ describe("telling a chosen verifier set from an inherited one", () => {
    * `getConfig` returns the merged result. Only the raw config shows the zeros.
    */
   it("recognises an application that set nothing", () => {
-    expect(isExplicitlyConfigured(inheriting)).toBe(false);
+    expect(isExplicitlyConfigured(inheriting, usdt0OnEthereum)).toBe(false);
+  });
+
+  /**
+   * Set only "no required verifiers" and left the optional pool at its
+   * default: what verifies is then entirely the network's default pool, which
+   * LayerZero can change without the application acting.
+   */
+  it("refuses a set whose optional pool is inherited and actually used", () => {
+    const app = { ...inheriting, requiredDVNCount: 255 };
+    const effective: UlnConfig = {
+      ...usdt0OnEthereum,
+      requiredDVNCount: 0,
+      requiredDVNs: [],
+      optionalDVNCount: 2,
+      optionalDVNThreshold: 1,
+      optionalDVNs: [
+        "0x589dEDbD617e0CBcB916A9223F4d1300c294236b",
+        "0xa4fE5A5B9A846458a70Cd0748228aED3bF65c2cd",
+      ],
+    };
+    expect(isExplicitlyConfigured(app, effective)).toBe(false);
+  });
+
+  it("refuses a set whose required verifiers are inherited", () => {
+    const app = { ...inheriting, optionalDVNCount: 255 };
+    expect(isExplicitlyConfigured(app, usdt0OnEthereum)).toBe(false);
+  });
+
+  it("accepts an inherited optional pool that nothing uses", () => {
+    // USDT0's own shape: three required, optional left at a default with no threshold
+    const app = { ...usdt0OnEthereum, optionalDVNCount: 0 };
+    expect(isExplicitlyConfigured(app, usdt0OnEthereum)).toBe(true);
   });
 
   it("counts required plus the optional threshold, not the optional pool", () => {
@@ -90,7 +122,7 @@ describe("refusing to send through a set nobody chose", () => {
         oft: "0x0000000000000000000000000000000000000001",
         eid: 30600,
       }),
-    ).toThrow(/inheriting the network default/);
+    ).toThrow(/inheriting some or all of them from the network default/);
   });
 
   it("stops when nothing at all would have to attest", () => {
