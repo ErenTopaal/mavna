@@ -35,7 +35,13 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
-import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
+import {
+  type BuiltChange,
+  BuiltLedger,
+  type BuiltRecord,
+  type Repayment,
+  signedBy,
+} from "./built.js";
 import { type CapDecision, CapLedger } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
@@ -359,6 +365,10 @@ const heldShape = z.object({
   preparation: z.object({ hash: z.string(), expiresAtUnix: z.number().int() }).optional(),
   sentAtUnix: z.number().int().optional(),
 });
+const builtChangeShape = z.union([
+  z.object({ add: builtShape }),
+  z.object({ drop: z.string().regex(/^[0-9a-f]{64}$/) }),
+]);
 const settledShape = z.object({ txHash: z.string(), untilUnix: z.number().int() });
 const secretShape = z.string().refine((value) => StrKey.isValidEd25519SecretSeed(value));
 const leaseShape = z.object({
@@ -819,7 +829,25 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     await checkNetwork(reject);
 
-    const builtDocument = await documentOf("built");
+    const builtLog = await state.readLog("built");
+    if (builtLog !== undefined) {
+      // replayed in order: what was added, less what was handed out or pushed out
+      const open = new Map<string, BuiltRecord>();
+      builtLog.forEach((value, index) => {
+        const parsed = builtChangeShape.safeParse(value);
+        if (!parsed.success) {
+          reject("built", value, `log line ${index + 1}`);
+        } else if ("add" in parsed.data) {
+          const record = stripUndefined(parsed.data.add) as BuiltRecord;
+          open.set(record.hash, record);
+        } else {
+          open.delete(parsed.data.drop);
+        }
+      });
+      built = BuiltLedger.fromSnapshot([...open.values()], now);
+    }
+    // written by a version that kept the ledger as one document
+    const builtDocument = builtLog === undefined ? await documentOf("built") : undefined;
     if (builtDocument !== undefined) {
       const records: BuiltRecord[] = [];
       builtDocument.forEach((value, index) => {
@@ -891,6 +919,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
     }
 
+    // From here every change is appended, onto a log of just what is open.
+    built.watch(logBuilt);
+    compactBuilt();
+    await builtWrites;
+
     if (Object.keys(rejected).length > 0) {
       // added to what earlier starts set aside, never written over it
       const before = ((await state.read("rejected")) ?? {}) as Rejected;
@@ -918,19 +951,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const pool: ChannelPoolSnapshot = channels?.snapshot() ?? { secrets: [], leases: [] };
     const channelDocument: ChannelDocument =
       pendingChannel === undefined ? pool : { ...pool, pending: pendingChannel.secret() };
-    // In this order, one after another: a held settlement names a channel lease,
-    // so the lease is on disk before the settlement that relies on it. A crash
+    // After the built log's own writes, then in this order, one after another: a
+    // held settlement names a channel lease, so the lease is on disk before the
+    // settlement that relies on it. A crash
     // between them then leaves a lease without a settlement, which lapses
     // harmlessly, never a settlement whose lease could be handed to another.
     const documents: Record<string, unknown> = {
-      built: built.snapshot(),
       channels: channelDocument,
       held: { held, settled: Object.fromEntries(recentlySettled) } satisfies HeldDocument,
     };
     // Most answers change nothing, and rewriting every file (secrets included)
     // for each anonymous refusal is wasted disk and a wider window for a
     // half-finished write, so only a document that differs is written.
-    let chain: Promise<void> = Promise.resolve();
+    let chain: Promise<void> = builtWrites;
     for (const [name, value] of Object.entries(documents)) {
       const text = JSON.stringify(value);
       const last = written.get(name);
@@ -959,6 +992,27 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * caller chose proves only that the caller can sign.
    */
   let built = new BuiltLedger();
+  /**
+   * The built log's writes, in order. Each build or hand-out is one appended
+   * line rather than the whole ledger rewritten, and every answer waits for
+   * what came before it. A failed append is reported to the answer waiting on
+   * it, and the next change goes on regardless.
+   */
+  let builtWrites: Promise<void> = Promise.resolve();
+  let appendedSinceCompaction = 0;
+
+  function logBuilt(change: BuiltChange): void {
+    appendedSinceCompaction += 1;
+    builtWrites = builtWrites.catch(() => {}).then(() => state.append("built", change));
+    // rewritten as just what is open once it is mostly history
+    if (appendedSinceCompaction > BUILT_LOG_SLACK + 2 * built.size) compactBuilt();
+  }
+
+  function compactBuilt(): void {
+    appendedSinceCompaction = 0;
+    const open = built.snapshot().map((record) => ({ add: record }));
+    builtWrites = builtWrites.catch(() => {}).then(() => state.writeLog("built", open));
+  }
   const expected = expectedMessageFields(options.networkId);
   /** Circle domains this network routes into Stellar from, and nothing else. */
   const sourceDomains = new Set(
@@ -3293,6 +3347,9 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * preparation in a wallet, one after the other.
  */
 const PROVISIONAL_LEASE_SECONDS = 600;
+
+/** Lines the built log may run past twice its open records before it is compacted. */
+const BUILT_LOG_SLACK = 1_000;
 
 /** The wait after a failed channel funding, doubled each time, to at most half an hour. */
 const FUNDING_BACKOFF_MS = 60_000;

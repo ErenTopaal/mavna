@@ -2315,6 +2315,23 @@ describe("the sponsor counts only USDC the account can spend", () => {
   });
 });
 
+/** The open records the built log says remain, of one kind, replayed as a restart would. */
+async function openBuilt(state: MemoryDocumentStore, kind: string): Promise<unknown[]> {
+  type Line = {
+    add?: { hash: string; kind: string; openUntilUnix?: number; expiresAtUnix: number };
+    drop?: string;
+  };
+  const open = new Map<string, NonNullable<Line["add"]>>();
+  for (const line of ((await state.readLog("built")) ?? []) as Line[]) {
+    if (line.add !== undefined) open.set(line.add.hash, line.add);
+    if (line.drop !== undefined) open.delete(line.drop);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  return [...open.values()].filter(
+    (record) => record.kind === kind && (record.openUntilUnix ?? record.expiresAtUnix) > now,
+  );
+}
+
 describe("what anonymous builds can make the sponsor write down", () => {
   it("keeps a few settlements per account, and none past its short lease", async () => {
     const state = new MemoryDocumentStore();
@@ -2330,10 +2347,7 @@ describe("what anonymous builds can make the sponsor write down", () => {
       });
       expect(built.status).toBe(200);
     }
-    const settlements = () =>
-      (state.read("built") as Promise<{ kind: string }[]>).then((records) =>
-        records.filter((record) => record.kind === "settlement"),
-      );
+    const settlements = () => openBuilt(state, "settlement");
     expect((await settlements()).length).toBe(3);
 
     vi.setSystemTime(Date.now() + PROVISIONAL_AND_GRACE_SECONDS * 1_000);
@@ -3213,10 +3227,12 @@ describe("the sponsor skips stored state it did not write, and still starts", ()
     const user = Keypair.random();
     await holdSettlementFor(first, user);
     const signed = await preparedAndSigned(first, user);
-    const built = (await state.read("built")) as Record<string, unknown>[];
-    await state.write("built", [
-      ...built,
-      { ...built[0], hash: "ff".repeat(32), sourceChainId: 7 },
+    const log = (await state.readLog("built")) as { add?: Record<string, unknown> }[];
+    const good = log.find((line) => line.add !== undefined)?.add;
+    await state.writeLog("built", [
+      ...log,
+      { add: { ...good, hash: "ff".repeat(32), sourceChainId: 7 } },
+      { neither: true },
     ]);
 
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3346,9 +3362,9 @@ describe("the sponsor writes its state only when it changed", () => {
       release = resolve;
     });
     class GatedStore extends MemoryDocumentStore {
-      override async write(name: string, value: unknown): Promise<void> {
+      override async append(name: string, entry: unknown): Promise<void> {
         if (name === "built") await gate;
-        await super.write(name, value);
+        await super.append(name, entry);
       }
     }
     const server = await startServer({ state: new GatedStore() });
@@ -3416,7 +3432,8 @@ describe("the sponsor writes its state only when it changed", () => {
       sourceChainId: "1",
     });
     expect(built.status).toBe(200);
-    expect(state.writes).toEqual(["built"]);
+    // a build is one line appended to the built log, and no document is rewritten
+    expect(state.writes).toEqual([]);
   });
 });
 
@@ -4466,5 +4483,87 @@ describe("round 2: two stored settlements for one account", () => {
     errors.mockRestore();
     const rejected = (await state.read("rejected")) as Record<string, { entry?: string }[]>;
     expect(rejected.held?.some((item) => item.entry === muxed)).toBe(true);
+  });
+});
+
+describe("round 2: the built ledger is written a record at a time", () => {
+  class AppendCountingStore extends MemoryDocumentStore {
+    readonly writes: string[] = [];
+    readonly appends: string[] = [];
+    override async write(name: string, value: unknown): Promise<void> {
+      this.writes.push(name);
+      await super.write(name, value);
+    }
+    override async append(name: string, entry: unknown): Promise<void> {
+      this.appends.push(name);
+      await super.append(name, entry);
+    }
+  }
+
+  it("appends each build instead of rewriting every open one", async () => {
+    const state = new AppendCountingStore();
+    const server = await startServer({ state });
+    await server.server.ready();
+    state.writes.length = 0;
+    state.appends.length = 0;
+    for (let i = 0; i < 5; i += 1) {
+      const built = await server.post("/prepare", {
+        destination: Keypair.random().publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+    }
+    expect(state.writes.filter((name) => name === "built")).toEqual([]);
+    expect(state.appends.filter((name) => name === "built")).toHaveLength(5);
+  });
+
+  it("remembers across a restart what was built, and what was already handed out", async () => {
+    const state = new MemoryDocumentStore();
+    const pool = [Keypair.random(), Keypair.random()];
+    const first = await startServer({ state, channels: new ChannelPool({ channels: pool }) });
+    for (const channel of pool) first.rpc.accounts.set(channel.publicKey(), 300n);
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    expect((await first.post("/submit", { signedXdr: signed })).status).toBe(200);
+    // built on the sponsor's sequence after that one landed
+    const other = Keypair.random();
+    await holdSettlementFor(first, other);
+    const otherSigned = await preparedAndSigned(first, other);
+
+    const second = await startServer(
+      { state, channels: new ChannelPool({ channels: pool }) },
+      { restartOf: first },
+    );
+    // the log was rewritten at start to just what is open, history dropped
+    const log = (await state.readLog("built")) as { add?: unknown; drop?: unknown }[];
+    expect(log.some((line) => line.drop !== undefined)).toBe(false);
+    // handed out before the restart, so never again
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(409);
+    // built and not yet used, so still good
+    expect((await second.post("/submit", { signedXdr: otherSigned })).status).toBe(200);
+  });
+});
+
+describe("round 2: a built ledger written by the earlier version", () => {
+  it("is read from its old document when there is no log yet, and kept from then on", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    // as the earlier version left it: one document, no log
+    const open = await openBuilt(state, "preparation");
+    const legacy = new MemoryDocumentStore();
+    for (const name of ["held", "channels", "network", "caps"]) {
+      const value = await state.read(name);
+      if (value !== undefined) await legacy.write(name, value);
+    }
+    await legacy.write("built", open);
+
+    const second = await startServer({ state: legacy }, { restartOf: first });
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(200);
+    expect(await legacy.readLog("built")).toBeDefined();
   });
 });

@@ -57,8 +57,13 @@ export const DEFAULT_OPEN_RECORDS = 10_000;
 /** Open records kept per account and kind; the oldest goes first. */
 const OPEN_PER_ACCOUNT = 3;
 
+/** One change to the open records, as it is appended to the built log. */
+export type BuiltChange = { readonly add: BuiltRecord } | { readonly drop: string };
+
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
+  /** Told of every record added, pushed out or handed out. Expiry needs no telling. */
+  private listener: (change: BuiltChange) => void = () => {};
   private readonly capacity: number;
   /** Which client asked for each open record, by hash. Kept in memory only. */
   private readonly clients = new Map<string, string>();
@@ -77,6 +82,11 @@ export class BuiltLedger {
     for (const record of records) ledger.records.set(record.hash, record);
     ledger.prune(nowUnix);
     return ledger;
+  }
+
+  /** Hear every change from now on, to write it down as it happens. */
+  watch(listener: (change: BuiltChange) => void): void {
+    this.listener = listener;
   }
 
   /** Every record still open, for writing down. */
@@ -104,8 +114,10 @@ export class BuiltLedger {
     for (const stale of same.slice(0, Math.max(0, same.length - (OPEN_PER_ACCOUNT - 1)))) {
       this.records.delete(stale.hash);
       this.clients.delete(stale.hash);
+      this.listener({ drop: stale.hash });
     }
     this.records.set(record.hash, record);
+    this.listener({ add: record });
     if (client !== undefined) this.clients.set(record.hash, client);
   }
 
@@ -136,6 +148,7 @@ export class BuiltLedger {
     if (found === undefined || found.kind !== kind) return undefined;
     this.records.delete(hash);
     this.clients.delete(hash);
+    this.listener({ drop: hash });
     return found;
   }
 

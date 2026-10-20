@@ -1,5 +1,5 @@
 export { curatedAssetsFor } from "./assets.js";
-export type { BuiltKind, BuiltRecord } from "./built.js";
+export type { BuiltChange, BuiltKind, BuiltRecord } from "./built.js";
 export { BuiltLedger, signedBy } from "./built.js";
 export type { CapConfig, CapDecision, CapStore, CapUsage, SourceChainClass } from "./caps.js";
 export {
