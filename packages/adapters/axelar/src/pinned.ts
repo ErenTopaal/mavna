@@ -28,6 +28,10 @@ export const PINNED_DEPLOYMENTS: Readonly<
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
     },
+    "arc-8": {
+      interchainTokenService: "0x7ca8bF7326b870Eab4ef7A9B8E59fCDb47921389",
+      gasService: "0xB2C575226fa1828F5101a42CaA5ba4Ce9140c108",
+    },
     avalanche: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
@@ -104,6 +108,10 @@ export const PINNED_DEPLOYMENTS: Readonly<
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
     },
+    "polygon-sepolia": {
+      interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+      gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+    },
     robinhood: {
       interchainTokenService: "0x3270540e5d2857E69BEC34c6EcFa02cD813aCb42",
       gasService: "0xef2e20AE1095C6bDb888e91E3c1a2443CBb76DB9",
@@ -123,6 +131,10 @@ export const PINNED_DEPLOYMENTS: Readonly<
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },
     avalanche: {
+      interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+      gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+    },
+    base: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },
@@ -147,6 +159,10 @@ export const PINNED_DEPLOYMENTS: Readonly<
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },
     fantom: {
+      interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+      gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+    },
+    filecoin: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },
@@ -183,6 +199,10 @@ export const PINNED_DEPLOYMENTS: Readonly<
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },
     monad: {
+      interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+      gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+    },
+    moonbeam: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
     },

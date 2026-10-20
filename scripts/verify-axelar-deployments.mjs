@@ -16,8 +16,10 @@
  *   4. there is code at that gas service,
  *   5. on Stellar, the token service contract instance exists on the ledger.
  *
- * A chain that cannot be confirmed is left out of pinned.ts, and the adapter
- * does not offer it.
+ * When the config's node cannot be reached from where this runs, the public
+ * nodes the community chain registry lists for the same chain id are tried, so
+ * an unreachable host is not mistaken for a missing deployment. A chain that
+ * cannot be confirmed is left out of pinned.ts, and the adapter does not offer it.
  *
  * Run from the repository root:
  *   node scripts/verify-axelar-deployments.mjs                 (latest commit on main)
@@ -97,32 +99,78 @@ async function call(url, method, params) {
   throw last;
 }
 
+/**
+ * Public alternates for a chain id, from the community registry, for when the
+ * config's own node cannot be reached from where this runs. Only plain https
+ * URLs: anything templated needs a key this script does not have.
+ */
+const registry = await fetch("https://chainid.network/chains.json", {
+  signal: AbortSignal.timeout(30_000),
+})
+  .then((r) => r.json())
+  .then((all) => new Map(all.map((c) => [c.chainId, c])));
+
+function alternates(chainId) {
+  return (registry.get(chainId)?.rpc ?? []).filter(
+    (url) => url.startsWith("https://") && !url.includes("${"),
+  );
+}
+
+/**
+ * The first node that answers as this chain. An unreachable node says nothing
+ * about the chain and the next one is tried. The config's own node answering as
+ * another chain is a fact about the config, so it fails the chain; an alternate
+ * doing so is only a bad registry entry and is skipped.
+ */
+async function nodeFor(chain, tried) {
+  const candidates = [...new Set([chain.rpc, ...alternates(chain.chainId)].filter(Boolean))];
+  for (const url of candidates) {
+    let answer;
+    try {
+      answer = Number(BigInt(await call(url, "eth_chainId", [])));
+    } catch (error) {
+      tried.push(`${url}: ${String(error?.message ?? error).slice(0, 80)}`);
+      continue;
+    }
+    if (answer === chain.chainId) {
+      tried.push(`${url}: chain id ${answer}`);
+      return url;
+    }
+    tried.push(`${url}: answers chain id ${answer}`);
+    if (url === chain.rpc) {
+      throw new Error(`config node answers chain id ${answer}, config says ${chain.chainId}`);
+    }
+  }
+  throw new Error(`no node reachable for chain id ${chain.chainId}`);
+}
+
 async function inspectEvm(chain) {
   const its = chain.contracts?.InterchainTokenService?.address;
   const gas = chain.contracts?.AxelarGasService?.address;
   if (its === undefined) return { skip: "no token service in the config" };
-  if (chain.rpc === undefined) throw new Error("no rpc in the config");
   if (gas === undefined) throw new Error("no gas service in the config");
 
-  const chainId = Number(BigInt(await call(chain.rpc, "eth_chainId", [])));
-  if (chainId !== chain.chainId) {
-    throw new Error(`node answers chain id ${chainId}, config says ${chain.chainId}`);
+  const tried = [];
+  let node;
+  try {
+    node = await nodeFor(chain, tried);
+  } catch (error) {
+    throw new Error(`${error.message} [tried ${tried.join("; ")}]`);
   }
-  const code = await call(chain.rpc, "eth_getCode", [its, "latest"]);
-  if (typeof code !== "string" || code.length <= 2) throw new Error(`no code at ${its}`);
 
-  const word = await call(chain.rpc, "eth_call", [
-    { to: its, data: GAS_SERVICE_SELECTOR },
-    "latest",
-  ]);
+  const code = await call(node, "eth_getCode", [its, "latest"]);
+  if (typeof code !== "string" || code.length <= 2) {
+    throw new Error(`no code at ${its} (read through ${node})`);
+  }
+  const word = await call(node, "eth_call", [{ to: its, data: GAS_SERVICE_SELECTOR }, "latest"]);
   const onChainGas = `0x${String(word).slice(-40)}`;
   if (onChainGas.toLowerCase() !== gas.toLowerCase()) {
     throw new Error(`token service names gas service ${onChainGas}, config says ${gas}`);
   }
-  const gasCode = await call(chain.rpc, "eth_getCode", [gas, "latest"]);
+  const gasCode = await call(node, "eth_getCode", [gas, "latest"]);
   if (typeof gasCode !== "string" || gasCode.length <= 2) throw new Error(`no code at ${gas}`);
 
-  return { pinned: { interchainTokenService: its, gasService: gas } };
+  return { pinned: { interchainTokenService: its, gasService: gas }, via: node };
 }
 
 async function inspectStellar(network, chain) {
@@ -163,7 +211,8 @@ for (const network of ["testnet", "mainnet"]) {
       console.log(`  - ${network}/${id}: ${outcome.value.skip}`);
     } else {
       pinned[network][id] = outcome.value.pinned;
-      console.log(`  ✓ ${network}/${id} ${outcome.value.pinned.interchainTokenService}`);
+      const via = outcome.value.via === undefined ? "" : ` via ${outcome.value.via}`;
+      console.log(`  ✓ ${network}/${id} ${outcome.value.pinned.interchainTokenService}${via}`);
     }
   });
 }
