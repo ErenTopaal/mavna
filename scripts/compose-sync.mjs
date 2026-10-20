@@ -1,23 +1,23 @@
 /**
  * Mirror the checkout into the volume compose builds in.
  *
- *   node scripts/compose-sync.mjs /src /repo
+ *   node scripts/compose-sync.mjs /src /repo       (inside the build container)
+ *   node scripts/compose-sync.mjs --write-manifest  (on the host, after adding or
+ *                                                    removing a tracked file)
  *
  * Compose mounts the checkout read-only and builds in a named volume, so the
  * container never writes into the host's tree: no Linux packages in its
- * node_modules, no root-owned directories, no build output. This copies the
- * sources across and deletes from the volume what the checkout no longer has,
- * while leaving alone what only the volume should hold: its own install and
- * build.
+ * node_modules, no root-owned directories, no build output.
  *
- * Only what the build reads is copied: the workspace manifests and configs at
- * the root, and inside packages/, apps/, services/, scripts/ and contracts/ only
- * the file types a build reads (sources, manifests, styles, assets). On top of
- * that, nothing any .gitignore ignores and nothing that looks like a secret
- * (.env files, *.env, keys, *secret*, *credential*) travels: compose passes
- * settings as environment variables, and the volume is mounted into the app
- * container.
+ * What is copied is exactly the tracked files under the paths the build reads,
+ * as listed in scripts/compose-files.txt. The image has no git, so the list is
+ * computed on the host from `git ls-files` and committed, and
+ * compose-sync.manifest.test.ts fails when it falls behind. Name rules guessed
+ * wrong both ways: they dropped real source named like a secret and let secrets
+ * named like config through. A secret denylist stays as a second guard, for a
+ * secret someone tracked by mistake, and every file it holds back is printed.
  */
+import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -27,14 +27,18 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// at the root, only these
-const ROOT_ALLOWED = new Set([
+export const MANIFEST = "scripts/compose-files.txt";
+
+// the root files and directories the build reads
+const ALLOWED = new Set([
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
@@ -54,147 +58,114 @@ const ROOT_ALLOWED = new Set([
 // what the volume makes for itself; never copied, never deleted from it
 const VOLUME_OWN = new Set(["node_modules", "dist", ".turbo", ".next"]);
 
+// source the build compiles is never held back for its name
+const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|rs)$/;
+
 const SECRET = [
   /^\.env(\..*)?$/,
-  /\.env$/,
+  /\.env(\.|$)/,
   /\.(pem|key|p12|pfx|jks|keystore)$/,
   /^id_(rsa|ecdsa|ed25519)/,
+  /^\.(npmrc|envrc|netrc|pgpass)$/,
+  /secret|credential|keypair|creds|apikey|api[-_]key|service[-_]account|private[-_]key/i,
+  /^auth\.json$/i,
 ];
 
-// inside the allowed directories, only the file types a build reads
-const BUILD_FILE = new Set([
-  "ts",
-  "tsx",
-  "mts",
-  "cts",
-  "js",
-  "jsx",
-  "mjs",
-  "cjs",
-  "json",
-  "jsonc",
-  "md",
-  "mdx",
-  "css",
-  "html",
-  "svg",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "ico",
-  "woff",
-  "woff2",
-  "ttf",
-  "otf",
-  "toml",
-  "rs",
-  "lock",
-  "yaml",
-  "yml",
-  "sh",
-  "wasm",
-]);
-
-function isSecret(name) {
+/** Whether a tracked file looks like a secret and stays out of the volume. */
+export function heldBack(path) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
   if (name === ".env.example") return false;
-  return SECRET.some((pattern) => pattern.test(name)) || /secret|credential/i.test(name);
+  if (SOURCE.test(name)) return false;
+  return SECRET.some((pattern) => pattern.test(name));
 }
 
-function isBuildFile(name) {
-  const dot = name.lastIndexOf(".");
-  // no extension, or only a leading dot (.npmrc, .envrc): not a build file
-  return dot > 0 && BUILD_FILE.has(name.slice(dot + 1).toLowerCase());
+/** The tracked paths compose copies, from a `git ls-files` list. */
+export function manifestFor(tracked) {
+  return tracked.filter((path) => ALLOWED.has(path.split("/")[0] ?? "")).sort();
+}
+
+function readManifest(src) {
+  const file = join(src, MANIFEST);
+  if (!existsSync(file)) {
+    throw new Error(`${MANIFEST} is missing; run node scripts/compose-sync.mjs --write-manifest`);
+  }
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
 }
 
 /**
- * One .gitignore's rules, as tests on a path relative to the directory it sits
- * in: a plain name matches at any depth below it, a pattern with a slash from
- * that directory, `*` within a segment, `!` re-includes. Enough for this
- * repository's files, which is all it has to read.
+ * Copy the manifest's files from src to dest and remove from dest what it does
+ * not list, leaving the volume's own install and build. Returns the files held
+ * back as likely secrets.
  */
-function rulesIn(dir, base) {
-  const file = join(dir, ".gitignore");
-  if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"))
-    .map((line) => {
-      const negated = line.startsWith("!");
-      const body = (negated ? line.slice(1) : line).replace(/\/$/, "").replace(/^\//, "");
-      const glob = body
-        .split("*")
-        .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-        .join("[^/]*");
-      const anchored = body.includes("/");
-      return { base, negated, test: new RegExp(anchored ? `^${glob}$` : `(^|/)${glob}$`) };
-    });
-}
-
-function ignoredBy(rules, path) {
-  let ignored = false;
-  for (const rule of rules) {
-    const prefix = rule.base === "" ? "" : `${rule.base}/`;
-    if (!path.startsWith(prefix)) continue;
-    if (rule.test.test(path.slice(prefix.length))) ignored = !rule.negated;
-  }
-  return ignored;
-}
-
 export function sync(src, dest) {
-  mirror(src, dest, "", rulesIn(src, ""));
-}
+  const listed = readManifest(src);
+  const missing = listed.filter((path) => !existsSync(join(src, path)));
+  if (missing.length > 0) {
+    throw new Error(
+      `${MANIFEST} lists files the checkout does not have (${missing.slice(0, 5).join(", ")}); ` +
+        "run node scripts/compose-sync.mjs --write-manifest",
+    );
+  }
+  const held = listed.filter(heldBack);
+  const copied = new Set(listed.filter((path) => !heldBack(path)));
 
-function wanted(rel, name, isDirectory, rules) {
-  const path = rel === "" ? name : `${rel}/${name}`;
-  if (VOLUME_OWN.has(name) || isSecret(name) || ignoredBy(rules, path)) return false;
-  if (rel === "") return ROOT_ALLOWED.has(name);
-  return isDirectory || isBuildFile(name);
-}
-
-function mirror(src, dest, rel, inherited) {
   mkdirSync(dest, { recursive: true });
-  const rules = rel === "" ? inherited : [...inherited, ...rulesIn(src, rel)];
-  const names = readdirSync(src).filter((name) =>
-    wanted(rel, name, lstatSync(join(src, name)).isDirectory(), rules),
-  );
-  const keep = new Set(names);
-  for (const name of readdirSync(dest)) {
-    if (!keep.has(name) && !VOLUME_OWN.has(name)) {
-      rmSync(join(dest, name), { recursive: true, force: true });
-    }
+  prune(dest, "", copied);
+  for (const path of copied) {
+    const from = join(src, path);
+    const to = join(dest, path);
+    mkdirSync(dirname(to), { recursive: true });
+    rmSync(to, { recursive: true, force: true });
+    if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), to);
+    else copyFileSync(from, to);
   }
-  for (const name of names) {
-    const from = join(src, name);
-    const to = join(dest, name);
-    const kind = lstatSync(from);
-    let there;
-    try {
-      there = lstatSync(to);
-    } catch {
-      there = undefined;
-    }
-    if (kind.isDirectory()) {
-      if (there !== undefined && !there.isDirectory()) rmSync(to, { force: true });
-      mirror(from, to, rel === "" ? name : `${rel}/${name}`, rules);
+  return held;
+}
+
+/** Remove what the manifest does not list; true when the directory is left empty. */
+function prune(dir, rel, copied) {
+  let empty = true;
+  for (const name of readdirSync(dir)) {
+    const path = rel === "" ? name : `${rel}/${name}`;
+    const full = join(dir, name);
+    if (VOLUME_OWN.has(name)) {
+      empty = false;
+    } else if (lstatSync(full).isDirectory()) {
+      if (prune(full, path, copied)) rmdirSync(full);
+      else empty = false;
+    } else if (copied.has(path)) {
+      empty = false;
     } else {
-      if (there !== undefined) rmSync(to, { recursive: true, force: true });
-      if (kind.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
-      else copyFileSync(from, to);
+      rmSync(full, { force: true });
     }
   }
+  return empty && rel !== "";
 }
 
 // compared as real paths: a script reached through a symlink (/tmp on macOS, a
 // mount) would otherwise not recognise itself and quietly do nothing
 const invoked = process.argv[1] === undefined ? undefined : realpathSync(process.argv[1]);
 if (invoked === fileURLToPath(import.meta.url)) {
-  const [src, dest] = process.argv.slice(2);
-  if (src === undefined || dest === undefined) {
-    console.error("usage: node scripts/compose-sync.mjs <checkout> <volume>");
-    process.exit(2);
+  const args = process.argv.slice(2);
+  if (args[0] === "--write-manifest") {
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+      .split("\n")
+      .filter((line) => line !== "");
+    // the manifest is tracked too, so it lists itself
+    const listed = manifestFor([...new Set([...tracked, MANIFEST])]);
+    writeFileSync(join(root, MANIFEST), `${listed.join("\n")}\n`);
+    console.log(`  wrote ${MANIFEST}: ${listed.length} files`);
+  } else {
+    const [src, dest] = args;
+    if (src === undefined || dest === undefined) {
+      console.error("usage: node scripts/compose-sync.mjs <checkout> <volume>");
+      process.exit(2);
+    }
+    for (const path of sync(src, dest)) {
+      console.error(`  held back as a likely secret: ${path}`);
+    }
   }
-  sync(src, dest);
 }
