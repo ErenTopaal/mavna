@@ -120,3 +120,26 @@ describe("terms", () => {
     await expect(client.terms()).rejects.toThrow(/503/);
   });
 });
+
+describe("a sponsor that accepts the connection and never answers", () => {
+  it("is given up on, with a reason, rather than waited on forever", async () => {
+    vi.stubGlobal(
+      "fetch",
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    );
+    try {
+      const sponsor = createSponsorClient("https://sponsor.test", { timeoutMs: 20 });
+      await expect(sponsor.requestDelivery(`0x${"ab".repeat(32)}`, 3)).rejects.toThrow(
+        "The sponsor did not answer in time.",
+      );
+      await expect(sponsor.submitPreparation("AAAA")).rejects.toThrow(
+        "The sponsor did not answer in time.",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
