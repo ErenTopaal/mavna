@@ -16,7 +16,7 @@ export function remedyNote(remedy: Remedy): string {
 }
 
 /** How a looked-up transfer ended, in the design's found-panel language. */
-export type FoundTone = "ok" | "wait" | "bad";
+export type FoundTone = "ok" | "wait" | "bad" | "info";
 
 export interface FoundState {
   readonly tone: FoundTone;
@@ -28,6 +28,8 @@ export interface FoundState {
    * rather than Circle's mint: the exact message waiting on Stellar.
    */
   readonly compose?: ComposeFinish;
+  /** Somewhere the user can check for themselves, such as the Stellar transaction. */
+  readonly link?: { readonly href: string; readonly label: string };
 }
 
 /**
@@ -101,6 +103,15 @@ export function foundFor(
         compose: phase.finish,
       };
     }
+    case "delivered-unverified":
+      return {
+        tone: "info",
+        note:
+          `The rail records this as delivered on Stellar in transaction ${short(phase.ref.txHash)}, ` +
+          `but what arrived could not be read back, so it is not confirmed here. ${phase.because}`,
+        canFinish: false,
+        link: { href: phase.ref.explorerUrl, label: "See the Stellar transaction" },
+      };
     case "done":
       return {
         tone: "ok",

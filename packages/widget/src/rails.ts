@@ -302,6 +302,8 @@ export function endedNote(phase: StepPhase): string {
       return `Part of this arrived: ${fmt(amountValue(phase.received))} of ${fmt(amountValue(phase.expected))} ${phase.expected.asset.symbol}. ${remedyNote(phase.remedy)}`;
     case "delivered-as-came":
       return `Delivered as it came, not converted: ${fmt(amountValue(phase.received))} ${phase.received.asset.symbol} arrived. ${phase.because}`;
+    case "delivered-unverified":
+      return `${phase.because} The rail records it as delivered on Stellar; what arrived is not confirmed here. Check the linked transaction.`;
     default:
       return "";
   }
@@ -374,6 +376,15 @@ export async function trackDelivery(
         case "refunded":
         case "partial":
           patch(stepId, { phase: "failed", note: endedNote(phase) });
+          return { outcome: "terminal", phase };
+        // an ending to read, with the transaction to check: neither a success nor a failure
+        case "delivered-unverified":
+          patch(stepId, {
+            phase: "done",
+            note: endedNote(phase),
+            ref: shortHash(phase.ref.txHash),
+            refUrl: phase.ref.explorerUrl,
+          });
           return { outcome: "terminal", phase };
         // a compose route: the rail has delivered, and the conversion is its own step
         case "delivered-conversion-pending":

@@ -1327,7 +1327,10 @@ export function renderActivity(c: Flow): ReactElement {
                     ? "var(--mv-white)"
                     : st.found.tone === "bad"
                       ? "var(--mv-signal-strong)"
-                      : "var(--mv-track-neutral)"
+                      : // information: neither the success white nor the warning signal
+                        st.found.tone === "info"
+                        ? "var(--mv-muted-b)"
+                        : "var(--mv-track-neutral)"
                 }`,
               )}
             />
@@ -1341,6 +1344,18 @@ export function renderActivity(c: Flow): ReactElement {
             >
               {st.found.note}
             </p>
+            {st.found.link !== undefined ? (
+              <a
+                href={st.found.link.href}
+                target="_blank"
+                rel="noreferrer noopener"
+                style={s(
+                  "display:inline-block;margin-top:7px;font-size:12px;color:var(--mv-muted-b);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--mv-rule-hover)",
+                )}
+              >
+                {st.found.link.label} ↗
+              </a>
+            ) : null}
           </div>
           {st.found.canFinish ? (
             <button

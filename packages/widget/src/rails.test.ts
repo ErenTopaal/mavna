@@ -14,6 +14,7 @@ import {
 import { settlementBlocker } from "./quote";
 import {
   adapterFor,
+  endedNote,
   lookupAcross,
   pollSettlement,
   settleNote,
@@ -120,6 +121,34 @@ describe("trackDelivery", () => {
         refUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
       },
     });
+  });
+
+  it("ends on a delivery it cannot read back, as information with the transaction, not as failed", async () => {
+    const unverified = {
+      phase: "delivered-unverified",
+      ref: {
+        chainId: "stellar",
+        txHash: "9f3c11aa22bb33cc44dd55ee66ff77009f3c11aa22bb33cc44dd55ee66ff7700",
+        explorerUrl:
+          "https://stellar.expert/explorer/public/tx/9f3c11aa22bb33cc44dd55ee66ff77009f3c11aa22bb33cc44dd55ee66ff7700",
+      },
+      because:
+        "Axelar records it executed on Stellar, and that transaction is too old to read back.",
+    } as const;
+    const adapter = new ScriptedAdapter("axelar", [pending(), unverified]);
+    const { patches, patch } = recorder();
+    const result = await trackDelivery(adapter, handle, patch, { wait: instant });
+    expect(result.outcome).toBe("terminal");
+    expect(patches.at(-1)).toEqual({
+      id: "deliver",
+      patch: {
+        phase: "done",
+        note: endedNote(unverified),
+        ref: "9f3c11…7700",
+        refUrl: unverified.ref.explorerUrl,
+      },
+    });
+    expect(endedNote(unverified)).toMatch(/too old to read back.*not confirmed/);
   });
 
   it("stops on failed and says why", async () => {

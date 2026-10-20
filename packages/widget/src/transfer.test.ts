@@ -1538,6 +1538,25 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(log).not.toContain("stellar sign PREPARATION");
   });
 
+  it("ends a delivery the rail cannot prove any more as still to check, never as failed", async () => {
+    const unverified = {
+      phase: "delivered-unverified" as const,
+      ref: {
+        chainId: "stellar",
+        txHash: "f00d",
+        explorerUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
+      },
+      because:
+        "Axelar records it executed on Stellar, and that transaction is too old to read back.",
+    };
+    const adapter = new ScriptedAdapter("axelar", [unverified], {
+      transactions: [layerZeroSend("1")],
+    });
+    const error = await run(adapter, routeFor("axelar"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/too old to read back.*Activity/);
+  });
+
   it("ends a conversion on arrival that delivered as it came apart from a failure", async () => {
     const asCame = {
       phase: "delivered-as-came" as const,

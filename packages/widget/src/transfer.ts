@@ -979,6 +979,13 @@ async function runRelayed(
       tracked.phase.received.asset.decimals,
     );
   }
+  if (tracked.phase.phase === "delivered-unverified") {
+    // the rail says it executed and nothing says otherwise, so this is not a
+    // failure; Activity shows the transaction for the user to check
+    throw new StillMoving(
+      `${endedNote(tracked.phase)} Activity shows it with the transaction to check.`,
+    );
+  }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));
 
   let unrepaid = repaysAtMost;

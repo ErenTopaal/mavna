@@ -145,6 +145,14 @@ describe("a conversion on arrival is its own phase", () => {
     expect(progressOf(s).done).toBe(1);
   });
 
+  it("reports a delivery it can no longer read back as its own outcome, neither success nor failure", () => {
+    const s = state(
+      step("bridge", { phase: "delivered-unverified", ref, because: "too old to read back" }),
+    );
+    expect(outcomeOf(s)).toBe("delivered-unverified");
+    expect(progressOf(s).finished).toBe(true);
+  });
+
   it("counts a conversion that ran as finished and successful", () => {
     const s = state(
       step("bridge", { phase: "done", ref, received: amount }),

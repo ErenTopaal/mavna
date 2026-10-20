@@ -122,12 +122,24 @@ export function progressOf(state: TransferState): Progress {
  */
 export function outcomeOf(
   state: TransferState,
-): "succeeded" | "refunded" | "partial" | "failed" | "delivered-as-came" | "in-flight" {
+):
+  | "succeeded"
+  | "refunded"
+  | "partial"
+  | "failed"
+  | "delivered-as-came"
+  | "delivered-unverified"
+  | "in-flight" {
   if (state.steps.some((s) => s.phase.phase === "failed")) return "failed";
   if (state.steps.some((s) => s.phase.phase === "refunded")) return "refunded";
   if (state.steps.some((s) => s.phase.phase === "partial")) return "partial";
   // the money arrived, but not as the asset asked for, so it is not a success
   if (state.steps.some((s) => s.phase.phase === "delivered-as-came")) return "delivered-as-came";
+  // the rail says it executed, but nothing could read what arrived: not a success
+  // to report, and nothing says it failed, so it is named for what it is
+  if (state.steps.some((s) => s.phase.phase === "delivered-unverified")) {
+    return "delivered-unverified";
+  }
   if (state.steps.length > 0 && state.steps.every((s) => isSuccess(s.phase))) return "succeeded";
   return "in-flight";
 }

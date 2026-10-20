@@ -95,4 +95,26 @@ describe("foundFor", () => {
       });
     }
   });
+
+  it("shows a delivery it cannot read back as information, with the transaction to check", () => {
+    const found = foundFor(UNVERIFIED, "source-tx", ["axelar"]);
+    expect(found.tone).toBe("info");
+    expect(found.canFinish).toBe(false);
+    expect(found.note).toContain("too old to read back");
+    expect(found.link).toEqual({
+      href: UNVERIFIED.ref.explorerUrl,
+      label: "See the Stellar transaction",
+    });
+  });
 });
+
+const UNVERIFIED = {
+  phase: "delivered-unverified",
+  ref: {
+    chainId: "stellar",
+    txHash: "9f3c11aa22bb33cc44dd55ee66ff77009f3c11aa22bb33cc44dd55ee66ff7700",
+    explorerUrl:
+      "https://stellar.expert/explorer/public/tx/9f3c11aa22bb33cc44dd55ee66ff77009f3c11aa22bb33cc44dd55ee66ff7700",
+  },
+  because: "Axelar records it executed on Stellar, and that transaction is too old to read back.",
+} as const satisfies StepPhase;

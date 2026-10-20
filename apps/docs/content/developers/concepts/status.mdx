@@ -49,7 +49,8 @@ type StepPhase =
   | { readonly phase: "failed"; readonly cause: string; readonly remedy: Remedy; readonly ref: OnChainRef | undefined }
   | { readonly phase: "delivered-conversion-pending"; readonly ref: OnChainRef; readonly deliveredAtUnix: number; readonly finish: ComposeFinish | undefined }
   | { readonly phase: "delivered-and-converted"; readonly ref: OnChainRef; readonly received: Amount; readonly fee: Amount | undefined }
-  | { readonly phase: "delivered-as-came"; readonly ref: OnChainRef; readonly received: Amount; readonly because: string };
+  | { readonly phase: "delivered-as-came"; readonly ref: OnChainRef; readonly received: Amount; readonly because: string }
+  | { readonly phase: "delivered-unverified"; readonly ref: OnChainRef; readonly because: string };
 ```
 
 `pending` and `stalled` both carry an on-chain reference, but they are separate
@@ -63,7 +64,15 @@ carries a `because`, so a failure is never a message with nothing to do beside i
 because a returned transfer rendered as a plain success is a lie about someone's
 money.
 
-The last three belong to a route that converts on arrival, where the Arrival
+`delivered-unverified` is an ending shown as information. The rail's own record
+says the transfer executed on Stellar in the transaction `ref` names, but that
+transaction is older than any source that can read back what arrived (public RPC
+keeps days, and Horizon shows no movement of a token that is its own contract).
+It carries no amount, because none was read from the chain. `isSuccess` is false
+and `isTerminal` is true; it is never shown as a failure either. The widget shows
+`because` and links the transaction for the user to check.
+
+The next three belong to a route that converts on arrival, where the Arrival
 Contract swaps what LayerZero delivers into the asset the user asked for:
 
 - `delivered-conversion-pending` is not an ending. The funds are on Stellar, held
@@ -84,7 +93,7 @@ moves to an earlier phase, with one exception: a `stalled` step goes back to
 `pending` when the update carries a new transaction, which is what acting on its
 remedy looks like. `progressOf` reports how far along a transfer is and whether
 it needs the user, and `outcomeOf` collapses the steps to one word: `failed`, then
-`refunded`, then `partial`, then `delivered-as-came` take precedence, and
+`refunded`, then `partial`, then `delivered-as-came`, then `delivered-unverified` take precedence, and
 `succeeded` needs every step at `done` or `delivered-and-converted`; anything else,
 including a transfer with no steps, is `in-flight`. There is no single
 "track this" call to make; you assemble tracking from these functions and a store,
