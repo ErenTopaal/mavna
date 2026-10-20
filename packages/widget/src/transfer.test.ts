@@ -57,7 +57,9 @@ let settleReplies: Array<[number, unknown]>;
 /** Status 0 is no answer at all: the connection dropped. */
 let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
-let refuses: "PREPARATION" | "CONVERSION" | undefined;
+let refuses: "PREPARATION" | "CONVERSION" | "DELIVERY" | undefined;
+/** A signed transaction lands as failed on Stellar. */
+let sendFails: boolean;
 /** Horizon's order-book mid for USDC, in stroops per whole USDC: 5 XLM to the USDC. */
 let xlmPerUsdc: bigint | Error;
 /** What /submit and /settlement answer before their usual 200, in turn. */
@@ -162,6 +164,7 @@ beforeEach(() => {
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   refuses = undefined;
   xlmPerUsdc = 50_000_000n;
+  sendFails = false;
   submitRefusals = [];
   settlementRefusals = [];
   stored = new Map();
@@ -413,12 +416,11 @@ function stellarNode(): RpcClient {
     log.push(`stellar send ${op?.type}`);
     return { status: "PENDING", hash: "0ae1" } as never;
   });
-  vi.spyOn(client.server, "getTransaction").mockResolvedValue({
-    status: "SUCCESS",
-    txHash: "0ae1",
-    ledger: 101,
-    latestLedger: 101,
-  } as never);
+  vi.spyOn(client.server, "getTransaction").mockImplementation(async () =>
+    sendFails
+      ? ({ status: "FAILED", txHash: "0ae1", ledger: 101, latestLedger: 101 } as never)
+      : ({ status: "SUCCESS", txHash: "0ae1", ledger: 101, latestLedger: 101 } as never),
+  );
   return client;
 }
 
@@ -444,6 +446,10 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         const kind =
           xdr === preparation || xdr === sponsoredPreparation ? "PREPARATION" : "CONVERSION";
         if (refuses === kind) throw { code: -4, message: "The user rejected this request." };
+        if (refuses === "DELIVERY" && xdr.startsWith("AAAA") && xdr !== settlementXdr) {
+          log.push("stellar refuse DELIVERY");
+          throw { code: -4, message: "The user rejected this request." };
+        }
         if (xdr === preparation || xdr === sponsoredPreparation) {
           log.push("stellar sign PREPARATION");
           return `signed ${xdr}`;
@@ -1166,6 +1172,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/authorize more than the delivery/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, stops at a declined delivery signature and leaves it to Activity", async () => {
+    funding = "self";
+    refuses = "DELIVERY";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/The user rejected this request\..*Activity/);
+    expect(log.filter((l) => l === "stellar refuse DELIVERY")).toHaveLength(1);
+  });
+
+  it("over Circle, does not sign a second delivery after a signed one failed on Stellar", async () => {
+    funding = "self";
+    sendFails = true;
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log.filter((l) => l === "stellar sign DELIVERY")).toHaveLength(1);
   });
 
   it("over Circle, has the receiving account deliver and pay for the mint, never the sponsor", async () => {
