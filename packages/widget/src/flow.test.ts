@@ -764,3 +764,57 @@ describe("the flight's eyebrow after an ending", () => {
     expect(html).toMatch(/role="status"[^>]*>Still on its way/);
   });
 });
+
+describe("after an ending, round 6", () => {
+  const endedFlow = (variant: "wide" | "compact", error: Error) => {
+    const quoting = {
+      ...engine,
+      usdcOnStellar: STELLAR_USDC,
+      xlmOnStellar: STELLAR_XLM,
+      adapters: [],
+      sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+      usdt0Chains: [],
+      sponsorTerms: () => Promise.reject(new Error("The sponsor is down.")),
+      xlmStroopsPerUsdc: async () => 100_000_000n,
+    } as unknown as Engine;
+    const flow = applied(new Flow({ engine: quoting, variant }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = {
+      ...flow.state,
+      ...FORM,
+      routes: [view],
+      selected: view.id,
+      flying: view,
+      screen: "flight",
+      phase: "sending",
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "pending" }],
+    };
+    flow.endWith(error);
+    return flow;
+  };
+
+  it("takes the logo home to a form that quotes afresh, with no Send another left on it", async () => {
+    const flow = endedFlow("wide", new StillMoving("This page stopped watching."));
+    flow.home();
+    expect(flow.state.screen).toBe("send");
+    expect(flow.state.phase).toBe("quote");
+    await vi.waitFor(() => expect(flow.state.quoting).toBe(false));
+    expect(flow.state.complete).toBe(true);
+    const html = renderToStaticMarkup(flow.render() as React.ReactElement);
+    expect(html).not.toContain("Send another");
+  });
+
+  it("says Stopped for a failed ending, after steps that were done", () => {
+    const flow = endedFlow("compact", new Error("x"));
+    flow.state = {
+      ...flow.state,
+      phase: "sending",
+      steps: [
+        { id: "approve", label: "Approve", user: true, actor: "Your wallet", phase: "done" },
+        { id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "pending" },
+      ],
+    };
+    flow.endWith(new Error("The network refused it."));
+    expect(flow.flightVals(false).stepEyebrow).toBe("Stopped");
+  });
+});
