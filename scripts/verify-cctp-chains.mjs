@@ -174,6 +174,9 @@ const CHAINS = {
     },
     { id: "cronos", domain: 32, evmChainId: 25, rpc: ["https://evm.cronos.org"] },
     { id: "x-layer", domain: 37, evmChainId: 196, rpc: ["https://rpc.xlayer.tech"] },
+    // Circle's own chain. Stellar mainnet's token messenger has a remote messenger
+    // for domain 26 and Circle's fee service answers 26 to 27.
+    { id: "arc", domain: 26, evmChainId: 5042, rpc: ["https://rpc.mainnet.arc.io"] },
   ],
   testnet: [
     {

@@ -483,6 +483,15 @@ export const EVM_DEPLOYMENTS: Readonly<Record<NetworkId, Readonly<Record<string,
         usdc: "0xb6ceceab302e2e4948951ee7843fc24e92933061",
         explorer: "https://www.oklink.com/xlayer",
       },
+      arc: {
+        domain: 26,
+        evmChainId: 5042,
+        name: "Arc",
+        nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+        tokenMessengerV2: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        usdc: "0x3600000000000000000000000000000000000000",
+        explorer: "https://explorer.arc.io",
+      },
     },
   };
 
