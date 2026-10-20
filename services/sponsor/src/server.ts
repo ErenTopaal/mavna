@@ -27,7 +27,7 @@ import {
 import {
   Account,
   Address,
-  type Asset,
+  Asset,
   Keypair,
   Operation,
   StrKey,
@@ -865,6 +865,59 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return channels;
   }
 
+  /** Channels being topped up right now, so two asks send one payment. */
+  const toppingUp = new Map<string, Promise<void>>();
+
+  /**
+   * Bring a channel back to its starting 2 XLM once it falls below 1.5. Each
+   * settlement's fee comes out of its channel, and one that cannot pay it is
+   * refused before anything else happens, so this keeps every settlement
+   * landable. Said in the log each time, which is where the operator sees it.
+   */
+  function topUpChannel(address: string): Promise<void> {
+    const running = toppingUp.get(address);
+    if (running !== undefined) return running;
+    const work = (async () => {
+      const entry = await readAccountEntry(options.rpc, address);
+      if (entry === undefined) return;
+      const balance = BigInt(entry.balance().toString());
+      if (balance >= CHANNEL_LOW_STROOPS) return;
+      const amount = CHANNEL_TOP_UP_TO_STROOPS - balance;
+      console.error(
+        `[sponsor] channel ${address} is short of XLM (${stroopsToXlm(balance)} XLM); ` +
+          `sending it ${stroopsToXlm(amount)} XLM from the sponsor`,
+      );
+      await options.rpc.submit("channel top-up", async () => {
+        const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
+        const payment = new TransactionBuilder(sponsorAccount, {
+          fee: "1000000",
+          networkPassphrase: options.network.passphrase,
+        })
+          .addOperation(
+            Operation.payment({
+              destination: address,
+              asset: Asset.native(),
+              amount: stroopsToDecimal(amount),
+            }),
+          )
+          .setTimeout(120)
+          .build();
+        payment.sign(keypair);
+        return payment;
+      });
+    })().finally(() => toppingUp.delete(address));
+    toppingUp.set(address, work);
+    return work;
+  }
+
+  function logTopUpFailure(address: string): (cause: unknown) => void {
+    return (cause) =>
+      console.error(
+        `[sponsor] could not top up channel ${address}:`,
+        cause instanceof Error ? cause.message : cause,
+      );
+  }
+
   async function submitChannelFunding(channel: Keypair): Promise<void> {
     // Built inside the thunk, so a retry after a stale sequence (anything else
     // the sponsor signs moves it) is built on the sequence as it is now.
@@ -937,6 +990,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * failing is logged and does not stop the rest.
    */
   async function sweepHeld(): Promise<void> {
+    // in self mode nothing is settled, and the sponsor spends nothing
+    for (const address of reserveFunding === "sponsor" ? (channels?.addresses() ?? []) : []) {
+      try {
+        await topUpChannel(address);
+      } catch (cause) {
+        logTopUpFailure(address)(cause);
+      }
+    }
     for (const destination of [...heldSettlements.keys()]) {
       try {
         // Inside the try: dropping an expired settlement writes to the cap
@@ -1115,6 +1176,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           // be served at all, and the smallest Circle transfer delivered.
           reserveFunding,
           minDeliveryBaseUnits: minDelivery.toString(),
+          // how close the settlement capacity is to full; addresses stay private
+          channels: {
+            size: channels?.size ?? 0,
+            leased: channels?.owners(nowUnix()).length ?? 0,
+            maxSize: options.channels === undefined ? poolSize : options.channels.size,
+          },
         },
         origin,
       );
@@ -1952,6 +2019,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     } catch (cause) {
       if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
         return await spentSequence(transaction.hash().toString("hex"), settled, stranded);
+      }
+      // The channel cannot pay the fee: the sponsor's own shortfall, and nothing
+      // was spent on-chain, so the settlement stays held while the channel is
+      // topped up, rather than being given up as a stranding.
+      if (cause instanceof SubmitRejected && cause.code === "txInsufficientBalance") {
+        void topUpChannel(transaction.source).catch(logTopUpFailure(transaction.source));
+        return { settled: false, settlementRetryable: true };
       }
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
       if (!retryable) return await stranded();
@@ -2855,6 +2929,11 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/** Below this a channel is topped up: its 1 XLM minimum plus a few surge fees. */
+const CHANNEL_LOW_STROOPS = 15_000_000n;
+/** What a channel is topped up to, the 2 XLM it was funded with. */
+const CHANNEL_TOP_UP_TO_STROOPS = 20_000_000n;
 
 /** The channel pool's own grace past a lease's end, before it reuses the channel. */
 const LEASE_RECLAIM_GRACE_SECONDS = 30;

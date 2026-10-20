@@ -31,7 +31,8 @@ with `retryable: true`. Preflight `OPTIONS` requests are not counted.
 
 Answers `200` with the network, the sponsor's public address, who pays a new
 account's reserve, and the smallest Circle delivery it pays for, in USDC base units
-at six decimals:
+at six decimals, and how many settlement channels it has, how many are in use and
+how many it may fund:
 
 ```json
 {
@@ -39,7 +40,8 @@ at six decimals:
   "network": "testnet",
   "sponsor": "G...",
   "reserveFunding": "sponsor",
-  "minDeliveryBaseUnits": "1000000"
+  "minDeliveryBaseUnits": "1000000",
+  "channels": { "size": 1, "leased": 0, "maxSize": 4 }
 }
 ```
 

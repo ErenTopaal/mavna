@@ -236,6 +236,13 @@ export class ChannelPool {
     return this.leased.size;
   }
 
+  /** Every channel's address, leased or not. Public keys only. */
+  addresses(): string[] {
+    return [...this.available, ...[...this.leased.values()].map((lease) => lease.channel)].map(
+      (channel) => channel.address,
+    );
+  }
+
   /** Every channel in the pool, leased or not. */
   get size(): number {
     return this.available.length + this.leased.size;

@@ -21,6 +21,7 @@ import {
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
   type SubmitOptions,
+  SubmitRejected,
   XlmPriceSource,
 } from "@mavna/stellar";
 import {
@@ -1978,6 +1979,64 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(server.rpc.submissions).toHaveLength(1);
     expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
     expect((await caps.usage()).stranded).toBe(0);
+  });
+});
+
+describe("a channel that runs short of XLM for fees", () => {
+  it("keeps the settlement held and tops the channel up, rather than counting a stranding", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 10_100_000n);
+    server.rpc.rejectNext = new SubmitRejected(
+      "settlement was rejected: txInsufficientBalance",
+      "txInsufficientBalance",
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect((await caps.usage()).stranded).toBe(0);
+    await vi.waitFor(() =>
+      expect(server.rpc.submissions.map((s) => s.label)).toEqual(["channel top-up"]),
+    );
+    const topUp = server.rpc.submissions[0]?.tx as Transaction;
+    expect(topUp.source).toBe(server.sponsor.publicKey());
+    const payment = topUp.operations[0] as Operation.Payment;
+    expect(payment.type).toBe("payment");
+    expect(payment.destination).toBe(server.channel.publicKey());
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/channel .* is short of XLM/);
+    logged.mockRestore();
+
+    // still held, and settles once the channel can pay
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 30_000_000n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+
+  it("is topped up by the sweep before it runs short", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const server = await startServer();
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 12_000_000n);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["channel top-up"]);
+  });
+
+  it("says how many channels it has and how many are in use at /health", async () => {
+    const server = await startServer();
+    await holdSettlementFor(server, Keypair.random());
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect(health.channels).toEqual({ size: 1, leased: 1, maxSize: 1 });
   });
 });
 

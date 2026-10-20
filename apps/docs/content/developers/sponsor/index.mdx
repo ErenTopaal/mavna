@@ -116,6 +116,12 @@ outright gives it back to the short hold. One client address may have at most
 `MAVNA_SETTLEMENTS_PER_CLIENT` settlements (2 by default) waiting on a preparation
 at once, and further asks answer `429`, retryable.
 
+Each settlement's fee is paid by its channel. The sweep tops a channel back up to
+2 XLM from the sponsor once it falls below 1.5 XLM, and logs each top-up; a
+settlement the network refuses because its channel cannot pay the fee stays held
+and is tried again rather than counted as a stranding. `/health` reports
+`channels: { size, leased, maxSize }`.
+
 Two daily caps bound the money at risk, from the
 [sponsorship design](/developers/concepts/sponsorship): a volume cap per source-chain
 class (300 a day from chains where gas is expensive, 200 from chains where gas costs
