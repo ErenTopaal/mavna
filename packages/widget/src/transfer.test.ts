@@ -30,6 +30,7 @@ import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
 import {
+  burnDomain,
   DeliveredAsCame,
   finishDelivery,
   runTransfer,
@@ -67,6 +68,8 @@ let preparedSource: string | undefined;
 let preparedShape: { fee?: string; limit?: string; timeout?: number };
 /** What Circle's attestation service answers, in turn; the last one repeats. */
 let irisReplies: Array<[number, unknown]>;
+/** When set, Circle answers per source domain instead, and a domain not listed has nothing. */
+let irisByDomain: Record<string, unknown> | undefined;
 const attested = {
   messages: [{ status: "complete", message: "0x0102", attestation: "0x0304", decodedMessage: {} }],
 };
@@ -120,6 +123,7 @@ beforeEach(() => {
   preparedFee = "182612";
   simulationFailures = [];
   irisReplies = [[200, attested]];
+  irisByDomain = undefined;
   preparedLine = undefined;
   preparedSource = undefined;
   preparedShape = {};
@@ -158,6 +162,10 @@ beforeEach(() => {
     if (url.includes("/api/external/v1/pools/")) return reply(200, { count: 1 });
     if (path.startsWith("/v2/messages/")) {
       log.push(`iris ${path}`);
+      if (irisByDomain !== undefined) {
+        const body = irisByDomain[path.split("/").at(-1) ?? ""];
+        return body === undefined ? reply(404, { error: "Not found" }) : reply(200, body);
+      }
       const next = irisReplies.length > 1 ? irisReplies.shift() : irisReplies[0];
       if (next === undefined) throw new Error("no iris reply scripted");
       return reply(next[0], next[1]);
@@ -1459,6 +1467,33 @@ describe("runTransfer when the account pays its own reserve", () => {
       ),
     ).rejects.toThrow(/the sponsor curates/);
     expect(log.some((l) => l.startsWith("sponsor /prepare"))).toBe(false);
+  });
+});
+
+describe("burnDomain", () => {
+  it("finds the Circle domain a burn left from when this browser did not send it", async () => {
+    irisByDomain = { "6": attested };
+    const engine = {
+      ...engineWith(new ScriptedAdapter("cctp", [])),
+      sourceChains: [
+        { id: "ethereum-sepolia", name: "Ethereum Sepolia" },
+        { id: "base-sepolia", name: "Base Sepolia" },
+        { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" },
+      ],
+      sourceDomain: (id: string) =>
+        ({ "ethereum-sepolia": 0, "base-sepolia": 6, "arbitrum-sepolia": 3 })[id] ?? Number.NaN,
+    };
+    expect(await burnDomain(engine, SEND_HASH)).toBe(6);
+  });
+
+  it("says so when no domain Circle serves has the burn", async () => {
+    irisByDomain = {};
+    const engine = {
+      ...engineWith(new ScriptedAdapter("cctp", [])),
+      sourceChains: [{ id: "ethereum-sepolia", name: "Ethereum Sepolia" }],
+      sourceDomain: () => 0,
+    };
+    expect(await burnDomain(engine, SEND_HASH)).toBeUndefined();
   });
 });
 

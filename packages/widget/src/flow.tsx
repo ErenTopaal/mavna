@@ -65,6 +65,7 @@ import {
 import { s } from "./style";
 import {
   buildSteps,
+  burnDomain,
   DeliveredAsCame,
   type FlightRow,
   type FlightStep,
@@ -1271,8 +1272,22 @@ export class Flow extends React.Component<FlowProps, State> {
     const known = this.state.history.find(
       (r) => r.sourceTxHash.toLowerCase() === hash.toLowerCase(),
     );
-    const domain = known === undefined ? 0 : this.engine.sourceDomain(known.sourceChainId);
     try {
+      // a burn this browser did not send is looked for on every chain Circle serves
+      const domain =
+        known === undefined
+          ? await burnDomain(this.engine, hash.startsWith("0x") ? hash : `0x${hash}`)
+          : this.engine.sourceDomain(known.sourceChainId);
+      if (domain === undefined) {
+        this.setState({
+          lookupNote:
+            "Circle has no record of this transaction on any chain this page sends from. " +
+            "If it was sent moments ago, try again in a minute.",
+          lookupNoteKind: "quiet",
+          finishTries: this.state.finishTries + 1,
+        });
+        return;
+      }
       const outcome = await finishDelivery(
         this.engine,
         hash.startsWith("0x") ? hash : `0x${hash}`,

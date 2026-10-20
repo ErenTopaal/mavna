@@ -17,6 +17,7 @@ import {
 import { createNetworkConfig, type NetworkConfig, RpcClient } from "@mavna/stellar";
 import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
 import type { IntegratorFeeConfig } from "./config.js";
+import { circleDomain } from "./domains";
 import { createSponsorClient, type SponsorClient, type SponsorTerms } from "./sponsor.js";
 import { createStellarWallet, type StellarWalletApi } from "./stellar-wallet.js";
 import { layerZeroSourceDetail, usdt0ChainsFor, usdt0SwapFor } from "./usdt0.js";
@@ -280,9 +281,7 @@ export function createEngine(config: EngineConfig): Engine {
     stellar: config.stellar ?? createStellarWallet(network),
     historyKey: config.historyKey,
     sourceDomain(chainId) {
-      return (
-        EVM_DEPLOYMENTS[network][chainId]?.domain ?? NON_EVM_CHAINS[network][chainId]?.domain ?? 0
-      );
+      return circleDomain(network, chainId);
     },
     sourceChainDetail(chainId) {
       const evm = EVM_DEPLOYMENTS[network][chainId];

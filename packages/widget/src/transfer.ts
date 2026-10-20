@@ -563,6 +563,36 @@ export async function finishDelivery(
   return engine.sponsor.requestDelivery(burnHash, domain, recipient);
 }
 
+/**
+ * The Circle domain a burn left from, for a hash this browser did not send:
+ * every domain this page serves is asked, and the one Circle knows the burn on
+ * answers. Undefined only when every domain was asked and none has it.
+ */
+export async function burnDomain(
+  engine: Pick<Engine, "network" | "sourceChains" | "sourceDomain">,
+  burnHash: string,
+): Promise<number | undefined> {
+  const domains = [...new Set(engine.sourceChains.map((c) => engine.sourceDomain(c.id)))];
+  const attestations = new AttestationService(engine.network);
+  const asked = await Promise.allSettled(
+    domains.map(async (domain) => ({
+      domain,
+      found: await attestations.byTransaction(domain, burnHash),
+    })),
+  );
+  const hit = asked.find((a) => a.status === "fulfilled" && a.value.found.length > 0);
+  if (hit?.status === "fulfilled") return hit.value.domain;
+  // a chain that could not be asked might be the one, so that is not "nowhere"
+  const failed = asked.find((a): a is PromiseRejectedResult => a.status === "rejected");
+  if (failed !== undefined) {
+    throw new Error(
+      `Circle could not be asked about every chain (${asError(failed.reason).message}), so ` +
+        "where this transfer came from is not known yet. Try again shortly.",
+    );
+  }
+  return undefined;
+}
+
 /** Where Circle's v2 message body starts, and the forwarder's hook data inside it. */
 const MESSAGE_BODY_INDEX = 148;
 const HOOK_DATA_INDEX = 228;
