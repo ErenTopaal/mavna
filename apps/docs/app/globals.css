@@ -150,24 +150,6 @@ article main li {
   margin-inline-start: 0.6rem;
 }
 
-.nextra-navbar nav > .nextra-scrollbar a {
-  padding: 0.3rem 0.55rem;
-  border-radius: 7px;
-  font-size: 0.9rem;
-  transition:
-    color 0.15s var(--mv-ease),
-    background-color 0.15s var(--mv-ease);
-}
-.nextra-navbar nav > .nextra-scrollbar a:hover {
-  background: color-mix(in oklab, currentColor 6%, transparent);
-}
-/* The active section link: Nextra bolds it; give it the accent and a soft pill. */
-.nextra-navbar nav > .nextra-scrollbar a[aria-current],
-.nextra-navbar nav > .nextra-scrollbar a.x\:font-medium {
-  color: var(--mv-accent);
-  background: var(--mv-accent-soft);
-}
-
 /* Center the search: the wrapper that holds it grows to fill the middle of the
    bar, the field sits centered inside it, and the right-hand controls stay pinned
    past it. So it reads as a real search field rather than one tucked in a corner. */
@@ -195,6 +177,18 @@ article main li {
 .nextra-search input:focus {
   border-color: var(--mv-accent);
   box-shadow: 0 0 0 3px var(--mv-accent-soft);
+}
+
+/* ------------------------------------------------------------------- toc --- */
+
+/* before the sidebar rules, whose link selectors are more specific; the two
+   never touch the same element */
+
+.nextra-toc a {
+  transition: color 0.15s var(--mv-ease);
+}
+.nextra-toc a:hover {
+  color: var(--mv-accent);
 }
 
 /* ------------------------------------------------------- sidebar + active --- */
@@ -255,9 +249,11 @@ article main li {
   transition: opacity 0.15s var(--mv-ease);
 }
 
-.nextra-sidebar li.active > a .mv-nav-icon,
 .nextra-sidebar a:hover .mv-nav-icon,
 .nextra-sidebar button:hover .mv-nav-icon {
+  opacity: 1;
+}
+.nextra-sidebar li.active > a .mv-nav-icon {
   opacity: 1;
 }
 
@@ -265,15 +261,6 @@ article main li {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* ------------------------------------------------------------------- toc --- */
-
-.nextra-toc a {
-  transition: color 0.15s var(--mv-ease);
-}
-.nextra-toc a:hover {
-  color: var(--mv-accent);
 }
 
 /* ----------------------------------------------------------------- links --- */
@@ -358,6 +345,29 @@ article main {
   color: var(--mv-accent);
 }
 
+/* ------------------------------------------------------ top-nav links --- */
+
+/* The top-nav page links (Guides / Developers / Widget), part of the navbar
+   rules above. Kept after the sidebar, toc and breadcrumb link rules: their
+   selectors are more specific, and these touch only the navbar's own links. */
+.nextra-navbar nav > .nextra-scrollbar a {
+  padding: 0.3rem 0.55rem;
+  border-radius: 7px;
+  font-size: 0.9rem;
+  transition:
+    color 0.15s var(--mv-ease),
+    background-color 0.15s var(--mv-ease);
+}
+.nextra-navbar nav > .nextra-scrollbar a:hover {
+  background: color-mix(in oklab, currentColor 6%, transparent);
+}
+/* The active section link: Nextra bolds it; give it the accent and a soft pill. */
+.nextra-navbar nav > .nextra-scrollbar a[aria-current],
+.nextra-navbar nav > .nextra-scrollbar a.x\:font-medium {
+  color: var(--mv-accent);
+  background: var(--mv-accent-soft);
+}
+
 /* -------------------------------------------------------------- scrollbar --- */
 
 * {
@@ -371,8 +381,10 @@ article main {
   article main {
     animation: none;
   }
-  * {
-    transition-duration: 0.001ms !important;
+  /* matches every element, with an id's specificity (no element has this id),
+     so it outranks every class-based transition above and in the theme */
+  *:not(#mv-reduced-motion) {
+    transition-duration: 0.001ms;
   }
 }
 

@@ -362,9 +362,6 @@ button {
 :root[data-pg-theme="dark"] .pg-stage > .mv-root {
   filter: drop-shadow(0 24px 50px oklch(0 0 0 / 0.45));
 }
-:root[data-pg-theme="dark"] .pg-dock {
-  background: oklch(0.128 0 0);
-}
 
 /* ---------------------------------------------------------------- dock --- */
 
@@ -374,6 +371,9 @@ button {
   flex-direction: column;
   border-top: 1px solid var(--pg-rule);
   background: oklch(0.965 0 0);
+}
+:root[data-pg-theme="dark"] .pg-dock {
+  background: oklch(0.128 0 0);
 }
 /* Drag this to resize the dock; the stage above takes the remaining height. */
 .pg-dock-handle {
@@ -397,11 +397,6 @@ button {
   opacity: 0;
   pointer-events: none;
 }
-.pg-dock-handle:has(.pg-dock-range:focus-visible) .pg-dock-grip {
-  background: var(--pg-muted);
-  outline: 2px solid var(--pg-muted);
-  outline-offset: 3px;
-}
 .pg-dock-grip {
   width: 40px;
   height: 3px;
@@ -411,6 +406,11 @@ button {
 }
 .pg-dock-handle:hover .pg-dock-grip {
   background: var(--pg-muted);
+}
+.pg-dock-handle:has(.pg-dock-range:focus-visible) .pg-dock-grip {
+  background: var(--pg-muted);
+  outline: 2px solid var(--pg-muted);
+  outline-offset: 3px;
 }
 .pg-tabs {
   flex: 0 0 auto;
