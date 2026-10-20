@@ -45,6 +45,7 @@ import arrivalEntries from "../../../packages/adapters/layerzero/src/__fixtures_
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
+import type { ChainSponsorshipView } from "./reconcile.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
 import { DirectSpendQuote } from "./spend.js";
@@ -388,6 +389,18 @@ class FixedSpend extends DirectSpendQuote {
   }
 }
 
+/** Horizon's view of what the sponsor carries, answered here. */
+class FixedSponsorshipView implements ChainSponsorshipView {
+  slots = 0;
+  accounts: string[] = [];
+  async totalSlotsCarried(): Promise<number> {
+    return this.slots;
+  }
+  async sponsoredAccounts(): Promise<readonly string[]> {
+    return this.accounts;
+  }
+}
+
 interface TestServer {
   readonly server: SponsorServer;
   readonly url: string;
@@ -468,6 +481,7 @@ async function startServer(
     channels: new ChannelPool({ channels: [channel] }),
     prices: new FixedPrice(),
     spendQuote: new FixedSpend(),
+    sponsorshipView: new FixedSponsorshipView(),
     allowedOrigins: [],
     ...overrides,
   };
@@ -2063,6 +2077,31 @@ describe("an arrival below the signed ceiling that still covers the trade", () =
       false,
     );
     expect(server.rpc.submissions).toEqual([]);
+  });
+});
+
+describe("the sponsor cross-checks what it carries", () => {
+  it("logs what the chain says it carries against its own records, from the sweep", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const view = new FixedSponsorshipView();
+    view.slots = 7;
+    const untracked = Keypair.random().publicKey();
+    const server = await startServer({ sponsorshipView: view });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    view.accounts = [user.publicKey(), untracked];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    const lines = logged.mock.calls.map((call) => call.join(" "));
+    logged.mockRestore();
+    const line = lines.find((text) => text.includes("reconciliation"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/7 reserve slots on-chain/);
+    expect(line).toMatch(/3 by its records/);
+    expect(line).toMatch(new RegExp(`untracked: ${untracked}`));
   });
 });
 

@@ -43,6 +43,12 @@ import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
 import { Deliverer, DeliveryFailedOnChain, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
+import {
+  type ChainSponsorshipView,
+  HorizonSponsorshipView,
+  reconcile,
+  type SponsoredRecord,
+} from "./reconcile.js";
 import type { SoroswapProxy } from "./soroswap.js";
 import { DirectSpendQuote } from "./spend.js";
 import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
@@ -104,6 +110,11 @@ export interface SponsorServerOptions {
   readonly settlementsPerClient?: number;
   /** Prices the reserve in the arriving asset, for the settlement's ceiling. */
   readonly prices?: XlmPriceSource;
+  /**
+   * The chain's view of what the sponsor carries, for the hourly cross-check
+   * against its own records. Horizon's, for this network, when not given.
+   */
+  readonly sponsorshipView?: ChainSponsorshipView;
   /** Quotes what a settlement's direct path spends now, for the balance check. */
   readonly spendQuote?: DirectSpendQuote;
   /**
@@ -860,22 +871,15 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   let channels = options.channels;
   /** A channel key written down whose funding has not been seen to land. */
   let pendingChannel: Keypair | undefined;
-  const spendQuote =
-    options.spendQuote ??
-    new DirectSpendQuote({
-      horizonUrl:
-        options.networkId === "mainnet"
-          ? "https://horizon.stellar.org"
-          : "https://horizon-testnet.stellar.org",
-    });
-  const prices =
-    options.prices ??
-    new XlmPriceSource({
-      horizonUrl:
-        options.networkId === "mainnet"
-          ? "https://horizon.stellar.org"
-          : "https://horizon-testnet.stellar.org",
-    });
+  const horizonUrl =
+    options.networkId === "mainnet"
+      ? "https://horizon.stellar.org"
+      : "https://horizon-testnet.stellar.org";
+  const sponsorshipView = options.sponsorshipView ?? new HorizonSponsorshipView(horizonUrl);
+  const spendQuote = options.spendQuote ?? new DirectSpendQuote({ horizonUrl });
+  /** When the last cross-check ran, in milliseconds; it runs at most hourly. */
+  let reconciledAtMs: number | undefined;
+  const prices = options.prices ?? new XlmPriceSource({ horizonUrl });
 
   /**
    * The channels this deployment runs on, created and funded as they are
@@ -1049,6 +1053,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         logTopUpFailure(address)(cause);
       }
     }
+    if (
+      reserveFunding === "sponsor" &&
+      (reconciledAtMs === undefined || Date.now() - reconciledAtMs >= RECONCILE_EVERY_MS)
+    ) {
+      reconciledAtMs = Date.now();
+      try {
+        await reconcileCarried();
+      } catch (cause) {
+        console.error(
+          "[sponsor] could not run the reconciliation:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     for (const destination of [...heldSettlements.keys()]) {
       try {
         // Inside the try: dropping an expired settlement writes to the cap
@@ -1066,6 +1084,31 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         );
       }
     }
+  }
+
+  /**
+   * What the chain says the sponsor carries, against its own records of what
+   * it lent and is still owed, as one log line. A difference is capital it may
+   * have lost track of, and strandings stay on the chain's side for good, so
+   * the operator reads the numbers rather than a verdict.
+   */
+  async function reconcileCarried(): Promise<void> {
+    const records: SponsoredRecord[] = [];
+    for (const [account, held] of heldSettlements) {
+      if (!held.prepared) continue;
+      records.push({
+        userAddress: account,
+        slots: (held.repays.createdAccount ? 2 : 0) + held.repays.assets.length,
+        state: "awaiting-arrival",
+      });
+    }
+    const report = await reconcile(keypair.publicKey(), records, sponsorshipView);
+    console.error(
+      `[sponsor] reconciliation: the sponsor carries ${report.actualSlots} reserve slots ` +
+        `on-chain and ${report.expectedSlots} by its records; ` +
+        `untracked: ${report.untracked.join(", ") || "none"}; ` +
+        `stale: ${report.stale.join(", ") || "none"}`,
+    );
   }
 
   function sweepTick(): void {
@@ -3012,6 +3055,9 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/** How often the sweep cross-checks what the sponsor carries against the chain. */
+const RECONCILE_EVERY_MS = 60 * 60 * 1000;
 
 /**
  * Room over the quoted cost, in basis points, for the market moving in the

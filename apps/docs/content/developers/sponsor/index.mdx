@@ -122,6 +122,11 @@ settlement the network refuses because its channel cannot pay the fee stays held
 and is tried again rather than counted as a stranding. `/health` reports
 `channels: { size, leased, maxSize }`.
 
+Once an hour the sweep also cross-checks what the sponsor carries: the reserve
+slots Horizon says it sponsors against those its own held, prepared settlements
+account for, with any sponsored account its records do not know. It is one log
+line with the numbers, not a verdict: a stranding stays on the chain's side for good.
+
 Two daily caps bound the money at risk, from the
 [sponsorship design](/developers/concepts/sponsorship): a volume cap per source-chain
 class (300 a day from chains where gas is expensive, 200 from chains where gas costs
