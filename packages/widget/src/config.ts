@@ -2,9 +2,11 @@ import { ARRIVAL_CONTRACTS } from "@mavna/adapter-layerzero";
 import type { NetworkId } from "@mavna/core";
 import type { IntegratorFee } from "@mavna/routing";
 import { PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
+import { usdcSourceChains } from "./domains.js";
 import type { EngineConfig } from "./engine.js";
 import type { RailName, SendAsset, Wanted } from "./quote.js";
 import type { StellarWalletApi } from "./stellar-wallet.js";
+import { usdt0ChainsFor } from "./usdt0.js";
 import type { Connection } from "./wallet.js";
 /** What an integrator sets. Whether it can be collected is decided by the engine. */
 export type IntegratorFeeConfig = Omit<IntegratorFee, "collects">;
@@ -275,6 +277,20 @@ export function resolveConfig(config: MavnaWidgetConfig, active?: NetworkId): Re
   const network = active ?? defaultNetwork;
   if (!networks.includes(network)) {
     throw configError(`${network} is not one of the networks offered.`);
+  }
+  if (config.fromChain !== undefined) {
+    // what the picker offers is what the form shows; a chain outside it would be
+    // shown as one chain and sent from another
+    const offered =
+      config.fromAsset === "USDT0"
+        ? usdt0ChainsFor(network, config.chains)
+        : usdcSourceChains(network, config.chains);
+    if (!offered.some((c) => c.id === config.fromChain)) {
+      throw configError(
+        `fromChain is ${config.fromChain}, which this widget does not offer for a ` +
+          `${config.fromAsset ?? "USDC"} send on ${network}.`,
+      );
+    }
   }
   // Every offered network is checked now, so a missing sponsor is a mistake at
   // mount and not a broken toggle later.

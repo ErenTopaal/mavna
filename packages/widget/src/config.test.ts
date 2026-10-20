@@ -130,3 +130,27 @@ describe("what the form starts out receiving", () => {
     ).not.toThrow();
   });
 });
+
+describe("resolveConfig, the chain sent from", () => {
+  it("refuses a fromChain the chain lists take away", () => {
+    expect(() =>
+      resolveConfig({
+        integrator: "t",
+        fromChain: "base-sepolia",
+        chains: { deny: ["base-sepolia"] },
+      }),
+    ).toThrow(/fromChain is base-sepolia/);
+  });
+
+  it("refuses a fromChain USDT0 cannot leave from on a USDT0 send", () => {
+    expect(() =>
+      resolveConfig({ integrator: "t", fromAsset: "USDT0", fromChain: "base-sepolia" }),
+    ).toThrow(/fromChain is base-sepolia/);
+  });
+
+  it("keeps a fromChain that is on offer", () => {
+    expect(resolveConfig({ integrator: "t", fromChain: "base-sepolia" }).init.fromChain).toBe(
+      "base-sepolia",
+    );
+  });
+});
