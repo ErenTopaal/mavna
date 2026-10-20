@@ -104,20 +104,23 @@ this page.
 many declined), `routeSelected` (the source and the amount received),
 `walletConnected` (the ecosystem and address), `transferStarted`,
 `transferStepUpdated` (a step id and its phase), `transferCompleted`,
-`transferFailed` (with a reason), `transferStillMoving` (with a reason), and
-`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived).
+`transferFailed` (with a reason), `transferStillMoving` (with a reason),
+`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived),
+and `transferDeliveredUnverified` (with a reason, `txHash` and `explorerUrl`).
 
-`transferStillMoving` means the widget stopped watching a transfer without an
-ending it can confirm. Usually the transfer is still on its way: it outlived the
-widget's patience, or the widget went away. It also covers a transfer the rail
-records as delivered on Stellar whose amount can no longer be read back
-(`delivered-unverified`): ended, but not confirmed, and the reason names the
-transaction to check. Neither is a failure; Activity shows the transfer and, where
-it can, finishes it.
+`transferStillMoving` means the widget stopped watching a transfer that is still
+on its way: it outlived the widget's patience, or the widget went away (the drawer
+closed, for example). It is not a failure; the transfer can be checked on and
+finished from Activity.
 
 `transferDeliveredAsCame` means a conversion on arrival could not meet the
 minimum, so the money arrived in the asset it was sent in, which is neither a
 success nor a loss.
+
+`transferDeliveredUnverified` means the rail records the transfer as executed on
+Stellar, but what arrived can no longer be read back. The transfer has ended; it
+is neither a failure nor still moving. `txHash` and `explorerUrl` name the Stellar
+transaction to check, and `reason` says why it could not be confirmed.
 
 Each event is backed by a real signal in the flow.
 
