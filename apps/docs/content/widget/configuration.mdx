@@ -24,7 +24,12 @@ this page.
   real money. An empty string is refused as a configuration error.
 - **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. On
   testnet it defaults to a local development sponsor; on mainnet it is required,
-  and the widget refuses to mount without it. An empty string is refused.
+  and the widget refuses to mount without it. An empty string is refused. The
+  widget tells a user the page is safe to close during a Circle transfer only
+  once this sponsor's `/deliver` answers `"watching": true`, meaning it will
+  deliver the burn by itself; a sponsor that does not say so, an account that
+  still has to be set up by its own wallet, or one that signs its own delivery
+  keep the "closing this page pauses it" note.
 - **`networks`**. The networks the header's network toggle switches between,
   `network` among them. Defaults to `[network]`, which shows the other network
   disabled. Switching rebuilds the engine for that network and starts the form
