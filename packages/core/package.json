@@ -19,7 +19,6 @@
     "publish:check": "publint --strict && attw --pack . --ignore-rules no-resolution cjs-resolves-to-esm"
   },
   "dependencies": {
-    "zod": "4.6.7",
-    "dnum": "2.17.0"
+    "zod": "4.6.7"
   }
 }
