@@ -152,7 +152,7 @@ export class RpcClient {
   constructor(options: RpcClientOptions) {
     this.server = new rpc.Server(options.url);
     // rpc.Server's own `timeout` option is declared but never applied (sdk
-    // 16.2.0), so the bound goes on the client it builds
+    // 16.2.0, and still in 17.2.1), so the bound goes on the client it builds
     this.server.httpClient.defaults.timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.floor = createLedgerFloor();
     this.maxAttempts = options.maxAttempts ?? 6;
