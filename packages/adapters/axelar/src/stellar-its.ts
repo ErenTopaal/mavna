@@ -104,6 +104,17 @@ export class StellarItsReader {
     return Number(value);
   }
 
+  /** What a token contract calls itself. Its own claim, not an identity. */
+  async tokenSymbol(token: string): Promise<string> {
+    const value = await this.simulateOn(token, "symbol");
+    if (typeof value !== "string" || value.length === 0) {
+      throw new MavnaError(`The Stellar contract ${token} did not answer with a symbol.`, {
+        retryable: false,
+      });
+    }
+    return value;
+  }
+
   /**
    * What a Stellar token contract the service names actually is.
    *

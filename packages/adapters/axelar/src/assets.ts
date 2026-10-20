@@ -98,6 +98,16 @@ export async function tokenIdFromIndex(
   return undefined;
 }
 
+/** The symbol Axelar's list gives a token id, which names it across every chain. */
+export async function tokenSymbolFromIndex(
+  network: NetworkId,
+  tokenId: string,
+): Promise<string | undefined> {
+  const wanted = withPrefix(tokenId);
+  const symbol = (await loadItsAssets(network)).find((asset) => asset.tokenId === wanted)?.symbol;
+  return symbol === undefined || symbol.length === 0 ? undefined : symbol;
+}
+
 function withPrefix(id: string): string {
   return id.startsWith("0x") ? id.toLowerCase() : `0x${id.toLowerCase()}`;
 }

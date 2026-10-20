@@ -14,7 +14,12 @@ export {
 export type { AxelarAdapterOptions, RecoverOptions } from "./adapter.js";
 export { AxelarAdapter, scaleAcrossDecimals } from "./adapter.js";
 export type { ItsAsset } from "./assets.js";
-export { forgetItsAssets, loadItsAssets, tokenIdFromIndex } from "./assets.js";
+export {
+  forgetItsAssets,
+  loadItsAssets,
+  tokenIdFromIndex,
+  tokenSymbolFromIndex,
+} from "./assets.js";
 export type { AxelarChain, NativeCurrency } from "./deployments.js";
 export { chainConfig, evmTokenService, forgetChains, loadChains } from "./deployments.js";
 export type { AxelarStellarChain } from "./discovery.js";

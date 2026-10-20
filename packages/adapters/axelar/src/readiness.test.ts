@@ -40,6 +40,7 @@ import { TOKEN_MANAGER } from "./token.js";
 const CHAINS_URL = "https://testnet.api.axelarscan.io/api/getChains";
 const CONFIG_URL = `https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${DEPLOYMENTS_COMMIT}/axelar-chains-config/info/testnet.json`;
 const GMP = "https://testnet.api.gmp.axelarscan.io";
+const ASSETS_URL = "https://testnet.api.axelarscan.io/api/getITSAssets";
 const HORIZON = "https://horizon.test";
 
 const STELLAR_ID = "stellar-2026-q1-2";
@@ -68,6 +69,8 @@ interface Ledger {
   executable: Executable;
   /** What `name()` answers, for a Stellar asset contract. */
   name: string;
+  /** What `symbol()` answers. */
+  symbol: string;
   account: boolean;
   trustline: boolean;
   latestLedger: number;
@@ -95,6 +98,9 @@ let sending: SendingChain;
 /** The sending chain's gas decimals as Axelar's config states them, and as its estimator prices. */
 let configDecimals: number;
 let estimatorDecimals: number;
+
+/** Axelar's published token list, as getITSAssets returns it. */
+let itsAssets: unknown[];
 
 /** Axelar's message search: the leg found by hash, and the leg found from it. */
 let gmp: { first: unknown[]; second: unknown[] };
@@ -189,6 +195,7 @@ function remoteServices(): void {
       });
     }
     if (url === `${GMP}/estimateITSFee`) return json(10543325497105);
+    if (url === ASSETS_URL) return json(itsAssets);
     if (url === `${GMP}/searchGMP`) {
       const query = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       return json({ data: query.messageId === undefined ? gmp.first : gmp.second });
@@ -246,6 +253,9 @@ function stellarNode(): RpcClient {
     }
     if (target === ledger.token && method === "decimals") {
       return answer(nativeToScVal(7, { type: "u32" })) as never;
+    }
+    if (target === ledger.token && method === "symbol") {
+      return answer(nativeToScVal(ledger.symbol, { type: "string" })) as never;
     }
     if (target === ledger.token && method === "name") {
       return answer(nativeToScVal(ledger.name, { type: "string" })) as never;
@@ -342,6 +352,7 @@ function classicUsdc(over: Partial<Ledger> = {}): void {
     token: USDC_SAC,
     executable: "stellar-asset",
     name: USDC_ID,
+    symbol: "USDC",
     account: true,
     trustline: true,
     latestLedger: 100,
@@ -354,6 +365,7 @@ function interchainToken(over: Partial<Ledger> = {}): void {
     token: INTERCHAIN_TOKEN,
     executable: "wasm",
     name: "Interchain Escrow Token",
+    symbol: "IXE",
     account: true,
     trustline: false,
     latestLedger: 100,
@@ -374,6 +386,7 @@ beforeEach(() => {
     gasService: "0xbe406f0189a0b4cf3a05c286473d23791dd44cc6",
   };
   gmp = { first: [], second: [] };
+  itsAssets = [];
   configDecimals = 18;
   estimatorDecimals = 18;
   remoteServices();
@@ -862,5 +875,45 @@ describe("the token service's own word on its gas service", () => {
     const route = routeOf(await adapter().quote(ask()));
     sending.gasService = "0x00000000000000000000000000000000deadbeef";
     await expect(adapter().buildTransactions(route)).rejects.toThrow(/gas service/);
+  });
+});
+
+describe("what an Axelar interchain token is called", () => {
+  // Mainnet: Ethereum's USDC reaches Stellar as CDPV3H7C...QTMW, a Soroban
+  // contract whose own symbol() says USDC. Axelar's token list calls it USDC.axl.
+  const askedAsUsdc: Asset = { ...stellarInterchain, symbol: "USDC", curatedBy: "Circle" };
+
+  it("takes Axelar's name for it, not the caller's, and never Circle's", async () => {
+    interchainToken({ symbol: "USDC", name: "USD Coin" });
+    itsAssets = [
+      {
+        id: TOKEN_ID.slice(2),
+        symbol: "USDC.axl",
+        name: "USD Coin",
+        decimals: 6,
+        chains: { "base-sepolia": { tokenAddress: SOURCE_TOKEN } },
+      },
+    ];
+    const route = routeOf(await adapter().quote(ask({ to: askedAsUsdc })));
+    for (const amount of [route.receives, route.receivesAtLeast, route.deliveredAtLeast]) {
+      expect(amount.asset.id).toBe(INTERCHAIN_TOKEN);
+      expect(amount.asset.symbol).toBe("USDC.axl");
+      expect(amount.asset.curatedBy).toBe("Axelar");
+    }
+  });
+
+  it("uses the contract's own symbol when Axelar's list does not carry the token", async () => {
+    interchainToken();
+    const route = routeOf(
+      await adapter().quote(ask({ to: { ...stellarInterchain, symbol: "X" } })),
+    );
+    expect(route.receives.asset.symbol).toBe("IXE");
+  });
+
+  it("declines an unlisted contract token that calls itself USDC", async () => {
+    interchainToken({ symbol: "USDC", name: "USD Coin" });
+    const result = await adapter().quote(ask({ to: askedAsUsdc }));
+    expect(isRoute(result)).toBe(false);
+    expect((result as RouteRejection).reason).toBe("asset-unsupported");
   });
 });

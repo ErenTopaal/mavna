@@ -27,6 +27,7 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Address, xdr } from "@stellar/stellar-sdk";
+import { tokenSymbolFromIndex } from "./assets.js";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
@@ -252,6 +253,22 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
+    let label: { symbol: string; curatedBy: string | undefined };
+    try {
+      label =
+        delivered.kind === "contract"
+          ? await this.contractTokenLabel(token.tokenId, token.stellarToken, stellarIts)
+          : { symbol: request.to.symbol, curatedBy: request.to.curatedBy };
+    } catch (cause) {
+      return this.declineFrom(
+        cause,
+        "asset-unsupported",
+        cause instanceof MavnaError
+          ? cause.message
+          : "What this token is called could not be read.",
+      );
+    }
+
     const lane = await this.laneFor(request.destination, delivered);
     if ("source" in lane) return lane;
 
@@ -329,9 +346,9 @@ export class AxelarAdapter implements BridgeAdapter {
     const receivesAsset: Asset = {
       chainId: stellarChainId(this.network),
       id: delivered.id,
-      symbol: request.to.symbol,
+      symbol: label.symbol,
       decimals: stellarDecimals,
-      curatedBy: request.to.curatedBy,
+      curatedBy: label.curatedBy,
     };
     const receives: Amount = { asset: receivesAsset, baseUnits: arriving.toString() };
 
@@ -940,28 +957,53 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
-    const symbol =
+    const label =
       delivered.kind === "classic"
-        ? delivered.asset.isNative()
-          ? "XLM"
-          : delivered.asset.getCode()
-        : second.symbol;
-    if (symbol === undefined || symbol.length === 0) {
-      throw new MavnaError("Axelar's record of this delivery does not name the token.", {
-        retryable: true,
-      });
-    }
+        ? {
+            symbol: delivered.asset.isNative() ? "XLM" : delivered.asset.getCode(),
+            curatedBy: undefined,
+          }
+        : await this.contractTokenLabel(tokenId, token, stellarIts);
 
     return {
       asset: {
         chainId: stellarChainId(this.network),
         id: delivered.id,
-        symbol,
+        symbol: label.symbol,
         decimals,
-        curatedBy: undefined,
+        curatedBy: label.curatedBy,
       },
       baseUnits: amount,
     };
+  }
+
+  /**
+   * What to call a token Axelar deployed on Stellar.
+   *
+   * Not what the caller called it, and not the contract's own symbol() when
+   * Axelar's list names it: Ethereum's USDC arrives on mainnet as a Soroban
+   * contract whose symbol() answers "USDC", which is not Circle's USDC and must
+   * not read as it. Axelar's list calls that token USDC.axl. A token the list
+   * does not carry is named by its contract, unless that contract claims to be
+   * USDC, which is declined rather than shown.
+   */
+  private async contractTokenLabel(
+    tokenId: string,
+    token: string,
+    stellarIts: StellarItsReader,
+  ): Promise<{ symbol: string; curatedBy: string }> {
+    const listed = await tokenSymbolFromIndex(this.network, tokenId);
+    if (listed !== undefined) return { symbol: listed, curatedBy: "Axelar" };
+
+    const own = await stellarIts.tokenSymbol(token);
+    if (own.toUpperCase() === "USDC") {
+      throw new MavnaError(
+        `The Stellar contract ${token} calls itself USDC and is not Circle's USDC, and ` +
+          "Axelar's token list does not name it. Refusing to quote it under that name.",
+        { retryable: false },
+      );
+    }
+    return { symbol: own, curatedBy: "Axelar" };
   }
 
   private refFor(chainId: string | undefined, txHash: string) {

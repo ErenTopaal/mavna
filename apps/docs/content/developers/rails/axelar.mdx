@@ -1,29 +1,38 @@
 ---
 title: Axelar ITS
-description: Axelar's Interchain Token Service as a rail. A validator set attests, and every address is resolved at runtime because the recorded ones were dead when checked.
+description: Axelar's Interchain Token Service as a rail. A validator set attests, and Axelar's deployment config is read at a pinned commit and checked against the chains.
 ---
 
 # Axelar ITS
 
 `@mavna/adapter-axelar`, id `axelar`, trust model `validator-set`. A named set of
 validators attests to a transfer, which moves through Axelar's Interchain Token
-Service hub. It carries any token registered with the service, including USDC on
-mainnet.
+Service hub. It carries tokens registered with the service. It does not carry
+Circle's USDC into Stellar: Ethereum's USDC arrives on Stellar mainnet as
+Axelar-wrapped USDC (USDC.axl), a Soroban token distinct from Circle USDC.
 
 ```ts
 const axelar = new AxelarAdapter({ network, rpc, baseReserveStroops });
 ```
 
-## Nothing here is a constant
+## Where the addresses come from
 
-There is no hardcoded chain list, no contract address, and no token identifier in
-this adapter. Every one is resolved at runtime, because the addresses this
-project's specification recorded were dead when they were checked. `supportedChains`
-intersects two live sources: Axelar's chain registry, dropping deprecated chains,
-and Axelar's published deployment config, keeping only chains that have an
-Interchain Token Service and an RPC. Stellar is registered under a versioned,
-rotating id, and a stale name routes into a graveyard rather than erroring, so the
-adapter requires exactly one Stellar chain to resolve or it stops.
+Chain names, nodes and token identifiers are resolved at runtime. Axelar's
+published deployment config is read at a pinned commit of
+`axelarnetwork/axelar-contract-deployments`, never from its main branch, because
+that file names the contract a user approves. `scripts/verify-axelar-deployments.mjs`
+pins the commit and confirms each chain on-chain: the node's chain id, code at the
+token service and the gas service, and the token service naming that gas service
+itself. Only confirmed addresses are accepted, and a config that names any other
+address for a confirmed chain is refused whole. Before quoting and again before
+building, the adapter asks the token service which gas service it pays and refuses
+a chain where that is not the confirmed one.
+
+`supportedChains` intersects Axelar's chain registry, dropping deprecated chains,
+with the confirmed chains that have a token service and an RPC. Stellar is
+registered under a versioned, rotating id, and a stale name routes into a graveyard
+rather than erroring, so the adapter requires exactly one Stellar chain to resolve
+or it stops.
 
 ## Both sides must agree
 
@@ -45,6 +54,13 @@ account is ready as it is, and an account that does not exist yet is declined: t
 balance would be credited but could not be moved, and the sponsor is repaid in the
 asset it curates, which this is not.
 
+A contract token is labelled with the symbol in Axelar's token list, not the one
+the caller passed and not the contract's own `symbol()`. Ethereum's USDC lands on
+Stellar mainnet as `CDPV3H7C3MR2R4Y4GAEJN4AXXY4LBITRRVE74VSMVCSBWISIU3Q4QTMW`, whose
+`symbol()` answers `USDC`; the route names it `USDC.axl`. A contract token Axelar's
+list does not carry is named by its own symbol, and one that calls itself USDC is
+declined rather than shown under that name.
+
 That contract-token case is the adapter's answer. The Mavna widget only asks for
 classic USDC, and before the first signature it checks the destination on Stellar
 itself, which it can only do for a `CODE:ISSUER` asset, so a route that would land
@@ -56,12 +72,19 @@ The fee is estimated from Axelar's own estimator, gas plus the service fee, and 
 is component-based rather than a percentage. A zero estimate is treated as an
 unrecognized chain and refused, never as a free transfer, because sending against a
 zero estimate would underpay and strand the message with no automatic recovery.
+The fee is labelled in the unit the estimator priced it in, which is not always
+the one Axelar's config states: Hedera's HBAR is priced in 18 decimals there.
 
 ## Networks
 
-On mainnet, Axelar carries Interchain Token Service tokens into Stellar, USDC among
-them. On the test network its Stellar deployment currently carries very little, so
-it usually declines; the reason is on the route, in a sentence. Delivery is proven
-across both legs of the hub route, and the adapter never reads Axelar's refund flag
-as a returned transfer, because that flag is leftover gas going home, not the
-tokens.
+On mainnet, Axelar carries Interchain Token Service tokens into Stellar. USDC is
+not among them as Circle USDC: it arrives as USDC.axl, which the Mavna widget does
+not offer. On the test network its Stellar deployment currently carries very
+little, so it usually declines; the reason is on the route, in a sentence.
+
+Delivery is proven across both legs of the hub route. Either leg running short of
+gas reports the transfer as stalled with an add-gas remedy, paid on the sending
+chain; either leg erroring reports it as failed. What arrived is read from the
+Stellar leg and named as the Stellar asset. The adapter never reads Axelar's
+refund flag as a returned transfer, because that flag is leftover gas going home,
+not the tokens.
