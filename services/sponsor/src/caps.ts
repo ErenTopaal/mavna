@@ -79,6 +79,11 @@ export class CapLedger {
   private readonly config: CapConfig;
   /** Injected so the day boundary is testable rather than tied to the clock. */
   private readonly today: () => string;
+  /**
+   * Every count is a read then a write, so two at once would both read the
+   * same number and one would be lost. They go through here one at a time.
+   */
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(store: CapStore, config: CapConfig = DEFAULT_CAPS, today: () => string = utcDay) {
     this.store = store;
@@ -118,12 +123,14 @@ export class CapLedger {
   }
 
   /** Record that capital was committed. Called after preparation lands, not before. */
-  async recordStarted(source: SourceChainClass): Promise<void> {
-    const day = this.today();
-    const usage = (await this.store.load(day)) ?? emptyUsage(day);
-    await this.store.save({
-      ...usage,
-      started: { ...usage.started, [source]: usage.started[source] + 1 },
+  recordStarted(source: SourceChainClass): Promise<void> {
+    return this.inTurn(async () => {
+      const day = this.today();
+      const usage = (await this.store.load(day)) ?? emptyUsage(day);
+      await this.store.save({
+        ...usage,
+        started: { ...usage.started, [source]: usage.started[source] + 1 },
+      });
     });
   }
 
@@ -132,10 +139,19 @@ export class CapLedger {
    * matters: it drives the exposure brake and it is a permanent loss, so it is
    * reported as a line item rather than left implicit.
    */
-  async recordStranded(): Promise<void> {
-    const day = this.today();
-    const usage = (await this.store.load(day)) ?? emptyUsage(day);
-    await this.store.save({ ...usage, stranded: usage.stranded + 1 });
+  recordStranded(): Promise<void> {
+    return this.inTurn(async () => {
+      const day = this.today();
+      const usage = (await this.store.load(day)) ?? emptyUsage(day);
+      await this.store.save({ ...usage, stranded: usage.stranded + 1 });
+    });
+  }
+
+  /** Run after every count asked for before it, whether those worked or not. */
+  private inTurn(count: () => Promise<void>): Promise<void> {
+    const next = this.queue.catch(() => {}).then(count);
+    this.queue = next;
+    return next;
   }
 
   async usage(): Promise<CapUsage> {

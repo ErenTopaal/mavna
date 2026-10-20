@@ -1,5 +1,6 @@
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import * as z from "zod";
 import type { CapStore, CapUsage } from "./caps.js";
 
 /**
@@ -144,6 +145,13 @@ async function syncDirectory(dir: string): Promise<void> {
   }
 }
 
+const count = z.number().int().nonnegative();
+const capUsageShape = z.object({
+  day: z.string(),
+  started: z.object({ "expensive-gas": count, "cheap-gas": count }),
+  stranded: count,
+});
+
 /** How many days of cap counts are kept. Only today's is ever read. */
 const CAP_DAYS_KEPT = 3;
 
@@ -165,7 +173,30 @@ export class DocumentCapStore implements CapStore {
     await this.store.write("caps", Object.fromEntries(kept.map((day) => [day, days[day]])));
   }
 
+  /**
+   * The stored days, each checked: one not in the shape this version writes is
+   * logged and skipped, and the rest are read as written.
+   */
   private async days(): Promise<Record<string, CapUsage>> {
-    return ((await this.store.read("caps")) as Record<string, CapUsage> | undefined) ?? {};
+    const stored = await this.store.read("caps");
+    if (stored === undefined) return {};
+    if (typeof stored !== "object" || stored === null || Array.isArray(stored)) {
+      console.error(
+        `[sponsor] skipped the caps state: it is not in the shape this version writes: ${JSON.stringify(stored)}`,
+      );
+      return {};
+    }
+    const days: Record<string, CapUsage> = {};
+    for (const [day, value] of Object.entries(stored)) {
+      const parsed = capUsageShape.safeParse(value);
+      if (parsed.success && parsed.data.day === day) {
+        days[day] = parsed.data;
+      } else {
+        console.error(
+          `[sponsor] skipped the caps for ${day}: not in the shape this version writes: ${JSON.stringify(value)}`,
+        );
+      }
+    }
+    return days;
   }
 }

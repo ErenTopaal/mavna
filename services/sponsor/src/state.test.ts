@@ -105,6 +105,22 @@ describe("caps kept in a document store survive a restart", () => {
     expect((await after.usage()).stranded).toBe(1);
   });
 
+  it("skips a day that is not in the shape it writes, keeping the others", async () => {
+    const backing = new MemoryDocumentStore();
+    const good = {
+      day: "2026-10-19",
+      started: { "expensive-gas": 1, "cheap-gas": 2 },
+      stranded: 3,
+    };
+    await backing.write("caps", { "2026-10-19": good, "2026-10-20": { stranded: "lots" } });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const caps = new DocumentCapStore(backing);
+    expect(await caps.load("2026-10-19")).toEqual(good);
+    expect(await caps.load("2026-10-20")).toBeUndefined();
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/2026-10-20/);
+    errors.mockRestore();
+  });
+
   it("keeps only the last few days", async () => {
     const backing = new MemoryDocumentStore();
     const caps = new DocumentCapStore(backing);
