@@ -15,6 +15,12 @@ overrides:
   "nextra>zod": "4.3.6"
   "nextra-theme-docs>zod": "4.3.6"
 
+# apps/docs stays on TypeScript 6 while the rest of the repo is on 7. Nextra's code
+# blocks run twoslash, which drives TypeScript's JavaScript API (`ts.sys` and the
+# language service), and TypeScript 7's npm package is the native compiler without
+# that API: the docs build fails reading `sys.readFile` (nextra 4.6.1, twoslash
+# 0.3.9, checked 2026-10-20). Move it once twoslash supports TypeScript 7.
+
 # Supply chain. A compromised release of our widget would harm every wallet that
 # embedded it, which is why these are tighter than the defaults rather than left alone.
 
