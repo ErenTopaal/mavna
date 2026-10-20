@@ -62,6 +62,8 @@ const RECLAIM_GRACE_SECONDS = 30;
 export class ChannelPool {
   private readonly available: Channel[];
   private readonly leased = new Map<string, Lease>();
+  /** Owners whose lease is not reclaimed at its end, whatever its bound says. */
+  private keep: (owner: string) => boolean = () => false;
 
   constructor(options: ChannelPoolOptions) {
     if (options.channels.length === 0) {
@@ -121,19 +123,13 @@ export class ChannelPool {
    * A lease ends at `untilUnix` whether or not anyone releases it. Without that,
    * every settlement built and never signed would hold its channel forever, and
    * a few abandoned quotes would exhaust the pool. Asking again for the same
-   * transfer only ever extends the lease, because the earlier settlement may
-   * still be live on the same sequence.
+   * transfer hands back the channel it already holds and changes nothing else:
+   * asking is free, so it must never lengthen a lease.
    */
   acquire(transferId: string, untilUnix: number, nowUnix: number): Channel | undefined {
     this.reclaim(nowUnix);
     const existing = this.leased.get(transferId);
-    if (existing !== undefined) {
-      this.leased.set(transferId, {
-        ...existing,
-        untilUnix: Math.max(existing.untilUnix, untilUnix),
-      });
-      return existing.channel;
-    }
+    if (existing !== undefined) return existing.channel;
     const channel = this.available.pop();
     if (channel === undefined) return undefined;
     this.leased.set(transferId, { channel, heldFor: transferId, untilUnix });
@@ -215,9 +211,20 @@ export class ChannelPool {
     this.free(transferId);
   }
 
+  /**
+   * Keep an owner's lease past its bound while `keep` says so: for a
+   * transaction on the channel that may still land, whose sequence must not
+   * pass to anyone else until its fate is known.
+   */
+  holdWhile(keep: (owner: string) => boolean): void {
+    this.keep = keep;
+  }
+
   private reclaim(nowUnix: number): void {
     for (const [owner, lease] of this.leased) {
-      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) this.free(owner);
+      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix && !this.keep(owner)) {
+        this.free(owner);
+      }
     }
   }
 

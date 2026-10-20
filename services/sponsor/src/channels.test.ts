@@ -219,3 +219,22 @@ describe("a pool that grows", () => {
     expect(pool.holds("a", channel, 200)).toBe(false);
   });
 });
+
+describe("round 2: a lease nobody paid for", () => {
+  it("is not lengthened by asking for it again", () => {
+    const pool = new ChannelPool({ channels: [Keypair.random()] });
+    const channel = pool.acquire("a", 100, 0)?.address ?? "";
+    expect(pool.acquire("a", 10_000, 50)?.address).toBe(channel);
+    expect(pool.holds("a", channel, 131)).toBe(false);
+  });
+
+  it("is kept past its bound while something on it may still land", () => {
+    const pool = new ChannelPool({ channels: [Keypair.random()] });
+    const channel = pool.acquire("a", 100, 0)?.address ?? "";
+    let inFlight = true;
+    pool.holdWhile((owner) => owner === "a" && inFlight);
+    expect(pool.holds("a", channel, 500)).toBe(true);
+    inFlight = false;
+    expect(pool.holds("a", channel, 500)).toBe(false);
+  });
+});
