@@ -1,6 +1,6 @@
 ---
 title: LayerZero OFT
-description: LayerZero OFT as a rail. The token's own verifier set attests, the owner chose it, and the adapter names it on every transaction it builds.
+description: LayerZero OFT as a rail. The token's own verifier set attests, the owner chose it, and the adapter names its verifiers on every send it builds.
 ---
 
 # LayerZero OFT
@@ -46,7 +46,12 @@ route through two kinds of set. It refuses a set with no required verifier, wher
 nothing would confirm the transfer, and it refuses a set nobody chose: an inherited
 network default, because LayerZero can change who verifies a token's transfers
 without the token's owner acting. Only the token owner's explicitly configured set
-is accepted, and every transaction the adapter builds names the verifiers on it.
+is accepted, and every send the adapter builds names the verifiers on it, by the
+name LayerZero's DVN list gives each one for that chain, or by address where the
+list has none (the list covers mainnet only, so on testnet every verifier is an
+address). It says how many must agree and after how many source-chain
+confirmations. That list is read with the rest of the deployment, so a quote
+declines while it cannot be reached.
 
 ## Refusing a superseded deployment
 

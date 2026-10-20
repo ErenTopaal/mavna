@@ -415,7 +415,9 @@ describe("building the transactions", () => {
     expect(BigInt(sendPayload.args[0].minAmountLD)).toBeGreaterThan(0n);
     // Consent needs understanding, so the sentence carries the trust model too.
     expect(send?.describes).toContain(quoted.destination);
-    expect(send?.describes).toContain("must agree");
+    expect(send?.describes).toContain("must all agree");
+    // named from LayerZero's DVN list rather than only counted
+    expect(send?.describes).toContain("LayerZero Labs");
   });
 
   it("asks for only a send where the contract mints and burns", async () => {

@@ -177,17 +177,33 @@ export function assertDvnStackIsSound(inputs: {
   }
 }
 
-/** The trust model, said in terms a user can weigh without knowing the words. */
-export function describeDvnStack(effective: UlnConfig): string {
+/**
+ * The trust model, said in terms a user can weigh without knowing the words,
+ * with every verifier named.
+ *
+ * Names come from LayerZero's DVN list for the source chain, keyed by lowercase
+ * address. One the list does not carry is shown by its address, which is its
+ * identity, rather than by anything guessed.
+ */
+export function describeDvnStack(effective: UlnConfig, names: ReadonlyMap<string, string>): string {
   const required = effective.requiredDVNCount;
   const optional = effective.optionalDVNThreshold;
   const confirmations = effective.confirmations.toString();
+  const list = (dvns: readonly string[]) =>
+    dvns.map((dvn) => names.get(dvn.toLowerCase()) ?? dvn).join(", ");
 
+  const must =
+    required === 1
+      ? `1 verifier must agree (${list(effective.requiredDVNs)})`
+      : `${required} verifiers must all agree (${list(effective.requiredDVNs)})`;
+  const pool = `${optional} of ${effective.optionalDVNCount}`;
   const who =
     optional === 0
-      ? `${required} named verifier${required === 1 ? "" : "s"} must agree`
-      : `${required} named verifier${required === 1 ? "" : "s"} and ${optional} more from a ` +
-        `pool of ${effective.optionalDVNCount} must agree`;
+      ? must
+      : required === 0
+        ? `${pool} verifiers must agree (${list(effective.optionalDVNs)})`
+        : `${must}, and ${optional} more of ${effective.optionalDVNCount} ` +
+          `(${list(effective.optionalDVNs)})`;
 
   return `${who}, after ${confirmations} source-chain confirmation${confirmations === "1" ? "" : "s"}.`;
 }

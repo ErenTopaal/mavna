@@ -11,6 +11,7 @@ import {
 import { type Abi, decodeFunctionResult, encodeFunctionData } from "viem";
 import {
   type EvmSource,
+  LAYERZERO_DVN_METADATA_URL,
   LAYERZERO_METADATA_URL,
   LAYERZERO_OFT_REGISTRY_URL,
   ROUTED_SYMBOLS,
@@ -109,6 +110,16 @@ export interface ResolvedRoute {
   readonly uln: UlnConfig;
   /** Raw, unmerged. The only thing that shows whether anybody chose it. */
   readonly appUln: UlnConfig;
+  /**
+   * What LayerZero calls each verifier in `uln`, keyed by lowercase address.
+   * One missing from LayerZero's list is absent here and gets named by its
+   * address.
+   */
+  readonly dvnNames: ReadonlyMap<string, string>;
+}
+
+interface DvnListing {
+  readonly dvns?: Readonly<Record<string, { readonly canonicalName?: string }>>;
 }
 
 interface RegistryDeployment {
@@ -164,6 +175,7 @@ export class Discovery {
   private readonly readers = new Map<string, EvmReader>();
   private stellarDeployment: Promise<StellarDeployment> | undefined;
   private oftRegistry: Promise<Readonly<Record<string, readonly OftEntry[]>>> | undefined;
+  private dvnList: Promise<Readonly<Record<string, DvnListing>>> | undefined;
   private readonly routes = new Map<string, Promise<ResolvedRoute>>();
   private readonly settled = new Map<string, ResolvedRoute>();
 
@@ -301,6 +313,45 @@ export class Discovery {
     return pending;
   }
 
+  /** LayerZero's DVN list, cached for the session like the OFT registry. */
+  private async dvnListing(): Promise<Readonly<Record<string, DvnListing>>> {
+    if (this.dvnList !== undefined) return this.dvnList;
+    const pending = (async () => {
+      const response = await this.fetchImpl(LAYERZERO_DVN_METADATA_URL, {
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new MavnaError(
+          `Could not reach LayerZero's list of verifiers (HTTP ${response.status}).`,
+          { retryable: response.status === 429 || response.status >= 500 },
+        );
+      }
+      return (await response.json()) as Readonly<Record<string, DvnListing>>;
+    })();
+    this.dvnList = pending;
+    pending.catch(() => {
+      if (this.dvnList === pending) this.dvnList = undefined;
+    });
+    return pending;
+  }
+
+  /**
+   * The names of the verifiers in a set, as LayerZero lists them for that chain.
+   *
+   * The list covers mainnet only, so testnet asks nothing and every verifier
+   * there is named by its address.
+   */
+  private async dvnNamesFor(source: EvmSource, uln: UlnConfig): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (this.network !== "mainnet") return names;
+    const listed = (await this.dvnListing())[source.layerZeroKey]?.dvns ?? {};
+    for (const dvn of [...uln.requiredDVNs, ...uln.optionalDVNs]) {
+      const name = listed[dvn.toLowerCase()]?.canonicalName;
+      if (typeof name === "string" && name !== "") names.set(dvn.toLowerCase(), name);
+    }
+    return names;
+  }
+
   /**
    * The first candidate on a chain that survives every check, or an error saying
    * why none did.
@@ -428,9 +479,10 @@ export class Discovery {
       eid: stellar.eid,
     });
 
-    const [tokenSymbol, tokenDecimals] = await Promise.all([
+    const [tokenSymbol, tokenDecimals, dvnNames] = await Promise.all([
       this.require(reader, token as `0x${string}`, ERC20_ABI, "symbol", []),
       this.require(reader, token as `0x${string}`, ERC20_ABI, "decimals", []),
+      this.dvnNamesFor(source, uln as UlnConfig),
     ]);
 
     // The Stellar side, asked directly. This is the check the whole module is
@@ -481,6 +533,7 @@ export class Discovery {
       sendLibrary,
       uln: uln as UlnConfig,
       appUln: appUln as UlnConfig,
+      dvnNames,
     };
   }
 

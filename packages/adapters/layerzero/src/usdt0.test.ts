@@ -20,7 +20,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
 import { SEND_ULN_ABI } from "./dvn.js";
-import { LAYERZERO_METADATA_URL, LAYERZERO_OFT_REGISTRY_URL, SCAN_BASE_URL } from "./index.js";
+import {
+  LAYERZERO_DVN_METADATA_URL,
+  LAYERZERO_METADATA_URL,
+  LAYERZERO_OFT_REGISTRY_URL,
+  SCAN_BASE_URL,
+} from "./index.js";
 import { ENDPOINT_ABI, ERC20_ABI, OFT_ABI, stellarToLocal } from "./oft.js";
 
 /**
@@ -179,6 +184,12 @@ function remoteServices(): void {
           // filed under the same symbol and not the token, so never a candidate
           { name: "USDT0 Native Mesh", deployments: { arbitrum: { address: TOKEN } } },
         ],
+      });
+    }
+    if (url === LAYERZERO_DVN_METADATA_URL) {
+      // DVN_B left out, as LayerZero's list leaves some out
+      return json({
+        arbitrum: { dvns: { [DVN_A.toLowerCase()]: { canonicalName: "LayerZero Labs" } } },
       });
     }
     if (url.startsWith(`${HORIZON}/order_book`)) {
@@ -496,6 +507,8 @@ describe("quoting USDT0 into Stellar", () => {
     );
     expect(payload.args[0].minAmountLD).toBe("24875000");
     expect(payload.args[0].to).toBe(`0x${StrKey.decodeEd25519PublicKey(READY).toString("hex")}`);
+    // the verifiers are named, by LayerZero's name or else by address
+    expect(txs[0]?.describes).toContain(`2 verifiers must all agree (LayerZero Labs, ${DVN_B})`);
   });
 });
 

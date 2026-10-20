@@ -150,8 +150,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * weigh rather than ours to flatten. Axelar's validators are the network's and
    * are the same for everybody. A DVN set belongs to whoever deployed the token,
    * so two routes on this same rail can be verified by entirely different
-   * parties, and `describeDvnStack` says which ones on every transaction this
-   * adapter builds.
+   * parties, and `describeDvnStack` names them on every send this adapter
+   * builds.
    */
   readonly trustModel: TrustModel = "dvn-stack";
 
@@ -613,7 +613,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
       describes:
         route.compose === undefined
           ? `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} to ` +
-            `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln)}`
+            `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln, resolved.dvnNames)}`
           : describeComposeSend(route.compose, route.destination, sends, resolved),
       ephemeralSigners: [],
       unnecessaryWhen: undefined,
@@ -1028,6 +1028,6 @@ function describeComposeSend(
     `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} via ` +
     `LayerZero to the Mavna Arrival Contract on Stellar, which converts it for ${destination} ` +
     `into at least ${atLeast} ${compose.wanted.symbol}, or sends ${compose.arriving.symbol} on ` +
-    `as it came if it cannot. ${describeDvnStack(resolved.uln)}`
+    `as it came if it cannot. ${describeDvnStack(resolved.uln, resolved.dvnNames)}`
   );
 }
