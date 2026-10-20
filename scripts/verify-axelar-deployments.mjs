@@ -170,7 +170,7 @@ async function inspectEvm(chain) {
   const gasCode = await call(node, "eth_getCode", [gas, "latest"]);
   if (typeof gasCode !== "string" || gasCode.length <= 2) throw new Error(`no code at ${gas}`);
 
-  return { pinned: { interchainTokenService: its, gasService: gas }, via: node };
+  return { pinned: { interchainTokenService: its, gasService: gas, rpcUrl: node }, via: node };
 }
 
 async function inspectStellar(network, chain) {
@@ -186,7 +186,7 @@ async function inspectStellar(network, chain) {
   );
   const { entries } = await server.getLedgerEntries(key);
   if (entries.length === 0) throw new Error(`no contract instance at ${its}`);
-  return { pinned: { interchainTokenService: its, gasService: undefined } };
+  return { pinned: { interchainTokenService: its, gasService: undefined, rpcUrl: undefined } };
 }
 
 const pinned = { testnet: {}, mainnet: {} };
@@ -231,6 +231,7 @@ const rows = (network) =>
         `    ${JSON.stringify(id)}: {\n` +
         `      interchainTokenService: ${JSON.stringify(p.interchainTokenService)},\n` +
         `      gasService: ${p.gasService === undefined ? "undefined" : JSON.stringify(p.gasService)},\n` +
+        `      rpcUrl: ${p.rpcUrl === undefined ? "undefined" : JSON.stringify(p.rpcUrl)},\n` +
         "    },"
       );
     })
@@ -250,7 +251,8 @@ writeFileSync(
  * a chain's token service and gas service are accepted only when they match the
  * addresses below, each of which was confirmed on its own chain: the node's chain
  * id, code at both addresses, and the token service naming this gas service
- * itself. A chain missing here is not offered.
+ * itself. A chain missing here is not offered, and a chain listed here is read
+ * through the node it was confirmed through.
  */
 export const DEPLOYMENTS_COMMIT = ${JSON.stringify(commit)};
 
@@ -258,6 +260,13 @@ export interface PinnedChain {
   readonly interchainTokenService: string;
   /** Undefined on Stellar, where nothing is paid to a gas service. */
   readonly gasService: string | undefined;
+  /**
+   * The node the chain was confirmed through, chain id checked, and the one the
+   * adapter reads it through. Axelar's own config node is used when it answered;
+   * several are dead, and a chain is only offered through a node that worked.
+   * Undefined on Stellar, which is read through the integrator's own node.
+   */
+  readonly rpcUrl: string | undefined;
 }
 
 export const PINNED_DEPLOYMENTS: Readonly<

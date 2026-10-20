@@ -142,7 +142,10 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
       name: chain.name ?? id,
       family: chain.chainType ?? "unknown",
       evmChainId: typeof chain.chainId === "number" ? chain.chainId : undefined,
-      rpcUrl: chain.rpc,
+      // The node the sweep confirmed the chain through, not the config's: several
+      // config nodes are dead (base mainnet's has no address record), and a
+      // chain must be read through a node that answered as it.
+      rpcUrl: PINNED_DEPLOYMENTS[network][id]?.rpcUrl ?? chain.rpc,
       explorerUrl: chain.explorer?.url,
       nativeCurrency:
         symbol === undefined || decimals === undefined ? undefined : { symbol, decimals },

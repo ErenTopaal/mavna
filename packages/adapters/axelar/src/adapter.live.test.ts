@@ -693,3 +693,26 @@ describe("mainnet transfers whose Stellar-leg record misstates the amount", () =
     expect(phase.received.asset.decimals).toBe(7);
   });
 });
+
+describe("the nodes the adapter reads each confirmed chain through", () => {
+  it("answer as the chain Axelar's config says they are, on both networks", async () => {
+    for (const network of ["testnet", "mainnet"] as const) {
+      const chains = await loadChains(network);
+      const wrong: string[] = [];
+      for (const chain of chains.values()) {
+        if (chain.family !== "evm" || chain.interchainTokenService === undefined) continue;
+        const id = await fetch(chain.rpcUrl ?? "", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+          signal: AbortSignal.timeout(15_000),
+        })
+          .then((r) => r.json() as Promise<{ result?: string }>)
+          .then((b) => Number(BigInt(b.result ?? "0x0")))
+          .catch(() => -1);
+        if (id !== chain.evmChainId) wrong.push(`${network}/${chain.id} ${chain.rpcUrl} -> ${id}`);
+      }
+      expect(wrong, wrong.join("\n")).toEqual([]);
+    }
+  });
+});

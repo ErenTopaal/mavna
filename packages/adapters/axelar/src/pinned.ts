@@ -10,7 +10,8 @@ import type { NetworkId } from "@mavna/core";
  * a chain's token service and gas service are accepted only when they match the
  * addresses below, each of which was confirmed on its own chain: the node's chain
  * id, code at both addresses, and the token service naming this gas service
- * itself. A chain missing here is not offered.
+ * itself. A chain missing here is not offered, and a chain listed here is read
+ * through the node it was confirmed through.
  */
 export const DEPLOYMENTS_COMMIT = "ce4c7b7d6b8673af570786005dba9f7fd96b5879";
 
@@ -18,6 +19,13 @@ export interface PinnedChain {
   readonly interchainTokenService: string;
   /** Undefined on Stellar, where nothing is paid to a gas service. */
   readonly gasService: string | undefined;
+  /**
+   * The node the chain was confirmed through, chain id checked, and the one the
+   * adapter reads it through. Axelar's own config node is used when it answered;
+   * several are dead, and a chain is only offered through a node that worked.
+   * Undefined on Stellar, which is read through the integrator's own node.
+   */
+  readonly rpcUrl: string | undefined;
 }
 
 export const PINNED_DEPLOYMENTS: Readonly<
@@ -27,208 +35,259 @@ export const PINNED_DEPLOYMENTS: Readonly<
     "arbitrum-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://sepolia-rollup.arbitrum.io/rpc",
     },
     "arc-8": {
       interchainTokenService: "0x7ca8bF7326b870Eab4ef7A9B8E59fCDb47921389",
       gasService: "0xB2C575226fa1828F5101a42CaA5ba4Ce9140c108",
+      rpcUrl: "https://rpc.testnet.arc.io",
     },
     avalanche: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
     },
     "base-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://sepolia.base.org",
     },
     berachain: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://bepolia.rpc.berachain.com",
     },
     binance: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://bsc-testnet-rpc.publicnode.com",
     },
     "blast-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://blast-sepolia.drpc.org",
     },
     "celo-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://forno.celo-sepolia.celo-testnet.org/",
     },
     "ethereum-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://sepolia.drpc.org",
     },
     "filecoin-2": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbe406f0189a0b4cf3a05c286473d23791dd44cc6",
+      rpcUrl: "https://api.calibration.node.glif.io/rpc/v2",
     },
     flow: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://testnet.evm.nodes.onflow.org",
     },
     hedera: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://testnet.hashio.io/api",
     },
     hyperliquid: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://rpc.hyperliquid-testnet.xyz/evm",
     },
     immutable: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://rpc.testnet.immutable.com",
     },
     kava: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://evm.testnet.kava.io",
     },
     "linea-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://rpc.sepolia.linea.build",
     },
     "mantle-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://rpc.sepolia.mantle.xyz",
     },
     "monad-3": {
       interchainTokenService: "0xF9c962bE1366cD9518D6BCCDcfC9CDFCa7a1EFE5",
       gasService: "0x5030D144E845e862B35B50E9C0610E2CD77F70D7",
+      rpcUrl: "https://testnet-rpc.monad.xyz",
     },
     moonbeam: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://moonbeam-alpha.api.onfinality.io/public",
     },
     "optimism-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://sepolia.optimism.io",
     },
     plume: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://testnet-rpc.plume.org",
     },
     "polygon-sepolia": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://polygon-amoy-bor-rpc.publicnode.com",
     },
     robinhood: {
       interchainTokenService: "0x3270540e5d2857E69BEC34c6EcFa02cD813aCb42",
       gasService: "0xef2e20AE1095C6bDb888e91E3c1a2443CBb76DB9",
+      rpcUrl: "https://rpc.testnet.chain.robinhood.com",
     },
     "stellar-2026-q1-2": {
       interchainTokenService: "CC7LAC4S7KAPIM26WKWFSOXWLNLSG7EXTC2EVY2H2UPKSTX3Z2A7M5YP",
       gasService: undefined,
+      rpcUrl: undefined,
     },
     "xrpl-evm": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6",
+      rpcUrl: "https://rpc.testnet.xrplevm.org",
     },
   },
   mainnet: {
     arbitrum: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://arb1.arbitrum.io/rpc",
     },
     avalanche: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
     },
     base: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://mainnet.base.org/",
     },
     berachain: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.berachain.com/",
     },
     binance: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://bsc-dataseed.bnbchain.org",
     },
     blast: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.blast.io",
     },
     celo: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://forno.celo.org",
     },
     ethereum: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://ethereum-rpc.publicnode.com",
     },
     fantom: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.fantom.network",
     },
     filecoin: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://api.chain.love/rpc/v2",
     },
     flow: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://mainnet.evm.nodes.onflow.org",
     },
     fraxtal: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.frax.com",
     },
     hedera: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://mainnet.hashio.io/api",
     },
     hyperliquid: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.hyperliquid.xyz/evm",
     },
     immutable: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x24C2b56128fF8E7bFaD578ABefB0fc7Dfa9ba358",
+      rpcUrl: "https://rpc.immutable.com/",
     },
     kava: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://kava-evm-rpc.publicnode.com",
     },
     linea: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.linea.build",
     },
     mantle: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.mantle.xyz",
     },
     monad: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.monad.xyz/",
     },
     moonbeam: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://moonbeam.api.onfinality.io/public",
     },
     optimism: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://optimism.drpc.org",
     },
     plume: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.plume.org",
     },
     polygon: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://polygon.drpc.org",
     },
     scroll: {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.scroll.io",
     },
     stellar: {
       interchainTokenService: "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
       gasService: undefined,
+      rpcUrl: undefined,
     },
     "xrpl-evm": {
       interchainTokenService: "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
       gasService: "0x2d5d7d31F671F86C782533cc367F14109a082712",
+      rpcUrl: "https://rpc.xrplevm.org",
     },
   },
 };
