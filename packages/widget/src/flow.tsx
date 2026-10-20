@@ -1182,7 +1182,13 @@ export class Flow extends React.Component<FlowProps, State> {
 
   // ------------------------------------------------------------ real lookup ---
 
+  /** Counts lookups, so an older one that lands late does not overwrite a newer one. */
+  private lookupSeq = 0;
+  /** True while a Finish runs: a second press must not sign a second delivery. */
+  private finishing = false;
+
   async onFind(): Promise<void> {
+    const seq = ++this.lookupSeq;
     // whatever was priced belonged to the transfer shown before this lookup
     this.pricedFinish = undefined;
     const v = this.state.lookup.trim();
@@ -1199,6 +1205,7 @@ export class Flow extends React.Component<FlowProps, State> {
       // The chain is known only for a transfer this browser sent. Without it
       // every rail is asked, which is slower and still finds it.
       const answer = await lookupAcross(this.engine.adapters, toHandle(key, rec?.sourceChainId));
+      if (seq !== this.lookupSeq) return;
       let phase = answer.phase;
       if (rec !== undefined && phase.phase === "pending") {
         phase = escalateIfOverdue(
@@ -1230,6 +1237,7 @@ export class Flow extends React.Component<FlowProps, State> {
         lookupNoteKind: "quiet",
       });
     } catch (e) {
+      if (seq !== this.lookupSeq) return;
       this.setState({ found: null, lookupNote: msg(e), lookupNoteKind: "fault" });
     }
   }
@@ -1243,6 +1251,16 @@ export class Flow extends React.Component<FlowProps, State> {
     | undefined;
 
   async onFinish(): Promise<void> {
+    if (this.finishing) return;
+    this.finishing = true;
+    try {
+      await this.finishOnce();
+    } finally {
+      this.finishing = false;
+    }
+  }
+
+  private async finishOnce(): Promise<void> {
     const compose = this.state.found?.compose;
     if (compose !== undefined) {
       try {
