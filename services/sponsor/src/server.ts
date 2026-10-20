@@ -483,8 +483,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * paid for, or is two days old. Written down with the rest of the state.
    */
   const watch = new Map<string, WatchEntry>();
-  /** Which client asked for each watched burn. Kept in memory only. */
-  const watchClients = new Map<string, string>();
   const watchLimits = options.watchLimits ?? DEFAULT_WATCH_LIMITS;
 
   /**
@@ -3142,22 +3140,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   function watchBurn(txHash: string, domain: number, client: string): void {
     const key = watchKey(txHash, domain);
     if (watch.has(key)) return;
-    const mine = [...watchClients.values()].filter((asker) => asker === client).length;
+    const mine = [...watch.values()].filter((entry) => entry.client === client).length;
     if (mine >= watchLimits.perClient || watch.size >= watchLimits.total) return;
     const now = nowUnix();
     watch.set(key, {
       txHash,
       domain,
+      client,
       addedAtUnix: now,
       nextAtUnix: now + WATCH_FIRST_RETRY_SECONDS,
       tries: 0,
     });
-    watchClients.set(key, client);
   }
 
   function forgetBurn(key: string): void {
     watch.delete(key);
-    watchClients.delete(key);
   }
 
   /**
@@ -3166,19 +3163,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * the minimum and the settlement that follows all apply as they would there.
    */
   async function sweepWatched(): Promise<void> {
-    let tried = 0;
+    const startedAt = nowUnix();
     for (const [key, entry] of [...watch]) {
-      const now = nowUnix();
-      if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < now) {
+      if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < startedAt) {
         forgetBurn(key);
         console.error(
           `[sponsor] stopped watching burn ${entry.txHash} on domain ${entry.domain}: ` +
             "not delivered within two days",
         );
-        continue;
       }
-      if (entry.nextAtUnix > now || tried >= WATCH_PER_SWEEP) continue;
-      tried += 1;
+    }
+    // Longest due first, so a burn retried a moment ago waits behind one that
+    // has not been tried yet: however many are ahead, each gets its turn.
+    const due = [...watch]
+      .filter(([, entry]) => entry.nextAtUnix <= startedAt)
+      .sort(([, a], [, b]) => a.nextAtUnix - b.nextAtUnix)
+      .slice(0, WATCH_PER_SWEEP);
+    for (const [key, entry] of due) {
       let result: BurnResult;
       try {
         result = await deliverBurn(entry.txHash, entry.domain);
@@ -3220,10 +3221,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       body: { error: "Circle's attestation service did not answer usefully.", retryable: true },
       next: "later",
     };
+    // Circle has never heard of it: not watched, since anyone can make up a
+    // hash, and a real burn Circle has not indexed yet is watched once it has
     const notYet: BurnResult = {
       status: 404,
       body: { error: "Circle has no attested record of that transaction yet.", retryable: true },
-      next: "watch",
+      next: "unknown",
     };
     let iris: Response;
     try {
@@ -3806,6 +3809,8 @@ const ALREADY_HOLDS_USDC =
 interface WatchEntry {
   readonly txHash: string;
   readonly domain: number;
+  /** Who asked first, so each client's share holds across a restart. */
+  readonly client?: string | undefined;
   readonly addedAtUnix: number;
   nextAtUnix: number;
   tries: number;
@@ -3815,12 +3820,13 @@ interface WatchEntry {
 interface BurnResult {
   readonly status: number;
   readonly body: Record<string, unknown>;
-  readonly next: "watch" | "later" | "done" | "never";
+  readonly next: "watch" | "unknown" | "later" | "done" | "never";
 }
 
 const watchEntryShape = z.object({
   txHash: z.string().max(200),
   domain: z.number().int().nonnegative(),
+  client: z.string().max(100).optional(),
   addedAtUnix: z.number().int(),
   nextAtUnix: z.number().int(),
   tries: z.number().int().nonnegative(),

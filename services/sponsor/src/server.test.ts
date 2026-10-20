@@ -4575,16 +4575,24 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
   const ATTESTATION = `0x${"ef".repeat(65)}`;
   const burnHash = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
 
-  /** Iris as a switch: nothing attested until `attest` names a message for a hash. */
+  /**
+   * Iris as a switch: every burn asked about is known and pending until
+   * `attest` names a message for it.
+   */
   function irisSwitch(): { attest: (hash: string, messageHex: string) => void; asked: URL[] } {
     const attested = new Map<string, string>();
     const asked = stubIris((url) => {
       const message = attested.get(url.searchParams.get("transactionHash") ?? "");
-      return message === undefined
-        ? new Response("{}", { status: 404 })
-        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
-            status: 200,
-          });
+      return new Response(
+        JSON.stringify({
+          messages: [
+            message === undefined
+              ? { message: "0x", attestation: "PENDING" }
+              : { message, attestation: ATTESTATION },
+          ],
+        }),
+        { status: 200 },
+      );
     });
     return { attest: (hash, messageHex) => attested.set(hash, messageHex), asked };
   }
@@ -4615,7 +4623,8 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
     server.rpc.holding(user, PLENTY);
 
     const early = await server.post("/deliver", { txHash: burnHash(1), domain: 0 });
-    expect(early.status).toBe(404);
+    expect(early.status).toBe(200);
+    expect(early.body.kind).toBe("not-attested-yet");
     expect(await watched(state)).toHaveLength(1);
 
     // the page is closed; Circle attests meanwhile
@@ -4631,7 +4640,7 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
     const state = new MemoryDocumentStore();
     const server = await startServer({ buildDelivery, state });
     for (const hash of [burnHash(2), burnHash(2), burnHash(2).toUpperCase().replace("0X", "0x")]) {
-      expect((await server.post("/deliver", { txHash: hash, domain: 0 })).status).toBe(404);
+      expect((await server.post("/deliver", { txHash: hash, domain: 0 })).status).toBe(200);
     }
     expect(await watched(state)).toHaveLength(1);
   });
@@ -4651,9 +4660,9 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
         headers: { "content-type": "application/json", "x-forwarded-for": client },
         body: JSON.stringify({ txHash: burnHash(n), domain: 0 }),
       });
-    for (const n of [10, 11, 12]) expect((await ask("203.0.113.1", n)).status).toBe(404);
+    for (const n of [10, 11, 12]) expect((await ask("203.0.113.1", n)).status).toBe(200);
     expect(await watched(state)).toHaveLength(2);
-    for (const n of [20, 21]) expect((await ask("198.51.100.9", n)).status).toBe(404);
+    for (const n of [20, 21]) expect((await ask("198.51.100.9", n)).status).toBe(200);
     expect(await watched(state)).toHaveLength(3);
   });
 
@@ -4741,13 +4750,21 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
   const ATTESTATION = `0x${"ef".repeat(65)}`;
   const burn = (n: number) => `0x${(1000 + n).toString(16).padStart(64, "0")}`;
 
-  function irisAnswers(message: string | undefined): void {
+  /** Circle's answer: unknown (404), known and pending, or attested with this message. */
+  function irisAnswers(message: string | "pending" | undefined): void {
     stubIris(() =>
       message === undefined
         ? new Response("{}", { status: 404 })
-        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
-            status: 200,
-          }),
+        : new Response(
+            JSON.stringify({
+              messages: [
+                message === "pending"
+                  ? { message: "0x", attestation: "PENDING" }
+                  : { message, attestation: ATTESTATION },
+              ],
+            }),
+            { status: 200 },
+          ),
     );
   }
 
@@ -4758,14 +4775,25 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
     return (document?.entries ?? []).map((entry) => entry.txHash);
   }
 
-  it("says watching on a 404, and the list is on disk when the answer arrives", async () => {
-    irisAnswers(undefined);
+  it("says watching on a burn Circle has pending, and the list is on disk when the answer arrives", async () => {
+    irisAnswers("pending");
     const state = new MemoryDocumentStore();
     const server = await startServer({ buildDelivery, state });
     const answered = await server.post("/deliver", { txHash: burn(1), domain: 0 });
-    expect(answered.status).toBe(404);
+    expect(answered.status).toBe(200);
+    expect(answered.body.kind).toBe("not-attested-yet");
     expect(answered.body.watching).toBe(true);
     expect(await watched(state)).toEqual([burn(1)]);
+  });
+
+  it("says nothing of watching on a 404 for a burn Circle has never heard of", async () => {
+    irisAnswers(undefined);
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const answered = await server.post("/deliver", { txHash: burn(9), domain: 0 });
+    expect(answered.status).toBe(404);
+    expect(answered.body.watching ?? false).toBe(false);
+    expect(await watched(state)).toEqual([]);
   });
 
   it("says watching on a 409 for a recipient that cannot hold USDC yet", async () => {
@@ -4784,7 +4812,7 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
 
   it("says nothing of watching once delivered, and stops watching it", async () => {
     const state = new MemoryDocumentStore();
-    irisAnswers(undefined);
+    irisAnswers("pending");
     const server = await startServer({ buildDelivery, state });
     expect((await server.post("/deliver", { txHash: burn(3), domain: 0 })).body.watching).toBe(
       true,
@@ -4798,7 +4826,7 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
   });
 
   it("says nothing of watching when the burn could not be put on the list", async () => {
-    irisAnswers(undefined);
+    irisAnswers("pending");
     const state = new MemoryDocumentStore();
     const full = await startServer({
       buildDelivery,
@@ -4807,7 +4835,7 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
     });
     expect((await full.post("/deliver", { txHash: burn(4), domain: 0 })).body.watching).toBe(true);
     const past = await full.post("/deliver", { txHash: burn(5), domain: 0 });
-    expect(past.status).toBe(404);
+    expect(past.status).toBe(200);
     expect(past.body.watching ?? false).toBe(false);
     const malformed = await full.post("/deliver", { txHash: "nope", domain: 0 });
     expect(malformed.body.watching ?? false).toBe(false);
@@ -5034,9 +5062,21 @@ describe("round 3: the widget reads the watching flag exactly as the sponsor sen
   const ATTESTATION = `0x${"ef".repeat(65)}`;
 
   it("carries watching through a not-attested answer and a recipient that cannot hold USDC yet", async () => {
+    // a hash Circle has never heard of is not watched
     stubIris(() => new Response("{}", { status: 404 }));
     const server = await startServer({ buildDelivery });
     const client = createSponsorClient(server.url);
+    const unknown = await client.requestDelivery(`0x${"a0".repeat(32)}`, 0);
+    expect(unknown.kind).toBe("not-attested-yet");
+    expect((unknown as { watching?: boolean }).watching ?? false).toBe(false);
+
+    // one Circle has, pending, is
+    stubIris(
+      () =>
+        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
+          status: 200,
+        }),
+    );
     expect(await client.requestDelivery(`0x${"a1".repeat(32)}`, 0)).toEqual({
       kind: "not-attested-yet",
       watching: true,
@@ -5089,5 +5129,123 @@ describe("round 3: the widget reads the watching flag exactly as the sponsor sen
     expect(refused).toBeInstanceOf(SponsorRefusal);
     expect((refused as SponsorRefusal).watching).toBe(true);
     expect((refused as SponsorRefusal).retryable).toBe(true);
+  });
+});
+
+describe("round 4: only burns Circle knows are watched, and the oldest due goes first", () => {
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const hash = (n: number) => `0x${(50_000 + n).toString(16).padStart(64, "0")}`;
+
+  async function watched(state: MemoryDocumentStore): Promise<string[]> {
+    const document = (await state.read("delivery-watch")) as
+      | { entries: { txHash: string }[] }
+      | undefined;
+    return (document?.entries ?? []).map((entry) => entry.txHash);
+  }
+
+  const askAs = (server: TestServer, client: string, txHash: string) =>
+    fetch(`${server.url}/deliver`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      body: JSON.stringify({ txHash, domain: 0 }),
+    });
+
+  it("leaves 600 made-up hashes off the list, and still delivers a real burn on schedule", async () => {
+    const real = hash(9_999);
+    const recipient = Keypair.random();
+    let attested = false;
+    stubIris((url) => {
+      if (url.searchParams.get("transactionHash") !== real)
+        return new Response("{}", { status: 404 });
+      return new Response(
+        JSON.stringify({
+          messages: [
+            attested
+              ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
+              : { message: "0x", attestation: "PENDING" },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, trustProxy: true });
+    for (let n = 0; n < 600; n += 1) {
+      const answered = await askAs(server, `2001:db8:${n.toString(16)}::1`, hash(n));
+      expect(answered.status).toBe(404);
+      expect(((await answered.json()) as Body).watching ?? false).toBe(false);
+    }
+    expect(await watched(state)).toEqual([]);
+
+    const realAnswer = (await (await askAs(server, "203.0.113.1", real)).json()) as Body;
+    expect(realAnswer.watching).toBe(true);
+    attested = true;
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions.map((s) => s.label)).toContain("cctp delivery");
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("tries the burn due longest first, so pending ones ahead of it cannot starve it", async () => {
+    const real = hash(7_777);
+    const recipient = Keypair.random();
+    let attested = false;
+    stubIris(
+      (url) =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              attested && url.searchParams.get("transactionHash") === real
+                ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
+                : { message: "0x", attestation: "PENDING" },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const state = new MemoryDocumentStore();
+    const server = await startServer({
+      buildDelivery,
+      state,
+      trustProxy: true,
+      watchLimits: { perClient: 8, total: 1_000 },
+    });
+    // 60 pending burns from other clients first, then the real one
+    for (let n = 0; n < 60; n += 1) await askAs(server, `2001:db8:${n.toString(16)}::1`, hash(n));
+    await askAs(server, "203.0.113.1", real);
+    attested = true;
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    server.server.startSweep();
+    // 25 a sweep: the never-tried ones go before the retried, so it is reached by the third
+    await vi.advanceTimersByTimeAsync(3 * 120_000);
+    await server.server.stopSweep();
+    expect(server.rpc.submissions.map((s) => s.label)).toContain("cctp delivery");
+  });
+
+  it("keeps each client's share across a restart", async () => {
+    stubIris(
+      () =>
+        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
+          status: 200,
+        }),
+    );
+    const state = new MemoryDocumentStore();
+    const limits = { perClient: 2, total: 1_000 };
+    const first = await startServer({
+      buildDelivery,
+      state,
+      trustProxy: true,
+      watchLimits: limits,
+    });
+    for (const n of [1, 2]) await askAs(first, "203.0.113.1", hash(n));
+    const second = await startServer(
+      { buildDelivery, state, trustProxy: true, watchLimits: limits },
+      { restartOf: first },
+    );
+    const third = (await (await askAs(second, "203.0.113.1", hash(3))).json()) as Body;
+    expect(third.watching ?? false).toBe(false);
+    expect(await watched(state)).toHaveLength(2);
   });
 });
