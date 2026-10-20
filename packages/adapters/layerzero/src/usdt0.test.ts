@@ -164,7 +164,10 @@ function remoteServices(): void {
       });
     }
     if (url.startsWith(`${HORIZON}/order_book`)) {
-      return json({ bids: [{ price: "0.2" }], asks: [{ price: "0.2" }] });
+      return json({
+        bids: [{ price: "0.2", amount: "1000" }],
+        asks: [{ price: "0.2", amount: "5000" }],
+      });
     }
     if (url === `${SCAN_BASE_URL.mainnet}/messages/tx/${SEND_HASH}`) {
       return json({
