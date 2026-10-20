@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseQuoteReply } from "./api.js";
-import { decodeTransfer } from "./evm.js";
+import type { OriginChain } from "./chains.js";
+import { decodeTransfer, type JsonRpc, readTransfer } from "./evm.js";
 
 const TO = "76b4c56085ed136a8744d52be956396624a730e8";
 
@@ -47,5 +48,62 @@ describe("parseQuoteReply", () => {
     expect(parseQuoteReply(reply({ depositAddress: `0x${TO}` }), false).quote.depositAddress).toBe(
       `0x${TO}`,
     );
+  });
+});
+
+describe("readTransfer", () => {
+  const chain: OriginChain = {
+    code: "arb",
+    chainId: "arbitrum",
+    name: "Arbitrum One",
+    evmChainId: 42161,
+    rpc: ["https://first.test", "https://second.test"],
+    explorer: "https://arbiscan.io",
+  };
+  const hash = `0x${"ab".repeat(32)}`;
+  const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+  const tx = {
+    to: USDC,
+    input: `0xa9059cbb${TO.padStart(64, "0")}${(10_000_000).toString(16).padStart(64, "0")}`,
+  };
+
+  /** Each URL's chain id and what it knows about the hash. */
+  function nodes(answers: Record<string, { chainId: string; tx: unknown }>): JsonRpc {
+    return async (url, method) => {
+      const node = answers[url];
+      if (node === undefined) throw new Error(`no node at ${url}`);
+      if (method === "eth_chainId") return node.chainId;
+      if (method === "eth_getTransactionByHash") return node.tx;
+      throw new Error(`no answer for ${method}`);
+    };
+  }
+
+  it("asks the next node when the first has not seen the transaction yet", async () => {
+    const rpc = nodes({
+      "https://first.test": { chainId: "0xa4b1", tx: null },
+      "https://second.test": { chainId: "0xa4b1", tx },
+    });
+    expect(await readTransfer(chain, hash, rpc)).toEqual({
+      token: USDC,
+      to: `0x${TO}`,
+      amount: 10_000_000n,
+    });
+  });
+
+  it("does not believe a node serving another chain", async () => {
+    const rpc = nodes({
+      // an Ethereum node behind an Arbitrum URL, which has some other tx at the hash
+      "https://first.test": { chainId: "0x1", tx },
+      "https://second.test": { chainId: "0xa4b1", tx: null },
+    });
+    expect(await readTransfer(chain, hash, rpc)).toBeUndefined();
+  });
+
+  it("says no node answered when every one serves another chain", async () => {
+    const rpc = nodes({
+      "https://first.test": { chainId: "0x1", tx },
+      "https://second.test": { chainId: "0x89", tx },
+    });
+    await expect(readTransfer(chain, hash, rpc)).rejects.toMatchObject({ retryable: true });
   });
 });

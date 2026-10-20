@@ -2,6 +2,7 @@ import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NearIntentsAdapter, slippageOf } from "./adapter.js";
+import { ORIGIN_CHAINS } from "./chains.js";
 import type { JsonRpc } from "./evm.js";
 
 /**
@@ -191,8 +192,12 @@ function stellarNode(): RpcClient {
 let chainTxs: Record<string, unknown>;
 let chainDown: Set<string>;
 const jsonRpc: JsonRpc = async (url, method, params) => {
-  if (method !== "eth_getTransactionByHash") throw new Error(`no answer for ${method}`);
   if (chainDown.has(url)) throw new Error(`${url} refused the connection`);
+  if (method === "eth_chainId") {
+    const chain = ORIGIN_CHAINS.mainnet.find((c) => c.rpc.includes(url));
+    return `0x${(chain?.evmChainId ?? 0).toString(16)}`;
+  }
+  if (method !== "eth_getTransactionByHash") throw new Error(`no answer for ${method}`);
   asked.push(`tx ${url}`);
   return chainTxs[`${url} ${String(params[0])}`] ?? null;
 };
