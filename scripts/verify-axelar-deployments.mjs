@@ -97,7 +97,7 @@ async function call(url, method, params) {
   throw last;
 }
 
-async function inspectEvm(id, chain) {
+async function inspectEvm(chain) {
   const its = chain.contracts?.InterchainTokenService?.address;
   const gas = chain.contracts?.AxelarGasService?.address;
   if (its === undefined) return { skip: "no token service in the config" };
@@ -151,7 +151,7 @@ for (const network of ["testnet", "mainnet"]) {
   );
   const settled = await Promise.allSettled(
     rows.map(([id, chain]) =>
-      chain.chainType === "stellar" ? inspectStellar(network, chain) : inspectEvm(id, chain),
+      chain.chainType === "stellar" ? inspectStellar(network, chain) : inspectEvm(chain),
     ),
   );
   settled.forEach((outcome, index) => {
