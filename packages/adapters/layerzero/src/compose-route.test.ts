@@ -1,5 +1,5 @@
 import type { Asset, ComposeQuoteRequest, Route, RouteRejection } from "@mavna/core";
-import { isRejection, MavnaError } from "@mavna/core";
+import { ARRIVAL_CONTRACT_IDS, isRejection, MavnaError } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { Keypair, Networks, Asset as StellarAsset, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
@@ -482,6 +482,51 @@ describe("what a compose decline shows the user", () => {
     expect(result.reason).toBe("temporarily-unavailable");
     expect(result.explanation).not.toMatch(/x\.test|503/);
     expect(result.detail).toMatch(/x\.test answered HTTP 503/);
+  });
+});
+
+describe("a compose through an integrator's own Arrival Contract", () => {
+  // the network's default contract is somebody else's here, and paying it a
+  // converted asset as a plain transfer leaves it there for good
+  const OWN = StrKey.encodeContract(Buffer.alloc(32, 21));
+  const own = (ctx: ComposeContext): ComposeContext => ({
+    ...ctx,
+    arrival: { ...ctx.arrival, contract: OWN },
+  });
+
+  it("declines the network's default Arrival Contract as the recipient", async () => {
+    expect(ARRIVAL_CONTRACT_IDS.testnet).toBe(ARRIVAL);
+    const { ctx } = context();
+    const result = await quoteComposeRoute(own(ctx), request(ARRIVAL));
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("declines the network's default Arrival Contract as the fee account", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(own(ctx), {
+      ...request(),
+      integratorFee: { bps: 100, recipient: ARRIVAL, recipientName: "Example app" },
+    });
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("refuses either again when a route naming it is built", async () => {
+    const { ctx } = context();
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route) || route.compose === undefined) {
+      throw new Error("expected a route");
+    }
+    const through = { ...route.compose, contract: OWN };
+    await expect(
+      composeSendFor(own(ctx), { ...route, compose: through, destination: ARRIVAL }, resolved),
+    ).rejects.toThrow(/Arrival Contract itself/);
+    await expect(
+      composeSendFor(
+        own(ctx),
+        { ...route, compose: { ...through, fee: { bps: 100, recipient: ARRIVAL } } },
+        resolved,
+      ),
+    ).rejects.toThrow(/Arrival Contract itself/);
   });
 });
 
