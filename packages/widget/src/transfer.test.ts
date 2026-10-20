@@ -1,6 +1,6 @@
 import { CctpAdapter } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
-import { createNetworkConfig, RpcClient } from "@mavna/stellar";
+import { buildPreparation, createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { createSwapVenues } from "@mavna/swap";
 import {
   Account,
@@ -42,8 +42,9 @@ import type { Connection } from "./wallet";
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
 const ARBITRUM_SEPOLIA = 421_614;
 const HISTORY_KEY = "test.transfers";
-/** A Stellar address other than the one the wallet connects. */
+/** A Stellar address other than the one the wallet connects; the sponsor's settlement channel. */
 const SENDER_STELLAR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const SPONSOR_STELLAR = Keypair.random().publicKey();
 
 /** Everything that crossed a boundary, in the order it crossed. */
 let log: string[];
@@ -70,6 +71,8 @@ const attested = {
 let askedAssets: string[][];
 /** The settlement the sponsor builds for a new account it fronts. */
 let settlementXdr: string;
+/** The preparation the sponsor builds for a new account it fronts. */
+let sponsoredPreparation: string;
 /** What happens on Stellar as the sponsor delivers a Circle transfer. */
 let onDeliver: (() => void) | undefined;
 
@@ -122,7 +125,14 @@ beforeEach(() => {
   usdcHeld = 0n;
   conversionAmounts = [];
   askedAssets = [];
-  settlementXdr = "SETTLEMENT";
+  settlementXdr = settlementSpending("0.6");
+  sponsoredPreparation = buildPreparation({
+    network: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
+    sponsorAccount: new Account(SPONSOR_STELLAR, "1"),
+    userAddress: DESTINATION,
+    createAccount: true,
+    assets: [new Asset("USDC", STELLAR_USDC.id.split(":")[1])],
+  }).toXDR();
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   stored = new Map();
@@ -158,7 +168,7 @@ beforeEach(() => {
           minDeliveryBaseUnits: "1000000",
         });
       case "/settlement":
-        return reply(200, { xdr: settlementXdr, channel: "GCHANNEL" });
+        return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
       case "/settlement/commit":
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
@@ -168,7 +178,9 @@ beforeEach(() => {
       case "/prepare": {
         const asked = bodyOf(init) as { assets: string[] };
         askedAssets.push(asked.assets);
-        if (funding === "sponsor") return reply(200, { xdr: "PREPARATION", sponsor: "GSPONSOR" });
+        if (funding === "sponsor") {
+          return reply(200, { xdr: sponsoredPreparation, sponsor: SPONSOR_STELLAR });
+        }
         // the real shape of a self-funded preparation: one changeTrust the account sources
         const [code] = asked.assets;
         const line = preparedLine ?? (code === "USDT0" ? STELLAR_USDT0.id : STELLAR_USDC.id);
@@ -190,7 +202,7 @@ beforeEach(() => {
       }
       case "/submit":
         expect(bodyOf(init)).toEqual({
-          signedXdr: `signed ${funding === "self" ? preparation : "PREPARATION"}`,
+          signedXdr: `signed ${funding === "self" ? preparation : sponsoredPreparation}`,
         });
         return reply(200, { txHash: "9e9", ledger: 1 });
       case "/deliver": {
@@ -366,7 +378,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         return DESTINATION;
       },
       sign: async (xdr: string) => {
-        if (xdr === preparation) {
+        if (xdr === preparation || xdr === sponsoredPreparation) {
           log.push("stellar sign PREPARATION");
           return `signed ${xdr}`;
         }
@@ -678,6 +690,89 @@ describe("runTransfer over Circle", () => {
         ref: "d311",
         refUrl: "https://stellar.expert/explorer/testnet/tx/d311",
         note: "Delivered, and the deposit repaid itself from the arrival.",
+      },
+    });
+  });
+});
+
+describe("a sponsor that fronts the reserve, read before the account signs", () => {
+  const ATTACKER = Keypair.random().publicKey();
+  const USDC = new Asset("USDC", STELLAR_USDC.id.split(":")[1]);
+
+  it("refuses a preparation that also hands the account to someone else", async () => {
+    sponsoredPreparation = new TransactionBuilder(new Account(SPONSOR_STELLAR, "1"), {
+      fee: "1000000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.beginSponsoringFutureReserves({ sponsoredId: DESTINATION }))
+      .addOperation(Operation.changeTrust({ asset: USDC, source: DESTINATION }))
+      .addOperation(Operation.endSponsoringFutureReserves({ source: DESTINATION }))
+      .addOperation(
+        Operation.setOptions({
+          source: DESTINATION,
+          signer: { ed25519PublicKey: ATTACKER, weight: 1 },
+          masterWeight: 0,
+        }),
+      )
+      .setTimeout(300)
+      .build()
+      .toXDR();
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/not signed: it does more than open the account\. Nothing has been sent/);
+    expect(log).not.toContain("stellar sign PREPARATION");
+    expect(log).not.toContain("sponsor /submit");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("refuses a settlement that pays the arrival to someone else, before the burn", async () => {
+    settlementXdr = new TransactionBuilder(new Account(SENDER_STELLAR, "1"), {
+      fee: "1000000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        Operation.pathPaymentStrictReceive({
+          source: DESTINATION,
+          sendAsset: USDC,
+          sendMax: "4.9",
+          destination: ATTACKER,
+          destAsset: Asset.native(),
+          destAmount: "1.5",
+          path: [],
+        }),
+      )
+      .setTimeout(86_400)
+      .build()
+      .toXDR();
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    await expect(
+      run(cctp, routeFor("cctp", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(
+      /not the receiving account buying back its own reserve.*Nothing has been sent/,
+    );
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+    expect(log).not.toContain("sponsor /settlement/commit");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("tells the user the most the repayment may take before they sign it", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    const { seen, patch } = patches();
+    await run(adapter, routeFor("layerzero", { newAccount: true }), patch);
+    expect(seen).toContainEqual({
+      id: "settle",
+      patch: {
+        phase: "blocked",
+        note: "Repays the reserve from what arrives: at most 0.6 USDC.",
       },
     });
   });
@@ -1169,12 +1264,13 @@ describe("runTransfer when the account pays its own reserve", () => {
     });
 
     it("skips the conversion and says the funds stay as they arrived when nothing would be left", async () => {
-      settlementXdr = settlementSpending("6");
+      // a repayment may never claim the whole arrival, so less arrives than it may take
+      settlementXdr = settlementSpending("4.9");
       settleReplies = [[200, { settled: false, settlementRetryable: true }]];
       const adapter = new ScriptedAdapter("layerzero", [delivered()], {
         transactions: [layerZeroSend("777")],
         onStatus: () => {
-          usdcHeld = 50_000_000n;
+          usdcHeld = 40_000_000n;
         },
       });
       const { seen, patch } = patches();

@@ -13,10 +13,9 @@
  */
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { inspectDestination, stroopsToXlm, xlmToStroops } from "@mavna/stellar";
+import { inspectDestination, stroopsToXlm } from "@mavna/stellar";
 import {
   FeeBumpTransaction,
-  type Operation,
   Asset as StellarAsset,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
@@ -43,6 +42,7 @@ import {
   trackDelivery,
 } from "./rails";
 import type { SponsorDelivery, SponsorTerms } from "./sponsor";
+import { preparationProblem, readSettlement } from "./sponsored";
 import type { Connection } from "./wallet";
 
 export type StepPhase = "idle" | "blocked" | "pending" | "done" | "failed";
@@ -186,6 +186,7 @@ async function collectSettlement(
   engine: TransferEngine,
   route: Route,
   chainId: string,
+  patch: Patch,
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
@@ -195,32 +196,23 @@ async function collectSettlement(
     );
   }
   const built = await engine.sponsor.requestSettlement(route.destination, chainId);
-  // a conversion has to leave the repayment its share, so it reads what the
-  // settlement may spend before the user signs it
-  const repaysAtMost = route.steps.some((s) => s.kind === "swap")
-    ? settlementSpend(built.xdr, engine.stellarNetwork.passphrase)
-    : 0n;
+  // held and submitted later against the arrival, so it is read in full first
+  const read = readSettlement(built.xdr, engine.stellarNetwork.passphrase, route, built.channel);
+  if ("problem" in read) {
+    throw new Error(
+      `The sponsor's repayment was not signed: ${read.problem}. Nothing has been sent.`,
+    );
+  }
+  const holds = route.deliveredAtLeast.asset;
+  patch("settle", {
+    phase: "blocked",
+    note: `Repays the reserve from what arrives: at most ${stroopsToXlm(read.sendMax)} ${holds.symbol}.`,
+  });
+  // a conversion has to leave the repayment its share
+  const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
   const signed = await engine.stellar.sign(built.xdr, address);
   await engine.sponsor.commitSettlement(route.destination, signed);
   return { owner: address, repaysAtMost };
-}
-
-/** The most the held settlement may spend of the arrival: its strict-receive's sendMax. */
-function settlementSpend(built: string, passphrase: string): bigint {
-  const tx = TransactionBuilder.fromXDR(built, passphrase);
-  const buys =
-    "operations" in tx
-      ? tx.operations.find(
-          (op): op is Operation.PathPaymentStrictReceive => op.type === "pathPaymentStrictReceive",
-        )
-      : undefined;
-  if (buys === undefined) {
-    throw new Error(
-      "The sponsor's repayment does not say how much of the arrival it may spend, so the " +
-        "conversion cannot leave that aside. Nothing has been sent.",
-    );
-  }
-  return xlmToStroops(buys.sendMax);
 }
 
 /**
@@ -316,8 +308,14 @@ async function prepareNow(
   route: Route,
   chainId: string,
   address: string,
+  /** What to tell the user about their funds if this is refused. */
+  funds: string,
 ): Promise<void> {
   const preparation = await engine.sponsor.requestPreparation(route.destination, chainId);
+  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, route);
+  if (problem !== undefined) {
+    throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
+  }
   const signed = await engine.stellar.sign(preparation.xdr, address);
   await engine.sponsor.submitPreparation(signed);
 }
@@ -469,7 +467,15 @@ async function deliverToStellar(
             owner,
             "The funds are safe on Circle's side and still deliverable once the account can hold them.",
           );
-        } else await prepareNow(engine, route, chainId, owner);
+        } else {
+          await prepareNow(
+            engine,
+            route,
+            chainId,
+            owner,
+            "The funds are safe on Circle's side and still deliverable once the account can hold them.",
+          );
+        }
         patch("prepare", { phase: "done" });
         prepared = true;
         continue;
@@ -657,10 +663,10 @@ async function runRelayed(
       selfFunded = true;
     } else {
       patch("settle", { phase: "blocked" });
-      ({ owner, repaysAtMost } = await collectSettlement(engine, route, chainId));
+      ({ owner, repaysAtMost } = await collectSettlement(engine, route, chainId, patch));
       patch("settle", { phase: "done" });
       patch("prepare", { phase: "blocked" });
-      await prepareNow(engine, route, chainId, owner);
+      await prepareNow(engine, route, chainId, owner, "Nothing has been sent.");
       patch("prepare", { phase: "done" });
     }
   }
@@ -774,7 +780,7 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
       prepared = true;
     } else if (view.newAccount) {
       patch("settle", { phase: "blocked" });
-      ({ owner, repaysAtMost: unrepaid } = await collectSettlement(engine, route, chainId));
+      ({ owner, repaysAtMost: unrepaid } = await collectSettlement(engine, route, chainId, patch));
       patch("settle", { phase: "done" });
     } else if (ownDelivery) {
       owner = await ownWallet(engine, route);
