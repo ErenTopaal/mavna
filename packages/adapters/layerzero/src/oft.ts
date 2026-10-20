@@ -1,8 +1,8 @@
 import type { Route } from "@mavna/core";
 import { MavnaError } from "@mavna/core";
 import { classifyAddress } from "@mavna/stellar";
-import { StrKey } from "@stellar/stellar-sdk";
-import { encodePacked } from "viem";
+import { nativeToScVal, StrKey, type xdr } from "@stellar/stellar-sdk";
+import { bytesToHex, encodePacked, hexToBytes } from "viem";
 import { readableAmount, STELLAR_DECIMALS } from "./config.js";
 
 /**
@@ -101,7 +101,17 @@ export function stellarRecipientToBytes32(address: string): `0x${string}` {
       ? StrKey.decodeContract(address)
       : StrKey.decodeEd25519PublicKey(address);
 
-  return `0x${Buffer.from(raw).toString("hex")}`;
+  return bytesToHex(raw);
+}
+
+/**
+ * Bytes in the Buffer the Stellar SDK constructs itself.
+ *
+ * Its xdr wants a Buffer, and a browser has no global one. The SDK carries its
+ * own, so going through it works wherever the SDK does.
+ */
+export function sdkBytes(bytes: Uint8Array): ReturnType<xdr.ScVal["bytes"]> {
+  return nativeToScVal(bytes, { type: "bytes" }).bytes();
 }
 
 /** The Stellar contract a 32-byte peer refers to. */
@@ -112,7 +122,7 @@ export function bytes32ToStellarContract(value: string): string {
       retryable: false,
     });
   }
-  return StrKey.encodeContract(Buffer.from(hex, "hex"));
+  return StrKey.encodeContract(sdkBytes(hexToBytes(`0x${hex}`)));
 }
 
 /** True when a bytes32 read back from a contract is unset. */

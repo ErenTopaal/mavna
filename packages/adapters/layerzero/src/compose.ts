@@ -15,7 +15,16 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
-import { concatHex, encodePacked, keccak256, numberToHex } from "viem";
+import {
+  bytesToHex,
+  concatHex,
+  encodePacked,
+  hexToBytes,
+  isHex,
+  keccak256,
+  numberToHex,
+} from "viem";
+import { sdkBytes } from "./oft.js";
 
 /**
  * Sending to the Mavna Arrival Contract, and reading what it did.
@@ -45,7 +54,7 @@ export const MAX_HOP_TOKENS = 3;
 /** What the endpoint leaves in a compose slot once it has been run. */
 export const COMPOSE_RECEIVED: `0x${string}` = `0x${"00".repeat(31)}01`;
 
-const hex = (bytes: Uint8Array): `0x${string}` => `0x${Buffer.from(bytes).toString("hex")}`;
+const hex = (bytes: Uint8Array): `0x${string}` => bytesToHex(bytes);
 
 function addressBytes(address: string): { kind: number; bytes: `0x${string}` } {
   if (StrKey.isValidEd25519PublicKey(address)) {
@@ -137,9 +146,9 @@ export function encodeArrivalMessage(recipient: string, compose: ComposeArrival)
 
 /** The recipient named in a Mavna compose message, or undefined if it is not one. */
 export function arrivalRecipientOf(composeMsg: string): string | undefined {
-  const raw = Buffer.from(composeMsg.replace(/^0x/, ""), "hex");
-  if (raw.length < 34 || raw[0] !== MESSAGE_VERSION) return undefined;
-  const payload = raw.subarray(2, 34);
+  const raw = messageBytes(composeMsg);
+  if (raw === undefined || raw.length < 34 || raw[0] !== MESSAGE_VERSION) return undefined;
+  const payload = sdkBytes(raw.subarray(2, 34));
   if (raw[1] === KIND_ACCOUNT) return StrKey.encodeEd25519PublicKey(payload);
   if (raw[1] === KIND_CONTRACT) return StrKey.encodeContract(payload);
   return undefined;
@@ -147,9 +156,15 @@ export function arrivalRecipientOf(composeMsg: string): string | undefined {
 
 /** The wanted asset's contract id in a Mavna compose message. */
 export function arrivalWantedOf(composeMsg: string): string | undefined {
-  const raw = Buffer.from(composeMsg.replace(/^0x/, ""), "hex");
-  if (raw.length < 66 || raw[0] !== MESSAGE_VERSION) return undefined;
-  return StrKey.encodeContract(raw.subarray(34, 66));
+  const raw = messageBytes(composeMsg);
+  if (raw === undefined || raw.length < 66 || raw[0] !== MESSAGE_VERSION) return undefined;
+  return StrKey.encodeContract(sdkBytes(raw.subarray(34, 66)));
+}
+
+/** A compose message's bytes, or undefined when it is not hex at all. */
+function messageBytes(composeMsg: string): Uint8Array | undefined {
+  const value = composeMsg.startsWith("0x") ? composeMsg : `0x${composeMsg}`;
+  return isHex(value) ? hexToBytes(value) : undefined;
 }
 
 /** An OFT message that carries a compose: what the OFT credits and what it queues. */
@@ -414,7 +429,7 @@ export async function readComposeQueue(
   const value = await simulateRead(rpcClient, passphrase, slot.endpoint, "compose_queue", [
     new Address(slot.from).toScVal(),
     new Address(slot.to).toScVal(),
-    xdr.ScVal.scvBytes(Buffer.from(slot.guid.replace(/^0x/, ""), "hex")),
+    guidScVal(slot.guid),
     nativeToScVal(slot.index, { type: "u32" }),
   ]);
   if (value.switch().name === "scvVoid") return undefined;
@@ -424,6 +439,13 @@ export async function readComposeQueue(
     });
   }
   return hex(value.bytes());
+}
+
+/** A guid as the endpoint and the Arrival Contract key it: 32 raw bytes. */
+function guidScVal(guid: string): xdr.ScVal {
+  return nativeToScVal(hexToBytes(guid.startsWith("0x") ? (guid as `0x${string}`) : `0x${guid}`), {
+    type: "bytes",
+  });
 }
 
 export function composeMessageHash(message: `0x${string}`): `0x${string}` {
@@ -478,10 +500,7 @@ export async function findArrivalEvent(
   const health = await rpcClient.server.getHealth();
   let startLedger = Math.max(fromLedger ?? health.oldestLedger, health.oldestLedger);
   const topics = [
-    [
-      nativeToScVal("arrival", { type: "symbol" }).toXDR("base64"),
-      xdr.ScVal.scvBytes(Buffer.from(guid.replace(/^0x/, ""), "hex")).toXDR("base64"),
-    ],
+    [nativeToScVal("arrival", { type: "symbol" }).toXDR("base64"), guidScVal(guid).toXDR("base64")],
   ];
   let cursor: string | undefined;
   for (let page = 0; page < EVENT_SCAN_PAGES; page++) {
