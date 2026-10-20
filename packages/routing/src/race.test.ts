@@ -289,6 +289,48 @@ describe("compose routes", () => {
     expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
   });
 
+  it("never adds a route or reopens the set after it reported complete, when a plain quote answers late", async () => {
+    const updates: RouteSet[] = [];
+    const asked: ComposeQuoteRequest[] = [];
+    let swapAsked = 0;
+    const late: BridgeAdapter = {
+      ...adapter("lz", async () => {
+        await sleep(60);
+        return plainRoute("lz");
+      }),
+      quoteCompose: async (r) => {
+        asked.push(r);
+        return { ...r.plain, id: "lz-compose" };
+      },
+    };
+    const counting: SwapQuoter = {
+      id: "venue",
+      quote: async (q) => {
+        swapAsked += 1;
+        return { provider: "venue", amountOut: q.amountIn, amountOutMinimum: q.amountIn };
+      },
+    };
+    const result = await raceAdapters(
+      [late],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      {
+        swap: { ...swap, provider: counting },
+        timeoutMs: 20,
+        onUpdate: (u) => updates.push(u),
+      },
+    );
+    const afterReturn = updates.length;
+    await sleep(120);
+    expect(result.routes).toEqual([]);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+    // nothing reaches the caller once the race has said it is done
+    expect(updates.length).toBe(afterReturn);
+    expect(updates.every((u) => u.routes.length === 0)).toBe(true);
+    // and a rail that already lost its slot is not asked for anything more
+    expect(asked).toHaveLength(0);
+    expect(swapAsked).toBe(0);
+  });
+
   it("hands the integrator fee to the contract that collects it, and does not take it twice", async () => {
     const asked: ComposeQuoteRequest[] = [];
     const result = await raceAdapters(

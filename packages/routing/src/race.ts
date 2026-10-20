@@ -86,7 +86,12 @@ export async function raceAdapters(
   const railRequest: QuoteRequest =
     options.swap === undefined ? request : { ...request, to: options.swap.delivered };
 
+  // set once the race has returned: a rail that answers after its timeout must
+  // not reach a caller that was already told the set is complete
+  let closed = false;
+
   const publish = (): void => {
+    if (closed) return;
     options.onUpdate?.({
       // Ranked every time, not only at the end: the first route on screen is the
       // default selection, and the default must be the best net outcome even
@@ -117,7 +122,7 @@ export async function raceAdapters(
   // conversion quote never holds back the plain route beside it.
   const askCompose = (adapter: BridgeAdapter, plain: Route): void => {
     const swap = options.swap;
-    if (swap === undefined || adapter.quoteCompose === undefined) return;
+    if (closed || swap === undefined || adapter.quoteCompose === undefined) return;
     const quoteCompose = adapter.quoteCompose.bind(adapter);
     const fee = options.integratorFee;
     expected += 1;
@@ -166,12 +171,14 @@ export async function raceAdapters(
         return;
       }
 
+      // withTimeout cannot cancel the quote, so a late answer is told to stop here
+      let lost = false;
       try {
         // One bound over the quote and the swap leg together: a hung exchange
         // must cost this rail its route, not stall the whole race.
         const result = await withTimeout(
           adapter.quote(railRequest).then((quoted) => {
-            if (isRejection(quoted)) return quoted;
+            if (lost || isRejection(quoted)) return quoted;
             askCompose(adapter, quoted);
             return enrich(quoted);
           }),
@@ -181,6 +188,7 @@ export async function raceAdapters(
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);
       } catch (error) {
+        lost = true;
         // A source that throws is still a source that declined, and the user is
         // entitled to know which one and why. Swallowing this is how a route
         // silently goes missing.
@@ -193,6 +201,7 @@ export async function raceAdapters(
   );
 
   await Promise.all(composes);
+  closed = true;
 
   return {
     routes: rankRoutes(routes, options.ranking ?? "best-received"),
