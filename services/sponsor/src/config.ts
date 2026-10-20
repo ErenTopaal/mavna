@@ -29,6 +29,8 @@ export interface SponsorConfig {
   readonly trustProxy: boolean;
   /** Settlements nothing has backed yet that may hold a channel at once. */
   readonly provisionalSettlements: number;
+  /** Idle channels kept however long they sit unused. */
+  readonly channelFloor: number;
   /** Settings that were read and are not acted on, said at start. */
   readonly warnings: readonly string[];
   /** Settlements one client address may have waiting on a preparation; zero for no limit. */
@@ -188,6 +190,7 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
     rateLimitPerMinute: whole("MAVNA_RATE_LIMIT_PER_MINUTE", 120),
     trustProxy: trust === "true",
     provisionalSettlements,
+    channelFloor: whole("MAVNA_CHANNEL_FLOOR", 4),
     warnings,
     settlementsPerClient: whole("MAVNA_SETTLEMENTS_PER_CLIENT", 2),
     deliveryBudgetStroops: xlmStroops(

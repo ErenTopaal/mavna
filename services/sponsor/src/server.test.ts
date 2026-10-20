@@ -4909,3 +4909,61 @@ describe("round 3: /deliver says a delivery of unknown outcome is unknown", () =
     expect(answered.body.watching).toBe(true);
   });
 });
+
+describe("round 3: idle channels go back to the sponsor above a floor", () => {
+  async function sweepOnce(server: TestServer): Promise<void> {
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+  }
+
+  it("merges channels idle for a day back into the sponsor, down to the floor", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer(
+      { provisionalSettlements: 4, settlementsPerClient: 0, channelFloor: 1 },
+      { fundsOwnChannel: true },
+    );
+    for (let i = 0; i < 3; i += 1) {
+      expect(
+        (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+      ).toBe(200);
+    }
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    // the slots lapse unused; the first sweep sees the channels idle
+    vi.setSystemTime(Date.now() + 700_000);
+    await sweepOnce(server);
+    expect(server.rpc.submissions.filter((s) => s.label === "channel merge")).toHaveLength(0);
+    // a day later they are still idle
+    vi.setSystemTime(Date.now() + 86_400_000);
+    await sweepOnce(server);
+    logged.mockRestore();
+
+    const merges = server.rpc.submissions.filter((s) => s.label === "channel merge");
+    expect(merges).toHaveLength(2);
+    for (const merge of merges) {
+      const tx = merge.tx as Transaction;
+      const op = tx.operations[0] as Operation.AccountMerge;
+      expect(op.type).toBe("accountMerge");
+      expect(op.destination).toBe(server.sponsor.publicKey());
+      expect(signedBy(tx, tx.source)).toBe(true);
+    }
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect((health.channels as Body).size).toBe(1);
+  });
+
+  it("never merges a channel a settlement holds or one used recently", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const server = await startServer(
+      { provisionalSettlements: 4, settlementsPerClient: 0, channelFloor: 0 },
+      { fundsOwnChannel: true },
+    );
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await sweepOnce(server);
+    vi.setSystemTime(Date.now() + 3_600_000);
+    await sweepOnce(server);
+    logged.mockRestore();
+    expect(server.rpc.submissions.filter((s) => s.label === "channel merge")).toEqual([]);
+  });
+});

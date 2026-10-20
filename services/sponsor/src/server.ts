@@ -121,6 +121,11 @@ export interface SponsorServerOptions {
    */
   readonly provisionalSettlements?: number;
   /**
+   * Channels the server keeps for itself however long they sit idle. Above it,
+   * a channel idle for a day is merged back into the sponsor. Four by default.
+   */
+  readonly channelFloor?: number;
+  /**
    * Settlements one client address may have waiting on a channel at once,
    * before anything backs them. Zero turns the limit off. Two by default.
    */
@@ -440,6 +445,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
   const provisionalLimit = options.provisionalSettlements ?? DEFAULT_PROVISIONAL_SETTLEMENTS;
   const perClient = options.settlementsPerClient ?? DEFAULT_SETTLEMENTS_PER_CLIENT;
+  const channelFloor = options.channelFloor ?? DEFAULT_CHANNEL_FLOOR;
+  if (!Number.isSafeInteger(channelFloor) || channelFloor < 0) {
+    throw new Error(`The channel floor must be a whole number; got ${channelFloor}.`);
+  }
   for (const [name, value, least] of [
     ["number of provisional settlements", provisionalLimit, 1],
     ["settlements per client", perClient, 0],
@@ -1168,6 +1177,74 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return adopt(channels);
   }
 
+  /** When each free channel was first seen idle, by address. */
+  const idleSince = new Map<string, number>();
+
+  /**
+   * Merge channels that have sat idle for a day back into the sponsor, while
+   * the pool is above its floor. The pool grows to meet the caps' worst case,
+   * and without this the XLM moved into it would stay there after the traffic
+   * is gone. Only a channel no one leases, that no held settlement names and
+   * that carries nothing in flight is merged; it is leased to itself while the
+   * merge goes out, so nothing else can take it meanwhile.
+   */
+  async function shrinkPool(): Promise<void> {
+    const pool = channels;
+    if (pool === undefined) return;
+    const now = nowUnix();
+    const free = pool.freeAddresses(now);
+    for (const address of [...idleSince.keys()]) {
+      if (!free.includes(address)) idleSince.delete(address);
+    }
+    const named = new Set([...heldSettlements.values()].map((held) => held.channel));
+    for (const address of free) {
+      if (named.has(address)) continue;
+      const since = idleSince.get(address);
+      if (since === undefined) {
+        idleSince.set(address, now);
+        continue;
+      }
+      if (now - since < CHANNEL_IDLE_MERGE_SECONDS || pool.size <= channelFloor) continue;
+      const lease = pool.acquireThis(address, address, now + PROVISIONAL_LEASE_SECONDS, now);
+      if (lease === undefined) continue;
+      // written down leased before the merge, so a crash leaves it unusable, not reused
+      await persist();
+      try {
+        await mergeChannel(lease.keypair);
+        console.error(`[sponsor] merged idle channel ${address} back into the sponsor`);
+      } catch (cause) {
+        if (!(cause instanceof AccountNotFound)) {
+          pool.release(address, address);
+          console.error(
+            `[sponsor] could not merge idle channel ${address}:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          continue;
+        }
+        console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
+      }
+      pool.drop(address, address);
+      idleSince.delete(address);
+      await persist();
+    }
+  }
+
+  /** Send everything a channel holds back to the sponsor, closing the account. */
+  async function mergeChannel(channel: Keypair): Promise<void> {
+    await options.rpc.submit("channel merge", async () => {
+      const account = await options.rpc.loadAccount(channel.publicKey());
+      const merge = new TransactionBuilder(account, {
+        fee: "1000000",
+        networkPassphrase: options.network.passphrase,
+      })
+        .addOperation(Operation.accountMerge({ destination: keypair.publicKey() }))
+        .setTimeout(120)
+        .build();
+      merge.sign(channel);
+      return merge;
+    });
+  }
+
   /** Channels being topped up right now, so two asks send one payment. */
   const toppingUp = new Map<string, Promise<void>>();
 
@@ -1323,6 +1400,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       } catch (cause) {
         console.error(
           "[sponsor] could not sweep the watched burns:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
+    if (reserveFunding === "sponsor" && options.channels === undefined) {
+      try {
+        await shrinkPool();
+      } catch (cause) {
+        console.error(
+          "[sponsor] could not return idle channels:",
           cause instanceof Error ? cause.message : cause,
         );
       }
@@ -3497,6 +3584,10 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * preparation in a wallet, one after the other.
  */
 const PROVISIONAL_LEASE_SECONDS = 600;
+
+/** Channels kept however idle, and how long one sits unused before it is merged back. */
+const DEFAULT_CHANNEL_FLOOR = 4;
+const CHANNEL_IDLE_MERGE_SECONDS = 24 * 60 * 60;
 
 /** Watched burns: per client and in all, first retry, longest wait, oldest, and per sweep. */
 const DEFAULT_WATCH_LIMITS = { perClient: 8, total: 1_000 } as const;

@@ -90,6 +90,7 @@ const server = createSponsorServer({
   rateLimitPerMinute: config.rateLimitPerMinute,
   trustProxy: config.trustProxy,
   provisionalSettlements: config.provisionalSettlements,
+  channelFloor: config.channelFloor,
   settlementsPerClient: config.settlementsPerClient,
   deliveryBudgetStroops: config.deliveryBudgetStroops,
   ...(config.settleSweepSeconds === undefined

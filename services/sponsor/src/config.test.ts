@@ -21,6 +21,7 @@ describe("the sponsor's configuration, read from the environment", () => {
     expect(config.stateDir).toBeUndefined();
     expect(config.port).toBe(8787);
     expect(config.provisionalSettlements).toBe(16);
+    expect(config.channelFloor).toBe(4);
     expect(config.settlementsPerClient).toBe(2);
     expect(config.deliveryBudgetStroops).toBe(250_000_000n);
   });
@@ -49,6 +50,13 @@ describe("the sponsor's configuration, read from the environment", () => {
     expect(config.settlementsPerClient).toBe(0);
     expect(() => readSponsorConfig({ ...base, MAVNA_PROVISIONAL_SETTLEMENTS: "0" })).toThrow(
       /MAVNA_PROVISIONAL_SETTLEMENTS/,
+    );
+  });
+
+  it("reads how many idle channels the sponsor keeps", () => {
+    expect(readSponsorConfig({ ...base, MAVNA_CHANNEL_FLOOR: "0" }).channelFloor).toBe(0);
+    expect(() => readSponsorConfig({ ...base, MAVNA_CHANNEL_FLOOR: "some" })).toThrow(
+      /MAVNA_CHANNEL_FLOOR/,
     );
   });
 

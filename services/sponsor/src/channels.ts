@@ -255,6 +255,38 @@ export class ChannelPool {
     return this.leased.size;
   }
 
+  /** Channels no one leases right now. Public keys only. */
+  freeAddresses(nowUnix: number): string[] {
+    this.reclaim(nowUnix);
+    return this.available.map((channel) => channel.address);
+  }
+
+  /** Lease this particular free channel, or undefined when it is not free. */
+  acquireThis(
+    transferId: string,
+    channelAddress: string,
+    untilUnix: number,
+    nowUnix: number,
+  ): Channel | undefined {
+    this.reclaim(nowUnix);
+    if (this.leased.has(transferId)) return undefined;
+    const index = this.available.findIndex((channel) => channel.address === channelAddress);
+    const channel = this.available[index];
+    if (channel === undefined) return undefined;
+    this.available.splice(index, 1);
+    this.leased.set(transferId, { channel, heldFor: transferId, untilUnix });
+    return channel;
+  }
+
+  /**
+   * Take a channel out of the pool for good, once the account behind it is
+   * gone. Only from its own lease, so nothing else can be on it meanwhile.
+   */
+  drop(transferId: string, channelAddress: string): void {
+    if (this.leased.get(transferId)?.channel.address !== channelAddress) return;
+    this.leased.delete(transferId);
+  }
+
   /** Every channel's address, leased or not. Public keys only. */
   addresses(): string[] {
     return [...this.available, ...[...this.leased.values()].map((lease) => lease.channel)].map(
