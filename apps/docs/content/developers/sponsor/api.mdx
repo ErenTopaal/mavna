@@ -21,7 +21,8 @@ Every `POST` takes a JSON object of at most 64 KiB. A larger body answers `413`,
 body that is not JSON or not an object answers `400`, and a transaction field that
 does not decode as a Stellar transaction answers `400`, all with `retryable: false`.
 An unexpected failure inside the server, including a Stellar read that did not
-answer, is `500` with `retryable: true`: nothing was spent, and asking again is safe.
+answer, is `500` with `retryable: true`. It may have happened after something was
+sent, so it says only that it may not have finished; asking again is safe.
 
 Every endpoint, `/health` included, counts requests per client address over
 one-minute windows (`MAVNA_RATE_LIMIT_PER_MINUTE`). Past the limit it answers `429`
@@ -266,7 +267,9 @@ ignored. When the delivery lands, or had already landed, the settlement held for
 the recipient Circle attested is submitted in the same breath, and only for a burn
 that provably pays that recipient through Circle's forwarder on Stellar.
 
-The server fetches the attestation, simulates the delivery, and answers `200` with
+The server fetches the attestation, simulates the delivery, and signs it only when
+the simulated fee is within its inclusion bid plus 1 XLM and it asks for no
+authorization. It answers `200` with
 one of:
 
 ```json
@@ -277,7 +280,9 @@ one of:
 
 or `404` when Circle has no attested record of the transaction yet (retryable:
 nothing is wrong, ask again in a minute), `502` when Circle's attestation service
-could not be reached or did not answer usefully (retryable), or `409` with
+could not be reached or did not answer usefully (retryable), `502` (retryable) when
+the delivery reached Stellar and failed there, so its fee was paid and nothing was
+minted, or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
 [the cue to prepare it](/developers/concepts/sponsorship). When a held settlement is

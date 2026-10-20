@@ -28,7 +28,7 @@ export {
 export type { ReserveFunding, SponsorConfig } from "./config.js";
 export { readSponsorConfig, SponsorConfigError } from "./config.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
-export { Deliverer } from "./deliver.js";
+export { Deliverer, DeliveryFailedOnChain } from "./deliver.js";
 export { env } from "./env.js";
 export { clientAddress, RequestLimiter } from "./ratelimit.js";
 export type {

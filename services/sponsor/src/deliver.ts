@@ -1,6 +1,6 @@
 import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
-import type { NetworkConfig, RpcClient } from "@mavna/stellar";
+import { type NetworkConfig, type RpcClient, SubmitRejected } from "@mavna/stellar";
 import { Keypair, type Transaction } from "@stellar/stellar-sdk";
 import { assertFeeWithin } from "./compose.js";
 
@@ -92,6 +92,20 @@ function assertAsksNoAuthorization(tx: Transaction): void {
   }
 }
 
+/**
+ * A delivery that reached Stellar and failed there. Its fee was paid and
+ * nothing was minted; delivering again is safe, since a message that did mint
+ * is refused as already delivered.
+ */
+export class DeliveryFailedOnChain extends MavnaError {
+  constructor() {
+    super("The delivery was included on Stellar and failed there; its fee was paid.", {
+      retryable: true,
+    });
+    this.name = "DeliveryFailedOnChain";
+  }
+}
+
 /** Circle marks an unfinished attestation with this rather than omitting it. */
 const NOT_YET_SIGNED = "PENDING";
 
@@ -160,6 +174,7 @@ export class Deliverer {
     };
 
     let prepared: Transaction | undefined;
+    let sent = false;
     try {
       prepared = await build();
     } catch (cause) {
@@ -174,10 +189,22 @@ export class Deliverer {
         const next = prepared ?? (await build());
         prepared = undefined;
         next.sign(this.#keypair);
+        sent = true;
         return next;
       });
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
+      // Sent, not refused, and not retryable: it was included and failed, so
+      // its fee was paid. Said as such, never as a failure that cost nothing.
+      if (
+        sent &&
+        cause instanceof MavnaError &&
+        !cause.retryable &&
+        !(cause instanceof SubmitRejected) &&
+        deliveryFailureOf(cause.message) === undefined
+      ) {
+        throw new DeliveryFailedOnChain();
+      }
       return classify(cause);
     }
   }

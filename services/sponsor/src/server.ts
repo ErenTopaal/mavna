@@ -41,7 +41,7 @@ import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps
 import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
-import { Deliverer, type DeliveryOutcome } from "./deliver.js";
+import { Deliverer, DeliveryFailedOnChain, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
 import type { SoroswapProxy } from "./soroswap.js";
 import { DirectSpendQuote } from "./spend.js";
@@ -1170,7 +1170,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       reply(
         res,
         500,
-        { error: "That did not work. Nothing was spent.", retryable: true },
+        // it may have failed after something was sent, so it says no more than that
+        {
+          error: "That did not work, and it may not have finished. Asking again is safe.",
+          retryable: true,
+        },
         corsOrigin(req),
       );
     });
@@ -2717,10 +2721,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
     }
 
-    const outcome: DeliveryOutcome = await deliverer.deliver({
-      messageHex: message.message,
-      attestationHex: message.attestation,
-    });
+    let outcome: DeliveryOutcome;
+    try {
+      outcome = await deliverer.deliver({
+        messageHex: message.message,
+        attestationHex: message.attestation,
+      });
+    } catch (cause) {
+      if (!(cause instanceof DeliveryFailedOnChain)) throw cause;
+      console.error("[sponsor]", cause.message);
+      await answer(
+        res,
+        502,
+        {
+          error:
+            "The delivery reached Stellar and failed there, so its fee was paid and nothing " +
+            "was minted. Asking again is safe.",
+          retryable: true,
+        },
+        origin,
+      );
+      return;
+    }
 
     // The lateness rule's payoff: the settlement was signed before anything
     // moved, and the moment the delivery lands it is submitted, releasing the

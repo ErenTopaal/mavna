@@ -1034,6 +1034,20 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
   });
 
+  it("says a delivery that failed on Stellar may have cost its fee, not that nothing was spent", async () => {
+    const server = await startServer({ buildDelivery });
+    irisReturns(cctpMessage(Keypair.random().publicKey()));
+    server.rpc.server.getTransaction = async (hash) =>
+      ({ status: rpc.Api.GetTransactionStatus.FAILED, txHash: hash, latestLedger: 2 }) as never;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    logged.mockRestore();
+    expect(response.status).toBe(502);
+    expect(response.body.error).toMatch(/reached Stellar and failed there/);
+    expect(response.body.error).not.toMatch(/Nothing was spent/);
+  });
+
   it("delivers but settles nothing for a destination the message does not name", async () => {
     const server = await startServer({ buildDelivery });
     const victim = Keypair.random();
@@ -2913,6 +2927,8 @@ describe("the sponsor does not take a failed read for a missing account", () => 
       });
       expect(response.status, path).toBe(500);
       expect(response.body.retryable, path).toBe(true);
+      // a failure can come after something was sent, so it never claims otherwise
+      expect(response.body.error, path).not.toMatch(/Nothing was spent/);
     }
     logged.mockRestore();
   });
