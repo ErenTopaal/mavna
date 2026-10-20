@@ -64,7 +64,11 @@ describe("a pair Circle does not route", () => {
       if (String(input).includes("/v2/burn/USDC/fees/")) return reply();
       // the fixture's recipient needs a reserve, so the floor asks the market
       if (String(input).includes("/order_book")) {
-        return Response.json({ bids: [{ price: "0.2" }], asks: [{ price: "0.2" }] });
+        // deep enough on both sides for the price to be believed
+        return Response.json({
+          bids: [{ price: "0.2", amount: "1000" }],
+          asks: [{ price: "0.2", amount: "5000" }],
+        });
       }
       throw new Error(`unexpected fetch ${String(input)}`);
     });
