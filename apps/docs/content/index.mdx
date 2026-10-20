@@ -37,8 +37,8 @@ differences side by side.
 
 | Rail | Trust model | Source chains | Assets into Stellar |
 | --- | --- | --- | --- |
-| Circle CCTP | The issuer burns and mints; nobody holds the money in between | 26 on testnet, 25 on mainnet: EVM, Solana, Starknet | USDC |
-| Axelar ITS | A named validator set attests | Resolved at runtime from Axelar's registry | Interchain Token Service tokens, USDC among them on mainnet |
+| Circle CCTP | The issuer burns and mints; nobody holds the money in between | 26 on testnet, 26 on mainnet: EVM, Solana, Starknet | USDC |
+| Axelar ITS | A named validator set attests | Resolved at runtime from Axelar's registry | Interchain Token Service tokens; USDC arrives as Axelar-wrapped USDC.axl, not Circle USDC |
 | LayerZero OFT | Verifiers chosen by whoever deployed the token | 12 on mainnet, 3 on testnet | USDT0 on mainnet, the only route to native USDT on Stellar; any OFT you deploy yourself |
 | NEAR Intents | Competing solvers fill it, the HOT Bridge pays out on Stellar | 13 EVM chains, mainnet only | USDC and XLM |
 

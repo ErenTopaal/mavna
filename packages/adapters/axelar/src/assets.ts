@@ -56,7 +56,7 @@ async function fetchAssets(network: NetworkId): Promise<readonly ItsAsset[]> {
   const reply = await requestJson("Axelar's interchain token list", ASSETS_API[network]);
   if (!reply.ok) {
     throw new MavnaError(`Axelar's interchain token list answered HTTP ${reply.status}.`, {
-      retryable: reply.status >= 500,
+      retryable: reply.status >= 500 || reply.status === 429,
     });
   }
 
@@ -96,6 +96,16 @@ export async function tokenIdFromIndex(
     if (entry !== undefined && entry.address.toLowerCase() === wanted) return asset.tokenId;
   }
   return undefined;
+}
+
+/** The symbol Axelar's list gives a token id, which names it across every chain. */
+export async function tokenSymbolFromIndex(
+  network: NetworkId,
+  tokenId: string,
+): Promise<string | undefined> {
+  const wanted = withPrefix(tokenId);
+  const symbol = (await loadItsAssets(network)).find((asset) => asset.tokenId === wanted)?.symbol;
+  return symbol === undefined || symbol.length === 0 ? undefined : symbol;
 }
 
 function withPrefix(id: string): string {

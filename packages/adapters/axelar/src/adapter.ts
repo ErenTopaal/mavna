@@ -27,10 +27,11 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Address, xdr } from "@stellar/stellar-sdk";
+import { tokenSymbolFromIndex } from "./assets.js";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
-import { priceTransfer } from "./fees.js";
+import { type PricedIn, priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
@@ -169,6 +170,15 @@ export class AxelarAdapter implements BridgeAdapter {
     }
 
     const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    try {
+      await confirmGasService(evm, source.address, source.chain);
+    } catch (cause) {
+      return this.declineFrom(
+        cause,
+        "chain-unsupported",
+        cause instanceof MavnaError ? cause.message : "Mavna cannot send from that chain yet.",
+      );
+    }
     const stellarIts = await this.stellarReader();
 
     let token: ItsToken;
@@ -243,17 +253,35 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
+    let label: { symbol: string; curatedBy: string | undefined };
+    try {
+      label =
+        delivered.kind === "contract"
+          ? await this.contractTokenLabel(token.tokenId, token.stellarToken, stellarIts)
+          : { symbol: request.to.symbol, curatedBy: request.to.curatedBy };
+    } catch (cause) {
+      return this.declineFrom(
+        cause,
+        "asset-unsupported",
+        cause instanceof MavnaError
+          ? cause.message
+          : "What this token is called could not be read.",
+      );
+    }
+
     const lane = await this.laneFor(request.destination, delivered);
     if ("source" in lane) return lane;
 
     let deliveryFee: bigint;
+    let feeAsset: Asset;
     let stellarDecimals: number;
     try {
       const [fee, decimals] = await Promise.all([
         priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
         stellarIts.tokenDecimals(token.stellarToken),
       ]);
-      deliveryFee = BigInt(fee);
+      deliveryFee = BigInt(fee.baseUnits);
+      feeAsset = nativeAsset(source.chain, fee.pricedIn);
       stellarDecimals = decimals;
     } catch (cause) {
       return this.declineFrom(
@@ -318,9 +346,9 @@ export class AxelarAdapter implements BridgeAdapter {
     const receivesAsset: Asset = {
       chainId: stellarChainId(this.network),
       id: delivered.id,
-      symbol: request.to.symbol,
+      symbol: label.symbol,
       decimals: stellarDecimals,
-      curatedBy: request.to.curatedBy,
+      curatedBy: label.curatedBy,
     };
     const receives: Amount = { asset: receivesAsset, baseUnits: arriving.toString() };
 
@@ -345,14 +373,14 @@ export class AxelarAdapter implements BridgeAdapter {
           // here and not a bridge fee deducted from the quote.
           kind: "gas",
           total: {
-            asset: nativeAsset(source.chain),
+            asset: feeAsset,
             baseUnits: deliveryFee.toString(),
           },
           recipients: [
             {
               name: "Axelar",
               amount: {
-                asset: nativeAsset(source.chain),
+                asset: feeAsset,
                 baseUnits: deliveryFee.toString(),
               },
               address: source.chain.gasService,
@@ -475,12 +503,21 @@ export class AxelarAdapter implements BridgeAdapter {
    * a failed transaction but a stuck one.
    */
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+    if (route.source !== this.id) {
+      throw new MavnaError(
+        `Refusing to build a route quoted by another rail (${route.source}) as an Axelar ` +
+          "transfer. The numbers shown were that rail's, not these.",
+        { retryable: false },
+      );
+    }
+
     const [stellar, source] = await Promise.all([
       this.registry.stellarChain(),
       evmTokenService(this.network, route.fromChain.id),
     ]);
 
     const evm = new EvmReader(source.rpcUrl, this.ethCall);
+    await confirmGasService(evm, source.address, source.chain);
     const stellarIts = await this.stellarReader();
 
     const token = await resolveItsToken({
@@ -508,10 +545,22 @@ export class AxelarAdapter implements BridgeAdapter {
       );
     }
 
+    // What lands is read again too. A token re-registered since the quote would
+    // credit a different Stellar asset than the one the user was shown.
+    const delivered = await stellarIts.deliveredAs(token.stellarToken);
+    if (delivered.id !== route.receives.asset.id) {
+      throw new MavnaError(
+        `This transfer would now arrive as ${delivered.id}, not the ${route.receives.asset.id} ` +
+          "it was quoted as. Refusing to build it; quote again.",
+        { retryable: false },
+      );
+    }
+
     // Priced now, not at quote time, and asserted positive on the way through.
     // Zero here would be accepted by the contract and the message emitted anyway.
     const gasValue = BigInt(
-      await priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
+      (await priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)))
+        .baseUnits,
     );
 
     const amount = BigInt(route.sends.baseUnits);
@@ -657,11 +706,43 @@ export class AxelarAdapter implements BridgeAdapter {
     }
 
     const second = (await this.gmp.byMessageId(first.callbackId))[0];
-    if (second === undefined || !legDelivered(second)) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
+    if (second === undefined) return { phase: "pending", ref, expectedByUnix: 0 };
+
+    // The hub-to-Stellar leg fails in the same two ways the first can, and
+    // waiting on it would leave someone watching "still moving" until the
+    // widget gives up, never offered the top-up that would release it.
+    if (second.underpaid) {
+      return {
+        phase: "stalled",
+        ref,
+        overdueSeconds: 0,
+        remedy: {
+          kind: "add-gas",
+          // gas for both legs is paid on the sending chain, so that is where
+          // a top-up goes too
+          chainId: first.sourceChain ?? handle.sourceChainId ?? "unknown",
+          because:
+            "The transfer reached Axelar but was not paid enough to be delivered to " +
+            "Stellar. Your funds are still in it, and paying the rest releases them.",
+        },
+      };
     }
 
-    return { phase: "done", ref, received: this.amountFrom(first) };
+    if (second.errored) {
+      return {
+        phase: "failed",
+        cause: "Axelar could not deliver this transfer to Stellar.",
+        remedy: {
+          kind: "retry",
+          because: "The transfer did not complete. Nothing further happens on its own.",
+        },
+        ref,
+      };
+    }
+
+    if (!legDelivered(second)) return { phase: "pending", ref, expectedByUnix: 0 };
+
+    return { phase: "done", ref, received: await this.receivedFrom(second) };
   }
 
   /**
@@ -699,7 +780,14 @@ export class AxelarAdapter implements BridgeAdapter {
         { retryable: true },
       );
     }
-    if (!first.underpaid) {
+    // Either leg can be the underpaid one. The top-up is paid on the sending
+    // chain against the first leg's event in both cases, which is what Axelar's
+    // own recovery does: "add gas at source chain".
+    const underpaid =
+      first.underpaid ||
+      (first.callbackId !== undefined &&
+        (await this.gmp.byMessageId(first.callbackId))[0]?.underpaid === true);
+    if (!underpaid) {
       throw new MavnaError(
         "That transfer was not underpaid, so adding gas would not move it along. " +
           "Refusing to charge for a signature that changes nothing.",
@@ -745,12 +833,14 @@ export class AxelarAdapter implements BridgeAdapter {
     // payment is the one thing this codebase never does with money. Paying the
     // full price cannot underpay, and the gas service returns what is not spent.
     const amount = BigInt(
-      await priceTransfer(
-        this.network,
-        chainId,
-        first.finalDestinationChain ?? stellar.id,
-        gasToken(chain),
-      ),
+      (
+        await priceTransfer(
+          this.network,
+          chainId,
+          first.finalDestinationChain ?? stellar.id,
+          gasToken(chain),
+        )
+      ).baseUnits,
     );
 
     const call = buildAddGas({
@@ -824,18 +914,96 @@ export class AxelarAdapter implements BridgeAdapter {
     );
   }
 
-  private amountFrom(record: GmpRecord): Amount {
-    const decimals = record.decimals ?? 7;
+  /**
+   * What landed, from the leg that landed it, named as the Stellar asset it is.
+   *
+   * The first leg's record is the sending side: its amount can be in the source
+   * chain's precision and its token is Axelar's id rather than anything a
+   * Stellar wallet shows. So the asset is resolved on the ledger the same way a
+   * quote resolves it, and a record missing what is needed is refused rather
+   * than filled in.
+   */
+  private async receivedFrom(second: GmpRecord): Promise<Amount> {
+    const { tokenId, amount } = second;
+    if (tokenId === undefined || amount === undefined || !/^\d+$/.test(amount)) {
+      throw new MavnaError(
+        "Axelar reports this transfer delivered but its record does not say how much " +
+          "arrived, so no amount is shown rather than a guessed one.",
+        { retryable: true },
+      );
+    }
+
+    const stellarIts = await this.stellarReader();
+    const token = await stellarIts.registeredTokenAddress(tokenId);
+    if (token === undefined) {
+      throw new MavnaError(
+        "Axelar reports this transfer delivered, but Stellar's token service has no " +
+          "token under its id, so what arrived cannot be named.",
+        { retryable: false },
+      );
+    }
+    const [delivered, decimals] = await Promise.all([
+      stellarIts.deliveredAs(token),
+      stellarIts.tokenDecimals(token),
+    ]);
+
+    // Axelar's record states the precision it counted in. If that is not the
+    // token's own on Stellar, the amount is in some other unit.
+    if (second.decimals !== undefined && second.decimals !== decimals) {
+      throw new MavnaError(
+        `Axelar states the delivered amount in ${second.decimals} decimals, and the token ` +
+          `on Stellar has ${decimals}. Refusing to show an amount in the wrong unit.`,
+        { retryable: false },
+      );
+    }
+
+    const label =
+      delivered.kind === "classic"
+        ? {
+            symbol: delivered.asset.isNative() ? "XLM" : delivered.asset.getCode(),
+            curatedBy: undefined,
+          }
+        : await this.contractTokenLabel(tokenId, token, stellarIts);
+
     return {
       asset: {
         chainId: stellarChainId(this.network),
-        id: record.tokenId ?? "unknown",
-        symbol: record.symbol ?? "",
+        id: delivered.id,
+        symbol: label.symbol,
         decimals,
-        curatedBy: "Axelar",
+        curatedBy: label.curatedBy,
       },
-      baseUnits: record.amount ?? "0",
+      baseUnits: amount,
     };
+  }
+
+  /**
+   * What to call a token Axelar deployed on Stellar.
+   *
+   * Not what the caller called it, and not the contract's own symbol() when
+   * Axelar's list names it: Ethereum's USDC arrives on mainnet as a Soroban
+   * contract whose symbol() answers "USDC", which is not Circle's USDC and must
+   * not read as it. Axelar's list calls that token USDC.axl. A token the list
+   * does not carry is named by its contract, unless that contract claims to be
+   * USDC, which is declined rather than shown.
+   */
+  private async contractTokenLabel(
+    tokenId: string,
+    token: string,
+    stellarIts: StellarItsReader,
+  ): Promise<{ symbol: string; curatedBy: string }> {
+    const listed = await tokenSymbolFromIndex(this.network, tokenId);
+    if (listed !== undefined) return { symbol: listed, curatedBy: "Axelar" };
+
+    const own = await stellarIts.tokenSymbol(token);
+    if (own.toUpperCase() === "USDC") {
+      throw new MavnaError(
+        `The Stellar contract ${token} calls itself USDC and is not Circle's USDC, and ` +
+          "Axelar's token list does not name it. Refusing to quote it under that name.",
+        { retryable: false },
+      );
+    }
+    return { symbol: own, curatedBy: "Axelar" };
   }
 
   private refFor(chainId: string | undefined, txHash: string) {
@@ -886,6 +1054,26 @@ export function scaleAcrossDecimals(amount: bigint, from: number, to: number): b
   if (from === to) return amount;
   if (to > from) return amount * 10n ** BigInt(to - from);
   return amount / 10n ** BigInt(from - to);
+}
+
+/**
+ * The token service names its gas service itself, and that must be the one
+ * confirmed for this chain. Asked at quote and again at build, because the
+ * value sent with a transfer pays whichever contract this is.
+ */
+async function confirmGasService(
+  evm: EvmReader,
+  tokenService: string,
+  chain: AxelarChain,
+): Promise<void> {
+  const named = await evm.gasService(tokenService);
+  if (chain.gasService === undefined || named.toLowerCase() !== chain.gasService.toLowerCase()) {
+    throw new MavnaError(
+      `The token service on ${chain.name} pays a different gas service than the one ` +
+        "confirmed for it. Nothing will be sent through it.",
+      { retryable: false },
+    );
+  }
 }
 
 function asJson(value: string | bigint): string {
@@ -956,12 +1144,13 @@ function gasToken(chain: AxelarChain): string {
   return symbol;
 }
 
-function nativeAsset(chain: AxelarChain): Asset {
+/** The sending chain's own token, in the unit Axelar priced the fee in. */
+function nativeAsset(chain: AxelarChain, pricedIn: PricedIn): Asset {
   return {
     chainId: chain.id,
     id: "native",
-    symbol: chain.nativeCurrency?.symbol ?? "",
-    decimals: chain.nativeCurrency?.decimals ?? 18,
+    symbol: pricedIn.symbol,
+    decimals: pricedIn.decimals,
     curatedBy: undefined,
   };
 }

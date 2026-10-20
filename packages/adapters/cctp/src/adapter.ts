@@ -203,12 +203,7 @@ export class CctpAdapter implements BridgeAdapter {
     }
 
     const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
-    if (fee === undefined) {
-      return this.decline(
-        "temporarily-unavailable",
-        "Circle is not quoting this route right now. It is worth trying again shortly.",
-      );
-    }
+    if (typeof fee !== "bigint") return fee;
 
     const reserve = quoteReserve({
       lane: destination.lane,
@@ -538,7 +533,7 @@ export class CctpAdapter implements BridgeAdapter {
       };
     }
 
-    const { attestation, chainId } = found;
+    const { attestations, chainId } = found;
     const ref = {
       chainId,
       txHash: handle.sourceTxHash,
@@ -548,29 +543,28 @@ export class CctpAdapter implements BridgeAdapter {
           : nonEvmExplorerTxUrl(this.network, chainId, handle.sourceTxHash),
     };
 
-    if (
-      attestation === undefined ||
-      attestation.status !== "complete" ||
-      attestation.message === undefined
-    ) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
-    }
-
-    // The recipient is read from the attested message rather than the handle,
-    // since the message is what the forwarder delivers to.
-    const recipient =
-      attestation.hookData === undefined
-        ? undefined
-        : parseForwarderHookData(fromHex(attestation.hookData)).recipient;
-    const delivery = await this.proof.find(attestation.message, recipient);
-    if (delivery === undefined) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
+    // Every burn to Stellar in the transaction has to have landed before the
+    // transfer is done, and what arrived is all of them together.
+    let received = 0n;
+    for (const attestation of attestations) {
+      if (attestation.status !== "complete" || attestation.message === undefined) {
+        return { phase: "pending", ref, expectedByUnix: 0 };
+      }
+      // The recipient is read from the attested message rather than the handle,
+      // since the message is what the forwarder delivers to.
+      const recipient =
+        attestation.hookData === undefined
+          ? undefined
+          : parseForwarderHookData(fromHex(attestation.hookData)).recipient;
+      const delivery = await this.proof.find(attestation.message, recipient);
+      if (delivery === undefined) return { phase: "pending", ref, expectedByUnix: 0 };
+      received += delivery.amount;
     }
 
     return {
       phase: "done",
       ref,
-      received: { asset: this.stellarUsdcAsset(), baseUnits: delivery.amount.toString() },
+      received: { asset: this.stellarUsdcAsset(), baseUnits: received.toString() },
     };
   }
 
@@ -586,7 +580,7 @@ export class CctpAdapter implements BridgeAdapter {
   private async findBurn(
     txHash: string,
     sourceChainId: string | undefined,
-  ): Promise<{ attestation: Attestation; chainId: string } | undefined> {
+  ): Promise<{ attestations: readonly Attestation[]; chainId: string } | undefined> {
     const candidates =
       sourceChainId === undefined
         ? [...sourceChainsFor(this.network), ...nonEvmChainsFor(this.network)]
@@ -596,8 +590,10 @@ export class CctpAdapter implements BridgeAdapter {
       const domain = this.domainOf(chainId);
       if (domain === undefined) return undefined;
       const rows = await this.attestations.byTransaction(domain, txHash);
-      const attestation = rows.find((row) => row.destinationDomain === STELLAR_DOMAIN) ?? rows[0];
-      return attestation === undefined ? undefined : { attestation, chainId };
+      // Only burns to Stellar are this rail's. A transaction can carry several
+      // (a smart wallet batching), and a burn to another chain is never one.
+      const attestations = rows.filter((row) => row.destinationDomain === STELLAR_DOMAIN);
+      return attestations.length === 0 ? undefined : { attestations, chainId };
     });
 
     const settled = await Promise.allSettled(lookups);
@@ -615,15 +611,29 @@ export class CctpAdapter implements BridgeAdapter {
    * Returning undefined means Circle declined to quote, which is temporary and
    * different from a pair that does not route at all.
    */
-  private async bridgeFee(sourceDomain: number, amount: bigint): Promise<bigint | undefined> {
+  private async bridgeFee(sourceDomain: number, amount: bigint): Promise<bigint | RouteRejection> {
+    let options: readonly { finalityThreshold: number; minimumFee: number }[];
     try {
-      const options = await this.attestations.fees(sourceDomain, STELLAR_DOMAIN);
-      const standard = options.find((o) => o.finalityThreshold === FINALITY.standard);
-      if (standard === undefined) return undefined;
-      return (amount * BigInt(Math.round(standard.minimumFee))) / BPS;
-    } catch {
-      return undefined;
+      options = await this.attestations.fees(sourceDomain, STELLAR_DOMAIN);
+    } catch (cause) {
+      // Circle's 400 is a pair it does not route, which no retry changes. Only
+      // an outage or a rate limit is worth trying again.
+      if (cause instanceof MavnaError && !cause.retryable) {
+        return this.decline("chain-unsupported", cause.message);
+      }
+      return this.decline(
+        "temporarily-unavailable",
+        "Circle is not quoting this route right now. It is worth trying again shortly.",
+      );
     }
+    const standard = options.find((o) => o.finalityThreshold === FINALITY.standard);
+    if (standard === undefined) {
+      return this.decline(
+        "temporarily-unavailable",
+        "Circle is not quoting the standard path for this route right now.",
+      );
+    }
+    return circleFee(amount, standard.minimumFee);
   }
 
   private stellarUsdcAsset(): Asset {
@@ -639,6 +649,29 @@ export class CctpAdapter implements BridgeAdapter {
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
     return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
   }
+}
+
+/**
+ * Circle's fee on an amount, from a rate in basis points that may be fractional.
+ *
+ * Rounded up. maxFee is set from this, and a maxFee below Circle's fee leaves
+ * the burn waiting or reverting, while one unit over costs nothing extra since
+ * Circle takes only what it charges. The rate is read from its decimal form
+ * rather than through float arithmetic, and a form that is not a plain decimal
+ * is refused rather than approximated.
+ */
+export function circleFee(amount: bigint, minimumFeeBps: number): bigint {
+  const text = String(minimumFeeBps);
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(text);
+  if (match === null) {
+    throw new MavnaError(`Circle quoted a fee rate this cannot read exactly: ${text}.`, {
+      retryable: false,
+    });
+  }
+  const fraction = match[2] ?? "";
+  const numerator = BigInt(`${match[1]}${fraction}`);
+  const denominator = BPS * 10n ** BigInt(fraction.length);
+  return (amount * numerator + denominator - 1n) / denominator;
 }
 
 /** The plan layer speaks in readiness, the Stellar layer in reserve slots. */

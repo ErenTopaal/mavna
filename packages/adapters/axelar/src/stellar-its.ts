@@ -13,6 +13,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
+import { hexToBytes } from "./abi.js";
 
 /**
  * Asking Stellar's token service the same questions, on the receiving side.
@@ -64,7 +65,7 @@ export class StellarItsReader {
    * the answer, and it cannot be mistaken for a valid address.
    */
   async registeredTokenAddress(tokenId: string): Promise<string | undefined> {
-    const bytes = Buffer.from(tokenId.replace(/^0x/, ""), "hex");
+    const bytes = hexToBytes(tokenId);
     if (bytes.length !== 32) {
       throw new MavnaError(`A token id must be 32 bytes; got ${bytes.length}.`, {
         retryable: false,
@@ -73,7 +74,11 @@ export class StellarItsReader {
 
     let value: unknown;
     try {
-      value = await this.simulate(REGISTERED_TOKEN_ADDRESS, xdr.ScVal.scvBytes(bytes));
+      // nativeToScVal copies into the SDK's own Buffer, so no global is needed here
+      value = await this.simulate(
+        REGISTERED_TOKEN_ADDRESS,
+        nativeToScVal(bytes, { type: "bytes" }),
+      );
     } catch (cause) {
       if (cause instanceof ItsNotRegistered) return undefined;
       throw cause;
@@ -97,6 +102,17 @@ export class StellarItsReader {
       );
     }
     return Number(value);
+  }
+
+  /** What a token contract calls itself. Its own claim, not an identity. */
+  async tokenSymbol(token: string): Promise<string> {
+    const value = await this.simulateOn(token, "symbol");
+    if (typeof value !== "string" || value.length === 0) {
+      throw new MavnaError(`The Stellar contract ${token} did not answer with a symbol.`, {
+        retryable: false,
+      });
+    }
+    return value;
   }
 
   /**

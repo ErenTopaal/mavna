@@ -78,6 +78,55 @@ describe("status from a destination address alone", () => {
   });
 });
 
+describe("status for a burn transaction carrying more than one message", () => {
+  const toArbitrum = {
+    ...recent.iris,
+    decodedMessage: {
+      ...(recent.iris as unknown as { decodedMessage: object }).decodedMessage,
+      destinationDomain: "3",
+    },
+  };
+  const stillAttesting = {
+    ...recent.iris,
+    status: "pending_confirmations",
+    attestation: "PENDING",
+  };
+
+  it("never follows a burn to another chain into a search on Stellar", async () => {
+    let searched = false;
+    const adapter = adapterWith({
+      captured: recent,
+      irisMessages: [toArbitrum],
+      events: () => {
+        searched = true;
+        throw new Error("a burn to another chain was searched for on Stellar");
+      },
+    });
+    const phase = await adapter.status(
+      handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
+    );
+    expect(phase.phase).toBe("pending");
+    expect(searched).toBe(false);
+  });
+
+  it("is not done while another burn to Stellar in the same transaction is still attesting", async () => {
+    const adapter = adapterWith({
+      captured: recent,
+      irisMessages: [recent.iris, stillAttesting],
+      events: (request) => {
+        const filter = request.filters[0];
+        if (filter?.contractIds?.[0] === testnet.messageTransmitter) return recent.messageReceived;
+        if (filter?.contractIds?.[0] === testnet.cctpForwarder) return recent.mintAndForward;
+        throw new Error(`unexpected getEvents ${JSON.stringify(request)}`);
+      },
+    });
+    const phase = await adapter.status(
+      handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
+    );
+    expect(phase.phase).toBe("pending");
+  });
+});
+
 describe("status when a network edge fails", () => {
   it("reports a failed health read as retryable", async () => {
     const adapter = adapterWith({ captured: recent, health: new Error("socket hang up") });
@@ -133,6 +182,8 @@ function adapterWith(options: {
   readonly horizonError?: Error;
   readonly health?: Error;
   readonly ledgerEntries?: OperationsCapture["recipientLedgerEntries"];
+  /** What Circle lists for the burn, when not just the captured message. */
+  readonly irisMessages?: readonly unknown[];
 }): CctpAdapter {
   const client = new RpcClient({
     url: "https://soroban-testnet.stellar.org",
@@ -162,7 +213,7 @@ function adapterWith(options: {
     const url = String(input);
     if (url.startsWith(testnet.irisBaseUrl)) {
       if (url === `${testnet.irisBaseUrl}/v2/messages/0?transactionHash=${options.captured.burn}`) {
-        return Response.json({ messages: [options.captured.iris] });
+        return Response.json({ messages: options.irisMessages ?? [options.captured.iris] });
       }
       return new Response("{}", { status: 404 });
     }

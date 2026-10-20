@@ -17,7 +17,7 @@ and each one answers for itself.
 | Adapter | `@mavna/adapter-cctp`, id `cctp` | `@mavna/adapter-axelar`, id `axelar` | `@mavna/adapter-layerzero`, id `layerzero` |
 | Trust model | `native-mint` | `validator-set` | `dvn-stack` |
 | Mechanism | The issuer burns on the source and mints on Stellar | A validator set attests; tokens move through the Interchain Token Service hub | Tokens implement OFT; verifiers chosen per token check each message |
-| Assets | USDC | Interchain Token Service tokens, USDC among them on mainnet | USDT0 on mainnet, plus any OFT you name yourself |
+| Assets | USDC | Interchain Token Service tokens; USDC arrives as Axelar-wrapped USDC.axl, not Circle USDC | USDT0 on mainnet, plus any OFT you name yourself |
 
 A fourth rail, [NEAR Intents](/developers/rails/near-intents)
 (`@mavna/adapter-near-intents`, id `near-intents`, trust model `solver-network`),
@@ -45,8 +45,9 @@ its reason in a sentence. That is the honest picture, and the app shows it rathe
 than hiding it.
 
 **On the main network**, the same quote has more to say. Axelar carries Interchain
-Token Service tokens into Stellar, USDC among them, which is what makes ranking
-meaningful: a native mint and a validator set quoting the same dollar side by side.
+Token Service tokens into Stellar. Ethereum's USDC is one of them, but it lands as
+Axelar-wrapped USDC (USDC.axl), a Soroban token distinct from Circle USDC, so it is
+never ranked against CCTP's native mint as the same dollar.
 LayerZero carries USDT0 from twelve source chains, the only route to native USDT on
 Stellar. The mainnet configurations are not dormant: the repository's live test
 suite quotes them against the real networks.

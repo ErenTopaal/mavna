@@ -1,4 +1,6 @@
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { hideBufferFrom } from "./__fixtures__/no-buffer.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { contractAddressToBytes32, toHex } from "./hook.js";
 import {
@@ -7,6 +9,7 @@ import {
   SOLANA_PROGRAMS,
   SOLANA_USDC,
   solanaAddressToBytes32,
+  solanaInstructionDataHex,
 } from "./solana.js";
 
 /**
@@ -118,5 +121,21 @@ describe("a Solana address as CCTP carries it", () => {
 
   it("refuses something that is not a Solana address", () => {
     expect(() => solanaAddressToBytes32("not-an-address")).toThrow();
+  });
+});
+
+describe("the Solana burn without Node's Buffer, as in a browser", () => {
+  it("builds the same instruction and reads it back as hex", async () => {
+    const withNode = await buildSolanaBurn(base);
+    const restore = hideBufferFrom(fileURLToPath(new URL(".", import.meta.url)));
+    try {
+      const instruction = await buildSolanaBurn(base);
+      expect(instruction.data).toBe(withNode.data);
+      expect(solanaInstructionDataHex(instruction)).toBe(
+        toHex(new Uint8Array(Buffer.from(withNode.data, "base64"))),
+      );
+    } finally {
+      restore();
+    }
   });
 });

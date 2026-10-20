@@ -7,7 +7,11 @@
  * driven from a transaction hash.
  *
  * Run:
- *   node scripts/deliver-cctp.mjs --tx=0x<burn hash> --domain=<source domain>
+ *   node scripts/deliver-cctp.mjs --tx=0x<burn hash> --domain=<source domain> [--network=testnet]
+ *
+ * The Stellar node is STELLAR_RPC_URL from `.env` when set, otherwise the public
+ * one for the chosen network. Either way the node is asked which network it
+ * serves first, and the script stops if that is not the one asked for.
  *
  * The paying key comes from SPONSOR_SECRET_KEY in `.env`, which is gitignored.
  * It is never printed and never written anywhere by this script.
@@ -25,9 +29,8 @@ import { existsSync, readFileSync } from "node:fs";
  * Run `pnpm build` first if these do not exist.
  */
 const { Deliverer } = await import("../services/sponsor/dist/index.mjs");
-const { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } = await import(
-  "../packages/stellar/dist/index.mjs"
-);
+const { createNetworkConfig, PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL, RpcClient } =
+  await import("../packages/stellar/dist/index.mjs");
 const { buildDelivery } = await import("../packages/adapters/cctp/dist/index.mjs");
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -35,6 +38,11 @@ const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slic
 const txHash = arg("tx");
 const domain = arg("domain") ?? "0";
 const networkId = arg("network") ?? "testnet";
+
+if (networkId !== "testnet" && networkId !== "mainnet") {
+  console.error(`--network must be testnet or mainnet, not ${networkId}.`);
+  process.exit(2);
+}
 
 if (txHash === undefined) {
   console.error(
@@ -58,19 +66,52 @@ if (payerSecret === undefined || payerSecret === "") {
   process.exit(2);
 }
 
+const rpcUrl =
+  env.get("STELLAR_RPC_URL") ??
+  process.env.STELLAR_RPC_URL ??
+  (networkId === "mainnet" ? PUBLIC_MAINNET_RPC_URLS[0] : PUBLIC_TESTNET_RPC_URL);
+const config = createNetworkConfig({ id: networkId, rpcUrl });
+
+// A testnet node handed a mainnet delivery (or the reverse) fails in confusing
+// ways, so the node says which network it serves before anything is built.
+const served = await new RpcClient({ url: rpcUrl }).server.getNetwork();
+if (served.passphrase !== config.passphrase) {
+  console.error(
+    `${rpcUrl} serves "${served.passphrase}", not the ${networkId} network asked for. ` +
+      "Set STELLAR_RPC_URL to a node for that network.",
+  );
+  process.exit(2);
+}
+
 const IRIS =
   networkId === "mainnet" ? "https://iris-api.circle.com" : "https://iris-api-sandbox.circle.com";
 
 const response = await fetch(`${IRIS}/v2/messages/${domain}?transactionHash=${txHash}`, {
   signal: AbortSignal.timeout(30_000),
 });
-const body = await response.json();
-const message = body?.messages?.[0];
-
-if (message === undefined) {
-  console.error(`Circle has no record of ${txHash} on domain ${domain}.`);
+if (!response.ok && response.status !== 404) {
+  console.error(`Circle answered HTTP ${response.status} for ${txHash}.`);
   process.exit(1);
 }
+const body = response.status === 404 ? {} : await response.json();
+// Only a burn to Stellar (domain 27) is this script's to deliver. A transaction
+// can carry burns to other chains, and the first message is not necessarily ours.
+const toStellar = (body?.messages ?? []).filter(
+  (m) => String(m?.decodedMessage?.destinationDomain) === "27",
+);
+
+if (toStellar.length === 0) {
+  console.error(`Circle has no burn to Stellar for ${txHash} on domain ${domain}.`);
+  process.exit(1);
+}
+if (toStellar.length > 1) {
+  console.error(
+    `${txHash} carries ${toStellar.length} burns to Stellar. Deliver them one at a time ` +
+      "with the sponsor service, which tracks each; this tool does one.",
+  );
+  process.exit(1);
+}
+const message = toStellar[0];
 
 console.log(`status: ${message.status}`);
 if (message.attestation === "PENDING" || message.status !== "complete") {
@@ -79,11 +120,6 @@ if (message.attestation === "PENDING" || message.status !== "complete") {
   console.log("Not attested yet. Circle is still waiting for the burn to finalise.");
   process.exit(3);
 }
-
-const config = createNetworkConfig({
-  id: networkId,
-  rpcUrl: env.get("STELLAR_RPC_URL") ?? PUBLIC_TESTNET_RPC_URL,
-});
 
 const deliverer = new Deliverer({
   rpc: new RpcClient({ url: config.rpcUrl }),

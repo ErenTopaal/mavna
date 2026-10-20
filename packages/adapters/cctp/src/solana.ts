@@ -198,7 +198,7 @@ export async function buildSolanaBurn(params: SolanaBurnParams): Promise<SolanaI
   return {
     programId: SOLANA_PROGRAMS.tokenMessengerMinterV2,
     keys,
-    data: Buffer.from(
+    data: toBase64(
       encodeParams({
         amount: params.amount,
         destinationDomain: STELLAR_DOMAIN,
@@ -208,7 +208,7 @@ export async function buildSolanaBurn(params: SolanaBurnParams): Promise<SolanaI
         minFinalityThreshold: finality,
         hookData,
       }),
-    ).toString("base64"),
+    ),
     describes:
       `Send ${readableUsdc(params.amount)} USDC to ${params.stellarRecipient} on Stellar, ` +
       `via Circle, ${finality === 1000 ? "on the fast path" : "on the standard path"}.`,
@@ -268,5 +268,19 @@ function encodeParams(p: Params): Uint8Array {
 
 /** The hex form, for anyone who would rather read the payload than decode base64. */
 export function solanaInstructionDataHex(instruction: SolanaInstruction): string {
-  return toHex(Uint8Array.from(Buffer.from(instruction.data, "base64")));
+  return toHex(fromBase64(instruction.data));
+}
+
+// btoa and atob exist in browsers and in node alike, unlike the Buffer global
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fromBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
 }

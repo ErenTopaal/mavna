@@ -14,7 +14,12 @@ export {
 export type { AxelarAdapterOptions, RecoverOptions } from "./adapter.js";
 export { AxelarAdapter, scaleAcrossDecimals } from "./adapter.js";
 export type { ItsAsset } from "./assets.js";
-export { forgetItsAssets, loadItsAssets, tokenIdFromIndex } from "./assets.js";
+export {
+  forgetItsAssets,
+  loadItsAssets,
+  tokenIdFromIndex,
+  tokenSymbolFromIndex,
+} from "./assets.js";
 export type { AxelarChain, NativeCurrency } from "./deployments.js";
 export { chainConfig, evmTokenService, forgetChains, loadChains } from "./deployments.js";
 export type { AxelarStellarChain } from "./discovery.js";
@@ -27,12 +32,14 @@ export {
 } from "./discovery.js";
 export type { EthCall } from "./evm.js";
 export { EvmReader, EvmRevert, fetchEthCall } from "./evm.js";
-export type { GasEstimate } from "./fees.js";
+export type { GasEstimate, PricedIn, TransferPrice } from "./fees.js";
 export { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";
 export { buildAddGas, GAS_SERVICE_ABI, GmpApi, legDelivered } from "./gmp.js";
 export type { JsonReply } from "./http.js";
 export { REQUEST_TIMEOUT_MS, requestJson } from "./http.js";
+export type { PinnedChain } from "./pinned.js";
+export { DEPLOYMENTS_COMMIT, PINNED_DEPLOYMENTS } from "./pinned.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";
 export type { ItsToken, ResolveInputs } from "./token.js";
 export {

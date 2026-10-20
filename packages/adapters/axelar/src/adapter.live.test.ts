@@ -432,7 +432,8 @@ describe("pricing, and the zero that means something else", () => {
   it("prices the transfer above zero for a chain it knows", async () => {
     const { stellarChain } = await testnetReaders();
     const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id, "ETH");
-    expect(BigInt(fee)).toBeGreaterThan(0n);
+    expect(BigInt(fee.baseUnits)).toBeGreaterThan(0n);
+    expect(fee.pricedIn).toEqual({ symbol: "ETH", decimals: 18 });
   });
 
   it("prices in the sending chain's own currency, at a size that pays for gas there", async () => {
@@ -451,7 +452,7 @@ describe("pricing, and the zero that means something else", () => {
     });
     const gasPrice = BigInt(((await response.json()) as { result: string }).result);
     const fee = await priceTransfer("testnet", "base-sepolia", stellarChain.id, symbol ?? "");
-    expect(BigInt(fee)).toBeGreaterThan(21_000n * gasPrice);
+    expect(BigInt(fee.baseUnits)).toBeGreaterThan(21_000n * gasPrice);
   });
 
   it("fails closed on a chain name it does not know, rather than quoting free", async () => {
@@ -482,7 +483,7 @@ describe("pricing, and the zero that means something else", () => {
       estimateGasFee("testnet", "base-sepolia", stellarChain.id, "ETH"),
       priceTransfer("testnet", "base-sepolia", stellarChain.id, "ETH"),
     ]);
-    expect(BigInt(paid)).toBeGreaterThan(BigInt(single.totalFee));
+    expect(BigInt(paid.baseUnits)).toBeGreaterThan(BigInt(single.totalFee));
   });
 });
 

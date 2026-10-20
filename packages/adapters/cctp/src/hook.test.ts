@@ -1,4 +1,4 @@
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Account, Keypair, MuxedAccount, StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import {
   buildForwarderHookData,
@@ -23,6 +23,7 @@ import {
  */
 
 const account = Keypair.random().publicKey();
+const muxed = new MuxedAccount(new Account(account, "0"), "1234567890").accountId();
 const forwarder = "CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ";
 
 /** Circle's published encoder, reimplemented here to compare against. */
@@ -84,6 +85,15 @@ describe("recipients Circle's forwarder accepts", () => {
   it("accepts accounts, contracts and muxed addresses", () => {
     expect(classifyForwardRecipient(account)).toBe("account");
     expect(classifyForwardRecipient(forwarder)).toBe("contract");
+    expect(classifyForwardRecipient(muxed)).toBe("muxed");
+  });
+
+  it("carries a muxed recipient as its own letters, id and all", () => {
+    // the M address, not the G it wraps: the sub-account id is what the
+    // recipient's platform credits by, and dropping it lands the funds unassigned
+    const data = buildForwarderHookData(muxed);
+    expect(parseForwarderHookData(data).recipient).toBe(muxed);
+    expect(new TextDecoder().decode(data.slice(32))).toBe(muxed);
   });
 
   it("refuses anything else rather than encoding it", () => {

@@ -2,8 +2,11 @@ import { MavnaError, type TransferHandle } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AxelarAdapter } from "./adapter.js";
-import { forgetChains } from "./deployments.js";
+import { forgetItsAssets, loadItsAssets } from "./assets.js";
+import { forgetChains, loadChains } from "./deployments.js";
+import { discoverLiveChains } from "./discovery.js";
 import { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
+import { DEPLOYMENTS_COMMIT } from "./pinned.js";
 
 /**
  * The adapter's edges with Axelar's HTTP APIs, held still with a fetch double.
@@ -13,8 +16,7 @@ import { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
  */
 
 const CHAINS_URL = "https://testnet.api.axelarscan.io/api/getChains";
-const CONFIG_URL =
-  "https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/main/axelar-chains-config/info/testnet.json";
+const CONFIG_URL = `https://raw.githubusercontent.com/axelarnetwork/axelar-contract-deployments/${DEPLOYMENTS_COMMIT}/axelar-chains-config/info/testnet.json`;
 const GMP = "https://testnet.api.gmp.axelarscan.io";
 
 const STELLAR_ID = "stellar-2026-q1-2";
@@ -56,7 +58,11 @@ const configBody = {
       rpc: "https://soroban-testnet.stellar.org",
       tokenSymbol: "XLM",
       decimals: 7,
-      contracts: {},
+      contracts: {
+        InterchainTokenService: {
+          address: "CC7LAC4S7KAPIM26WKWFSOXWLNLSG7EXTC2EVY2H2UPKSTX3Z2A7M5YP",
+        },
+      },
     },
   },
 };
@@ -67,6 +73,7 @@ const GAS_FEE_ETH = {
   baseFee: "5661583247892",
   executionFee: "0",
   totalFee: "5661583247892",
+  apiResponse: { result: { source_token: { symbol: "ETH", decimals: 18 } } },
 };
 const ITS_FEE_ETH = 10543325497105;
 
@@ -228,5 +235,27 @@ describe("the chain registry, per adapter", () => {
     await expect(instance.supportedChains()).rejects.toThrow(/503/);
     await expect(instance.supportedChains()).resolves.toEqual(["base-sepolia"]);
     expect(calls.filter((call) => call.url === CHAINS_URL).length).toBe(2);
+  });
+});
+
+describe("a rate limited Axelar endpoint", () => {
+  it("is a retry on every endpoint, not a permanent no", async () => {
+    // a burst of estimator calls during the audit came back 23 of 40 as HTTP 429
+    vi.stubGlobal("fetch", async () => json({ message: "Too Many Requests" }, 429));
+    const attempts: Array<[string, () => Promise<unknown>]> = [
+      ["deployments", () => loadChains("testnet")],
+      ["assets", () => loadItsAssets("testnet")],
+      ["chain registry", () => discoverLiveChains("testnet")],
+      ["gas estimator", () => estimateGasFee("testnet", "base-sepolia", STELLAR_ID, "ETH")],
+      ["its estimator", () => estimateItsFee("testnet", "base-sepolia", STELLAR_ID, "ETH")],
+      ["message search", () => adapter().status(HANDLE)],
+    ];
+    for (const [name, attempt] of attempts) {
+      forgetChains();
+      forgetItsAssets();
+      const failure = await attempt().catch((cause: unknown) => cause);
+      expect(failure, name).toBeInstanceOf(MavnaError);
+      expect((failure as MavnaError).retryable, name).toBe(true);
+    }
   });
 });
