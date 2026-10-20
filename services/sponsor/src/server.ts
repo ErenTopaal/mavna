@@ -564,6 +564,19 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   /**
+   * A preparation refused on its sequence, looked up by hash: the landed result
+   * if it is what spent the sequence, undefined if it is not. A lookup that
+   * fails throws, which leaves the preparation marked for the next touch to
+   * look up again.
+   */
+  async function preparationLanded(
+    hash: string,
+  ): Promise<Awaited<ReturnType<RpcClient["submit"]>> | undefined> {
+    const found = await options.rpc.findTransaction(hash);
+    return found.status === "SUCCESS" ? found : undefined;
+  }
+
+  /**
    * Back to the short lease, for a settlement whose preparation definitely did
    * not land: the account may try once more, but the slot is not kept for it.
    */
@@ -794,18 +807,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   }
 
   async function submitChannelFunding(channel: Keypair): Promise<void> {
-    const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
-    const create = new TransactionBuilder(sponsorAccount, {
-      fee: "1000000",
-      networkPassphrase: options.network.passphrase,
-    })
-      .addOperation(
-        Operation.createAccount({ destination: channel.publicKey(), startingBalance: "2" }),
-      )
-      .setTimeout(120)
-      .build();
-    create.sign(keypair);
-    await options.rpc.submit("channel funding", async () => create);
+    // Built inside the thunk, so a retry after a stale sequence (anything else
+    // the sponsor signs moves it) is built on the sequence as it is now.
+    await options.rpc.submit("channel funding", async () => {
+      const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
+      const create = new TransactionBuilder(sponsorAccount, {
+        fee: "1000000",
+        networkPassphrase: options.network.passphrase,
+      })
+        .addOperation(
+          Operation.createAccount({ destination: channel.publicKey(), startingBalance: "2" }),
+        )
+        .setTimeout(120)
+        .build();
+      create.sign(keypair);
+      return create;
+    });
   }
 
   /**
@@ -2051,22 +2068,55 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         throw cause;
       }
       try {
-        result = await options.rpc.submit("sponsored preparation", async () => transaction);
+        // Presigned: the user signed this sequence, so it cannot be rebuilt here,
+        // and resending it after a stale sequence can only be refused again.
+        result = await options.rpc.submit("sponsored preparation", async () => transaction, {
+          presigned: true,
+        });
       } catch (cause) {
-        const retryable = cause instanceof MavnaError ? cause.retryable : true;
-        // A refusal is final. Anything else (a timeout, an answer that never
-        // came) may still land, so the mark stays and the next touch looks it up.
-        if (!retryable && held.preparation === sent) {
-          held.preparation = undefined;
-          shortenLease(record.signer, held);
+        if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
+          // Something else the sponsor signed took this sequence while the user
+          // was signing. Asked by hash in case this very preparation is what
+          // took it; otherwise it can never land, and the account may prepare
+          // again at once.
+          const landed = await preparationLanded(record.hash);
+          if (landed !== undefined) {
+            result = landed;
+          } else {
+            if (held.preparation === sent) {
+              held.preparation = undefined;
+              shortenLease(record.signer, held);
+            }
+            await answer(
+              res,
+              409,
+              {
+                error:
+                  "The sponsor's account moved on before this preparation went out, so it " +
+                  "can never land. Ask for a new preparation and sign that one.",
+                retryable: true,
+                prepareAgain: true,
+              },
+              origin,
+            );
+            return;
+          }
+        } else {
+          const retryable = cause instanceof MavnaError ? cause.retryable : true;
+          // A refusal is final. Anything else (a timeout, an answer that never
+          // came) may still land, so the mark stays and the next touch looks it up.
+          if (!retryable && held.preparation === sent) {
+            held.preparation = undefined;
+            shortenLease(record.signer, held);
+          }
+          await answer(
+            res,
+            502,
+            { error: "The preparation could not be submitted.", retryable },
+            origin,
+          );
+          return;
         }
-        await answer(
-          res,
-          502,
-          { error: "The preparation could not be submitted.", retryable },
-          origin,
-        );
-        return;
       }
     } finally {
       held.preparing = false;

@@ -1,6 +1,15 @@
 import { MavnaError } from "@mavna/core";
-import type { NetworkConfig, RpcClient } from "@mavna/stellar";
-import { Keypair } from "@stellar/stellar-sdk";
+import { type NetworkConfig, RpcClient } from "@mavna/stellar";
+import {
+  Account,
+  Keypair,
+  Operation,
+  rpc,
+  StrKey,
+  type Transaction,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { Deliverer } from "./deliver.js";
 
@@ -112,5 +121,95 @@ describe("before anything is signed", () => {
 
     expect(deliverer.payerAddress).toBe(Keypair.fromSecret(payer).publicKey());
     expect(JSON.stringify(deliverer)).not.toContain(payer);
+  });
+});
+
+/**
+ * The network behind a real RpcClient, as far as delivery needs it: an account
+ * whose sequence moves when anything lands, and a submission that is refused
+ * with txBadSeq unless it carries the next one.
+ */
+class SequencedRpc extends RpcClient {
+  sequence = 100n;
+  readonly sent: bigint[] = [];
+  /** Something else the payer signed lands before this many sends. */
+  landsFirst = new Set<number>();
+  /** What simulation adds to the transaction, the way prepareTransaction does. */
+  simulate: (tx: Transaction) => Transaction = (tx) => tx;
+  private readonly landed = new Set<string>();
+
+  constructor() {
+    super({ url: "https://127.0.0.1:9", baseDelayMs: 0, sleep: () => Promise.resolve() });
+    this.server.sendTransaction = async (tx) => {
+      if (this.landsFirst.delete(this.sent.length)) this.sequence += 1n;
+      const inner = tx as Transaction;
+      this.sent.push(BigInt(inner.sequence));
+      const hash = tx.hash().toString("hex");
+      const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
+      if (BigInt(inner.sequence) !== this.sequence + 1n) {
+        return {
+          ...base,
+          status: "ERROR",
+          errorResult: new xdr.TransactionResult({
+            feeCharged: xdr.Int64.fromString("100"),
+            result: xdr.TransactionResultResult.txBadSeq(),
+            ext: new xdr.TransactionResultExt(0),
+          }),
+        };
+      }
+      this.sequence += 1n;
+      this.landed.add(hash);
+      return { ...base, status: "PENDING" };
+    };
+    this.server.getTransaction = async (hash) =>
+      (this.landed.has(hash)
+        ? { status: rpc.Api.GetTransactionStatus.SUCCESS, txHash: hash, ledger: 2, latestLedger: 2 }
+        : {
+            status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+            txHash: hash,
+            latestLedger: 2,
+          }) as never;
+  }
+
+  override async loadAccount(address: string): Promise<Account> {
+    return new Account(address, this.sequence.toString());
+  }
+
+  override async prepare(tx: Transaction): Promise<Transaction> {
+    return this.simulate(tx);
+  }
+}
+
+function deliveryOn(rpcClient: SequencedRpc): Deliverer {
+  return new Deliverer({
+    network,
+    networkId: "testnet",
+    payerSecret: payer,
+    rpc: rpcClient,
+    buildDelivery: ({ payerAccount }) =>
+      new TransactionBuilder(payerAccount, { fee: "100", networkPassphrase: network.passphrase })
+        .addOperation(
+          Operation.invokeContractFunction({
+            contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+            function: "receive_message",
+            args: [],
+          }),
+        )
+        .setTimeout(300)
+        .build(),
+  });
+}
+
+describe("a delivery whose sequence something else spent", () => {
+  it("is rebuilt on the payer's fresh sequence rather than resent as it was", async () => {
+    const network = new SequencedRpc();
+    // another sponsor transaction lands between building and the first send
+    network.landsFirst.add(0);
+    const outcome = await deliveryOn(network).deliver({
+      messageHex: "0xabcd",
+      attestationHex: "0x1234",
+    });
+    expect(outcome.kind).toBe("delivered");
+    expect(network.sent).toEqual([101n, 102n]);
   });
 });

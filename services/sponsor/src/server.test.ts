@@ -1959,6 +1959,53 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
   });
 });
 
+describe("a preparation whose sponsor sequence something else spent", () => {
+  it("is sent once, frees the account to prepare again, and says so", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const stale = await preparedAndSigned(server, user);
+    // a delivery or another account's preparation lands first
+    server.rpc.accounts.set(server.sponsor.publicKey(), 101n);
+    let sends = 0;
+    const send = server.rpc.server.sendTransaction.bind(server.rpc.server);
+    server.rpc.server.sendTransaction = async (tx) => {
+      sends += 1;
+      return send(tx);
+    };
+
+    const failed = await server.post("/submit", { signedXdr: stale });
+    expect(failed.status).toBe(409);
+    expect(failed.body.retryable).toBe(true);
+    expect(sends).toBe(1);
+
+    const fresh = await preparedAndSigned(server, user);
+    const landed = await server.post("/submit", { signedXdr: fresh });
+    expect(landed.status).toBe(200);
+  });
+
+  it("funds a channel on the sponsor's fresh sequence when something else landed first", async () => {
+    const server = await startServer({}, { fundsOwnChannel: true });
+    const sends: string[] = [];
+    const send = server.rpc.server.sendTransaction.bind(server.rpc.server);
+    server.rpc.server.sendTransaction = async (tx) => {
+      // the first time, another sponsor transaction lands just ahead of this one
+      if (sends.length === 0) {
+        const sponsor = server.sponsor.publicKey();
+        server.rpc.accounts.set(sponsor, (server.rpc.accounts.get(sponsor) ?? 0n) + 1n);
+      }
+      sends.push((tx as Transaction).sequence);
+      return send(tx);
+    };
+    const built = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+    expect(sends).toEqual(["101", "102"]);
+  });
+});
+
 describe("one account is one account however its address is written", () => {
   function muxedOf(user: Keypair): string {
     return new MuxedAccount(new Account(user.publicKey(), "0"), "7").accountId();

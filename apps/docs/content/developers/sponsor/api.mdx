@@ -142,6 +142,10 @@ Answers:
   been submitted against that settlement, whether it is still on its way or has
   landed. One settlement repays one preparation
 - `429` when a cap refuses at submission, retryable
+- `409`, retryable, with `"prepareAgain": true`, when something else the sponsor
+  signed took the preparation's sequence while the user was signing. It can never
+  land; ask `/prepare` for a new one and sign that, against the same held
+  settlement
 - `502` when Stellar would not accept the submission. The preparation is not
   offered again; build a new one
 

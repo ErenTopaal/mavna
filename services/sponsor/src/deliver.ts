@@ -1,7 +1,7 @@
 import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
 import type { NetworkConfig, RpcClient } from "@mavna/stellar";
-import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Keypair, type Transaction } from "@stellar/stellar-sdk";
 
 /**
  * Performing the last mile of a CCTP transfer.
@@ -110,37 +110,38 @@ export class Deliverer {
       return { kind: "not-attested-yet" };
     }
 
-    const payerAccount = await this.options.rpc.loadAccount(this.#keypair.publicKey());
+    // Built from the payer's sequence as it is now, and simulated before it is
+    // signed. A transaction that will fail should never be submitted, and the
+    // simulation is also where a not-ready recipient announces itself, before
+    // any fee is spent.
+    const build = async (): Promise<Transaction> => {
+      const payerAccount = await this.options.rpc.loadAccount(this.#keypair.publicKey());
+      const unsigned = this.options.buildDelivery({
+        network: this.options.network,
+        networkId: this.options.networkId,
+        payerAccount,
+        messageHex: request.messageHex,
+        attestationHex: request.attestationHex,
+      });
+      return this.options.rpc.prepare(unsigned);
+    };
 
-    const unsigned = this.options.buildDelivery({
-      network: this.options.network,
-      networkId: this.options.networkId,
-      payerAccount,
-      messageHex: request.messageHex,
-      attestationHex: request.attestationHex,
-    });
-
-    let prepared: import("@stellar/stellar-sdk").Transaction;
+    let prepared: Transaction | undefined;
     try {
-      // Simulated before it is signed. A transaction that will fail should never
-      // be submitted, and the simulation is also where a not-ready recipient
-      // announces itself, before any fee is spent.
-      prepared = await this.options.rpc.prepare(unsigned);
+      prepared = await build();
     } catch (cause) {
       return classify(cause);
     }
 
     try {
-      // A thunk rather than a transaction, because `submit` rebuilds on each
-      // retry: a stale sequence number is one of the transient failures it
-      // recovers from, and it cannot recover if it is handed a fixed envelope.
+      // Every other transaction the payer signs moves the same sequence, so a
+      // retry after a stale sequence is built and simulated again from a fresh
+      // read. Resending the first envelope could only be refused the same way.
       const result = await this.options.rpc.submit("cctp delivery", async () => {
-        const signed = TransactionBuilder.fromXDR(
-          prepared.toXDR(),
-          this.options.network.passphrase,
-        ) as import("@stellar/stellar-sdk").Transaction;
-        signed.sign(this.#keypair);
-        return signed;
+        const next = prepared ?? (await build());
+        prepared = undefined;
+        next.sign(this.#keypair);
+        return next;
       });
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
