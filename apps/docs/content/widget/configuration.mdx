@@ -100,13 +100,21 @@ many declined), `routeSelected` (the source and the amount received),
 `walletConnected` (the ecosystem and address), `transferStarted`,
 `transferStepUpdated` (a step id and its phase), `transferCompleted`,
 `transferFailed` (with a reason), `transferStillMoving` (with a reason), and
-`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived: a
-conversion on arrival could not meet the minimum, so the money arrived in the asset
-it was sent in, which is neither a success nor a loss). The
-last one means the widget stopped watching a transfer that is still on its way: it
-outlived the widget's patience, or the widget went away. It is not a failure; the
-transfer can be checked on and finished from Activity. Each event is backed by a
-real signal in the flow.
+`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived).
+
+`transferStillMoving` means the widget stopped watching a transfer without an
+ending it can confirm. Usually the transfer is still on its way: it outlived the
+widget's patience, or the widget went away. It also covers a transfer the rail
+records as delivered on Stellar whose amount can no longer be read back
+(`delivered-unverified`): ended, but not confirmed, and the reason names the
+transaction to check. Neither is a failure; Activity shows the transfer and, where
+it can, finishes it.
+
+`transferDeliveredAsCame` means a conversion on arrival could not meet the
+minimum, so the money arrived in the asset it was sent in, which is neither a
+success nor a loss.
+
+Each event is backed by a real signal in the flow.
 
 ## The type
 

@@ -45,8 +45,13 @@ interface RouteRejection {
     | "errored";
   readonly explanation: string;
   readonly retryable: boolean;
+  readonly detail?: string;
 }
 ```
+
+`detail`, when present, is for whoever runs the integration and never for the
+user: a venue's or a node's own words, which can carry raw protocol text or URLs.
+Show `explanation`; log `detail`.
 
 A user must be able to see why a route is unavailable rather than watch it quietly
 not appear, so a rail that declines, times out, or throws still shows up in
