@@ -22,9 +22,9 @@ this page.
   connected wallet, never here. The foundation runs no mainnet node, so mainnet
   defaults to the first of the measured public nodes; set your own provider for
   real money. An empty string is refused as a configuration error.
-- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. It
-  defaults to a local development sponsor, so set your own for production. An
-  empty string is refused.
+- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. On
+  testnet it defaults to a local development sponsor; on mainnet it is required,
+  and the widget refuses to mount without it. An empty string is refused.
 - **`networks`**. The networks the header's network toggle switches between,
   `network` among them. Defaults to `[network]`, which shows the other network
   disabled. Switching rebuilds the engine for that network and starts the form

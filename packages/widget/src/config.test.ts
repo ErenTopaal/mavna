@@ -12,7 +12,11 @@ describe("resolveConfig, the network", () => {
   });
 
   it("starts on the network the integrator chose, against the public mainnet node", () => {
-    const resolved = resolveConfig({ integrator: "t", network: "mainnet" });
+    const resolved = resolveConfig({
+      integrator: "t",
+      network: "mainnet",
+      sponsorUrl: "https://sponsor.example",
+    });
     expect(resolved.engineConfig.network).toBe("mainnet");
     expect(resolved.engineConfig.rpcUrl).toBe(PUBLIC_MAINNET_RPC_URLS[0]);
   });
@@ -151,6 +155,14 @@ describe("resolveConfig, the chain sent from", () => {
   it("keeps a fromChain that is on offer", () => {
     expect(resolveConfig({ integrator: "t", fromChain: "base-sepolia" }).init.fromChain).toBe(
       "base-sepolia",
+    );
+  });
+});
+
+describe("resolveConfig, a mainnet sponsor", () => {
+  it("is never assumed to be on this machine", () => {
+    expect(() => resolveConfig({ integrator: "t", network: "mainnet" })).toThrow(
+      /mainnet.*sponsorUrl/,
     );
   });
 });

@@ -245,11 +245,20 @@ function endpointsFor(
     (isDefault ? given(config.rpcUrl, "rpcUrl", network) : undefined) ??
     (network === "mainnet" ? PUBLIC_MAINNET_RPC_URLS[0] : PUBLIC_TESTNET_RPC_URL);
   if (rpcUrl === undefined) throw configError(`no rpcUrl is known for ${network}.`);
+  // A local sponsor is a testnet convenience. On mainnet it would have users'
+  // browsers ask whatever listens on their own port 8787 for what they sign.
   const sponsorUrl =
     given(own?.sponsorUrl, "sponsorUrl", network) ??
     (isDefault
-      ? (given(config.sponsorUrl, "sponsorUrl", network) ?? "http://localhost:8787")
+      ? (given(config.sponsorUrl, "sponsorUrl", network) ??
+        (network === "testnet" ? "http://localhost:8787" : undefined))
       : undefined);
+  if (sponsorUrl === undefined && isDefault) {
+    throw configError(
+      `${network} needs a sponsorUrl: the sponsor you run for it. Only testnet defaults to a ` +
+        "local one.",
+    );
+  }
   if (sponsorUrl === undefined) {
     throw configError(
       `${network} is offered but has no sponsorUrl in endpoints. A sponsor serves one network, ` +
