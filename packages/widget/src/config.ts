@@ -69,6 +69,18 @@ export type MavnaWidgetEvent =
       readonly reason: string;
       readonly asset: string;
       readonly baseUnits: string;
+    }
+  /**
+   * The rail says the transfer executed on Stellar but can no longer prove what
+   * arrived. It has ended: not a failure, and not still moving. The Stellar
+   * transaction is given for checking it.
+   */
+  | {
+      readonly type: "transferDeliveredUnverified";
+      readonly reason: string;
+      /** The Stellar transaction the rail reported. */
+      readonly stellarTxHash: string;
+      readonly explorerUrl: string;
     };
 
 /**

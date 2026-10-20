@@ -33,8 +33,10 @@ import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
 import {
+  buildSteps,
   burnDomain,
   DeliveredAsCame,
+  DeliveredUnverified,
   finishDelivery,
   holdBlocker,
   mapEvm,
@@ -484,6 +486,7 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     swapVenues: createSwapVenues({ network: "testnet" }),
     rpc: stellarNode(),
     usdcOnStellar: STELLAR_USDC,
+    xlmOnStellar: STELLAR_XLM,
     stellarNetwork: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
   };
 }
@@ -1183,7 +1186,9 @@ describe("runTransfer when the account pays its own reserve", () => {
       "iris /v2/messages/3",
       "stellar read destination",
       "stellar simulate delivery",
+      "deliver blocked",
       "stellar sign DELIVERY",
+      "deliver pending",
       "stellar send invokeHostFunction",
       "deliver done",
     ]);
@@ -1218,6 +1223,25 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/authorize more than the delivery/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, marks the delivery as waiting on the wallet while it asks to sign it", async () => {
+    funding = "self";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const order: string[] = [];
+    const { patch } = patches();
+    await run(cctp, routeFor("cctp"), (id, p) => {
+      if (id === "deliver" && p.phase !== undefined) order.push(`deliver ${String(p.phase)}`);
+      patch(id, p);
+    });
+    expect(order[0]).toBe("deliver blocked");
+    const signedAt = log.indexOf("stellar sign DELIVERY");
+    expect(signedAt).toBeGreaterThan(-1);
+    expect(order).toContain("deliver pending");
   });
 
   it("over Circle, stops at a declined delivery signature and leaves it to Activity", async () => {
@@ -1269,7 +1293,9 @@ describe("runTransfer when the account pays its own reserve", () => {
       "iris /v2/messages/3",
       "stellar read destination",
       "stellar simulate delivery",
+      "deliver blocked",
       "stellar sign DELIVERY",
+      "deliver pending",
       "stellar send invokeHostFunction",
       "deliver done",
     ]);
@@ -1538,7 +1564,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(log).not.toContain("stellar sign PREPARATION");
   });
 
-  it("ends a delivery the rail cannot prove any more as still to check, never as failed", async () => {
+  it("ends a delivery the rail cannot prove any more as its own outcome, never as failed", async () => {
     const unverified = {
       phase: "delivered-unverified" as const,
       ref: {
@@ -1553,7 +1579,7 @@ describe("runTransfer when the account pays its own reserve", () => {
       transactions: [layerZeroSend("1")],
     });
     const error = await run(adapter, routeFor("axelar"), patches().patch).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(StillMoving);
+    expect(error).toBeInstanceOf(DeliveredUnverified);
     expect((error as Error).message).toMatch(/too old to read back.*Activity/);
   });
 
@@ -1806,10 +1832,12 @@ describe("finishing a Circle delivery from Activity", () => {
   });
 
   /** An attested burn whose hook data names `recipient`, laid out as Circle's v2 message is. */
-  const attestedTo = (recipient: string) => {
+  const attestedTo = (recipient: string, mintedBaseUnits = 0) => {
     const hook = buildForwarderHookData(recipient);
     const message = new Uint8Array(148 + 228 + hook.length);
     message.set(hook, 148 + 228);
+    // the burn body's amount, a big-endian uint256 at body + 68; the fee at body + 164 stays 0
+    new DataView(message.buffer).setUint32(148 + 68 + 28, mintedBaseUnits, false);
     irisReplies = [
       [
         200,
@@ -1839,6 +1867,31 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
   });
 
+  it("signs a new repayment first when the one held for a new account has lapsed", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    lane = "needs-account";
+    settleReplies = [[404, { error: "Nothing is held for that account.", retryable: false }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    const asked = log.filter((l) => l.startsWith("sponsor") || l.startsWith("stellar sign"));
+    expect(asked).toEqual([
+      "sponsor /health",
+      "sponsor /deliver",
+      "sponsor /settle",
+      "sponsor /settlement",
+      "stellar sign SETTLEMENT",
+      "sponsor /settlement/commit",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "sponsor /deliver",
+    ]);
+  });
+
   it("prepares a new account the flow never got to, checked, then delivers", async () => {
     attestedTo(DESTINATION);
     deliverReplies = [
@@ -1852,6 +1905,8 @@ describe("finishing a Circle delivery from Activity", () => {
       "sponsor /deliver",
       "iris /v2/messages/3",
       "stellar connect",
+      // whether the sponsor still holds the repayment it is set up against
+      "sponsor /settle",
       "sponsor /prepare",
       "stellar sign PREPARATION",
       "sponsor /submit",
@@ -1994,6 +2049,124 @@ describe("a Stellar wallet connected to another account", () => {
       }),
     ).rejects.toThrow(/Switch to that account in your wallet/);
     expect(forgot).toBe(1);
+  });
+});
+
+describe("a delivery the rail can no longer prove", () => {
+  it("says the arrival was not converted when the route converts, and asks for no conversion", async () => {
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const unverified = {
+      phase: "delivered-unverified" as const,
+      ref: {
+        chainId: "stellar-testnet",
+        txHash: "f00d",
+        explorerUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
+      },
+      because: "The rail's record no longer says what arrived.",
+    };
+    const adapter = new ScriptedAdapter("layerzero", [unverified], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+      },
+    });
+    const error = await run(adapter, route, patches().patch).catch((e: unknown) => e);
+    // ended, though unproven: its own outcome, with the Stellar transaction to check
+    expect(error).toBeInstanceOf(DeliveredUnverified);
+    expect((error as DeliveredUnverified).txHash).toBe("f00d");
+    expect((error as DeliveredUnverified).explorerUrl).toBe(
+      "https://stellar.expert/explorer/testnet/tx/f00d",
+    );
+    expect((error as Error).message).toMatch(/not converted.*USDC.*XLM/);
+    expect(conversionAmounts).toEqual([]);
+  });
+});
+
+describe("whether closing the page is safe while Circle attests", () => {
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+  const attestNotes = (seen: Array<{ id: string; patch: Record<string, unknown> }>) =>
+    seen
+      .filter((p) => p.id === "attest" && typeof p.patch.note === "string")
+      .map((p) => p.patch.note);
+
+  it("is said only once the sponsor has the burn on its watch list", async () => {
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    expect(attestNotes(seen)[0]).toMatch(/Safe to close this page: the sponsor delivers it/);
+  });
+
+  it("is not said when the sponsor does not say it is watching, or cannot be reached", async () => {
+    for (const first of [
+      [404, { error: "Not attested yet.", retryable: true }],
+      [0, undefined],
+    ] as Array<[number, unknown]>) {
+      deliverReplies = [first, [200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
+      const { seen, patch } = patches();
+      await run(cctp(), routeFor("cctp"), patch);
+      const notes = attestNotes(seen);
+      expect(notes.some((n) => /Safe to close/.test(String(n)))).toBe(false);
+      expect(
+        notes.some((n) => /Closing this page pauses the delivery.*Activity/.test(String(n))),
+      ).toBe(true);
+    }
+  });
+
+  it("is said when a sent delivery's outcome is not known yet but the sponsor is watching it", async () => {
+    deliverReplies = [
+      [
+        502,
+        {
+          error: "The delivery went out and its outcome is not known yet.",
+          retryable: true,
+          deliveryTxHash: "d311",
+          watching: true,
+        },
+      ],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    expect(attestNotes(seen)[0]).toMatch(/Safe to close this page: the sponsor delivers it/);
+  });
+
+  it("is not said for a new account, which its own wallet still has to set up", async () => {
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp", { newAccount: true }), patch);
+    const notes = attestNotes(seen);
+    expect(notes.some((n) => /Safe to close/.test(String(n)))).toBe(false);
+    expect(notes[0]).toMatch(/Closing this page pauses setting up the new account.*Activity/);
+  });
+
+  it("is never said when the account signs its own delivery", () => {
+    const steps = buildSteps(toRouteView(routeFor("cctp")), "self");
+    const attest = steps.find((s) => s.id === "attest");
+    expect(attest?.note).not.toMatch(/Safe to close/);
+    expect(attest?.note).toMatch(/closing this page pauses it.*Activity/);
+    // before the sponsor has answered, nothing calls it safe either
+    const sponsored = buildSteps(toRouteView(routeFor("cctp")), "sponsor");
+    expect(sponsored.find((s) => s.id === "attest")?.note).not.toMatch(/Safe to close/);
   });
 });
 

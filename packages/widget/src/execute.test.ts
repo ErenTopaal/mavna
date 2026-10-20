@@ -265,7 +265,12 @@ describe("execute", () => {
     return { connection, seen, waits };
   }
 
-  function run(connection: Connection, transactions: readonly UnsignedTransaction[]) {
+  function run(
+    connection: Connection,
+    transactions: readonly UnsignedTransaction[],
+    signal?: AbortSignal,
+    onEvent?: (event: ExecutionEvent) => void,
+  ) {
     const events: ExecutionEvent[] = [];
     const done = execute({
       connection,
@@ -274,7 +279,11 @@ describe("execute", () => {
       chainName: "Arbitrum Sepolia",
       evmChainId: 421_614,
       nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-      onEvent: (event) => events.push(event),
+      onEvent: (event) => {
+        events.push(event);
+        onEvent?.(event);
+      },
+      ...(signal === undefined ? {} : { signal }),
     });
     return { done, events };
   }
@@ -361,5 +370,40 @@ describe("execute", () => {
     await expect(run(connection, [send]).done).rejects.toThrow(
       "The transfer was cancelled in your wallet, so nothing was sent.",
     );
+  });
+
+  describe("a page closed partway, said by what actually confirmed", () => {
+    const reset = () => approve({ skipAlsoWhenExactly: "0" });
+
+    it("says nothing was approved when only a reset with nothing to reset went by", async () => {
+      const gone = new AbortController();
+      const { connection } = wallet({ allowance: 0n });
+      const { done } = run(connection, [reset(), approve(), send], gone.signal, (event) => {
+        if (event.kind === "skipped") gone.abort();
+      });
+      await expect(done).rejects.toThrow(
+        "This page closed before anything was signed. Nothing has been sent.",
+      );
+    });
+
+    it("says the old allowance was cleared, not that anything was approved", async () => {
+      const gone = new AbortController();
+      const { connection } = wallet({ allowance: 7n });
+      const { done } = run(connection, [reset(), approve(), send], gone.signal, (event) => {
+        if (event.kind === "confirmed" && event.index === 0) gone.abort();
+      });
+      const error = await done.catch((e: unknown) => e);
+      expect((error as Error).message).toMatch(/allowance was cleared.*nothing was approved/);
+      expect((error as Error).message).not.toMatch(/approval went through/);
+    });
+
+    it("says the approval went through only when it did", async () => {
+      const gone = new AbortController();
+      const { connection } = wallet({});
+      const { done } = run(connection, [approve(), send], gone.signal, (event) => {
+        if (event.kind === "confirmed" && event.index === 0) gone.abort();
+      });
+      await expect(done).rejects.toThrow(/The approval went through, but no funds moved/);
+    });
   });
 });

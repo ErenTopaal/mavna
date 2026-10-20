@@ -12,7 +12,7 @@ import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
 import { renderChains, renderFlight, renderReview, routeDetail } from "./screens";
-import { DeliveredAsCame, StillMoving } from "./transfer";
+import { DeliveredAsCame, DeliveredUnverified, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
 // runTransfer() are the system under test; nothing here is mounted.
@@ -76,6 +76,26 @@ describe("Flow.endWith", () => {
         reason: "USDT0 arrived as it came.",
         asset: "USDT0",
         baseUnits: "5000000",
+      },
+    ]);
+  });
+
+  it("tells the host a delivery it could not prove has ended, with the transaction to check", () => {
+    const events: MavnaWidgetEvent[] = [];
+    const flow = new Flow({ engine, emit: (event) => events.push(event) });
+    flow.endWith(
+      new DeliveredUnverified(
+        "The rail's record no longer says what arrived.",
+        "f00d",
+        "https://stellar.expert/explorer/testnet/tx/f00d",
+      ),
+    );
+    expect(events).toEqual([
+      {
+        type: "transferDeliveredUnverified",
+        reason: "The rail's record no longer says what arrived.",
+        stellarTxHash: "f00d",
+        explorerUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
       },
     ]);
   });

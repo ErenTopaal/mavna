@@ -26,7 +26,10 @@ export async function fetchOrThrow(
 export function causeOf(cause: unknown): string {
   if (cause instanceof Error) {
     const inner = cause.cause instanceof Error ? `: ${cause.cause.message}` : "";
-    return `${cause.name}: ${cause.message}${inner}`.slice(0, 200);
+    // a refusal keeps the node's or host's own words as detail, which is what an operator needs
+    const said = (cause as { detail?: unknown }).detail;
+    const detail = typeof said === "string" && said !== "" ? ` ${said}` : "";
+    return `${cause.name}: ${cause.message}${detail}${inner}`.slice(0, 200);
   }
   return String(cause).slice(0, 200);
 }

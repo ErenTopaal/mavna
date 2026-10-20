@@ -482,5 +482,7 @@ function describeEvent(e: MavnaWidgetEvent): string {
       return `transferStillMoving · ${e.reason}`;
     case "transferDeliveredAsCame":
       return `transferDeliveredAsCame · ${e.asset} · ${e.reason}`;
+    case "transferDeliveredUnverified":
+      return `transferDeliveredUnverified · ${e.stellarTxHash} · ${e.reason}`;
   }
 }

@@ -110,7 +110,10 @@ export function stepsFor(
       {
         id: "attest",
         label: "Circle attests the transfer",
-        note: "A few minutes. Safe to close this page.",
+        // the account's own wallet signs the delivery, and only an open page can ask it
+        note:
+          "A few minutes. Your wallet signs the delivery next, so closing this page pauses it; " +
+          "you can finish it under Activity.",
         user: false,
         actor: "Circle",
       },
@@ -134,7 +137,8 @@ export function stepsFor(
       {
         id: "attest",
         label: "Circle attests the transfer",
-        note: "A few minutes. Safe to close this page.",
+        // safe to close only once the sponsor says it is watching the burn
+        note: "A few minutes. Keep this page open until the sponsor has the transfer.",
         user: false,
         actor: "Circle",
       },

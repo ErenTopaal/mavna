@@ -115,11 +115,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
 
     const call = parseCall(transaction.payload, connection.address);
     if (options.signal?.aborted === true) {
-      throw new Error(
-        index === 0
-          ? "This page closed before anything was signed. Nothing has been sent."
-          : "This page closed before the transfer was signed. The approval went through, but no funds moved. Nothing has been sent.",
-      );
+      throw new Error(closedMessage(index, transactions.length, hashes.length));
     }
     onEvent({ kind: "awaiting-signature", index, describes: transaction.describes });
 
@@ -139,7 +135,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
         // Nothing was sent, and saying so is the point: a user who is unsure
         // whether their money moved will try again, and trying again is how one
         // payment becomes two.
-        throw new Error(declinedMessage(index, transactions.length));
+        throw new Error(declinedMessage(index, transactions.length, hashes.length));
       }
       throw cause;
     }
@@ -202,11 +198,34 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
  * What a declined signature means, said by position: the send is always last,
  * and a rail whose token needs no allowance builds nothing before it.
  */
-function declinedMessage(index: number, count: number): string {
-  if (index < count - 1) return "You did not approve, so nothing was sent.";
-  return index === 0
+function declinedMessage(index: number, count: number, confirmed: number): string {
+  if (index < count - 1) {
+    // a reset that already confirmed cleared the old allowance, and approved nothing
+    return confirmed === 0
+      ? "You did not approve, so nothing was sent."
+      : "You did not approve. The old allowance was cleared, but nothing was approved and nothing was sent.";
+  }
+  return confirmed === 0
     ? "You did not confirm the transfer, so nothing was sent."
     : "You did not confirm the transfer. The approval went through, but no funds moved.";
+}
+
+/**
+ * What closing the page left behind, said by what actually confirmed: a skipped
+ * step signed nothing, and a reset before the approval approved nothing.
+ */
+function closedMessage(index: number, count: number, confirmed: number): string {
+  if (confirmed === 0) return "This page closed before anything was signed. Nothing has been sent.";
+  if (index < count - 1) {
+    return (
+      "This page closed before the approval was signed. The old allowance was cleared, but " +
+      "nothing was approved and no funds moved. Nothing has been sent."
+    );
+  }
+  return (
+    "This page closed before the transfer was signed. The approval went through, but no " +
+    "funds moved. Nothing has been sent."
+  );
 }
 
 /**

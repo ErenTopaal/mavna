@@ -56,6 +56,8 @@ export async function deliverOwn(
   domain: number,
   payer: string,
   attestations: AttestationService = new AttestationService(engine.network),
+  /** Told when the wallet is asked to sign, and when it has answered. */
+  asking?: (open: boolean) => void,
 ): Promise<OwnDelivery> {
   const found = await attestations.byTransaction(domain, burnHash);
   const ready = found.find(
@@ -101,8 +103,11 @@ export async function deliverOwn(
   // Activity re-simulates first, so finishing from there is safe either way.
   let signedXdr: string;
   try {
+    asking?.(true);
     signedXdr = await engine.stellar.sign(prepared.toXdr(), payer);
+    asking?.(false);
   } catch (cause) {
+    asking?.(false);
     return {
       kind: "refused",
       detail: `${asError(cause).message} The delivery was not signed; finish it under Activity when you are ready.`,

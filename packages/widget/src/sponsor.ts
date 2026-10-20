@@ -17,6 +17,7 @@ interface SponsorError {
   readonly error: string;
   readonly retryable: boolean;
   readonly prepareAgain?: boolean;
+  readonly watching?: boolean;
 }
 
 /** A refusal the sponsor answered, with what it said about trying again. */
@@ -25,21 +26,31 @@ export class SponsorRefusal extends Error {
   readonly retryable: boolean;
   /** The preparation can never land; a new one, signed again, can. */
   readonly prepareAgain: boolean;
+  /** The burn is on the sponsor's watch list, and it keeps delivering it by itself. */
+  readonly watching: boolean;
 
-  constructor(message: string, status: number, retryable: boolean, prepareAgain: boolean) {
+  constructor(
+    message: string,
+    status: number,
+    retryable: boolean,
+    prepareAgain: boolean,
+    watching = false,
+  ) {
     super(message);
     this.name = "SponsorRefusal";
     this.status = status;
     this.retryable = retryable;
     this.prepareAgain = prepareAgain;
+    this.watching = watching;
   }
 }
 
 export type SponsorDelivery =
   | { kind: "delivered"; txHash: string; ledger: number }
   | { kind: "already-delivered" }
-  | { kind: "recipient-not-ready"; detail: string }
-  | { kind: "not-attested-yet" };
+  | { kind: "recipient-not-ready"; detail: string; watching?: boolean }
+  /** `watching`: the sponsor wrote the burn down and keeps asking about it by itself. */
+  | { kind: "not-attested-yet"; watching?: boolean };
 
 /** What finishing a conversion on arrival came to. */
 export type SponsorCompose =
@@ -186,6 +197,7 @@ export function createSponsorClient(
       answer.status,
       body?.retryable === true,
       body?.prepareAgain === true,
+      body?.watching === true,
     );
   }
 
@@ -212,7 +224,10 @@ export function createSponsorClient(
       const answer = await send("/deliver", { txHash, domain, destination });
       // Not attested yet (404) and recipient not ready (409) are the polling
       // loop's ordinary answers, so they come back as outcomes, not errors.
-      if (answer.status === 404) return { kind: "not-attested-yet" };
+      if (answer.status === 404) {
+        const watching = (answer.body as { watching?: unknown } | null)?.watching === true;
+        return watching ? { kind: "not-attested-yet", watching } : { kind: "not-attested-yet" };
+      }
       if (answer.status === 409 && (answer.body as { kind?: unknown } | null)?.kind) {
         return answer.body as SponsorDelivery;
       }

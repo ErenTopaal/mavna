@@ -122,3 +122,29 @@ describe("rememberConnection, telling the header", () => {
     expect(opened()).toBe(1);
   });
 });
+
+describe("rememberConnection, letting go of the wallet", () => {
+  it("stops listening to the wallet once nothing listens to it, and starts again after", () => {
+    let listening = 0;
+    const wallet = rememberConnection({
+      connect: async () => "G",
+      sign: async (xdr) => xdr,
+      disconnect: async () => {},
+      onChange: () => {
+        listening += 1;
+        return () => {
+          listening -= 1;
+        };
+      },
+    });
+    expect(listening).toBe(0);
+    const stop = wallet.onChange?.(() => {});
+    expect(listening).toBe(1);
+    stop?.();
+    expect(listening).toBe(0);
+    const again = wallet.onChange?.(() => {});
+    expect(listening).toBe(1);
+    again?.();
+    expect(listening).toBe(0);
+  });
+});

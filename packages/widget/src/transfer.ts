@@ -11,10 +11,11 @@
  * than as module singletons, so the same runner serves the app (env config) and
  * the widget (an integrator's config).
  */
-import { AttestationService, fromHex, parseForwarderHookData } from "@mavna/adapter-cctp";
+import { AttestationService, fromHex, parseForwarderHookData, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
 import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import { detailOf } from "@mavna/swap";
 import {
   FeeBumpTransaction,
   Asset as StellarAsset,
@@ -79,6 +80,23 @@ export class DeliveredAsCame extends Error {
     this.asset = asset;
     this.baseUnits = baseUnits;
     this.decimals = decimals;
+  }
+}
+
+/**
+ * The rail says the transfer executed on Stellar, but can no longer prove what
+ * arrived. It has ended, so it is neither still moving nor a failure; the
+ * Stellar transaction is there for the user to check.
+ */
+export class DeliveredUnverified extends Error {
+  readonly txHash: string;
+  readonly explorerUrl: string;
+
+  constructor(message: string, txHash: string, explorerUrl: string) {
+    super(message);
+    this.name = "DeliveredUnverified";
+    this.txHash = txHash;
+    this.explorerUrl = explorerUrl;
   }
 }
 
@@ -160,6 +178,7 @@ export type TransferEngine = Pick<
   | "sponsorTerms"
   | "stellarNetwork"
   | "xlmStroopsPerUsdc"
+  | "xlmOnStellar"
 >;
 
 export interface TransferDeps {
@@ -190,9 +209,11 @@ export interface TransferDeps {
  */
 async function collectSettlement(
   engine: TransferEngine,
-  route: Route,
+  route: Pick<Route, "destination" | "deliveredAtLeast" | "fees" | "steps">,
   chainId: string,
   patch: Patch,
+  /** What to tell the user about their funds if this is refused. */
+  funds = "Nothing has been sent.",
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
@@ -201,7 +222,7 @@ async function collectSettlement(
       address,
       route.destination,
       "Only the owner of the receiving account can allow it to hold USDC.",
-      "Nothing has been sent.",
+      funds,
     );
   }
   let built: Awaited<ReturnType<typeof engine.sponsor.requestSettlement>>;
@@ -216,10 +237,12 @@ async function collectSettlement(
       (cause.status === 429 || cause.status === 503)
     ) {
       throw new Error(
-        `${cause.message} Nothing has been sent, and the transfer is ready to start again in a moment.`,
+        funds === "Nothing has been sent."
+          ? `${cause.message} Nothing has been sent, and the transfer is ready to start again in a moment.`
+          : `${cause.message} ${funds} Try again in a moment.`,
       );
     }
-    throw cause;
+    throw withFunds(cause, funds);
   }
   // held and submitted later against the arrival, so it is read in full first,
   // and held to the ceiling the quote offered this setup on
@@ -229,7 +252,7 @@ async function collectSettlement(
   } catch (cause) {
     throw new Error(
       "The sponsor's repayment could not be held to the order book's price " +
-        `(${asError(cause).message}), so it was not signed. Nothing has been sent.`,
+        `(${asError(cause).message}), so it was not signed. ${funds}`,
     );
   }
   const read = readSettlement(
@@ -240,9 +263,7 @@ async function collectSettlement(
     price,
   );
   if ("problem" in read) {
-    throw new Error(
-      `The sponsor's repayment was not signed: ${read.problem}. Nothing has been sent.`,
-    );
+    throw new Error(`The sponsor's repayment was not signed: ${read.problem}. ${funds}`);
   }
   const holds = route.deliveredAtLeast.asset;
   patch("settle", {
@@ -253,7 +274,7 @@ async function collectSettlement(
   const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
   const signed = await engine.stellar.sign(built.xdr, address);
   await engine.sponsor.commitSettlement(route.destination, signed).catch((cause: unknown) => {
-    throw withFunds(cause, "Nothing has been sent.");
+    throw withFunds(cause, funds);
   });
   return { owner: address, repaysAtMost };
 }
@@ -472,7 +493,15 @@ export async function convertOnStellar(
     );
   }
   const stellarAccount = await engine.rpc.loadAccount(account);
-  const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
+  let unsigned: Awaited<ReturnType<typeof engine.swapVenues.build>>;
+  try {
+    unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
+  } catch (cause) {
+    // the user is told it in plain words by the refusal itself; the node's and
+    // the host's own text is for whoever runs the page
+    console.warn("[mavna] the conversion could not be built:", detailOf(cause));
+    throw cause;
+  }
   const signed = await engine.stellar.sign(unsigned.toXdr(), account);
   const parsed = TransactionBuilder.fromXdr(signed, unsigned.networkPassphrase);
   // signed by the user, so its sequence is fixed: a stale one cannot be resent
@@ -563,6 +592,23 @@ async function deliverToStellar(
   patch("attest", { phase: "pending" });
   let prepared = alreadyPrepared;
   let lastError: string | undefined;
+  // The sponsor's first answer says whether it keeps delivering by itself once
+  // this page is gone; only then is closing it safe. A new account still needs
+  // its own wallet to be set up, which no sponsor can do for it.
+  let told = ownDelivery;
+  const tellClosing = (watching: boolean): void => {
+    if (told) return;
+    told = true;
+    patch("attest", {
+      phase: "pending",
+      note: !watching
+        ? "A few minutes. Closing this page pauses the delivery; you can finish it under Activity."
+        : !prepared && route.steps.some((s) => s.kind === "prepare-account")
+          ? "A few minutes. Closing this page pauses setting up the new account, which your " +
+            "wallet signs once Circle attests; you can finish it under Activity."
+          : "A few minutes. Safe to close this page: the sponsor delivers it when Circle attests.",
+    });
+  };
   for (let attempt = 0; attempt < 90; attempt += 1) {
     // a page that is gone asks for no more signatures
     if (gone(signal)) throw new StillMoving(STOPPED_WATCHING);
@@ -570,18 +616,26 @@ async function deliverToStellar(
     try {
       outcome =
         ownDelivery && owner !== undefined
-          ? await deliverOwn(engine, burnHash, domain, owner)
+          ? await deliverOwn(engine, burnHash, domain, owner, undefined, (open) =>
+              // the wallet's prompt is open: the page must not be closed under it
+              patch("deliver", { phase: open ? "blocked" : "pending" }),
+            )
           : await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
     } catch (cause) {
       // The burn is done, so a node or sponsor that did not answer this once is
       // asked again; it is not a reason to call the transfer failed.
       lastError = asError(cause).message;
+      // a delivery sent with its outcome unknown is still the sponsor's to finish
+      tellClosing(cause instanceof SponsorRefusal && cause.watching);
       patch("attest", {
         phase: "pending",
         note: `The last check failed (${lastError}). Trying again.`,
       });
       await wait(20_000, signal);
       continue;
+    }
+    if (outcome.kind === "not-attested-yet" || outcome.kind === "recipient-not-ready") {
+      tellClosing("watching" in outcome && outcome.watching === true);
     }
     if (outcome.kind === "too-costly") {
       throw new StillMoving(tooCostly(outcome.feeStroops));
@@ -664,8 +718,9 @@ export async function finishDelivery(
   // A new account the flow never got to prepare: the page closed during the
   // attestation, or the prompt was missed. The account Circle will mint to is
   // read from the attested message, and only its own wallet may open it.
-  const recipient = await attestedRecipient(engine, burnHash, domain);
-  if (recipient === undefined) return first;
+  const attested = await attestedBurn(engine, burnHash, domain);
+  if (attested === undefined) return first;
+  const { recipient } = attested;
   const address = await engine.stellar.connect();
   if (address !== recipient) {
     // remembered from before, maybe for another account: asked afresh next time
@@ -677,12 +732,47 @@ export async function finishDelivery(
         "Stellar wallet to let it hold USDC.",
     };
   }
+  const funds = "The funds are safe on Circle's side and still deliverable.";
+  const chainId = sourceChainId ?? "unknown";
+  // The sponsor accepts a preparation only against a repayment it holds, and it
+  // holds one about a day. Past that, a new one is signed first, held to the
+  // same checks as at the start, for what Circle will actually mint.
+  if ((await engine.sponsor.settle(recipient)).held === false) {
+    const usdc = engine.usdcOnStellar;
+    const { lane } = await inspectDestination(
+      engine.rpc,
+      recipient,
+      new StellarAsset("USDC", usdc.id.split(":")[1]),
+    );
+    const slots = lane.kind === "needs-account" ? 3n : 1n;
+    const reserve = slots * BigInt(engine.stellarNetwork.baseReserveStroops);
+    await collectSettlement(
+      engine,
+      {
+        destination: recipient,
+        // minted at six decimals, held on Stellar at seven
+        deliveredAtLeast: { asset: usdc, baseUnits: (attested.minted * 10n).toString() },
+        fees: [
+          {
+            kind: "account-reserve",
+            total: { asset: engine.xlmOnStellar, baseUnits: reserve.toString() },
+            recipients: [],
+            includedInQuote: true,
+          },
+        ],
+        steps: [],
+      },
+      chainId,
+      () => {},
+      funds,
+    );
+  }
   await prepareSponsored(
     engine,
     { destination: recipient, holds: engine.usdcOnStellar },
-    sourceChainId ?? "unknown",
+    chainId,
     address,
-    "The funds are safe on Circle's side and still deliverable.",
+    funds,
   );
   return engine.sponsor.requestDelivery(burnHash, domain, recipient);
 }
@@ -722,17 +812,28 @@ const MESSAGE_BODY_INDEX = 148;
 const HOOK_DATA_INDEX = 228;
 
 /** The Stellar account the attested burn's hook data names, or undefined when there is none yet. */
-async function attestedRecipient(
+async function attestedBurn(
   engine: Pick<TransferEngine, "network">,
   burnHash: string,
   domain: number,
-): Promise<string | undefined> {
+): Promise<{ readonly recipient: string; readonly minted: bigint } | undefined> {
   const found = await new AttestationService(engine.network).byTransaction(domain, burnHash);
   const message = found.find((a) => a.status === "complete" && a.message !== undefined)?.message;
   if (message === undefined) return undefined;
-  return parseForwarderHookData(fromHex(message).subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX))
-    .recipient;
+  const bytes = fromHex(message);
+  const { recipient } = parseForwarderHookData(
+    bytes.subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX),
+  );
+  // what Circle mints: the amount burned less the fee it took, both big-endian uint256
+  const uint = (at: number): bigint =>
+    BigInt(toHex(bytes.subarray(MESSAGE_BODY_INDEX + at, MESSAGE_BODY_INDEX + at + 32)));
+  const minted = uint(BURN_AMOUNT_INDEX) - uint(BURN_FEE_EXECUTED_INDEX);
+  return { recipient, minted: minted > 0n ? minted : 0n };
 }
+
+/** Where the amount and the fee Circle took sit in a v2 burn body. */
+const BURN_AMOUNT_INDEX = 68;
+const BURN_FEE_EXECUTED_INDEX = 164;
 
 /** Why a delivery the account would pay for was left unsigned. */
 export function tooCostly(feeStroops: bigint): string {
@@ -982,8 +1083,18 @@ async function runRelayed(
   if (tracked.phase.phase === "delivered-unverified") {
     // the rail says it executed and nothing says otherwise, so this is not a
     // failure; Activity shows the transaction for the user to check
-    throw new StillMoving(
-      `${endedNote(tracked.phase)} Activity shows it with the transaction to check.`,
+    // what arrived cannot be told apart from other funds without the rail's
+    // word, so a conversion is not asked for, and that is said
+    const swap = route.steps.find((step) => step.kind === "swap");
+    const unconverted =
+      swap === undefined
+        ? ""
+        : ` It was not converted: whatever arrived stays in ${swap.from.asset.symbol}; convert it ` +
+          `to ${swap.to.asset.symbol} in your wallet if you still want it.`;
+    throw new DeliveredUnverified(
+      `${endedNote(tracked.phase)}${unconverted} Activity shows it with the transaction to check.`,
+      tracked.phase.ref.txHash,
+      tracked.phase.ref.explorerUrl,
     );
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));

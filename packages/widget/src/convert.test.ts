@@ -60,6 +60,12 @@ beforeEach(() => {
 });
 
 describe("converting on Stellar", () => {
+  /** When set, the node's simulation of the swap fails with this host error. */
+  let hostError: string | undefined;
+  afterEach(() => {
+    hostError = undefined;
+  });
+
   /** The network doubles and a real venue chain; what crossed the boundary is returned. */
   function setUp() {
     const simulated: string[] = [];
@@ -107,6 +113,9 @@ describe("converting on Stellar", () => {
           simulated.push(
             `${Address.fromScAddress(call.contractAddress).toString()} ${call.functionName.toString()}`,
           );
+        }
+        if (hostError !== undefined) {
+          return respond({ jsonrpc: "2.0", id: 1, result: { latestLedger: 10, error: hostError } });
         }
         return respond({
           jsonrpc: "2.0",
@@ -260,6 +269,20 @@ describe("converting on Stellar", () => {
       convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "50000000"),
     ).rejects.toThrow(/txBadSeq/);
     expect(sends).toBe(1);
+  });
+
+  it("tells the user a swap could not be prepared without the host's own error text", async () => {
+    hostError = "HostError: Error(Contract, #6)\nEvent log (newest first): ...";
+    const run = setUp();
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = await convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "50000000").catch(
+      (e: unknown) => e,
+    );
+    expect((error as Error).message).toBe("Aquarius could not prepare this swap right now.");
+    expect((error as Error).message).not.toMatch(/HostError/);
+    // kept for whoever runs the page, in the console
+    expect(warned.mock.calls.flat().join(" ")).toMatch(/HostError: Error\(Contract, #6\)/);
+    expect(run.signed).toEqual([]);
   });
 
   it("leaves an amount the venue would turn into nothing as it arrived", async () => {
