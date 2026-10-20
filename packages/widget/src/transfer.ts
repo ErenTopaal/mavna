@@ -21,6 +21,7 @@ import {
 } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute, ReceiptTimedOut } from "./execute";
+import { asError } from "./helpers";
 import { forget, remember } from "./history";
 import {
   deliverOwn,
@@ -409,6 +410,10 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
   }
 }
 
+/** Said when the page stops after the burn: the money is past the point of failing. */
+const AFTER_BURN =
+  "Your funds are safe on Circle's side and still deliverable: finish the delivery under Activity.";
+
 /** Trigger the mint, preparing the account at the last moment if it is new. */
 async function deliverToStellar(
   engine: TransferEngine,
@@ -420,22 +425,41 @@ async function deliverToStellar(
   alreadyPrepared: boolean,
   /** The account pays for its own delivery: `owner` signs it, the sponsor is not asked. */
   ownDelivery: boolean,
+  wait: (ms: number, signal?: AbortSignal) => Promise<void>,
+  signal: AbortSignal | undefined,
 ): Promise<{ readonly repaid: boolean }> {
   // an account that pays for its own delivery is the one that signs it; asking
   // the sponsor instead would quietly spend the money self mode exists to save
   if (ownDelivery && owner === undefined) {
-    throw new Error(
-      "This delivery is the receiving account's to sign, and no Stellar wallet is connected for it.",
+    throw new StillMoving(
+      "This delivery is the receiving account's to sign, and no Stellar wallet is connected " +
+        `for it. ${AFTER_BURN}`,
     );
   }
   const domain = engine.sourceDomain(chainId);
   patch("attest", { phase: "pending" });
   let prepared = alreadyPrepared;
+  let lastError: string | undefined;
   for (let attempt = 0; attempt < 90; attempt += 1) {
-    const outcome =
-      ownDelivery && owner !== undefined
-        ? await deliverOwn(engine, burnHash, domain, owner)
-        : await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
+    // a page that is gone asks for no more signatures
+    if (signal?.aborted === true) throw new StillMoving(STOPPED_WATCHING);
+    let outcome: Awaited<ReturnType<typeof engine.sponsor.requestDelivery>> | OwnDelivery;
+    try {
+      outcome =
+        ownDelivery && owner !== undefined
+          ? await deliverOwn(engine, burnHash, domain, owner)
+          : await engine.sponsor.requestDelivery(burnHash, domain, route.destination);
+    } catch (cause) {
+      // The burn is done, so a node or sponsor that did not answer this once is
+      // asked again; it is not a reason to call the transfer failed.
+      lastError = asError(cause).message;
+      patch("attest", {
+        phase: "pending",
+        note: `The last check failed (${lastError}). Trying again.`,
+      });
+      await wait(20_000, signal);
+      continue;
+    }
     if (outcome.kind === "too-costly") {
       throw new StillMoving(tooCostly(outcome.feeStroops));
     }
@@ -459,35 +483,28 @@ async function deliverToStellar(
     if (outcome.kind === "recipient-not-ready") {
       if (owner !== undefined && !prepared) {
         patch("prepare", { phase: "blocked" });
-        // an account paying for itself gets the same check as at the start
-        if (ownDelivery) {
-          await openOwnTrustline(
-            engine,
-            route,
-            chainId,
-            owner,
-            "The funds are safe on Circle's side and still deliverable once the account can hold them.",
-          );
-        } else {
-          await prepareNow(
-            engine,
-            route,
-            chainId,
-            owner,
-            "The funds are safe on Circle's side and still deliverable once the account can hold them.",
-          );
+        try {
+          // an account paying for itself gets the same check as at the start
+          if (ownDelivery) {
+            await openOwnTrustline(engine, route, chainId, owner, AFTER_BURN);
+          } else await prepareNow(engine, route, chainId, owner, AFTER_BURN);
+        } catch (cause) {
+          const reason = asError(cause).message;
+          throw new StillMoving(reason.includes(AFTER_BURN) ? reason : `${reason} ${AFTER_BURN}`);
         }
         patch("prepare", { phase: "done" });
         prepared = true;
         continue;
       }
-      throw new Error(outcome.detail);
+      throw new StillMoving(`${outcome.detail} ${AFTER_BURN}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 20_000));
+    await wait(20_000, signal);
   }
   throw new StillMoving(
-    "Circle has not attested this transfer yet. Your funds are safe and this page " +
-      "can finish the delivery later: find the transfer under Activity.",
+    lastError === undefined
+      ? "Circle has not attested this transfer yet. Your funds are safe and this page " +
+          "can finish the delivery later: find the transfer under Activity."
+      : `This page could not get the delivery through (${lastError}). ${AFTER_BURN}`,
   );
 }
 
@@ -808,6 +825,8 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
         patch,
         prepared,
         ownDelivery,
+        deps.wait ?? sleep,
+        deps.signal,
       );
       if (repaid) unrepaid = 0n;
     }
@@ -833,7 +852,21 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
       });
       return;
     }
-    const converted = await convertOnStellar(engine, route, owner, convertible.toString());
+    let converted: Awaited<ReturnType<typeof convertOnStellar>>;
+    try {
+      converted = await convertOnStellar(engine, route, owner, convertible.toString());
+    } catch (cause) {
+      // the money is on Stellar either way: a conversion that could not run
+      // leaves it as it came, which is not a failed transfer
+      const reason = asError(cause).message;
+      throw new DeliveredAsCame(
+        reason.includes("has arrived")
+          ? reason
+          : `It was not converted: ${reason} The ${swapFrom.symbol} has arrived and is yours.`,
+        swapFrom.symbol,
+        convertible.toString(),
+      );
+    }
     patch(
       "swap",
       converted === "converted"

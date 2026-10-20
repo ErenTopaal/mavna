@@ -50,7 +50,10 @@ const SPONSOR_STELLAR = Keypair.random().publicKey();
 let log: string[];
 let stored: Map<string, string>;
 let settleReplies: Array<[number, unknown]>;
+/** Status 0 is no answer at all: the connection dropped. */
 let deliverReplies: Array<[number, unknown]>;
+/** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
+let refuses: "PREPARATION" | "CONVERSION" | undefined;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
@@ -135,6 +138,7 @@ beforeEach(() => {
   }).toXDR();
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
+  refuses = undefined;
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -209,6 +213,7 @@ beforeEach(() => {
         onDeliver?.();
         const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
         if (next === undefined) throw new Error("no deliver reply scripted");
+        if (next[0] === 0) throw new TypeError("Failed to fetch");
         return reply(next[0], next[1]);
       }
       case "/settle": {
@@ -379,6 +384,9 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         return DESTINATION;
       },
       sign: async (xdr: string) => {
+        const kind =
+          xdr === preparation || xdr === sponsoredPreparation ? "PREPARATION" : "CONVERSION";
+        if (refuses === kind) throw { code: -4, message: "The user rejected this request." };
         if (xdr === preparation || xdr === sponsoredPreparation) {
           log.push("stellar sign PREPARATION");
           return `signed ${xdr}`;
@@ -709,7 +717,10 @@ describe("runTransfer over Circle", () => {
     });
     const { seen, patch } = patches();
 
-    const done = run(cctp, routeFor("cctp", { newAccount: true }), patch);
+    // waits on the clock here, so the twenty seconds between asks can be seen
+    const done = run(cctp, routeFor("cctp", { newAccount: true }), patch, connection(), {
+      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    });
     // the first ask finds no attestation, and the next waits twenty seconds
     await vi.advanceTimersByTimeAsync(19_999);
     expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(1);
@@ -827,6 +838,45 @@ describe("a sponsor that fronts the reserve, read before the account signs", () 
         note: "Repays the reserve from what arrives: at most 0.6 USDC.",
       },
     });
+  });
+});
+
+describe("after the money has left the wallet", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+
+  it("rides out a dropped connection to the sponsor and keeps asking for the delivery", async () => {
+    deliverReplies = [
+      [0, undefined],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch, connection(), { wait: instant });
+    expect(log.filter((l) => l === "sponsor /deliver")).toHaveLength(2);
+    expect(seen).toContainEqual({
+      id: "attest",
+      patch: { phase: "pending", note: "The last check failed (Failed to fetch). Trying again." },
+    });
+    expect(log.at(-1)).toBe("deliver done");
+  });
+
+  it("ends as still moving, with the wallet's own reason, when the late preparation is refused", async () => {
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    refuses = "PREPARATION";
+    const error = await run(
+      cctp(),
+      routeFor("cctp", { newAccount: true }),
+      patches().patch,
+      connection(),
+      { wait: instant },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/The user rejected this request\..*Activity/);
   });
 });
 
@@ -1358,6 +1408,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     });
     await run(adapter, route, patches().patch).catch(() => undefined);
     expect(conversionAmounts).toEqual(["50000000"]);
+  });
+
+  it("ends a conversion that could not run after the money arrived as delivered as it came", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+      },
+    });
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    // the exchange does not answer (the harness's find-path is a 503)
+    const error = await run(adapter, route, patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DeliveredAsCame);
+    expect((error as DeliveredAsCame).asset).toBe("USDC");
+    expect((error as DeliveredAsCame).baseUnits).toBe("50000000");
   });
 
   it("will not start a conversion it could not tell apart from other arrivals", async () => {
