@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark.js";
+import { buildSource } from "./source.js";
 
 /*
  * A live configurator for the Mavna widget. The rail on the left writes a config;
@@ -482,15 +483,4 @@ function describeEvent(e: MavnaWidgetEvent): string {
     case "transferDeliveredAsCame":
       return `transferDeliveredAsCame · ${e.asset} · ${e.reason}`;
   }
-}
-
-/** Print the config as the JSX an integrator would paste, minus the onEvent hook. */
-function buildSource(config: MavnaWidgetConfig): string {
-  // the sponsor is this page's own; an integrator points the widget at theirs
-  const { onEvent: _onEvent, sponsorUrl: _sponsorUrl, ...rest } = config;
-  const body = JSON.stringify(rest, null, 2)
-    .split("\n")
-    .map((line, i) => (i === 0 ? line : `  ${line}`))
-    .join("\n");
-  return `import { MavnaWidget } from "@mavna/widget";\nimport "@mavna/widget/widget.css";\n\n<MavnaWidget\n  config={${body}}\n  onEvent={(e) => console.log(e)}\n/>`;
 }
