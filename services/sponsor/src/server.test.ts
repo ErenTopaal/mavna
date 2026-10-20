@@ -1,5 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildBurn,
   buildDelivery,
@@ -42,7 +45,7 @@ import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
-import { DocumentCapStore, MemoryDocumentStore } from "./state.js";
+import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
  * The sponsor's endpoints, driven over real HTTP against a real server.
@@ -2486,18 +2489,117 @@ describe("the sponsor and its node agree on the network", () => {
   });
 });
 
-describe("the sponsor refuses state it did not write", () => {
+describe("the sponsor skips stored state it did not write, and still starts", () => {
   it.each([
     ["held", { held: 5 }],
     ["built", { not: "a list" }],
     ["channels", { secrets: "S...", leases: [] }],
-  ])("stops with a named error when %s is not in the shape it writes", async (name, value) => {
+  ])(
+    "starts without a %s document that is not in the shape it writes, and keeps it aside",
+    async (name, value) => {
+      const state = new MemoryDocumentStore();
+      await state.write(name, value);
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { server } = await startServer({ state });
+      await expect(server.ready()).resolves.toBeUndefined();
+      expect(errors.mock.calls.some((call) => String(call.join(" ")).includes(name))).toBe(true);
+      const rejected = (await state.read("rejected")) as Record<string, { value: unknown }[]>;
+      expect(rejected[name]?.[0]?.value).toEqual(value);
+      errors.mockRestore();
+    },
+  );
+
+  it("drops only the built record that is not in the shape it writes", async () => {
     const state = new MemoryDocumentStore();
-    await state.write(name, value);
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    const built = (await state.read("built")) as Record<string, unknown>[];
+    await state.write("built", [
+      ...built,
+      { ...built[0], hash: "ff".repeat(32), sourceChainId: 7 },
+    ]);
+
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { server } = await startServer({ state });
-    await expect(server.ready()).rejects.toThrow(new RegExp(`${name} state .*not in the shape`));
+    const second = await startServer({ state }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
     errors.mockRestore();
+    const submitted = await second.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(200);
+  });
+
+  it("drops only the held settlement that is not in the shape it writes", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const document = (await state.read("held")) as { held: Record<string, unknown> };
+    const stray = Keypair.random().publicKey();
+    await state.write("held", {
+      ...document,
+      held: { ...document.held, [stray]: { xdr: 5 } },
+    });
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
+    errors.mockRestore();
+    const signed = await preparedAndSigned(second, user);
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(200);
+  });
+});
+
+describe("the sponsor reads every request field as the type it must be", () => {
+  it("refuses a source chain that is not a chain id, and still starts after a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mavna-sponsor-"));
+    const state = new FileDocumentStore(dir);
+    const first = await startServer({ state });
+    for (const sourceChainId of [7, { a: 1 }, ["base"], "", "x".repeat(200)]) {
+      for (const path of ["/prepare", "/settlement"]) {
+        const answered = await first.post(path, {
+          destination: Keypair.random().publicKey(),
+          sourceChainId,
+        });
+        expect(answered.status, `${path} ${JSON.stringify(sourceChainId)}`).toBe(400);
+      }
+    }
+    first.server.close();
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state: new FileDocumentStore(dir) }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("refuses the same in self-funded mode", async () => {
+    const server = await startServer({ reserveFunding: "self" });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    const answered = await server.post("/prepare", {
+      destination: user.publicKey(),
+      sourceChainId: 7,
+    });
+    expect(answered.status).toBe(400);
+  });
+
+  it.each([
+    ["/prepare", { destination: 5 }],
+    ["/prepare", { destination: Keypair.random().publicKey(), assets: "USDC" }],
+    ["/prepare", { destination: Keypair.random().publicKey(), assets: [5] }],
+    ["/settlement", { destination: ["G"] }],
+    ["/settlement/commit", { signedXdr: "AAAA", destination: 5 }],
+    ["/submit", { signedXdr: 5 }],
+    ["/settle", { destination: { a: 1 } }],
+    ["/deliver", { txHash: `0x${"ab".repeat(32)}`, domain: "0" }],
+  ])("answers %s with 400 for a field of the wrong type", async (path, body) => {
+    const server = await startServer();
+    const answered = await server.post(path, body);
+    expect(answered.status).toBe(400);
+    expect(answered.body.retryable).toBe(false);
+    expect(server.rpc.submissions).toEqual([]);
   });
 });
 

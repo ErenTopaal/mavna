@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CapLedger } from "./caps.js";
 import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
@@ -22,6 +22,20 @@ describe("a file-backed store keeps what it was given across processes", () => {
     const dir = await freshDir();
     await new FileDocumentStore(dir).write("held", { a: 1 });
     expect(await new FileDocumentStore(dir).read("held")).toEqual({ a: 1 });
+  });
+
+  it("moves a document that is not JSON aside and reads it as never written", async () => {
+    const dir = await freshDir();
+    await new FileDocumentStore(dir).write("held", { a: 1 });
+    await writeFile(join(dir, "held.json"), "{ half a docu");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await new FileDocumentStore(dir).read("held")).toBeUndefined();
+    errors.mockRestore();
+    const files = await readdir(dir);
+    const aside = files.find((file) => file.startsWith("held.json.unreadable-"));
+    expect(aside).toBeDefined();
+    expect(await readFile(join(dir, aside as string), "utf8")).toBe("{ half a docu");
+    expect(files).not.toContain("held.json");
   });
 
   it("answers undefined for a document never written", async () => {
@@ -47,14 +61,6 @@ describe("a file-backed store keeps what it was given across processes", () => {
   it("refuses a document name that could leave the directory", async () => {
     const store = new FileDocumentStore(await freshDir());
     await expect(store.write("../escape", {})).rejects.toThrow(/document name/);
-  });
-
-  it("throws on a document that is not JSON rather than starting empty", async () => {
-    const dir = await freshDir();
-    const store = new FileDocumentStore(dir);
-    await store.write("caps", {});
-    await writeFile(join(dir, "caps.json"), "{not json");
-    await expect(new FileDocumentStore(dir).read("caps")).rejects.toThrow(/caps/);
   });
 
   it("leaves no temporary file behind when a write fails", async () => {

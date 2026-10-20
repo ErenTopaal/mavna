@@ -30,13 +30,14 @@ import {
   type Asset,
   Keypair,
   Operation,
+  StrKey,
   type Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
 import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
-import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
+import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
@@ -169,30 +170,53 @@ const SELF_FUNDED_FEE_STROOPS = 1_000;
  */
 const SWEEP_ACCOUNT_DEADLINE_MS = 60_000;
 
-interface PrepareBody {
-  readonly destination?: string;
-  readonly assets?: readonly string[];
-  readonly sourceChainId?: string;
-}
+/**
+ * A source chain id as the widget sends it, such as "base" or "1". It is written
+ * into stored state and read back on every start, so anything else is refused
+ * here rather than trusted to be a string later.
+ */
+const chainIdField = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+/** Long enough for a muxed address; the address checks themselves come later. */
+const addressField = z.string().min(1).max(128);
+/** Every route takes a few hundred bytes; the body limit bounds this anyway. */
+const xdrField = z.string().min(1).max(60_000);
 
-interface SubmitBody {
-  readonly signedXdr?: string;
-}
-
-interface DeliverBody {
-  readonly txHash?: unknown;
-  readonly domain?: unknown;
+/**
+ * What each route accepts, checked before anything is read from it. A field of
+ * the wrong type is the caller's mistake and answered with 400; nothing it
+ * carries reaches stored state unchecked.
+ */
+const prepareBody = z.object({
+  destination: addressField.optional(),
+  assets: z.array(z.string().min(1).max(12)).max(8).optional(),
+  sourceChainId: chainIdField.optional(),
+});
+const submitBody = z.object({ signedXdr: xdrField.optional() });
+const settlementBody = z.object({
+  destination: addressField.optional(),
+  sourceChainId: chainIdField.optional(),
+});
+const settlementCommitBody = z.object({
+  destination: addressField.optional(),
+  signedXdr: xdrField.optional(),
+});
+const settleBody = z.object({ destination: addressField.optional() });
+const deliverBody = z.object({
+  txHash: z.string().max(200).optional(),
+  domain: z.number().int().nonnegative().optional(),
   /**
    * Accepted from older clients and never acted on. Who the transfer is for is
    * read from Circle's attested message, the one source a caller cannot choose.
    */
-  readonly destination?: unknown;
-}
+  destination: z.unknown().optional(),
+});
 
-interface SettlementBody {
-  readonly destination?: string;
-  readonly sourceChainId?: string;
-}
+type PrepareBody = z.infer<typeof prepareBody>;
+type SubmitBody = z.infer<typeof submitBody>;
+type SettlementBody = z.infer<typeof settlementBody>;
+type SettlementCommitBody = z.infer<typeof settlementCommitBody>;
+type SettleBody = z.infer<typeof settleBody>;
+type DeliverBody = z.infer<typeof deliverBody>;
 
 interface ComposeBody {
   readonly from?: unknown;
@@ -201,13 +225,17 @@ interface ComposeBody {
   readonly message?: unknown;
 }
 
-interface SettleBody {
-  readonly destination?: unknown;
-}
-
-interface SettlementCommitBody {
-  readonly destination?: string;
-  readonly signedXdr?: string;
+/** A body in the route's shape, or a 400 naming the first field that is not. */
+function bodyOf<T>(schema: z.ZodType<T>, body: Record<string, unknown>): T {
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const field = parsed.error.issues[0]?.path.join(".") ?? "";
+  throw new RequestError(
+    field === ""
+      ? "The request is not in the shape this endpoint reads."
+      : `The field "${field}" is not in the shape this endpoint reads.`,
+    400,
+  );
 }
 
 /** A settlement the user signed, held until their money lands. */
@@ -251,56 +279,58 @@ interface ChannelDocument extends ChannelPoolSnapshot {
 }
 
 /**
- * The shapes this version writes, checked on load. A file in another shape,
- * from another version or edited by hand, stops the process with its name
- * rather than failing later on some field it lacked.
+ * The shapes this version writes, checked entry by entry on load. An entry in
+ * another shape, from another version or edited by hand, is logged, set aside
+ * in the "rejected" document and skipped, so one bad record cannot keep the
+ * service from starting; the rest load as written.
  */
-const repaymentShape = z.object({ createdAccount: z.boolean(), assets: z.array(z.string()) });
-const storedShapes = {
-  built: z.array(
-    z.looseObject({
-      hash: z.string(),
-      kind: z.string(),
-      destination: z.string(),
-      signer: z.string(),
-      sourceChainId: z.string(),
-      expiresAtUnix: z.number(),
-      repays: repaymentShape.optional(),
-    }),
-  ),
+const repaymentShape = z.object({
+  createdAccount: z.boolean(),
+  assets: z.array(z.string()),
+});
+const builtShape = z.object({
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  kind: z.enum(["preparation", "settlement"]),
+  destination: z.string(),
+  signer: z.string(),
+  sourceChainId: chainIdField,
+  expiresAtUnix: z.number().int(),
+  channel: z.string().optional(),
+  repays: repaymentShape.optional(),
+  selfFunded: z.boolean().optional(),
+});
+const heldShape = z.object({
+  xdr: z.string(),
+  createdAtUnix: z.number().int(),
+  sourceChainId: chainIdField,
+  channel: z.string().optional(),
+  maxTimeUnix: z.number().int(),
+  repays: repaymentShape,
+  prepared: z.boolean(),
+  preparation: z.object({ hash: z.string(), expiresAtUnix: z.number().int() }).optional(),
+});
+const settledShape = z.object({ txHash: z.string(), untilUnix: z.number().int() });
+const secretShape = z.string().refine((value) => StrKey.isValidEd25519SecretSeed(value));
+const leaseShape = z.object({
+  owner: z.string(),
+  channel: z.string(),
+  untilUnix: z.number().int(),
+});
+const documentShapes = {
+  built: z.array(z.unknown()),
   held: z.object({
-    held: z.record(
-      z.string(),
-      z.looseObject({
-        xdr: z.string(),
-        createdAtUnix: z.number(),
-        sourceChainId: z.string(),
-        maxTimeUnix: z.number(),
-        repays: repaymentShape,
-        prepared: z.boolean(),
-        preparation: z.object({ hash: z.string(), expiresAtUnix: z.number() }).optional(),
-      }),
-    ),
-    settled: z.record(z.string(), z.object({ txHash: z.string(), untilUnix: z.number() })),
+    held: z.record(z.string(), z.unknown()),
+    settled: z.record(z.string(), z.unknown()),
   }),
   channels: z.object({
-    secrets: z.array(z.string()),
-    leases: z.array(z.object({ owner: z.string(), channel: z.string(), untilUnix: z.number() })),
-    pending: z.string().optional(),
+    secrets: z.array(z.unknown()),
+    leases: z.array(z.unknown()),
+    pending: z.unknown().optional(),
   }),
 } as const;
 
-async function readStored<K extends keyof typeof storedShapes>(
-  state: DocumentStore,
-  name: K,
-): Promise<unknown> {
-  const value = await state.read(name);
-  if (value === undefined) return undefined;
-  if (!storedShapes[name].safeParse(value).success) {
-    throw new Error(`The sponsor's ${name} state is not in the shape this version writes.`);
-  }
-  return value;
-}
+/** What load set aside, by document, written once so nothing is lost. */
+type Rejected = Record<string, { atUnix: number; entry?: string; value: unknown }[]>;
 
 /**
  * How long past a preparation's time bound before it is taken as never
@@ -485,26 +515,92 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   /** What is written down, read back. Runs once, before the first request. */
   async function load(): Promise<void> {
     const now = nowUnix();
-    const builtDocument = (await readStored(state, "built")) as readonly BuiltRecord[] | undefined;
-    if (builtDocument !== undefined) built = BuiltLedger.fromSnapshot(builtDocument, now);
+    const rejected: Rejected = {};
+    const reject = (name: string, value: unknown, entry?: string): void => {
+      console.error(
+        `[sponsor] skipped ${entry === undefined ? "the whole" : `an entry (${entry}) of the`} ` +
+          `${name} state: it is not in the shape this version writes. It is kept in rejected.json.`,
+      );
+      const list = rejected[name] ?? [];
+      rejected[name] = list;
+      list.push({
+        atUnix: now,
+        ...(entry === undefined ? {} : { entry }),
+        value,
+      });
+    };
+    const documentOf = async <K extends keyof typeof documentShapes>(
+      name: K,
+    ): Promise<z.infer<(typeof documentShapes)[K]> | undefined> => {
+      const value = await state.read(name);
+      if (value === undefined) return undefined;
+      const parsed = documentShapes[name].safeParse(value);
+      if (parsed.success) return parsed.data as z.infer<(typeof documentShapes)[K]>;
+      reject(name, value);
+      return undefined;
+    };
 
-    const heldDocument = (await readStored(state, "held")) as HeldDocument | undefined;
-    for (const [destination, held] of Object.entries(heldDocument?.held ?? {})) {
-      heldSettlements.set(destination, { ...held, preparing: false });
-    }
-    for (const [destination, record] of Object.entries(heldDocument?.settled ?? {})) {
-      recentlySettled.set(destination, record);
+    const builtDocument = await documentOf("built");
+    if (builtDocument !== undefined) {
+      const records: BuiltRecord[] = [];
+      builtDocument.forEach((value, index) => {
+        const parsed = builtShape.safeParse(value);
+        if (parsed.success) records.push(stripUndefined(parsed.data) as BuiltRecord);
+        else reject("built", value, String(index));
+      });
+      built = BuiltLedger.fromSnapshot(records, now);
     }
 
-    const channelDocument = (await readStored(state, "channels")) as ChannelDocument | undefined;
-    if (channelDocument === undefined) return;
-    if (channels !== undefined) {
-      channels.restoreLeases(channelDocument.leases, now);
-    } else if (channelDocument.secrets.length > 0) {
-      channels = ChannelPool.fromSnapshot(channelDocument, now);
+    const heldDocument = await documentOf("held");
+    for (const [destination, value] of Object.entries(heldDocument?.held ?? {})) {
+      const parsed = heldShape.safeParse(value);
+      if (!parsed.success || !settlesOnStellar(destination)) {
+        reject("held", value, destination);
+        continue;
+      }
+      const { channel, preparation, ...rest } = parsed.data;
+      heldSettlements.set(destination, { ...rest, channel, preparation, preparing: false });
     }
-    if (channels === undefined && channelDocument.pending !== undefined) {
-      pendingChannel = Keypair.fromSecret(channelDocument.pending);
+    for (const [destination, value] of Object.entries(heldDocument?.settled ?? {})) {
+      const parsed = settledShape.safeParse(value);
+      if (parsed.success) recentlySettled.set(destination, parsed.data);
+      else reject("held", value, `settled ${destination}`);
+    }
+
+    const channelDocument = await documentOf("channels");
+    if (channelDocument !== undefined) {
+      const secrets: string[] = [];
+      channelDocument.secrets.forEach((value, index) => {
+        if (secretShape.safeParse(value).success) secrets.push(value as string);
+        else reject("channels", value, `secret ${index}`);
+      });
+      const leases: LeaseRecord[] = [];
+      channelDocument.leases.forEach((value, index) => {
+        const parsed = leaseShape.safeParse(value);
+        if (parsed.success) leases.push(parsed.data);
+        else reject("channels", value, `lease ${index}`);
+      });
+      if (channels !== undefined) {
+        channels.restoreLeases(leases, now);
+      } else if (secrets.length > 0) {
+        channels = ChannelPool.fromSnapshot({ secrets, leases }, now);
+      }
+      const pending = channelDocument.pending;
+      if (pending !== undefined && !secretShape.safeParse(pending).success) {
+        reject("channels", pending, "pending");
+      } else if (channels === undefined && pending !== undefined) {
+        pendingChannel = Keypair.fromSecret(pending as string);
+      }
+    }
+
+    if (Object.keys(rejected).length > 0) {
+      // added to what earlier starts set aside, never written over it
+      const before = ((await state.read("rejected")) ?? {}) as Rejected;
+      const merged: Rejected = { ...before };
+      for (const [name, entries] of Object.entries(rejected)) {
+        merged[name] = [...(Array.isArray(before[name]) ? before[name] : []), ...entries];
+      }
+      await state.write("rejected", merged);
     }
   }
 
@@ -880,27 +976,27 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     if (req.method === "POST" && url.pathname === "/prepare") {
-      await prepare((await readJson(req)) as PrepareBody, res, origin);
+      await prepare(bodyOf(prepareBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/submit") {
-      await submit((await readJson(req)) as SubmitBody, res, origin);
+      await submit(bodyOf(submitBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement") {
-      await settlement((await readJson(req)) as SettlementBody, res, origin);
+      await settlement(bodyOf(settlementBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement/commit") {
-      await settlementCommit((await readJson(req)) as SettlementCommitBody, res, origin);
+      await settlementCommit(bodyOf(settlementCommitBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settle") {
-      await settle((await readJson(req)) as SettleBody, res, origin);
+      await settle(bodyOf(settleBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
-      await deliver((await readJson(req)) as DeliverBody, res, origin);
+      await deliver(bodyOf(deliverBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/compose") {
@@ -2537,4 +2633,9 @@ async function accountExists(rpc: RpcClient, address: string): Promise<boolean> 
     if (cause instanceof AccountNotFound) return false;
     throw cause;
   }
+}
+
+/** A parsed record without the keys zod filled with undefined, as it was written. */
+function stripUndefined<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(Object.entries(record).filter(([, v]) => v !== undefined)) as T;
 }

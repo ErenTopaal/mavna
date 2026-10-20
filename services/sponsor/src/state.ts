@@ -69,10 +69,16 @@ export class FileDocumentStore implements DocumentStore {
     }
     try {
       return JSON.parse(text);
-    } catch (cause) {
-      // Starting empty would forget held settlements and reset the caps, which
-      // is the failure this store exists to prevent, so it stops here instead.
-      throw new Error(`The sponsor's ${name} state at ${path} is not readable JSON.`, { cause });
+    } catch {
+      // Moved aside rather than refused: one damaged file must not keep the
+      // service down, and the next write would otherwise replace the only copy.
+      const aside = `${path}.unreadable-${Date.now()}`;
+      await rename(path, aside);
+      console.error(
+        `[sponsor] the ${name} state at ${path} is not readable JSON; it was moved to ${aside} ` +
+          "and the sponsor starts without it.",
+      );
+      return undefined;
     }
   }
 
