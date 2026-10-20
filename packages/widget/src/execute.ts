@@ -42,6 +42,8 @@ export interface ExecuteOptions {
   /** Undefined for a chain the registry does not carry. Nothing is guessed. */
   readonly nativeCurrency: NativeCurrency | undefined;
   readonly onEvent: (event: ExecutionEvent) => void;
+  /** Aborted when the page goes away: nothing more is put to the wallet after that. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -110,6 +112,13 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     }
 
     const call = parseCall(transaction.payload, connection.address);
+    if (options.signal?.aborted === true) {
+      throw new Error(
+        index === 0
+          ? "This page closed before anything was signed. Nothing has been sent."
+          : "This page closed before the transfer was signed. The approval went through, but no funds moved. Nothing has been sent.",
+      );
+    }
     onEvent({ kind: "awaiting-signature", index, describes: transaction.describes });
 
     let hash: Hash;

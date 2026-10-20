@@ -496,3 +496,18 @@ describe("what a screen reader hears", () => {
     expect(html).toMatch(/role="status"[^>]*>[^<]*Send from Arbitrum[^<]*The network refused it\./);
   });
 });
+
+describe("Flow.props.onAwaitingUser", () => {
+  it("says when a step waits on the user's wallet, and when it no longer does", () => {
+    const told: boolean[] = [];
+    const flow = applied(new Flow({ engine, onAwaitingUser: (waiting) => told.push(waiting) }));
+    flow.state = {
+      ...flow.state,
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "idle" }],
+    };
+    flow.setStep("burn", { phase: "blocked" });
+    flow.setStep("burn", { phase: "pending" });
+    flow.setStep("burn", { phase: "done" });
+    expect(told).toEqual([true, false]);
+  });
+});

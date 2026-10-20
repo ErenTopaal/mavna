@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dismissesOnKey, nextFocus } from "./Drawer";
+import { dismissesOnKey, hostWants, nextFocus } from "./Drawer";
 
 /** A node that holds only what it is told it holds, as `Node.contains` answers. */
 const overlay = (inside: unknown[]) => ({ contains: (n: unknown) => inside.includes(n) });
@@ -32,5 +32,21 @@ describe("nextFocus, which keeps Tab inside the drawer", () => {
   });
   it("brings focus back in when it is outside", () => {
     expect(nextFocus([a, b, c], {}, false)).toBe(a);
+  });
+});
+
+describe("hostWants, the drawer following a host's open prop", () => {
+  it("closes on open={false} only once nothing waits on the user, and then does", () => {
+    const shown = { open: false, mounted: true, closing: false };
+    expect(hostWants({ ...shown, waitingOnUser: true })).toBe("none");
+    expect(hostWants({ ...shown, waitingOnUser: false })).toBe("close");
+  });
+  it("opens on open={true}, and does nothing without a host prop", () => {
+    expect(hostWants({ open: true, mounted: false, closing: false, waitingOnUser: false })).toBe(
+      "open",
+    );
+    expect(
+      hostWants({ open: undefined, mounted: true, closing: false, waitingOnUser: false }),
+    ).toBe("none");
   });
 });

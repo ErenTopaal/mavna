@@ -684,9 +684,10 @@ describe("runTransfer over a relayed rail", () => {
 
   it("reports a transfer it stopped watching as still moving, not as failed", async () => {
     const controller = new AbortController();
-    controller.abort();
+    // gone once the send is out, while the rail is being watched
     const adapter = new ScriptedAdapter("layerzero", [pending()], {
       transactions: [layerZeroSend("777")],
+      onStatus: () => controller.abort(),
     });
     await expect(
       run(adapter, routeFor("layerzero"), patches().patch, connection(), {
@@ -989,6 +990,26 @@ describe("after the money has left the wallet", () => {
 });
 
 describe("a page that went away mid-transfer", () => {
+  it("asks for nothing more when it closes before the send, and sends nothing", async () => {
+    const gone = new AbortController();
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    // closed while the sponsor was building the repayment
+    const done = run(
+      adapter,
+      routeFor("layerzero", { newAccount: true }),
+      patches().patch,
+      connection(),
+      {
+        signal: gone.signal,
+      },
+    );
+    gone.abort();
+    await expect(done).rejects.toThrow(/closed.*Nothing has been sent/);
+    expect(log.some((l) => l.startsWith("stellar sign") || l.startsWith("evm"))).toBe(false);
+  });
+
   it("asks for no more signatures once it is gone, and says the transfer is still moving", async () => {
     const gone = new AbortController();
     deliverReplies = [

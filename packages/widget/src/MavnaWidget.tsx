@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { type MavnaWidgetConfig, resolveConfig } from "./config.js";
-import { DrawerChrome } from "./Drawer.js";
+import { DrawerChrome, hostWants } from "./Drawer.js";
 import { createEngine } from "./engine.js";
 import { engineKeyOf } from "./engine-key.js";
 import { Flow } from "./flow.js";
@@ -81,26 +81,27 @@ export const MavnaWidget: ForwardRefExoticComponent<
     setClosing(false);
     setMounted(true);
   }, []);
-  // A running transfer still asks for signatures and still offers a conversion,
-  // and an unmounted flow could do neither visibly, so the drawer stays open
-  // until it has ended.
+  // Closing is refused only while the user's wallet is mid-prompt. At any other
+  // point the flight says closing is safe, and it is: the flow stops watching,
+  // the transfer ends as still moving, and Activity finishes it.
+  const [waitingOnUser, setWaitingOnUser] = useState(false);
   const doClose = useCallback(() => {
-    if (running.current) return;
+    if (waitingOnUser) return;
     setClosing(true);
     window.setTimeout(() => {
       setMounted(false);
       setClosing(false);
       onClose?.();
     }, CLOSE_MS);
-  }, [onClose]);
+  }, [onClose, waitingOnUser]);
 
   // When a host drives `open`, mirror it into the same open/close transitions the
   // trigger and the ref use, so the animation runs either way.
   useEffect(() => {
-    if (open === undefined) return;
-    if (open) doOpen();
-    else if (mounted && !closing) doClose();
-  }, [open, mounted, closing, doOpen, doClose]);
+    const wants = hostWants({ open, mounted, closing, waitingOnUser });
+    if (wants === "open") doOpen();
+    else if (wants === "close") doClose();
+  }, [open, mounted, closing, waitingOnUser, doOpen, doClose]);
 
   useImperativeHandle(
     ref,
@@ -141,6 +142,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
     emit: resolved.onEvent,
     networks: resolved.networks,
     onNetworkChange: setActive,
+    onAwaitingUser: setWaitingOnUser,
     onTransferChange: (now: boolean) => {
       running.current = now;
       // pick up any config change that waited for the transfer

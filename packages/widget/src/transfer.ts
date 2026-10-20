@@ -720,6 +720,7 @@ async function send(
   try {
     hashes = await execute({
       connection: deps.connection,
+      ...(deps.signal === undefined ? {} : { signal: deps.signal }),
       route,
       transactions,
       chainName,
@@ -939,7 +940,10 @@ async function runRelayed(
  * screen renders whatever phase each step is in; on a thrown error the caller
  * marks the active step failed and shows the message.
  */
-export async function runTransfer(deps: TransferDeps): Promise<void> {
+export async function runTransfer(given: TransferDeps): Promise<void> {
+  // A page can be closed whenever no wallet prompt is open, so every prompt
+  // after that point is refused here rather than opened from a page nobody sees.
+  const deps: TransferDeps = { ...given, engine: guardedEngine(given.engine, given.signal) };
   const { engine, view, chainId, patch } = deps;
   const route = view.route;
   const adapter = adapterFor(engine, route);
@@ -1055,6 +1059,33 @@ export async function runTransfer(deps: TransferDeps): Promise<void> {
     }
     patch("swap", { phase: "done" });
   }
+}
+
+/** The engine with its Stellar wallet refusing to prompt once the page is gone. */
+function guardedEngine(engine: TransferEngine, signal: AbortSignal | undefined): TransferEngine {
+  if (signal === undefined) return engine;
+  const refuse = (): void => {
+    if (gone(signal)) {
+      throw new Error(
+        "This page closed before it was asked for, so it was not. Nothing has been sent past " +
+          "what the flight shows as done; anything already sent is under Activity.",
+      );
+    }
+  };
+  return {
+    ...engine,
+    stellar: {
+      connect: async () => {
+        refuse();
+        return engine.stellar.connect();
+      },
+      sign: async (xdr, address) => {
+        refuse();
+        return engine.stellar.sign(xdr, address);
+      },
+      disconnect: () => engine.stellar.disconnect(),
+    },
+  };
 }
 
 /** What an account holds of an asset, in base units; nothing when it cannot hold it. */
