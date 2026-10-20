@@ -23,12 +23,20 @@ because it is not a fee anyone takes: the XLM ends up locked in the user's own
 account and returns to them if they close it.
 
 `inspectDestination` in `@mavna/stellar` classifies what a destination needs in
-one read: nothing (it already holds the asset, or it is a contract), a trustline
-only, or a whole account plus a trustline. Three of those cases cost the sponsor
-nothing, and the routing layer knows which before it quotes.
+one read: nothing (an account that can take the asset now, any account for XLM,
+or a contract deployed on this network), a trustline only, or a whole account
+plus a trustline (only the account, for XLM). It reads as unusable, with the
+reason, when no contract exists at a contract address, or when a trustline exists
+but the issuer has not authorised it or its limit has no room left (or no room
+for the amount, when one is given). Funds sent to a contract address with nothing
+deployed behind it can never be moved, so that case is refused rather than
+treated as ready. Only the trustline and account cases cost the sponsor anything,
+and the routing layer knows which before it quotes.
 
 Transfers that need sponsoring have a floor, checked at quote time: four times the
-deposit's value, converted at the live XLM price from Stellar's own orderbook.
+deposit's value, converted at the live XLM price from Stellar's own orderbook,
+averaged over the first 1,000 XLM of each side so a stray small order inside the
+spread cannot move it.
 Below the bare deposit, recovery is impossible, because there is not enough
 arriving to buy the deposit back; the multiple gives headroom above that line. A
 transfer under the floor is refused with a reason that names the minimum and
