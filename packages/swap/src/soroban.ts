@@ -8,7 +8,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
-import { PASSPHRASE, readValidated } from "./wire.js";
+import { boundedBy, PASSPHRASE, readValidated } from "./wire.js";
 
 /**
  * Soroban reads and builds for the contract venues, over plain JSON-RPC.
@@ -64,6 +64,7 @@ export async function simulate(
   tx: Transaction,
   timeoutMs: number,
   venue: string,
+  caller?: AbortSignal,
 ): Promise<Simulated> {
   let response: Response;
   try {
@@ -76,7 +77,7 @@ export async function simulate(
         method: "simulateTransaction",
         params: { transaction: tx.toXDR() },
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: boundedBy(timeoutMs, caller),
     });
   } catch (cause) {
     throw new MavnaError(`The Stellar RPC did not answer for ${venue}.`, {
@@ -137,6 +138,7 @@ export async function readContract(
   args: readonly xdr.ScVal[],
   timeoutMs: number,
   venue: string,
+  caller?: AbortSignal,
 ): Promise<xdr.ScVal> {
   const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, "0"), {
     fee: "100",
@@ -145,7 +147,7 @@ export async function readContract(
     .addOperation(new Contract(contract).call(method, ...args))
     .setTimeout(60)
     .build();
-  return (await simulate(rpcUrl, tx, timeoutMs, venue)).retval;
+  return (await simulate(rpcUrl, tx, timeoutMs, venue, caller)).retval;
 }
 
 /**

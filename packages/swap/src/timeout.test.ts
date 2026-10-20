@@ -1,6 +1,7 @@
 import { MavnaError } from "@mavna/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AquariusProvider } from "./aquarius.js";
+import { SdexProvider } from "./sdex.js";
 import { SoroswapProvider } from "./soroswap.js";
 import { SushiSwapProvider } from "./sushiswap.js";
 
@@ -68,5 +69,61 @@ describe("provider request timeouts", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(true);
+  });
+});
+
+describe("a caller that stops waiting", () => {
+  // each venue's own bound is ten seconds here; the caller's is a few milliseconds
+  const soon = () => AbortSignal.timeout(15);
+  const quick = async (quote: Promise<unknown>) => {
+    const started = Date.now();
+    const error = await quote.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  };
+
+  it("stops aquarius's request", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    const provider = new AquariusProvider("testnet", undefined, { timeoutMs: 10_000 });
+    await quick(provider.quote({ ...request, signal: soon() }));
+  });
+
+  it("stops soroswap's request", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    const provider = new SoroswapProvider({
+      network: "mainnet",
+      proxyUrl: "https://sponsor.example",
+      timeoutMs: 10_000,
+    });
+    await quick(provider.quote({ ...request, signal: soon() }));
+  });
+
+  it("stops sushiswap's simulations", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    const provider = new SushiSwapProvider({
+      network: "mainnet",
+      rpcUrl: "https://rpc.example",
+      timeoutMs: 10_000,
+    });
+    await quick(
+      provider.quote({
+        ...request,
+        assetIn: "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF",
+        assetOut: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+        signal: soon(),
+      }),
+    );
+  });
+
+  it("stops the orderbook's request", async () => {
+    vi.stubGlobal("fetch", hangingFetch());
+    await quick(
+      new SdexProvider("testnet").quote({
+        ...request,
+        assetIn: "native",
+        assetOut: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        signal: soon(),
+      }),
+    );
   });
 });

@@ -10,7 +10,7 @@ import {
   type SwapQuoteRequest,
 } from "./provider.js";
 import { buildContractCall, readContract } from "./soroban.js";
-import { fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
+import { boundedBy, fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
 
 /**
  * Aquarius. The fallback venue, on both networks.
@@ -143,7 +143,7 @@ export class AquariusProvider implements SwapProvider {
     const tokenIn = toContractId(request.assetIn, this.network);
     const tokenOut = toContractId(request.assetOut, this.network);
     const response = await fetchOrThrow("Aquarius", `${this.baseUrl}/api/external/v1/find-path/`, {
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: boundedBy(this.timeoutMs, request.signal),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -9,7 +9,7 @@ import {
   type SwapQuote,
   type SwapQuoteRequest,
 } from "./provider.js";
-import { fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
+import { boundedBy, fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
 
 /**
  * Stellar's own exchange, as a swap provider.
@@ -138,7 +138,7 @@ export class SdexProvider implements SwapProvider {
     const response = await fetchOrThrow(
       "Stellar's exchange",
       `${this.horizonUrl}/paths/strict-send?${params.toString()}`,
-      { signal: AbortSignal.timeout(15_000) },
+      { signal: boundedBy(15_000, request.signal) },
     );
     if (!response.ok) {
       throw new MavnaError(`Stellar's exchange could not be read (HTTP ${response.status}).`, {

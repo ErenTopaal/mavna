@@ -21,7 +21,7 @@ import {
   type SwapQuote,
   type SwapQuoteRequest,
 } from "./provider.js";
-import { fetchOrThrow, PASSPHRASE, readValidated, toContractId } from "./wire.js";
+import { boundedBy, fetchOrThrow, PASSPHRASE, readValidated, toContractId } from "./wire.js";
 
 /**
  * Soroswap. The preferred venue, reached through a proxy that holds the key.
@@ -252,7 +252,7 @@ export class SoroswapProvider implements SwapProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: boundedBy(this.timeoutMs, request.signal),
     });
     if (!response.ok) throw await refusal(response, "price this swap");
 

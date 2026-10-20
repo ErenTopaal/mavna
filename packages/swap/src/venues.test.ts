@@ -2,8 +2,9 @@ import { MavnaError } from "@mavna/core";
 import { Account, Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, routedFetch, sorobanNode } from "./__fixtures__/network.js";
+import type { SwapProvider } from "./provider.js";
 import { selectSwapProvider } from "./select.js";
-import { createSwapVenues, STELLAR_USDT0 } from "./venues.js";
+import { createSwapVenues, STELLAR_USDT0, SwapVenues, type Venue } from "./venues.js";
 
 const PROXY = "https://sponsor.example";
 const RPC = "https://rpc.example";
@@ -87,8 +88,7 @@ describe("the chain", () => {
       usdcToXlm,
     );
     expect(quote.provider).toBe("soroswap");
-    // Sushi is not asked about a pair without USDT0, and Aquarius is not reached.
-    expect(net.calls.some((c) => c.url.startsWith(AQUA_MAIN))).toBe(false);
+    // Sushi is not asked about a pair without USDT0
     expect(net.calls.some((c) => c.url.startsWith(RPC))).toBe(false);
   });
 
@@ -150,6 +150,9 @@ describe("the chain", () => {
       [`${PROXY}/swap/soroswap/health`]: () => json({ error: "down" }, 502),
       [RPC]: node,
       [`${AQUA_MAIN}/api/external/v1/pools/`]: pools,
+      // Aquarius is asked at the same time and prices higher, which must not matter
+      [`${AQUA_MAIN}/api/external/v1/find-path/`]: () =>
+        json({ ...aquariusFound([USDT0_MAIN, USDC_MAIN]), amount: 200_000_000 }),
     });
     vi.stubGlobal("fetch", net.fetch);
     const quote = await createSwapVenues({
@@ -162,7 +165,7 @@ describe("the chain", () => {
       assetOut: USDC_MAIN,
     });
     expect(quote.provider).toBe("sushiswap");
-    expect(net.calls.some((c) => c.url.includes("find-path"))).toBe(false);
+    expect(net.calls.some((c) => c.url.includes("find-path"))).toBe(true);
   });
 
   it("does not offer SushiSwap a pair without USDT0", async () => {
@@ -280,4 +283,99 @@ describe("selectSwapProvider", () => {
 it("knows USDT0 by code and issuer", async () => {
   const { toContractId } = await import("./wire.js");
   expect(toContractId(STELLAR_USDT0, "mainnet")).toBe(USDT0_MAIN);
+});
+
+describe("the chain under the route race's deadline", () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const req = { ...usdcToXlm, assetIn: USDC_MAIN, assetOut: XLM_MAIN };
+  const asked: string[] = [];
+  function venue(id: string, answer: (signal: AbortSignal | undefined) => Promise<string>): Venue {
+    const provider: SwapProvider = {
+      id,
+      network: "mainnet",
+      canCollectIntegratorFee: false,
+      isUsable: async () => true,
+      quote: async (q) => {
+        asked.push(id);
+        const amountOut = await answer(q.signal);
+        return {
+          provider: id,
+          assetIn: q.assetIn,
+          assetOut: q.assetOut,
+          amountIn: q.amountIn,
+          amountOut,
+          amountOutMinimum: amountOut,
+          venues: [],
+          isClassicPathPayment: false,
+          raw: {},
+        };
+      },
+      build: async () => {
+        throw new Error("not built here");
+      },
+    };
+    return { provider };
+  }
+  const hangs = () => new Promise<string>(() => {});
+  const after = (ms: number, out: string) => async () => {
+    await sleep(ms);
+    return out;
+  };
+
+  it("asks every venue at once, so a slow first venue does not add to the next one's time", async () => {
+    asked.length = 0;
+    const chain = new SwapVenues("mainnet", [
+      venue("first", hangs),
+      venue("second", after(5, "2")),
+    ]);
+    const started = Date.now();
+    const quote = await chain.quote({ ...req, signal: AbortSignal.timeout(80) });
+    expect(quote.provider).toBe("second");
+    expect(asked).toEqual(["first", "second"]);
+    // decided at the deadline, not after the first venue's own ten-second bound
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("still prefers the earlier venue when it answers in time, even after a later one", async () => {
+    const chain = new SwapVenues("mainnet", [
+      venue("first", after(30, "1")),
+      venue("second", after(1, "2")),
+    ]);
+    const quote = await chain.quote({ ...req, signal: AbortSignal.timeout(200) });
+    expect(quote.provider).toBe("first");
+  });
+
+  it("does not wait for the deadline once the preferred venue has failed", async () => {
+    const chain = new SwapVenues("mainnet", [
+      venue("first", async () => {
+        throw new MavnaError("no route", { retryable: false });
+      }),
+      venue("second", after(5, "2")),
+    ]);
+    const started = Date.now();
+    const quote = await chain.quote({ ...req, signal: AbortSignal.timeout(2_000) });
+    expect(quote.provider).toBe("second");
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("says plainly that nothing answered in time, as something worth asking again", async () => {
+    const chain = new SwapVenues("mainnet", [venue("first", hangs), venue("second", hangs)]);
+    const error = await chain.quote({ ...req, signal: AbortSignal.timeout(30) }).catch((e) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).retryable).toBe(true);
+    expect((error as MavnaError).message).toMatch(/first.*in time/);
+  });
+
+  it("hands each venue the deadline so it can stop its own requests", async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const chain = new SwapVenues("mainnet", [
+      venue("first", (signal) => {
+        seen.push(signal);
+        return hangs();
+      }),
+      venue("second", after(1, "2")),
+    ]);
+    await chain.quote({ ...req, signal: AbortSignal.timeout(30) });
+    expect(seen[0]?.aborted).toBe(true);
+  });
 });

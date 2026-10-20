@@ -29,4 +29,11 @@ export type { SushiSwapOptions } from "./sushiswap.js";
 export { SushiSwapProvider } from "./sushiswap.js";
 export type { SwapVenueOptions, Venue } from "./venues.js";
 export { createSwapVenues, STELLAR_USDT0, SwapVenues, swapVenuesFor } from "./venues.js";
-export { fetchOrThrow, PASSPHRASE, readValidated, toContractId, validated } from "./wire.js";
+export {
+  boundedBy,
+  fetchOrThrow,
+  PASSPHRASE,
+  readValidated,
+  toContractId,
+  validated,
+} from "./wire.js";

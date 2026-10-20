@@ -36,6 +36,12 @@ export interface SwapQuoteRequest {
    * before choosing venues rather than after.
    */
   readonly destinationKind: "account" | "contract";
+  /**
+   * When the caller stops waiting. The route race hands down what is left of
+   * its budget, so a venue that is still asking by then gives up rather than
+   * answering a question nobody is listening to.
+   */
+  readonly signal?: AbortSignal | undefined;
 }
 
 export interface SwapQuote {

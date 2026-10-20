@@ -25,7 +25,9 @@ import { toContractId } from "./wire.js";
  *
  * The first venue that is usable and quotes wins. This is an order of
  * preference, not a price race: racing would hand the conversion to whichever
- * venue shaves a few stroops, and the order is a product decision.
+ * venue shaves a few stroops, and the order is a product decision. The venues
+ * are asked at the same time for speed, but their answers are read in this
+ * order.
  */
 
 /** USDT0 on Stellar: the classic asset, whose contract is its Stellar Asset Contract. */
@@ -132,31 +134,75 @@ export class SwapVenues implements SwapProvider {
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
     const reasons: string[] = [];
     let retryable = false;
+    const serving: Venue[] = [];
     for (const venue of this.venues) {
       // a pair this venue cannot even read is its reason, not the chain's end
-      let served: boolean;
       try {
-        served = venue.serves?.(request.assetIn, request.assetOut) ?? true;
+        if (venue.serves?.(request.assetIn, request.assetOut) ?? true) serving.push(venue);
       } catch (cause) {
         reasons.push(
           `${venue.provider.id}: ${cause instanceof Error ? cause.message : String(cause)}`,
         );
         retryable ||= cause instanceof MavnaError && cause.retryable;
-        continue;
       }
-      if (!served) continue;
-      if (!(await this.isVenueUsable(venue.provider))) {
-        reasons.push(`${venue.provider.id} is unavailable`);
-        retryable = true;
-        continue;
-      }
+    }
+
+    // Every serving venue is asked at once and the answers are then read in
+    // order. Asked one after another, a venue that is slow to answer spends the
+    // next one's time: measured cold, the chain alone took 1.7 to 2.3 s of the
+    // route race's 3 s, and an unreachable Soroswap in front of it cost the route.
+    type Outcome = { quote: SwapQuote } | { reason: string; retryable: boolean };
+    const outcomes: (Outcome | undefined)[] = serving.map(() => undefined);
+    const asked = serving.map(async (venue, i): Promise<Outcome> => {
+      let outcome: Outcome;
       try {
-        return await venue.provider.quote(request);
+        if (!(await this.isVenueUsable(venue.provider))) {
+          outcome = { reason: `${venue.provider.id} is unavailable`, retryable: true };
+        } else {
+          outcome = { quote: await venue.provider.quote(request) };
+        }
       } catch (cause) {
         const why = cause instanceof Error ? cause.message : String(cause);
-        reasons.push(`${venue.provider.id}: ${why}`);
-        retryable ||= !(cause instanceof MavnaError) || cause.retryable;
+        outcome = {
+          reason: `${venue.provider.id}: ${why}`,
+          retryable: !(cause instanceof MavnaError) || cause.retryable,
+        };
       }
+      outcomes[i] = outcome;
+      return outcome;
+    });
+
+    const signal = request.signal;
+    const deadline =
+      signal === undefined
+        ? undefined
+        : new Promise<"late">((resolve) => {
+            if (signal.aborted) resolve("late");
+            else signal.addEventListener("abort", () => resolve("late"), { once: true });
+          });
+
+    for (let i = 0; i < serving.length; i++) {
+      const outcome = await (deadline === undefined
+        ? (asked[i] as Promise<Outcome>)
+        : Promise.race([asked[i] as Promise<Outcome>, deadline]));
+      if (outcome === "late") {
+        // the preferred venues are out of time; a later one that has already
+        // answered is still a quote, in the same order of preference
+        const ready = outcomes.slice(i).find((o) => o !== undefined && "quote" in o);
+        if (ready !== undefined && "quote" in ready) return ready.quote;
+        const waiting = serving
+          .filter((_, j) => j >= i && outcomes[j] === undefined)
+          .map((v) => v.provider.id);
+        for (const o of outcomes.slice(i))
+          if (o !== undefined && "reason" in o) reasons.push(o.reason);
+        reasons.push(`${waiting.join(", ")} did not answer in time`);
+        throw new MavnaError(`No swap venue could convert this in time. ${reasons.join("; ")}`, {
+          retryable: true,
+        });
+      }
+      if ("quote" in outcome) return outcome.quote;
+      reasons.push(outcome.reason);
+      retryable ||= outcome.retryable;
     }
     throw new MavnaError(
       reasons.length === 0

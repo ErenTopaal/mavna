@@ -22,6 +22,12 @@ export async function fetchOrThrow(
   }
 }
 
+/** A venue's own bound, cut short when the caller stops waiting first. */
+export function boundedBy(timeoutMs: number, caller: AbortSignal | undefined): AbortSignal {
+  const own = AbortSignal.timeout(timeoutMs);
+  return caller === undefined ? own : AbortSignal.any([own, caller]);
+}
+
 /**
  * Read and validate a JSON answer.
  *
