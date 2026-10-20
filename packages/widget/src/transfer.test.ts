@@ -1867,6 +1867,31 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
   });
 
+  it("says it cannot tell whether the repayment is held when the sponsor is busy, preparing nothing", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    settleReplies = [[429, { error: "Asked too often.", retryable: true }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    await expect(
+      finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia"),
+    ).rejects.toThrow(/busy.*not known.*safe on Circle's side.*Try again in a moment/);
+    expect(log).not.toContain("sponsor /prepare");
+  });
+
+  it("says the funds are safe when asking about the repayment fails", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    settleReplies = [[500, { error: "The sponsor's state could not be read.", retryable: true }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    await expect(
+      finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia"),
+    ).rejects.toThrow(
+      "The sponsor's state could not be read. The funds are safe on Circle's side and still deliverable.",
+    );
+  });
+
   it("signs a new repayment first when the one held for a new account has lapsed", async () => {
     attestedTo(DESTINATION, 5_000_000);
     lane = "needs-account";
