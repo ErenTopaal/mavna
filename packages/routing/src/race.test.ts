@@ -1,12 +1,13 @@
-import type {
-  BridgeAdapter,
-  ComposeQuoteRequest,
-  QuoteRequest,
-  Route,
-  RouteRejection,
-  RouteSet,
+import {
+  ADAPTER_QUOTE_TIMEOUT_MS,
+  type BridgeAdapter,
+  type ComposeQuoteRequest,
+  type QuoteRequest,
+  type Route,
+  type RouteRejection,
+  type RouteSet,
 } from "@mavna/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SwapQuoter } from "./enrich.js";
 import { raceAdapters } from "./race.js";
 
@@ -56,6 +57,26 @@ describe("racing route sources", () => {
     expect(result.routes.map((r) => r.source)).toEqual(["fast"]);
     expect(result.rejected.map((r) => r.source)).toEqual(["slow"]);
     expect(result.complete).toBe(true);
+  });
+
+  it("bounds every rail by the shared deadline when the caller sets none", async () => {
+    vi.useFakeTimers();
+    try {
+      let finished = false;
+      const racing = raceAdapters([adapter("hung", () => new Promise(() => {}))], request).then(
+        (set) => {
+          finished = true;
+          return set;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(ADAPTER_QUOTE_TIMEOUT_MS - 1);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await racing;
+      expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says WHY a source produced nothing rather than omitting it", async () => {
