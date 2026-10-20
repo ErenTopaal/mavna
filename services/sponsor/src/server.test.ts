@@ -2562,7 +2562,9 @@ describe("the sponsor reads every request field as the type it must be", () => {
         assets: [name],
       });
       expect(answered.status).toBe(400);
-      expect(answered.body.error).toBe("This sponsor only prepares accounts for assets it curates.");
+      expect(answered.body.error).toBe(
+        "This sponsor only prepares accounts for assets it curates.",
+      );
     },
   );
 
