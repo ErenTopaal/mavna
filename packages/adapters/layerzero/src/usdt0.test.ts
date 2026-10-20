@@ -86,6 +86,10 @@ interface World {
   inboundCapacity: bigint;
   /** The EVM OFT's `quoteOFT` limit. */
   maxAmountLD: bigint;
+  /** The functions the Stellar OFT's Wasm spec declares. */
+  oftFunctions: string[];
+  /** When set, simulations against the Stellar OFT fail the way a node that is down does. */
+  simulationDown: boolean;
 }
 
 let world: World;
@@ -335,6 +339,39 @@ function tokenInstance(): xdr.LedgerEntryData {
   ]);
 }
 
+/**
+ * A Wasm module carrying only a `contractspecv0` custom section that declares
+ * these functions, which is where the SDK's `Spec.fromWasm` reads them from.
+ */
+function wasmDeclaring(functions: readonly string[]): Uint8Array {
+  const entries = functions.map((name) =>
+    xdr.ScSpecEntry.scSpecEntryFunctionV0(
+      new xdr.ScSpecFunctionV0({ doc: "", name, inputs: [], outputs: [] }),
+    ).toXdr(),
+  );
+  const payload = Buffer.concat(entries.map((e) => Buffer.from(e)));
+  const name = Buffer.from("contractspecv0");
+  const leb = (n: number): number[] => {
+    const out: number[] = [];
+    let v = n;
+    do {
+      let byte = v & 0x7f;
+      v >>>= 7;
+      if (v !== 0) byte |= 0x80;
+      out.push(byte);
+    } while (v !== 0);
+    return out;
+  };
+  const body = Buffer.concat([Buffer.from(leb(name.length)), name, payload]);
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+      Buffer.from([0x00, ...leb(body.length)]),
+      body,
+    ]),
+  );
+}
+
 /** A real client whose node is a double, reading whatever `world` says. */
 function stellarNode(): RpcClient {
   const client = new RpcClient({
@@ -387,6 +424,10 @@ function stellarNode(): RpcClient {
     }
     return { entries, latestLedger: 100 } as never;
   });
+  vi.spyOn(client.server, "getContractWasmByContractId").mockImplementation(async (id) => {
+    if (id !== STELLAR_OFT) throw new Error(`the Stellar double has no Wasm for ${id}`);
+    return wasmDeclaring(world.oftFunctions);
+  });
   vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
     const envelope = (tx as { toEnvelope(): xdr.TransactionEnvelope }).toEnvelope();
     const op = xdr.expectUnionVariant(envelope, "envelopeTypeTx").v1.tx.operations[0];
@@ -406,6 +447,17 @@ function stellarNode(): RpcClient {
       const head = v?.type === "scvVec" ? v.vec?.[0] : undefined;
       return head?.type === "scvSymbol" ? head.sym.toString() : undefined;
     };
+    if (contract === STELLAR_OFT && world.simulationDown && name !== "peer") {
+      throw new Error("fetch failed");
+    }
+    if (contract === STELLAR_OFT && !world.oftFunctions.includes(name ?? "")) {
+      // what a node answers for a function the contract does not export
+      return {
+        latestLedger: 100,
+        error:
+          "HostError: Error(WasmVm, MissingValue)\n trying to invoke non-existent contract function",
+      } as never;
+    }
     let retval: xdr.ScVal | undefined;
     if (contract === STELLAR_OFT && name === "peer" && u32(args[0]) === 30110) {
       retval = xdr.ScVal.scvBytes(Buffer.from(world.stellarPeer.slice(2), "hex"));
@@ -457,6 +509,8 @@ beforeEach(() => {
     paused: false,
     inboundCapacity: 2n ** 127n - 1n,
     maxAmountLD: 10n ** 30n,
+    oftFunctions: ["peer", "is_paused", "rate_limit_capacity", "quote_oft", "send"],
+    simulationDown: false,
   };
   remoteServices();
 });
@@ -648,6 +702,18 @@ describe("the Stellar side of the pathway, checked before sending", () => {
     const result = await quoteFor();
     expect(result).toMatchObject({ reason: "destination-unsupported" });
     expect((result as RouteRejection).explanation).toMatch(/room for only 24\.9999999 USDT0/);
+  });
+
+  it("quotes through an OFT that has no pause and no rate limit at all", async () => {
+    // its own spec says so, so there is nothing to read and nothing to wait for
+    world.oftFunctions = ["peer", "quote_oft", "send"];
+    expect(isRoute(await quoteFor())).toBe(true);
+  });
+
+  it("does not take a node that is down for an OFT without a pause", async () => {
+    world.simulationDown = true;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "temporarily-unavailable", retryable: true });
   });
 
   it("quotes when every limit has room", async () => {

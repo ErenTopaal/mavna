@@ -7,6 +7,7 @@ import {
   Asset as StellarAsset,
   StrKey,
   scValToNative,
+  contract as sorobanContract,
   xdr,
 } from "@stellar/stellar-sdk";
 import { type Abi, bytesToHex, decodeFunctionResult, encodeFunctionData, pad } from "viem";
@@ -178,6 +179,7 @@ export class Discovery {
   private stellarDeployment: Promise<StellarDeployment> | undefined;
   private oftRegistry: Promise<Readonly<Record<string, readonly OftEntry[]>>> | undefined;
   private dvnList: Promise<Readonly<Record<string, DvnListing>>> | undefined;
+  private readonly declared = new Map<string, Promise<ReadonlySet<string>>>();
   private readonly routes = new Map<string, Promise<ResolvedRoute>>();
   private readonly settled = new Map<string, ResolvedRoute>();
 
@@ -604,25 +606,80 @@ export class Discovery {
    * The capacity's unit is not documented. It is compared with the delivered
    * amount in Stellar's own units, which is exact if the bucket counts in
    * those and only declines early if it counts in the smaller shared units.
+   *
+   * An OFT built without a pause or a rate limit has neither to read, and is
+   * then never paused and never limited. That is decided from the functions
+   * its own Wasm declares, never from a simulation failing, because a node
+   * that is down fails the same way and must not read as "no limit".
+   * Undefined capacity means there is no limit.
    */
   async stellarInbound(
     route: ResolvedRoute,
-  ): Promise<{ readonly paused: boolean; readonly capacity: bigint }> {
+  ): Promise<{ readonly paused: boolean; readonly capacity: bigint | undefined }> {
+    const declared = await this.functionsOf(route.stellarOft);
     const [paused, capacity] = await Promise.all([
-      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "is_paused", []),
-      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "rate_limit_capacity", [
-        xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Inbound")]),
-        nativeToScVal(route.sourceEid, { type: "u32" }),
-      ]),
+      declared.has("is_paused")
+        ? simulateRead(this.rpc, this.passphrase(), route.stellarOft, "is_paused", [])
+        : undefined,
+      declared.has("rate_limit_capacity")
+        ? simulateRead(this.rpc, this.passphrase(), route.stellarOft, "rate_limit_capacity", [
+            xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Inbound")]),
+            nativeToScVal(route.sourceEid, { type: "u32" }),
+          ])
+        : undefined,
     ]);
-    if (paused.type !== "scvBool" || capacity.type !== "scvI128") {
+    if (
+      (paused !== undefined && paused.type !== "scvBool") ||
+      (capacity !== undefined && capacity.type !== "scvI128")
+    ) {
       throw new MavnaError(
         `The Stellar OFT ${route.stellarOft} answered is_paused or rate_limit_capacity in a ` +
           "shape it does not use.",
         { retryable: false },
       );
     }
-    return { paused: paused.b, capacity: BigInt(scValToNative(capacity) as bigint) };
+    return {
+      paused: paused?.type === "scvBool" ? paused.b : false,
+      capacity: capacity === undefined ? undefined : BigInt(scValToNative(capacity) as bigint),
+    };
+  }
+
+  /**
+   * The function names a Stellar contract's Wasm declares in its spec, read
+   * once per session. A failed read is not remembered.
+   */
+  private async functionsOf(contractId: string): Promise<ReadonlySet<string>> {
+    const known = this.declared.get(contractId);
+    if (known !== undefined) return known;
+    const pending = (async () => {
+      let wasm: Uint8Array;
+      try {
+        wasm = await this.rpc.server.getContractWasmByContractId(contractId);
+      } catch (cause) {
+        throw new MavnaError(`The Stellar contract ${contractId}'s code could not be read.`, {
+          retryable: true,
+          cause,
+        });
+      }
+      let names: string[];
+      try {
+        names = sorobanContract.Spec.fromWasm(wasm)
+          .funcs()
+          .map((f) => f.name.toString());
+      } catch (cause) {
+        throw new MavnaError(
+          `The Stellar contract ${contractId} carries no readable interface, so whether it can ` +
+            "be paused or limited cannot be told.",
+          { retryable: false, cause },
+        );
+      }
+      return new Set(names);
+    })();
+    this.declared.set(contractId, pending);
+    pending.catch(() => {
+      if (this.declared.get(contractId) === pending) this.declared.delete(contractId);
+    });
+    return pending;
   }
 
   private passphrase(): string {

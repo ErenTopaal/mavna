@@ -470,7 +470,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
       );
     }
 
-    let inbound: { readonly paused: boolean; readonly capacity: bigint };
+    let inbound: { readonly paused: boolean; readonly capacity: bigint | undefined };
     try {
       inbound = await this.discovery.stellarInbound(route);
     } catch (cause) {
@@ -488,7 +488,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
           "delivered until it resumes. Nothing has been sent.",
       );
     }
-    if (delivered > inbound.capacity) {
+    if (inbound.capacity !== undefined && delivered > inbound.capacity) {
       return this.decline(
         "amount-too-large",
         `Stellar's ${route.tokenSymbol} contract will take in at most ` +
