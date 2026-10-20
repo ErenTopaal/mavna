@@ -1,15 +1,28 @@
 ---
 title: NEAR Intents
-description: NEAR Intents through the 1Click API as a rail. Competing solvers deliver on Stellar out of their own inventory, against a deposit the user pays into an address 1Click hands out.
+description: NEAR Intents through the 1Click API as a rail. Competing solvers fill the trade, the NEAR Intents contract settles it, and the HOT Bridge pays out on Stellar, against a deposit the user pays into an address 1Click hands out.
 ---
 
 # NEAR Intents
 
 `@mavna/adapter-near-intents`, id `near-intents`, trust model `solver-network`.
-Nothing is burned, locked or messaged. The user pays an ordinary ERC-20 transfer
-into a deposit address, and a market of solvers competes to deliver the asked-for
-asset on Stellar from their own inventory. The NEAR Intents contract settles the
-trade, and a deposit that cannot be filled at the quoted floor is returned.
+The user pays an ordinary ERC-20 transfer into a deposit address, a market of
+solvers competes to fill the trade, and the NEAR Intents contract settles it. A
+deposit that cannot be filled at the quoted floor is returned.
+
+## Who could lie to you
+
+Three parties: the solver that fills the trade, the NEAR Intents contract that
+settles it, and the HOT Bridge that pays out on Stellar. 1Click's Stellar assets
+are HOT Omni tokens inside NEAR Intents (asset ids starting
+`nep245:v2_1.omni.hot.tg:1100_`), so solvers settle in HOT's wrapped token and the
+Stellar payout is a HOT Bridge withdrawal. HOT holds the Stellar side in its
+locker contract and releases it on a signature from HOT's MPC network
+([NEAR Intents token bridges](https://docs.near-intents.org/integration/bridging/overview),
+where HOT is the only bridge listed for Stellar, and
+[HOT's bridge docs](https://docs.hotdao.ai/omni-tokens)). The adapter offers
+only Stellar assets carrying that prefix, so the bridge it names is the one a
+transfer actually uses, and the transaction text names it too.
 
 ```ts
 const nearIntents = new NearIntentsAdapter({ network, rpc, baseReserveStroops });

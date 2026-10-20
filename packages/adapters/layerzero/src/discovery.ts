@@ -3,14 +3,17 @@ import type { RpcClient } from "@mavna/stellar";
 import {
   Contract,
   Networks,
+  nativeToScVal,
   Asset as StellarAsset,
   StrKey,
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import { type Abi, decodeFunctionResult, encodeFunctionData } from "viem";
+import { type Abi, bytesToHex, decodeFunctionResult, encodeFunctionData, pad } from "viem";
+import { simulateRead } from "./compose.js";
 import {
   type EvmSource,
+  LAYERZERO_DVN_METADATA_URL,
   LAYERZERO_METADATA_URL,
   LAYERZERO_OFT_REGISTRY_URL,
   ROUTED_SYMBOLS,
@@ -109,6 +112,16 @@ export interface ResolvedRoute {
   readonly uln: UlnConfig;
   /** Raw, unmerged. The only thing that shows whether anybody chose it. */
   readonly appUln: UlnConfig;
+  /**
+   * What LayerZero calls each verifier in `uln`, keyed by lowercase address.
+   * One missing from LayerZero's list is absent here and gets named by its
+   * address.
+   */
+  readonly dvnNames: ReadonlyMap<string, string>;
+}
+
+interface DvnListing {
+  readonly dvns?: Readonly<Record<string, { readonly canonicalName?: string }>>;
 }
 
 interface RegistryDeployment {
@@ -164,6 +177,7 @@ export class Discovery {
   private readonly readers = new Map<string, EvmReader>();
   private stellarDeployment: Promise<StellarDeployment> | undefined;
   private oftRegistry: Promise<Readonly<Record<string, readonly OftEntry[]>>> | undefined;
+  private dvnList: Promise<Readonly<Record<string, DvnListing>>> | undefined;
   private readonly routes = new Map<string, Promise<ResolvedRoute>>();
   private readonly settled = new Map<string, ResolvedRoute>();
 
@@ -172,7 +186,10 @@ export class Discovery {
     this.rpc = options.rpc;
     this.evmOptions = options.evm ?? {};
     this.extraOfts = options.ofts ?? [];
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    const injected = options.fetch;
+    // called as a plain function, never as a method of this object: a browser's
+    // fetch throws "Illegal invocation" when `this` is anything but the window
+    this.fetchImpl = (input, init) => (injected ?? globalThis.fetch)(input, init);
   }
 
   /**
@@ -299,6 +316,45 @@ export class Discovery {
       if (this.oftRegistry === pending) this.oftRegistry = undefined;
     });
     return pending;
+  }
+
+  /** LayerZero's DVN list, cached for the session like the OFT registry. */
+  private async dvnListing(): Promise<Readonly<Record<string, DvnListing>>> {
+    if (this.dvnList !== undefined) return this.dvnList;
+    const pending = (async () => {
+      const response = await this.fetchImpl(LAYERZERO_DVN_METADATA_URL, {
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new MavnaError(
+          `Could not reach LayerZero's list of verifiers (HTTP ${response.status}).`,
+          { retryable: response.status === 429 || response.status >= 500 },
+        );
+      }
+      return (await response.json()) as Readonly<Record<string, DvnListing>>;
+    })();
+    this.dvnList = pending;
+    pending.catch(() => {
+      if (this.dvnList === pending) this.dvnList = undefined;
+    });
+    return pending;
+  }
+
+  /**
+   * The names of the verifiers in a set, as LayerZero lists them for that chain.
+   *
+   * The list covers mainnet only, so testnet asks nothing and every verifier
+   * there is named by its address.
+   */
+  private async dvnNamesFor(source: EvmSource, uln: UlnConfig): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (this.network !== "mainnet") return names;
+    const listed = (await this.dvnListing())[source.layerZeroKey]?.dvns ?? {};
+    for (const dvn of [...uln.requiredDVNs, ...uln.optionalDVNs]) {
+      const name = listed[dvn.toLowerCase()]?.canonicalName;
+      if (typeof name === "string" && name !== "") names.set(dvn.toLowerCase(), name);
+    }
+    return names;
   }
 
   /**
@@ -428,9 +484,10 @@ export class Discovery {
       eid: stellar.eid,
     });
 
-    const [tokenSymbol, tokenDecimals] = await Promise.all([
+    const [tokenSymbol, tokenDecimals, dvnNames] = await Promise.all([
       this.require(reader, token as `0x${string}`, ERC20_ABI, "symbol", []),
       this.require(reader, token as `0x${string}`, ERC20_ABI, "decimals", []),
+      this.dvnNamesFor(source, uln as UlnConfig),
     ]);
 
     // The Stellar side, asked directly. This is the check the whole module is
@@ -447,11 +504,23 @@ export class Discovery {
       );
     }
 
-    const delivers = await readStellarToken(
-      this.rpc,
-      facts.token,
-      this.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
-    );
+    // The other direction of the same pairing. Delivery runs through the Stellar
+    // OFT's own peer for this chain, and a message from an OFT it does not
+    // name is refused there after the source has already taken the funds.
+    const back = await simulateRead(this.rpc, this.passphrase(), stellarOft, "peer", [
+      nativeToScVal(sourceEid, { type: "u32" }),
+    ]);
+    const expected = pad(oft.toLowerCase() as `0x${string}`);
+    const named = back.switch().name === "scvBytes" ? bytesToHex(back.bytes()) : undefined;
+    if (named !== expected) {
+      throw new MavnaError(
+        `its Stellar peer ${stellarOft} does not peer back to it for endpoint ${sourceEid} ` +
+          `(it names ${named ?? "nothing"}), so a message from it would be refused on arrival`,
+        { retryable: false },
+      );
+    }
+
+    const delivers = await readStellarToken(this.rpc, facts.token, this.passphrase());
 
     const local = Number(sharedDecimals) + facts.decimalsDiff;
     if (local !== 7) {
@@ -481,6 +550,7 @@ export class Discovery {
       sendLibrary,
       uln: uln as UlnConfig,
       appUln: appUln as UlnConfig,
+      dvnNames,
     };
   }
 
@@ -496,13 +566,67 @@ export class Discovery {
     return { nativeFee: fee.nativeFee, lzTokenFee: fee.lzTokenFee };
   }
 
-  /** What the pathway says will actually arrive, in the source chain's units. */
-  async quoteDelivered(route: ResolvedRoute, sendParam: unknown): Promise<bigint | undefined> {
+  /**
+   * What the pathway says will actually arrive, in the source chain's units,
+   * and the most and least the OFT carries in one transfer.
+   */
+  async quoteDelivered(
+    route: ResolvedRoute,
+    sendParam: unknown,
+  ): Promise<
+    | { readonly received: bigint; readonly minAmountLD: bigint; readonly maxAmountLD: bigint }
+    | undefined
+  > {
     const reader = this.readerFor(route.chainId, route.source);
     const result = await this.read(reader, route.oft, OFT_ABI, "quoteOFT", [sendParam]);
     if (result === undefined) return undefined;
-    const receipt = (result as readonly unknown[])[2] as { amountReceivedLD: bigint } | undefined;
-    return receipt?.amountReceivedLD;
+    const [limit, , receipt] = result as readonly [
+      { minAmountLD: bigint; maxAmountLD: bigint } | undefined,
+      unknown,
+      { amountReceivedLD: bigint } | undefined,
+    ];
+    if (limit === undefined || receipt === undefined) return undefined;
+    return {
+      received: receipt.amountReceivedLD,
+      minAmountLD: limit.minAmountLD,
+      maxAmountLD: limit.maxAmountLD,
+    };
+  }
+
+  /**
+   * Whether the Stellar OFT will take a delivery from this route right now.
+   *
+   * Read at quote time rather than cached with the route, because both move:
+   * an operator can pause the contract, and the inbound bucket drains as
+   * transfers land. Either one refusing the message strands it after the
+   * source has taken the funds.
+   *
+   * The capacity's unit is not documented. It is compared with the delivered
+   * amount in Stellar's own units, which is exact if the bucket counts in
+   * those and only declines early if it counts in the smaller shared units.
+   */
+  async stellarInbound(
+    route: ResolvedRoute,
+  ): Promise<{ readonly paused: boolean; readonly capacity: bigint }> {
+    const [paused, capacity] = await Promise.all([
+      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "is_paused", []),
+      simulateRead(this.rpc, this.passphrase(), route.stellarOft, "rate_limit_capacity", [
+        xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Inbound")]),
+        nativeToScVal(route.sourceEid, { type: "u32" }),
+      ]),
+    ]);
+    if (paused.switch().name !== "scvBool" || capacity.switch().name !== "scvI128") {
+      throw new MavnaError(
+        `The Stellar OFT ${route.stellarOft} answered is_paused or rate_limit_capacity in a ` +
+          "shape it does not use.",
+        { retryable: false },
+      );
+    }
+    return { paused: paused.b(), capacity: BigInt(scValToNative(capacity) as bigint) };
+  }
+
+  private passphrase(): string {
+    return this.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
   }
 
   /**
@@ -516,6 +640,34 @@ export class Discovery {
       stellar.eid,
       msgType,
     ])) as `0x${string}`;
+  }
+
+  /**
+   * Where a source OFT sends Stellar-bound messages from and to, read off the
+   * chain rather than taken from an indexer.
+   *
+   * Status uses this to decide whether a message it found is one of this
+   * rail's, so it skips the gates `routeFrom` applies before sending. Those
+   * gates are about whether a new transfer is safe; a transfer already sent
+   * has to stay readable even if one of them fails today.
+   */
+  async pathwayOf(
+    chainId: string,
+    oft: string,
+  ): Promise<{ readonly sourceEid: number; readonly peer: `0x${string}` }> {
+    const source = sourceFor(this.network, chainId);
+    if (source === undefined) {
+      throw new MavnaError(`This rail does not send from ${chainId}.`, { retryable: false });
+    }
+    const reader = this.readerFor(chainId, source);
+    const [peer, endpoint] = await Promise.all([
+      this.require(reader, oft, OFT_ABI, "peers", [STELLAR_SIDE[this.network].eid]),
+      this.require(reader, oft, OFT_ABI, "endpoint", []),
+    ]);
+    const sourceEid = Number(
+      await this.require(reader, endpoint as `0x${string}`, ENDPOINT_ABI, "eid", []),
+    );
+    return { sourceEid, peer: (peer as string).toLowerCase() as `0x${string}` };
   }
 
   /**

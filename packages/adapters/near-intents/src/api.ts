@@ -155,7 +155,10 @@ export class OneClickApi {
   constructor(options: OneClickOptions = {}) {
     this.baseUrl = options.baseUrl ?? ONE_CLICK_URL;
     this.apiKey = options.apiKey;
-    this.fetcher = options.fetch ?? fetch;
+    const injected = options.fetch;
+    // called as a plain function, never as a method of this object: a browser's
+    // fetch throws "Illegal invocation" when `this` is anything but the window
+    this.fetcher = (input, init) => (injected ?? globalThis.fetch)(input, init);
   }
 
   /**

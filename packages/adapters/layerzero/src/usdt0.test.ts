@@ -1,4 +1,4 @@
-import type { QuoteRequest, Route, RouteRejection } from "@mavna/core";
+import type { AllowanceCheck, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import {
   Address,
@@ -8,11 +8,24 @@ import {
   StrKey,
   xdr,
 } from "@stellar/stellar-sdk";
-import { type Abi, decodeFunctionData, encodeFunctionResult, getAddress } from "viem";
+import {
+  type Abi,
+  decodeFunctionData,
+  encodeFunctionResult,
+  encodePacked,
+  getAddress,
+  keccak256,
+  pad,
+} from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
 import { SEND_ULN_ABI } from "./dvn.js";
-import { LAYERZERO_METADATA_URL, LAYERZERO_OFT_REGISTRY_URL, SCAN_BASE_URL } from "./index.js";
+import {
+  LAYERZERO_DVN_METADATA_URL,
+  LAYERZERO_METADATA_URL,
+  LAYERZERO_OFT_REGISTRY_URL,
+  SCAN_BASE_URL,
+} from "./index.js";
 import { ENDPOINT_ABI, ERC20_ABI, OFT_ABI, stellarToLocal } from "./oft.js";
 
 /**
@@ -57,6 +70,20 @@ interface World {
   assetInfoIssuer: string;
   account: boolean;
   trustline: boolean;
+  /** What LayerZero Scan holds for SEND_HASH. */
+  messages: unknown[];
+  /** Whether the OFT's verifier set is its own choice or inherited from the network. */
+  dvnInherited: boolean;
+  /** True for an adapter that locks the token, as USDT0 does on Ethereum. */
+  approvalRequired: boolean;
+  /** What the Stellar OFT's `peer(30110)` answers, as hex. */
+  stellarPeer: string;
+  /** What the Stellar OFT's `is_paused()` answers. */
+  paused: boolean;
+  /** What `rate_limit_capacity(Inbound, 30110)` answers. */
+  inboundCapacity: bigint;
+  /** The EVM OFT's `quoteOFT` limit. */
+  maxAmountLD: bigint;
 }
 
 let world: World;
@@ -85,7 +112,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
       case "token":
         return reply(TOKEN);
       case "approvalRequired":
-        return reply(false);
+        return reply(world.approvalRequired);
       case "sharedDecimals":
         return reply(6);
       case "endpoint":
@@ -97,7 +124,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
       case "quoteOFT": {
         const amount = ((args ?? [])[0] as { amountLD: bigint }).amountLD;
         return reply([
-          { minAmountLD: 0n, maxAmountLD: 10n ** 30n },
+          { minAmountLD: 0n, maxAmountLD: world.maxAmountLD },
           [],
           { amountSentLD: amount, amountReceivedLD: amount },
         ]);
@@ -118,6 +145,10 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
     target === SEND_LIB &&
     (functionName === "getUlnConfig" || functionName === "getAppUlnConfig")
   ) {
+    // an inherited set reads back from getAppUlnConfig as all zeros
+    if (functionName === "getAppUlnConfig" && world.dvnInherited) {
+      return reply({ ...uln, requiredDVNCount: 0, requiredDVNs: [] });
+    }
     return reply(uln);
   }
   if (target === TOKEN) {
@@ -163,6 +194,12 @@ function remoteServices(): void {
         ],
       });
     }
+    if (url === LAYERZERO_DVN_METADATA_URL) {
+      // DVN_B left out, as LayerZero's list leaves some out
+      return json({
+        arbitrum: { dvns: { [DVN_A.toLowerCase()]: { canonicalName: "LayerZero Labs" } } },
+      });
+    }
     if (url.startsWith(`${HORIZON}/order_book`)) {
       return json({
         bids: [{ price: "0.2", amount: "1000" }],
@@ -170,22 +207,7 @@ function remoteServices(): void {
       });
     }
     if (url === `${SCAN_BASE_URL.mainnet}/messages/tx/${SEND_HASH}`) {
-      return json({
-        data: [
-          {
-            status: { name: "DELIVERED" },
-            pathway: { srcEid: 30110, dstEid: 30600, sender: { chain: "arbitrum" } },
-            source: {
-              // 24.875 in six shared decimals, after the recipient bytes32
-              tx: {
-                txHash: SEND_HASH,
-                payload: `0x${"11".repeat(32)}${24_875_000n.toString(16).padStart(16, "0")}`,
-              },
-            },
-            destination: { tx: { txHash: "cd".repeat(32) } },
-          },
-        ],
-      });
+      return json({ data: world.messages });
     }
     if (url === "https://arb1.arbitrum.io/rpc") {
       const { method, params } = JSON.parse(init?.body as string) as {
@@ -200,6 +222,59 @@ function remoteServices(): void {
     }
     throw new Error(`the fetch double has no answer for ${url}`);
   });
+}
+
+const STELLAR_OFT_BYTES = `0x${StrKey.decodeContract(STELLAR_OFT).toString("hex")}` as const;
+
+/**
+ * A delivered USDT0 message from Arbitrum to Stellar, shaped the way Scan
+ * answered for the real Polygon one (guid 0x2dc98848...6dd7): sender and
+ * receiver as lowercase hex, the guid the endpoint derived from the pathway.
+ */
+function delivered(
+  pathway: {
+    srcEid?: number;
+    dstEid?: number;
+    sender?: string;
+    receiver?: `0x${string}`;
+    nonce?: number;
+  } = {},
+  guid?: string,
+): unknown {
+  const p = {
+    srcEid: 30110,
+    dstEid: 30600,
+    sender: OFT.toLowerCase(),
+    receiver: STELLAR_OFT_BYTES,
+    nonce: 43,
+    ...pathway,
+  };
+  return {
+    guid:
+      guid ??
+      keccak256(
+        encodePacked(
+          ["uint64", "uint32", "bytes32", "uint32", "bytes32"],
+          [BigInt(p.nonce), p.srcEid, pad(p.sender as `0x${string}`), p.dstEid, p.receiver],
+        ),
+      ),
+    status: { name: "DELIVERED" },
+    pathway: {
+      srcEid: p.srcEid,
+      dstEid: p.dstEid,
+      nonce: p.nonce,
+      sender: { address: p.sender, chain: "arbitrum" },
+      receiver: { address: p.receiver, chain: p.dstEid === 30600 ? "stellar" : "ethereum" },
+    },
+    source: {
+      // 24.875 in six shared decimals, after the recipient bytes32
+      tx: {
+        txHash: SEND_HASH,
+        payload: `0x${"11".repeat(32)}${24_875_000n.toString(16).padStart(16, "0")}`,
+      },
+    },
+    destination: { tx: { txHash: "cd".repeat(32) } },
+  };
 }
 
 const sym = (name: string): xdr.ScVal => xdr.ScVal.scvSymbol(name);
@@ -299,6 +374,33 @@ function stellarNode(): RpcClient {
     }
     return { entries, latestLedger: 100 } as never;
   });
+  vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
+    const op = (tx as { toEnvelope(): xdr.TransactionEnvelope })
+      .toEnvelope()
+      .v1()
+      .tx()
+      .operations()[0];
+    const call = op?.body().invokeHostFunctionOp().hostFunction().invokeContract();
+    const contract =
+      call === undefined ? "" : Address.fromScAddress(call.contractAddress()).toString();
+    const name = call?.functionName().toString();
+    const args = call?.args() ?? [];
+    let retval: xdr.ScVal | undefined;
+    if (contract === STELLAR_OFT && name === "peer" && args[0]?.u32() === 30110) {
+      retval = xdr.ScVal.scvBytes(Buffer.from(world.stellarPeer.slice(2), "hex"));
+    } else if (contract === STELLAR_OFT && name === "is_paused") {
+      retval = xdr.ScVal.scvBool(world.paused);
+    } else if (
+      contract === STELLAR_OFT &&
+      name === "rate_limit_capacity" &&
+      args[0]?.vec()?.[0]?.sym().toString() === "Inbound" &&
+      args[1]?.u32() === 30110
+    ) {
+      retval = nativeToScVal(world.inboundCapacity, { type: "i128" });
+    }
+    if (retval === undefined) throw new Error(`the Stellar double has no answer for ${name}`);
+    return { latestLedger: 100, result: { retval, auth: [] } } as never;
+  });
   return client;
 }
 
@@ -326,6 +428,14 @@ beforeEach(() => {
     assetInfoIssuer: ISSUER,
     account: true,
     trustline: true,
+    messages: [delivered()],
+    dvnInherited: false,
+    approvalRequired: false,
+    // live on 20 October 2026: the Arbitrum OFT, left-padded, and an unlimited bucket
+    stellarPeer: `0x${"00".repeat(12)}${OFT.slice(2).toLowerCase()}`,
+    paused: false,
+    inboundCapacity: 2n ** 127n - 1n,
+    maxAmountLD: 10n ** 30n,
   };
   remoteServices();
 });
@@ -426,6 +536,18 @@ describe("quoting USDT0 into Stellar", () => {
     expect((result as RouteRejection).reason).toBe("asset-unsupported");
   });
 
+  it.each([0.5, -1, 10_000, 12_000, Number.NaN])(
+    "declines a slippage of %s basis points instead of throwing or accepting anything",
+    async (bps) => {
+      const result = await mainnet().quote({ ...(await ask(READY)), maxSlippageBps: bps });
+      expect(isRoute(result)).toBe(false);
+      const rejection = result as RouteRejection;
+      expect(rejection.reason).toBe("errored");
+      expect(rejection.retryable).toBe(false);
+      expect(rejection.explanation).toMatch(/whole number of basis points/);
+    },
+  );
+
   it("builds a send whose on-chain minimum is the quoted floor", async () => {
     const adapter = mainnet();
     const route = routeOf(await adapter.quote(await ask(READY)));
@@ -445,6 +567,165 @@ describe("quoting USDT0 into Stellar", () => {
     );
     expect(payload.args[0].minAmountLD).toBe("24875000");
     expect(payload.args[0].to).toBe(`0x${StrKey.decodeEd25519PublicKey(READY).toString("hex")}`);
+    // the quoted fee plus a tenth, in both the fee argument and the value, since
+    // the OApp requires them equal and the endpoint refunds what is not needed
+    const sent = JSON.parse(txs[0]?.payload ?? "{}") as {
+      value: string;
+      args: [unknown, { nativeFee: string }, string];
+    };
+    expect(sent.value).toBe("45100000000000");
+    expect(sent.args[1].nativeFee).toBe("45100000000000");
+    expect(txs[0]?.describes).toMatch(/refunded/);
+    // the verifiers are named, by LayerZero's name or else by address
+    expect(txs[0]?.describes).toContain(`2 verifiers must all agree (LayerZero Labs, ${DVN_B})`);
+  });
+});
+
+describe("the Stellar side of the pathway, checked before sending", () => {
+  async function quoteFor(baseUnits = "25000000"): Promise<Route | RouteRejection> {
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    return adapter.quote({
+      from,
+      to,
+      sends: { asset: from, baseUnits },
+      destination: READY,
+      maxSlippageBps: 50,
+    });
+  }
+
+  it("refuses a Stellar OFT that does not peer back to the sending OFT", async () => {
+    world.stellarPeer = `0x${"00".repeat(12)}${"77".repeat(20)}`;
+    await expect(mainnet().sendableAssets("arbitrum")).rejects.toThrow(/does not peer back/);
+  });
+
+  it("declines while the Stellar OFT is paused, since nothing would be delivered", async () => {
+    world.paused = true;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "temporarily-unavailable" });
+    expect((result as RouteRejection).explanation).toMatch(/paused/);
+  });
+
+  it("declines more than the Stellar side will take in right now", async () => {
+    // 25 USDT0 lands as 250000000 at seven decimals
+    world.inboundCapacity = 249_999_999n;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "amount-too-large" });
+  });
+
+  it("declines more than the sending OFT will carry in one transfer", async () => {
+    world.maxAmountLD = 24_999_999n;
+    const result = await quoteFor();
+    expect(result).toMatchObject({ reason: "amount-too-large" });
+  });
+
+  it("quotes when every limit has room", async () => {
+    world.inboundCapacity = 250_000_000n;
+    world.maxAmountLD = 25_000_000n;
+    expect(isRoute(await quoteFor())).toBe(true);
+  });
+});
+
+describe("the approval, where the OFT locks the token", () => {
+  /**
+   * How a caller reads a transaction's condition, written from the documented
+   * fields: skipped when the allowance is at least `atLeastBaseUnits`, or
+   * exactly `skipAlsoWhenExactly` when that is set.
+   */
+  function skipped(condition: AllowanceCheck | undefined, allowance: bigint): boolean {
+    if (condition === undefined) return false;
+    if (allowance >= BigInt(condition.atLeastBaseUnits)) return true;
+    return (
+      condition.skipAlsoWhenExactly !== undefined &&
+      allowance === BigInt(condition.skipAlsoWhenExactly)
+    );
+  }
+
+  /**
+   * Tether's USDT `approve`, as mainnet answered it on 20 October 2026 for an
+   * eth_call with the allowance slot overridden: a non-zero value over a
+   * non-zero allowance reverts, anything else is accepted.
+   */
+  function usdtApprove(allowance: bigint, value: bigint): bigint {
+    if (allowance !== 0n && value !== 0n) throw new Error("execution reverted");
+    return value;
+  }
+
+  /** What the caller's loop does: skip what it may, send the rest in order. */
+  async function runApprovals(allowance: bigint): Promise<{ sent: string[]; allowance: bigint }> {
+    world.approvalRequired = true;
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    const route = routeOf(
+      await adapter.quote({
+        from,
+        to,
+        sends: { asset: from, baseUnits: "150000000" },
+        destination: READY,
+        maxSlippageBps: 50,
+      }),
+    );
+    const txs = await adapter.buildTransactions(route);
+    const sent: string[] = [];
+    let current = allowance;
+    for (const tx of txs) {
+      if (skipped(tx.unnecessaryWhen, current)) continue;
+      const call = JSON.parse(tx.payload) as { functionName: string; args: string[] };
+      if (call.functionName !== "approve") {
+        sent.push(`${call.functionName}()`);
+        continue;
+      }
+      sent.push(`approve(${call.args[1]})`);
+      current = usdtApprove(current, BigInt(call.args[1] ?? ""));
+    }
+    return { sent, allowance: current };
+  }
+
+  it("clears a smaller allowance first, since USDT refuses to change one in place", async () => {
+    // approved 100 earlier, declined the send, now sending 150
+    const { sent, allowance } = await runApprovals(100_000_000n);
+    expect(sent.slice(0, 2)).toEqual(["approve(0)", "approve(150000000)"]);
+    expect(allowance).toBe(150_000_000n);
+  });
+
+  it("asks for no reset when there is no allowance to clear", async () => {
+    const { sent } = await runApprovals(0n);
+    expect(sent.slice(0, 1)).toEqual(["approve(150000000)"]);
+  });
+
+  it("asks for neither when the allowance already covers the send", async () => {
+    const { sent } = await runApprovals(150_000_000n);
+    expect(sent).toEqual(["send()"]);
+  });
+
+  it("says what the reset is for, and names the same token and spender", async () => {
+    world.approvalRequired = true;
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    const route = routeOf(
+      await adapter.quote({
+        from,
+        to,
+        sends: { asset: from, baseUnits: "150000000" },
+        destination: READY,
+        maxSlippageBps: 50,
+      }),
+    );
+    const [reset, approve] = await adapter.buildTransactions(route);
+    expect(reset?.describes).toMatch(/clear/i);
+    expect(reset?.unnecessaryWhen).toEqual({
+      kind: "erc20-allowance",
+      token: TOKEN,
+      spender: OFT.toLowerCase(),
+      atLeastBaseUnits: "150000000",
+      skipAlsoWhenExactly: "0",
+    });
+    expect(approve?.unnecessaryWhen).toEqual({
+      kind: "erc20-allowance",
+      token: TOKEN,
+      spender: OFT.toLowerCase(),
+      atLeastBaseUnits: "150000000",
+    });
   });
 });
 
@@ -462,5 +743,68 @@ describe("status, for a USDT0 transfer", () => {
     expect(phase.received.asset.symbol).toBe("USDT0");
     expect(phase.received.baseUnits).toBe("248750000");
     expect(phase.ref.chainId).toBe("stellar");
+  });
+
+  const lookUp = () =>
+    mainnet().status({
+      sourceTxHash: SEND_HASH,
+      depositAddress: undefined,
+      destinationAddress: READY,
+      sourceChainId: undefined,
+    });
+
+  it("does not answer for a message bound for another chain", async () => {
+    // the shape of 0xa9658a79...f0e0, USDT0 Polygon to Ethereum, which was once
+    // reported here as delivered on Stellar
+    world.messages = [delivered({ dstEid: 30101 })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for another contract's message to Stellar", async () => {
+    world.messages = [delivered({ sender: `0x${"77".repeat(20)}` })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for a message delivered to another Stellar contract", async () => {
+    world.messages = [delivered({ receiver: `0x${"99".repeat(32)}` })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not answer for a message from another endpoint", async () => {
+    world.messages = [delivered({ srcEid: 30109 })];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("does not believe a record whose guid is not the one its pathway derives", async () => {
+    world.messages = [delivered({}, `0x${"ee".repeat(32)}`)];
+    expect(await lookUp()).toEqual({ phase: "idle" });
+  });
+
+  it("picks the Stellar-bound message out of several in one transaction", async () => {
+    world.messages = [delivered({ dstEid: 30101 }), delivered()];
+    const phase = await lookUp();
+    expect(phase.phase).toBe("done");
+  });
+
+  it("still calls an unindexed hash pending", async () => {
+    world.messages = [];
+    expect((await lookUp()).phase).toBe("pending");
+  });
+
+  it("still reads a delivered transfer when a send-time gate fails today", async () => {
+    // a new send would be refused, and yesterday's delivery is still a delivery
+    world.dvnInherited = true;
+    await expect(mainnet().sendableAssets("arbitrum")).rejects.toThrow();
+    const phase = await lookUp();
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    expect(phase.received.baseUnits).toBe("248750000");
+    expect(phase.received.asset.id).toBe(USDT0_ID);
+  });
+
+  it("says it could not read the amount rather than calling it pending", async () => {
+    // a token whose storage cannot be read is an error, never a quiet pending
+    world.token = StrKey.encodeContract(Buffer.alloc(32, 12));
+    await expect(lookUp()).rejects.toThrow(/does not derive its own address/);
   });
 });

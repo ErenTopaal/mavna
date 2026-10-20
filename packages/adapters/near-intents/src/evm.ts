@@ -71,11 +71,39 @@ export interface SentTransfer {
 }
 
 /**
+ * URLs that have said which chain they serve, per JSON-RPC transport.
+ *
+ * Asked once per URL rather than on every lookup, since a status read from a
+ * hash alone searches every chain and is polled. Keyed by transport as well,
+ * so a test's double is never answered from a real node's record.
+ */
+const served = new WeakMap<JsonRpc, Map<string, number>>();
+
+async function servesChain(url: string, evmChainId: number, rpc: JsonRpc): Promise<boolean> {
+  let known = served.get(rpc);
+  if (known === undefined) {
+    known = new Map();
+    served.set(rpc, known);
+  }
+  let id = known.get(url);
+  if (id === undefined) {
+    const answer = await rpc(url, "eth_chainId", []);
+    if (typeof answer !== "string") return false;
+    id = Number(answer);
+    known.set(url, id);
+  }
+  return id === evmChainId;
+}
+
+/**
  * The ERC-20 transfer a transaction made, read off the chain it was sent on.
  *
- * Undefined when the chain has no such transaction or it is not a plain
- * transfer. Each URL is tried in turn, and only when none answers is it an
- * error: a node that cannot be reached says nothing about the transfer.
+ * Undefined when no node on the chain has the transaction, or it is not a
+ * plain transfer. Every URL is asked before concluding it is not there: a node
+ * that is a block behind answers null for a deposit sent seconds ago, and one
+ * node's null is not the chain's. A node is believed only once it has said it
+ * serves this chain, since a URL pointed at another chain answers confidently
+ * about some other transaction. Only when no node answered is it an error.
  */
 export async function readTransfer(
   chain: OriginChain,
@@ -84,21 +112,28 @@ export async function readTransfer(
 ): Promise<SentTransfer | undefined> {
   const hash = txHash.startsWith("0x") ? txHash : `0x${txHash}`;
   let lastError: unknown;
+  let answered = false;
   for (const url of chain.rpc) {
     let tx: unknown;
     try {
+      if (!(await servesChain(url, chain.evmChainId, rpc))) {
+        lastError = new Error(`${url} does not serve chain ${chain.evmChainId}`);
+        continue;
+      }
       tx = await rpc(url, "eth_getTransactionByHash", [hash]);
     } catch (cause) {
       lastError = cause;
       continue;
     }
-    if (tx === null || tx === undefined) return undefined;
+    answered = true;
+    if (tx === null || tx === undefined) continue;
     const fields = tx as { to?: unknown; input?: unknown };
     if (typeof fields.to !== "string" || typeof fields.input !== "string") return undefined;
     const call = decodeTransfer(fields.input);
     if (call === undefined) return undefined;
     return { token: fields.to.toLowerCase(), to: call.to, amount: call.amount };
   }
+  if (answered) return undefined;
   throw new MavnaError(`No ${chain.name} node answered for that transaction.`, {
     retryable: true,
     cause: lastError,

@@ -30,6 +30,7 @@ interface AllowanceCheck {
   readonly token: string;
   readonly spender: string;
   readonly atLeastBaseUnits: string;
+  readonly skipAlsoWhenExactly?: string;
 }
 ```
 
@@ -38,7 +39,10 @@ An `UnsignedTransaction` can carry `unnecessaryWhen`. Today its one form is
 wallet already holds an allowance of at least `atLeastBaseUnits` for `spender` on
 `token`. The SDK cannot read the allowance itself, because that needs a
 source-chain node the caller holds, so it states the condition and the caller
-checks it. `unnecessaryWhen: undefined` means always send it.
+checks it. When `skipAlsoWhenExactly` is set, the transaction is also unnecessary
+when the allowance is exactly that value: it is how a reset to zero, which Tether's
+USDT demands before an allowance can change, says to skip itself when there is
+nothing to clear. `unnecessaryWhen: undefined` means always send it.
 
 ## Some transactions need a fresh keypair
 

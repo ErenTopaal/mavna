@@ -160,7 +160,7 @@ describe("resolving LayerZero from the chains rather than from a table", () => {
     expect(verifierThreshold(ethereum.uln)).toBeGreaterThan(0);
     // The mainnet default names a DVN that is not deployed, so an application
     // relying on it cannot be quoted at all. This one set its own.
-    expect(isExplicitlyConfigured(ethereum.appUln)).toBe(true);
+    expect(isExplicitlyConfigured(ethereum.appUln, ethereum.uln)).toBe(true);
     expect(ethereum.uln.requiredDVNs.length).toBe(ethereum.uln.requiredDVNCount);
     expect(Number(ethereum.uln.confirmations)).toBeGreaterThan(0);
   });
@@ -373,9 +373,15 @@ describe("building the transactions", () => {
     if (!isRoute(quoted)) throw new Error(quoted.explanation);
 
     const transactions = await mainnet.buildTransactions(quoted);
-    expect(transactions).toHaveLength(2);
+    // a reset that clears an earlier smaller allowance, which USDT needs, then the approval
+    expect(transactions).toHaveLength(3);
 
-    const [approval, send] = transactions;
+    const [reset, approval, send] = transactions;
+    expect(JSON.parse(reset?.payload ?? "{}")).toMatchObject({
+      functionName: "approve",
+      args: [ethereum.oft, "0"],
+    });
+    expect(reset?.unnecessaryWhen?.skipAlsoWhenExactly).toBe("0");
     expect(approval?.format).toBe("evm-tx");
     const approvalPayload = JSON.parse(approval?.payload ?? "{}") as {
       functionName: string;
@@ -409,7 +415,9 @@ describe("building the transactions", () => {
     expect(BigInt(sendPayload.args[0].minAmountLD)).toBeGreaterThan(0n);
     // Consent needs understanding, so the sentence carries the trust model too.
     expect(send?.describes).toContain(quoted.destination);
-    expect(send?.describes).toContain("must agree");
+    expect(send?.describes).toContain("must all agree");
+    // named from LayerZero's DVN list rather than only counted
+    expect(send?.describes).toContain("LayerZero Labs");
   });
 
   it("asks for only a send where the contract mints and burns", async () => {
@@ -462,6 +470,33 @@ describe("status, read from LayerZero's own indexer", () => {
     });
     expect(phase.phase).toBe("pending");
   });
+
+  it("reports a real Polygon to Stellar USDT0 transfer as delivered, with its amount", async () => {
+    const phase = await mainnet.status({
+      sourceTxHash: "0x7f531e1dfe096968f03551411c717f698d98576c7f42829a0e600e8d7016131f",
+      depositAddress: undefined,
+      destinationAddress: UNFUNDED,
+      sourceChainId: undefined,
+    });
+    expect(phase.phase).toBe("done");
+    if (phase.phase !== "done") return;
+    // one USDT0, seven decimals on Stellar
+    expect(phase.received.baseUnits).toBe("10000000");
+    expect(phase.received.asset.symbol).toBe("USDT0");
+    expect(phase.ref.txHash).toBe(
+      "ace3893f10405ef834b1408e778223985f17ed7b03c2641f901d92f01a41e340",
+    );
+  }, 30_000);
+
+  it("does not answer for a USDT0 transfer from Polygon to Ethereum", async () => {
+    const phase = await mainnet.status({
+      sourceTxHash: "0xa9658a797e99f86d8b5d1080184042301badc53e1a7e308bdee9510f62f3f0e0",
+      depositAddress: undefined,
+      destinationAddress: UNFUNDED,
+      sourceChainId: undefined,
+    });
+    expect(phase).toEqual({ phase: "idle" });
+  }, 30_000);
 });
 
 /**

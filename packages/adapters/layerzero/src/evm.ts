@@ -45,7 +45,10 @@ export class EvmReader {
     this.endpoints = urls.map((url) => ({ url, chainId: undefined, rejected: false }));
     this.expectedChainId = expectedChainId;
     this.timeoutMs = options.timeoutMs ?? 8000;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    const injected = options.fetch;
+    // called as a plain function, never as a method of this object: a browser's
+    // fetch throws "Illegal invocation" when `this` is anything but the window
+    this.fetchImpl = (input, init) => (injected ?? globalThis.fetch)(input, init);
   }
 
   /**

@@ -58,10 +58,22 @@ describe("what a status means for someone waiting on their money", () => {
 describe("what the user can do about it", () => {
   const url = "https://layerzeroscan.com/tx/0xabc";
 
-  it("offers a stored payload to anyone willing to push it through", () => {
+  // LayerZero's V2 docs do not describe PAYLOAD_STORED or how to clear it, so
+  // promising a button that pushes it through would be a guess
+  it("sends a stored payload to the scan page and support, promising no action", () => {
     const remedy = remedyForStatus("PAYLOAD_STORED", url, 1_000);
+    expect(remedy.kind).toBe("contact");
+    if (remedy.kind === "contact") expect(remedy.reference).toBe(url);
+    expect(remedy.because).not.toMatch(/anyone can/i);
+  });
+
+  // documented: Scan shows the execution error and can run the message again,
+  // and the endpoint's lzReceive that does it is open to anyone
+  it("offers a failed execution for a retry on the scan page, saying when it works", () => {
+    const remedy = remedyForStatus("FAILED", url, 1_000);
     expect(remedy.kind).toBe("claim");
     if (remedy.kind === "claim") expect(remedy.at).toBe(url);
+    expect(remedy.because).toMatch(/run it again/);
   });
 
   it("tells someone blocked behind another transfer to wait, and why", () => {

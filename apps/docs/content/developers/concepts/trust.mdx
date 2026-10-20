@@ -34,14 +34,15 @@ Service. What you are trusting is that validator set.
 attests, and the token's owner chose which. This is kept separate from
 `validator-set` on purpose: who is trusted is chosen by whoever deployed the
 token, not by the network, so two routes on the same rail can be verified by
-entirely different parties. The adapter names the verifiers on every transaction
-it builds.
+entirely different parties. The adapter names the verifiers on every send it
+builds.
 
 **`solver-network`** ([NEAR Intents](/developers/rails/near-intents)). Competing
-solvers deliver on Stellar from their own inventory against a deposit the user pays
-into an address 1Click hands out; the NEAR Intents contract settles, and a deposit
-that cannot be filled at the floor is returned. What you are trusting is that
-settlement and the solver market.
+solvers fill the trade against a deposit the user pays into an address 1Click
+hands out; the NEAR Intents contract settles it, the HOT Bridge pays out on
+Stellar from its locker contract on a signature from HOT's MPC network, and a
+deposit that cannot be filled at the floor is returned. What you are trusting is
+the solver market, that settlement, and the HOT Bridge.
 
 `liquidity-pool` exists in the type for rails of that shape. No adapter in this
 repository uses it today.

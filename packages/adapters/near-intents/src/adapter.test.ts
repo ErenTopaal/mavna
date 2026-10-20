@@ -2,6 +2,7 @@ import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NearIntentsAdapter, slippageOf } from "./adapter.js";
+import { ORIGIN_CHAINS } from "./chains.js";
 import type { JsonRpc } from "./evm.js";
 
 /**
@@ -196,8 +197,12 @@ function stellarNode(): RpcClient {
 let chainTxs: Record<string, unknown>;
 let chainDown: Set<string>;
 const jsonRpc: JsonRpc = async (url, method, params) => {
-  if (method !== "eth_getTransactionByHash") throw new Error(`no answer for ${method}`);
   if (chainDown.has(url)) throw new Error(`${url} refused the connection`);
+  if (method === "eth_chainId") {
+    const chain = ORIGIN_CHAINS.mainnet.find((c) => c.rpc.includes(url));
+    return `0x${(chain?.evmChainId ?? 0).toString(16)}`;
+  }
+  if (method !== "eth_getTransactionByHash") throw new Error(`no answer for ${method}`);
   asked.push(`tx ${url}`);
   return chainTxs[`${url} ${String(params[0])}`] ?? null;
 };
@@ -510,6 +515,16 @@ describe("quoting", () => {
     expect(route.steps.map((s) => s.kind)).toEqual(["bridge"]);
   });
 
+  it.each([0.5, -1, 10_000, 12_000, Number.NaN])(
+    "declines a slippage of %s basis points without asking 1Click",
+    async (bps) => {
+      const result = rejectionOf(await adapter().quote(ask({ maxSlippageBps: bps })));
+      expect(result.reason).toBe("errored");
+      expect(result.retryable).toBe(false);
+      expect(result.explanation).toMatch(/whole number of basis points/);
+    },
+  );
+
   it("lists the EVM chains 1Click currently carries a token on", async () => {
     expect(await adapter().supportedChains()).toEqual(["arbitrum", "base", "bsc"]);
   });
@@ -563,6 +578,10 @@ describe("building", () => {
     });
     expect(tx?.describes).toContain(`deposit address ${DEPOSIT}`);
     expect(tx?.describes).toContain(`returned to ${SENDER}`);
+    // 1Click's Stellar assets are HOT Omni tokens (nep245:v2_1.omni.hot.tg:1100_...),
+    // so the payout on Stellar is a HOT Bridge withdrawal, and consent has to say so
+    expect(tx?.describes).toContain("HOT Bridge");
+    expect(tx?.describes).not.toContain("inventory");
   });
 
   it("refuses a real quote whose floor fell below the route's", async () => {

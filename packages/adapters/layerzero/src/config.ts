@@ -37,6 +37,13 @@ export const LAYERZERO_METADATA_URL = "https://metadata.layerzero-api.com/v1/met
 export const LAYERZERO_OFT_REGISTRY_URL =
   "https://metadata.layerzero-api.com/v1/metadata/experiment/ofts/list";
 
+/**
+ * LayerZero's list of DVNs per chain, which is where a verifier's name comes
+ * from. It covers mainnet chains only; on testnet a verifier is named by its
+ * address.
+ */
+export const LAYERZERO_DVN_METADATA_URL = "https://metadata.layerzero-api.com/v1/metadata/dvns";
+
 export interface StellarSide {
   /** How LayerZero keys Stellar in its registry. Not the same on both networks. */
   readonly chainKey: string;
@@ -127,10 +134,11 @@ export interface EvmSource {
    *
    * Carried because it is half of the only honest delivery estimate available.
    * A LayerZero message is not verified until the DVNs have seen the source
-   * chain reach the confirmation depth the application configured, and USDT0
-   * asks for 65 confirmations on the Stellar pathway. Sixty-five blocks is under
-   * fifteen seconds on Arbitrum and nearly twelve minutes on Ethereum, so a
-   * single flat estimate would be wrong by an order of magnitude on one of them.
+   * chain reach the confirmation depth the application configured, which is set
+   * per chain and read live. For USDT0 to Stellar it was 65 on Ethereum (about
+   * twelve minutes), 4000 on Arbitrum (about thirteen minutes at its 200 ms
+   * blocks) and 32 on Polygon when last read, so a single flat estimate would be
+   * wrong by an order of magnitude somewhere.
    *
    * Mainnet figures are LayerZero's own `chainDetails.averageBlockTime`. The
    * three testnets have none published, so these were measured directly, over

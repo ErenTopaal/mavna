@@ -67,6 +67,16 @@ export interface AllowanceCheck {
   readonly spender: string;
   /** Skip the transaction when the existing allowance is at least this. */
   readonly atLeastBaseUnits: string;
+  /**
+   * Also skip it when the existing allowance is exactly this.
+   *
+   * For clearing an allowance before setting a new one, which Tether's USDT
+   * on Ethereum demands: its `approve` reverts when both the current and the
+   * new value are non-zero. Clearing is pointless when the allowance is
+   * already zero, so that reset says "0" here. A caller that ignores the field
+   * only sends a harmless approve of zero over zero.
+   */
+  readonly skipAlsoWhenExactly?: string;
 }
 
 export type UnnecessaryWhen = AllowanceCheck;

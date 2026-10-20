@@ -1,4 +1,5 @@
 import type {
+  AllowanceCheck,
   Amount,
   Asset,
   BridgeAdapter,
@@ -6,6 +7,7 @@ import type {
   ComposeArrival,
   ComposeQuoteRequest,
   NetworkId,
+  OnChainRef,
   QuoteRequest,
   Route,
   RouteRejection,
@@ -28,6 +30,7 @@ import {
   XlmPriceSource,
 } from "@mavna/stellar";
 import { Networks, Asset as StellarAsset } from "@stellar/stellar-sdk";
+import { encodePacked, isAddress, isHex, keccak256, pad } from "viem";
 import { decodeOftComposePayload } from "./compose.js";
 import {
   type ArrivalSetup,
@@ -48,9 +51,16 @@ import {
   sourceFor,
   stellarExplorerTxUrl,
 } from "./config.js";
-import { Discovery, type OftLocation, type ResolvedRoute } from "./discovery.js";
+import {
+  Discovery,
+  type OftLocation,
+  type ResolvedRoute,
+  readStellarOft,
+  readStellarToken,
+} from "./discovery.js";
 import { describeDvnStack } from "./dvn.js";
 import {
+  badSlippage,
   buildApproval,
   buildSendParam,
   bytes32ToStellarContract,
@@ -63,7 +73,13 @@ import {
   sharedToStellar,
   stellarRecipientToBytes32,
 } from "./oft.js";
-import { classifyScanStatus, remedyForStatus, ScanService, scanMessageUrl } from "./scan.js";
+import {
+  classifyScanStatus,
+  remedyForStatus,
+  type ScanMessage,
+  ScanService,
+  scanMessageUrl,
+} from "./scan.js";
 
 /**
  * LayerZero as a rail the routing engine can race.
@@ -83,6 +99,9 @@ import { classifyScanStatus, remedyForStatus, ScanService, scanMessageUrl } from
 
 /** Ten thousand basis points to the whole. */
 const BPS = 10_000n;
+
+/** The native fee is attached with a tenth on top, refunded when unused. */
+const FEE_HEADROOM_DIVISOR = 10n;
 
 export interface LayerZeroAdapterOptions {
   readonly network: NetworkId;
@@ -135,8 +154,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * weigh rather than ours to flatten. Axelar's validators are the network's and
    * are the same for everybody. A DVN set belongs to whoever deployed the token,
    * so two routes on this same rail can be verified by entirely different
-   * parties, and `describeDvnStack` says which ones on every transaction this
-   * adapter builds.
+   * parties, and `describeDvnStack` names them on every send this adapter
+   * builds.
    */
   readonly trustModel: TrustModel = "dvn-stack";
 
@@ -250,6 +269,11 @@ export class LayerZeroAdapter implements BridgeAdapter {
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
     const stellarChainId = STELLAR_SIDE[this.network].chainId;
+    const slippage = badSlippage(request.maxSlippageBps);
+    if (slippage !== undefined) {
+      // the caller's input, so asking again will not help
+      return { ...this.decline("errored", slippage), retryable: false };
+    }
 
     if (request.to.chainId !== stellarChainId) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
@@ -377,12 +401,12 @@ export class LayerZeroAdapter implements BridgeAdapter {
       extraOptions,
     });
 
-    const [fee, deliveredLocal] = await Promise.all([
+    const [fee, oftQuote] = await Promise.all([
       this.discovery.quoteNativeFee(route, sendParam),
       this.discovery.quoteDelivered(route, sendParam),
     ]);
 
-    if (fee === undefined || deliveredLocal === undefined) {
+    if (fee === undefined || oftQuote === undefined) {
       // The contract refused to price it. On mainnet the documented cause is a
       // verifier set that resolves to a DVN which is not deployed, which cannot
       // be fixed from here and is not the user's doing.
@@ -390,6 +414,23 @@ export class LayerZeroAdapter implements BridgeAdapter {
         "temporarily-unavailable",
         `${source.name}'s ${route.tokenSymbol} contract would not price a transfer to Stellar ` +
           "right now. Nothing about the amount or the address is wrong.",
+      );
+    }
+
+    const deliveredLocal = oftQuote.received;
+    if (sends > oftQuote.maxAmountLD) {
+      return this.decline(
+        "amount-too-large",
+        `${source.name}'s ${route.tokenSymbol} contract carries at most ` +
+          `${readableAmount(oftQuote.maxAmountLD, route.tokenDecimals)} ${route.tokenSymbol} in one ` +
+          "transfer. Send less, or split it.",
+      );
+    }
+    if (sends < oftQuote.minAmountLD) {
+      return this.decline(
+        "amount-too-small",
+        `${source.name}'s ${route.tokenSymbol} contract carries at least ` +
+          `${readableAmount(oftQuote.minAmountLD, route.tokenDecimals)} ${route.tokenSymbol} in one transfer.`,
       );
     }
 
@@ -418,6 +459,33 @@ export class LayerZeroAdapter implements BridgeAdapter {
       return this.decline(
         "amount-too-small",
         "Nothing would arrive: the amount is smaller than this token's smallest transferable unit.",
+      );
+    }
+
+    let inbound: { readonly paused: boolean; readonly capacity: bigint };
+    try {
+      inbound = await this.discovery.stellarInbound(route);
+    } catch (cause) {
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "The Stellar side of this route could not be read right now.",
+      );
+    }
+    if (inbound.paused) {
+      return this.decline(
+        "temporarily-unavailable",
+        `${route.tokenSymbol} on Stellar is paused by its operator, so nothing sent now would be ` +
+          "delivered until it resumes. Nothing has been sent.",
+      );
+    }
+    if (delivered > inbound.capacity) {
+      return this.decline(
+        "amount-too-large",
+        `Stellar's ${route.tokenSymbol} contract will take in at most ` +
+          `${readableAmount(inbound.capacity, STELLAR_DECIMALS)} from ${source.name} right now. ` +
+          "Send less, or wait for its limit to refill.",
       );
     }
     // Converted first. The floor is an amount of XLM and this is an amount of
@@ -571,6 +639,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
       );
     }
 
+    // Still a block or more old by the time it is signed, and on Ethereum the
+    // approval confirms in between. The endpoint reverts a send whose fee went
+    // up and refunds whatever is attached beyond the fee, so a tenth on top
+    // costs nothing unless it is needed. The OApp requires the fee argument and
+    // the value to be equal, so both carry it.
+    const attached =
+      fee.nativeFee + (fee.nativeFee + FEE_HEADROOM_DIVISOR - 1n) / FEE_HEADROOM_DIVISOR;
+    const native = nativeAssetOf(route.fromChain.id, resolved.source);
+    const feeNote =
+      ` Attaches up to ${readableAmount(attached, native.decimals)} ${native.symbol} for ` +
+      "LayerZero's delivery fee; whatever is not needed is refunded to this wallet.";
+
     const send: UnsignedTransaction = {
       chainId: route.fromChain.id,
       // The caller's wallet encodes this. The SDK never signs and never submits,
@@ -585,21 +665,23 @@ export class LayerZeroAdapter implements BridgeAdapter {
             amountLD: sendParam.amountLD.toString(),
             minAmountLD: sendParam.minAmountLD.toString(),
           },
-          { nativeFee: fee.nativeFee.toString(), lzTokenFee: fee.lzTokenFee.toString() },
+          { nativeFee: attached.toString(), lzTokenFee: fee.lzTokenFee.toString() },
           // Refunded to the sender. Anything left of the fee comes back to the
           // wallet that paid it, which is the only address we are entitled to name.
           SENDER_ADDRESS,
         ],
         // `send` is payable and the fee rides on the call itself. A caller that
         // ignored this would have the transaction revert having spent gas.
-        value: fee.nativeFee.toString(),
+        value: attached.toString(),
       }),
       format: "evm-tx",
       describes:
         route.compose === undefined
           ? `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} to ` +
-            `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln)}`
-          : describeComposeSend(route.compose, route.destination, sends, resolved),
+            `${route.destination} on Stellar, via LayerZero. ` +
+            describeDvnStack(resolved.uln, resolved.dvnNames) +
+            feeNote
+          : describeComposeSend(route.compose, route.destination, sends, resolved) + feeNote,
       ephemeralSigners: [],
       unnecessaryWhen: undefined,
     };
@@ -620,28 +702,44 @@ export class LayerZeroAdapter implements BridgeAdapter {
       symbol: resolved.tokenSymbol,
     });
 
-    // Two transactions, in this order. The adapter pulls the funds with
-    // transferFrom, so the allowance has to exist before the send goes out.
+    const approveTx = (amount: bigint, describes: string, skip: AllowanceCheck) => ({
+      chainId: route.fromChain.id,
+      payload: JSON.stringify({
+        to: approval.contract,
+        abi: ERC20_ABI,
+        functionName: approval.functionName,
+        args: [approval.args[0], amount.toString()],
+      }),
+      format: "evm-tx" as const,
+      describes,
+      ephemeralSigners: [],
+      unnecessaryWhen: skip,
+    });
+    // A wallet that has approved this much already should not be asked again.
+    const covered: AllowanceCheck = {
+      kind: "erc20-allowance",
+      token: approval.contract,
+      spender: approval.args[0],
+      atLeastBaseUnits: sends.toString(),
+    };
+
+    // In this order. The adapter pulls the funds with transferFrom, so the
+    // allowance has to exist before the send goes out. Ahead of it, a reset to
+    // zero: Tether's USDT, which the Ethereum adapter locks, reverts an approve
+    // when both the old and the new allowance are non-zero, so someone who
+    // approved a smaller amount earlier and never sent could not approve again.
+    // The token's behaviour cannot be asked without the sender's address, so
+    // the reset is always built and skipped unless an allowance sits between
+    // zero and the amount, which is the only case it changes anything.
     return [
-      {
-        chainId: route.fromChain.id,
-        payload: JSON.stringify({
-          to: approval.contract,
-          abi: ERC20_ABI,
-          functionName: approval.functionName,
-          args: [approval.args[0], approval.args[1].toString()],
-        }),
-        format: "evm-tx",
-        describes: approval.describes,
-        ephemeralSigners: [],
-        // A wallet that has approved this much already should not be asked again.
-        unnecessaryWhen: {
-          kind: "erc20-allowance",
-          token: approval.contract,
-          spender: approval.args[0],
-          atLeastBaseUnits: sends.toString(),
-        },
-      },
+      approveTx(
+        0n,
+        `Clear the ${resolved.tokenSymbol} allowance you gave the LayerZero transfer contract ` +
+          `earlier, so it can be set to this transfer's amount. ${resolved.tokenSymbol} does not ` +
+          "allow an allowance to be changed without clearing it first. This moves no funds.",
+        { ...covered, skipAlsoWhenExactly: "0" },
+      ),
+      approveTx(sends, approval.describes, covered),
       send,
     ];
   }
@@ -659,32 +757,17 @@ export class LayerZeroAdapter implements BridgeAdapter {
     if (handle.sourceTxHash === undefined) return { phase: "idle" };
 
     const messages = await this.scan.byTransaction(handle.sourceTxHash);
-    // One transaction can carry several messages. Ours is the one bound for
-    // Stellar; anything else in the same transaction is not this transfer.
-    const stellarEid = STELLAR_SIDE[this.network].eid;
-    const message = messages.find((m) => m.pathway?.dstEid === stellarEid) ?? messages[0];
+    const pendingRef = this.sourceRef(handle.sourceTxHash, handle.sourceChainId);
+    // Nothing indexed yet is the normal first minute, not evidence of anything.
+    if (messages.length === 0) return { phase: "pending", ref: pendingRef, expectedByUnix: 0 };
 
-    // Which chain it left from, taken from the message when the caller did not
-    // say. Someone who closed the tab may have nothing but a hash, and this
-    // product's stated advantage over the prior art is recovering from whatever
-    // they still have rather than telling them it is lost.
-    const chainId =
-      handle.sourceChainId ??
-      chainIdForLayerZeroKey(this.network, message?.pathway?.sender?.chain ?? "");
-
-    const explorerUrl =
-      chainId === undefined
-        ? scanMessageUrl(this.network, handle.sourceTxHash)
-        : explorerTxUrl(this.network, chainId, handle.sourceTxHash);
-    const ref = {
-      chainId: chainId ?? "unknown",
-      txHash: handle.sourceTxHash,
-      explorerUrl,
-    };
-
-    if (message === undefined) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
-    }
+    // Indexed, but none of it is a transfer this rail can vouch for: a message
+    // to another chain, or another contract's message to Stellar. Answering
+    // for it would report someone else's transfer as this user's delivery.
+    const ours = await this.oursAmong(messages, handle.sourceChainId);
+    if (ours === undefined) return { phase: "idle" };
+    const { message, chainId } = ours;
+    const ref = this.sourceRef(handle.sourceTxHash, chainId);
 
     const name = message.status?.name;
     const outcome = classifyScanStatus(name);
@@ -706,7 +789,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
     }
 
     const deliveredTx = message.destination?.tx?.txHash;
-    if (this.composing !== undefined && chainId !== undefined) {
+    if (this.composing !== undefined) {
       const composed = await composePhase(this.composing, message, chainId, {
         chainId: STELLAR_SIDE[this.network].chainId,
         txHash: deliveredTx ?? handle.sourceTxHash,
@@ -727,7 +810,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
         });
       }
     }
-    const received = await this.receivedFrom(message.source?.tx, chainId);
+    const received = await this.receivedFrom(message.source?.tx, ours);
     if (received === undefined) {
       // Delivered, but the payload was not indexed with it, so the amount cannot
       // be stated. Claiming a number here would be inventing one.
@@ -759,6 +842,78 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   /**
+   * The source chain's ref, with a link to wherever the transaction can be seen.
+   */
+  private sourceRef(txHash: string, chainId: string | undefined): OnChainRef {
+    return {
+      chainId: chainId ?? "unknown",
+      txHash,
+      explorerUrl:
+        chainId === undefined
+          ? scanMessageUrl(this.network, txHash)
+          : explorerTxUrl(this.network, chainId, txHash),
+    };
+  }
+
+  /**
+   * The message in a transaction that is this rail's, checked against the
+   * chain rather than taken on the indexer's word.
+   *
+   * Bound for Stellar, sent by an OFT this rail would have sent through, from
+   * the endpoint that OFT is registered on, to the Stellar contract it peers
+   * to, and carrying the guid the endpoint derives from exactly that pathway.
+   * Anything short of all of it is not a transfer this rail can speak for.
+   */
+  private async oursAmong(
+    messages: readonly ScanMessage[],
+    sourceChainId: string | undefined,
+  ): Promise<OurMessage | undefined> {
+    const stellarEid = STELLAR_SIDE[this.network].eid;
+    for (const message of messages) {
+      const pathway = message.pathway;
+      if (pathway?.dstEid !== stellarEid) continue;
+      const chainId =
+        sourceChainId ?? chainIdForLayerZeroKey(this.network, pathway.sender?.chain ?? "");
+      const sender = pathway.sender?.address?.toLowerCase();
+      const receiver = pathway.receiver?.address?.toLowerCase();
+      const { nonce, srcEid } = pathway;
+      if (
+        chainId === undefined ||
+        sender === undefined ||
+        !isAddress(sender) ||
+        receiver === undefined ||
+        !isHex(receiver) ||
+        receiver.length !== 66 ||
+        nonce === undefined ||
+        srcEid === undefined ||
+        message.guid === undefined
+      ) {
+        continue;
+      }
+      const candidate = (await this.discovery.candidatesFor(chainId)).find(
+        (c) => c.address.toLowerCase() === sender,
+      );
+      if (candidate === undefined) continue;
+      const onChain = await this.discovery.pathwayOf(chainId, sender);
+      if (onChain.sourceEid !== srcEid || onChain.peer !== receiver) continue;
+      const guid = keccak256(
+        encodePacked(
+          ["uint64", "uint32", "bytes32", "uint32", "bytes32"],
+          [BigInt(nonce), srcEid, pad(sender), stellarEid, receiver],
+        ),
+      );
+      if (guid !== message.guid.toLowerCase()) continue;
+      return {
+        message,
+        chainId,
+        symbol: candidate.symbol,
+        stellarOft: bytes32ToStellarContract(receiver),
+      };
+    }
+    return undefined;
+  }
+
+  /**
    * What actually landed, decoded from the message rather than guessed.
    *
    * The wire payload carries the amount in shared decimals, which is the number
@@ -769,41 +924,38 @@ export class LayerZeroAdapter implements BridgeAdapter {
    */
   private async receivedFrom(
     tx: { readonly payload?: string } | undefined,
-    chainId: string | undefined,
+    ours: OurMessage,
   ): Promise<Amount | undefined> {
     const payload = tx?.payload;
-    if (payload === undefined || chainId === undefined) return undefined;
+    if (payload === undefined) return undefined;
 
     let amountSd: bigint;
     try {
       amountSd = decodeOftMessage(payload).amountSd;
     } catch {
+      // indexed without a readable payload yet, so there is no amount to state
       return undefined;
     }
 
-    // The payload counts in shared decimals and Stellar counts in seven, and
-    // only the OFT knows the difference between them. Resolving rather than
-    // reading a cache, because a caller polling status in a fresh process has
-    // no cache and would otherwise watch a delivered transfer sit at pending
-    // forever. Discovery caches it after the first call.
-    let route: ResolvedRoute;
-    try {
-      route = await this.discovery.routeFrom(chainId);
-    } catch {
-      return undefined;
-    }
+    // The scale and the asset come from the Stellar OFT the message was
+    // delivered to, read directly. Not from a full route resolution: those
+    // gates decide whether a new send is safe, and one failing today must not
+    // make yesterday's delivery unreadable. A read that fails is thrown, so
+    // the caller says it could not check rather than showing pending forever.
+    const facts = await readStellarOft(this.rpc, ours.stellarOft);
+    const delivers = await readStellarToken(this.rpc, facts.token, this.passphrase);
 
     return {
       asset: {
         chainId: STELLAR_SIDE[this.network].chainId,
         // The classic asset where there is one, so what Activity shows is a
         // Stellar asset a wallet recognises rather than its contract address.
-        id: route.delivers?.id ?? route.stellar.token,
-        symbol: route.delivers?.code ?? route.tokenSymbol,
+        id: delivers?.id ?? facts.token,
+        symbol: delivers?.code ?? ours.symbol,
         decimals: STELLAR_DECIMALS,
         curatedBy: "LayerZero",
       },
-      baseUnits: sharedToStellar(amountSd, route.stellar.decimalsDiff).toString(),
+      baseUnits: sharedToStellar(amountSd, facts.decimalsDiff).toString(),
     };
   }
 
@@ -812,9 +964,10 @@ export class LayerZeroAdapter implements BridgeAdapter {
    *
    * A message is not verified until the source chain reaches the confirmation
    * depth the application configured, so the honest estimate is that depth in
-   * blocks plus the executor's turnaround. USDT0 asks for 65 confirmations,
-   * which is fifteen seconds on Arbitrum and twelve minutes on Ethereum. One
-   * number for both would be wrong for both.
+   * blocks plus the executor's turnaround. The depth is per chain and comes
+   * from the live config (USDT0: 65 on Ethereum, 4000 on Arbitrum) and the block
+   * time from the chain's table entry, so one number for every chain would be
+   * wrong for most.
    */
   private estimateSeconds(route: ResolvedRoute): number {
     const confirmations = Number(route.uln.confirmations);
@@ -879,6 +1032,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 }
 
+/** A Scan message this rail has checked is its own, and what that check learned. */
+interface OurMessage {
+  readonly message: ScanMessage;
+  readonly chainId: string;
+  readonly symbol: string;
+  /** The Stellar OFT it was delivered to, from the pathway the chain confirmed. */
+  readonly stellarOft: string;
+}
+
 /** The plan layer speaks in readiness, the Stellar layer in reserve slots. */
 function readinessOf(lane: DestinationLane): "ready" | "needs-trustline" | "needs-account" {
   switch (lane.kind) {
@@ -934,6 +1096,6 @@ function describeComposeSend(
     `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} via ` +
     `LayerZero to the Mavna Arrival Contract on Stellar, which converts it for ${destination} ` +
     `into at least ${atLeast} ${compose.wanted.symbol}, or sends ${compose.arriving.symbol} on ` +
-    `as it came if it cannot. ${describeDvnStack(resolved.uln)}`
+    `as it came if it cannot. ${describeDvnStack(resolved.uln, resolved.dvnNames)}`
   );
 }

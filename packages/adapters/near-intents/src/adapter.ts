@@ -52,11 +52,14 @@ import { phaseFor } from "./status.js";
 /**
  * NEAR Intents as a rail the routing engine can race.
  *
- * A different shape from every other rail here. Nothing is burned, locked or
- * messaged: the user pays an ordinary token transfer into a deposit address, and
- * a market of solvers competes to deliver the asked-for asset on Stellar out of
- * their own inventory. Who is trusted is that market and the NEAR Intents
- * contract that settles it, which is why the trust model is the solver network.
+ * A different shape from every other rail here. The user pays an ordinary token
+ * transfer into a deposit address, and a market of solvers competes to fill the
+ * trade inside the NEAR Intents contract, which settles it. What they settle in
+ * is HOT's wrapped Stellar token, so the payout on Stellar is a HOT Bridge
+ * withdrawal: released from HOT's locker contract on a signature from HOT's MPC
+ * network. Who is trusted is that market, the NEAR Intents contract and the HOT
+ * Bridge. The trust model is the solver network because that is the part a
+ * user is choosing; the bridge is named wherever the trust is spelled out.
  *
  * Quoting is a dry request, which reserves nothing and hands out no address. The
  * deposit address only exists once a transfer is being built, because it is tied
@@ -89,7 +92,7 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export class NearIntentsAdapter implements BridgeAdapter {
   readonly id = "near-intents";
-  /** Competing solvers front the delivery; the NEAR Intents contract settles it. */
+  /** Competing solvers fill it, NEAR Intents settles it, the HOT Bridge pays out on Stellar. */
   readonly trustModel: TrustModel = "solver-network";
 
   private readonly network: NetworkId;
@@ -133,6 +136,11 @@ export class NearIntentsAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const slippage = badSlippage(request.maxSlippageBps);
+    if (slippage !== undefined) {
+      // the caller's input, so asking again will not help
+      return { ...this.decline("errored", slippage), retryable: false };
+    }
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
     }
@@ -380,8 +388,8 @@ export class NearIntentsAdapter implements BridgeAdapter {
         format: "evm-tx",
         describes:
           `Send ${readable(amount, token.decimals)} ${token.symbol} on ${chain.name} to the ` +
-          `NEAR Intents deposit address ${depositAddress}. A solver delivers at least ` +
-          `${readable(floor, route.deliveredAtLeast.asset.decimals)} ` +
+          `NEAR Intents deposit address ${depositAddress}. A solver fills it and the HOT Bridge ` +
+          `pays at least ${readable(floor, route.deliveredAtLeast.asset.decimals)} ` +
           `${route.deliveredAtLeast.asset.symbol} to ${route.destination} on Stellar, or ` +
           `the deposit is returned to ${sender} once the quote expires` +
           (reply.quote.deadline === undefined ? "." : ` (${reply.quote.deadline}).`),
@@ -796,6 +804,19 @@ function readable(units: bigint, decimals: number): string {
   return fraction.length === 0 ? (units / scale).toString() : `${units / scale}.${fraction}`;
 }
 
+/**
+ * A slippage the floor can be built from: a whole number of basis points, at
+ * least zero and under the whole. A fraction cannot become a BigInt, the whole
+ * makes the floor zero (accepting anything back), and more makes it negative.
+ * The widget always passes 50; this is for SDK callers.
+ */
+function badSlippage(bps: number): string | undefined {
+  if (Number.isInteger(bps) && bps >= 0 && bps < 10_000) return undefined;
+  return (
+    `A slippage of ${bps} cannot be used. It must be a whole number of basis points from ` +
+    "0 up to but not including 10000."
+  );
+}
 function readinessOf(lane: DestinationLane): "ready" | "needs-trustline" | "needs-account" {
   switch (lane.kind) {
     case "needs-account":

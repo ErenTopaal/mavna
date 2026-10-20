@@ -271,6 +271,14 @@ describe("a compose route", () => {
     expect((result as RouteRejection).explanation).toMatch(/not a Stellar account/);
   });
 
+  it("declines a slippage that is not a whole number of basis points under the whole", async () => {
+    const { ctx } = context();
+    for (const bps of [0.5, -1, 10_000]) {
+      const result = await quoteComposeRoute(ctx, { ...request(), maxSlippageBps: bps });
+      expect(result).toMatchObject({ reason: "errored", retryable: false });
+    }
+  });
+
   it("is refused, readably, for an account that cannot hold the wanted asset", async () => {
     const { ctx } = context();
     const result = await quoteComposeRoute(ctx, request(NO_TRUSTLINE));
@@ -359,6 +367,42 @@ describe("a compose route", () => {
   it("offers nothing when the wanted asset is what arrives anyway", async () => {
     const { ctx } = context();
     expect(await quoteComposeRoute(ctx, { ...request(), to: xlm })).toBeUndefined();
+  });
+});
+
+describe("the Arrival Contract never pays itself", () => {
+  // funds the contract sends to itself sit in it with no one able to take them out
+  it("declines the contract's own id as the recipient", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, request(ARRIVAL));
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("declines the contract's own id as the integrator's fee account", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, {
+      ...request(),
+      integratorFee: { bps: 100, recipient: ARRIVAL, recipientName: "Example app" },
+    });
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+  });
+
+  it("refuses either again when a route naming it is built", async () => {
+    const { ctx } = context();
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route) || route.compose === undefined) {
+      throw new Error("expected a route");
+    }
+    await expect(
+      composeSendFor(ctx, { ...route, compose: route.compose, destination: ARRIVAL }, resolved),
+    ).rejects.toThrow(/Arrival Contract itself/);
+    await expect(
+      composeSendFor(
+        ctx,
+        { ...route, compose: { ...route.compose, fee: { bps: 100, recipient: ARRIVAL } } },
+        resolved,
+      ),
+    ).rejects.toThrow(/Arrival Contract itself/);
   });
 });
 

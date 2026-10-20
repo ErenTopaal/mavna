@@ -2,7 +2,7 @@ import type { Asset, Route, RouteRejection } from "@mavna/core";
 import { PUBLIC_MAINNET_RPC_URLS, RpcClient } from "@mavna/stellar";
 import { describe, expect, it } from "vitest";
 import { NearIntentsAdapter } from "./adapter.js";
-import { OneClickApi } from "./api.js";
+import { OneClickApi, OneClickRefused } from "./api.js";
 import { stellarDeliveries } from "./assets.js";
 
 /**
@@ -81,6 +81,43 @@ describe("1Click on mainnet", () => {
     expect(BigInt(result.receivesAtLeast.baseUnits)).toBeLessThanOrEqual(
       BigInt(result.receives.baseUnits),
     );
+  });
+
+  /**
+   * The wording the adapter's decline depends on, asked for raw. The rail is
+   * raced on mainnet and, while 1Click quotes nothing into Stellar, this is the
+   * answer every user gets: if 1Click rewords it, `refusal()` stops recognising
+   * it, and this says so by name instead of as a vaguer decline.
+   */
+  it("still refuses quotes into Stellar in the words the adapter matches, if it refuses", async () => {
+    const api = new OneClickApi();
+    const tokens = await api.tokens();
+    const origin = tokens.find(
+      (t) => t.blockchain === "arb" && t.contractAddress?.toLowerCase() === arbUsdc.id,
+    );
+    const destination = stellarDeliveries(tokens).find((d) => d.id === `USDC:${CIRCLE}`);
+    if (origin === undefined || destination === undefined) {
+      throw new Error("1Click no longer lists Arbitrum USDC or Stellar USDC");
+    }
+    try {
+      await api.quote({
+        dry: true,
+        swapType: "EXACT_INPUT",
+        slippageTolerance: 100,
+        originAsset: origin.assetId,
+        depositType: "ORIGIN_CHAIN",
+        destinationAsset: destination.token.assetId,
+        amount: "2000000000",
+        refundTo: "0x2527D02599Ba641c19FEa793cD0F167589a0f10D",
+        refundType: "ORIGIN_CHAIN",
+        recipient: HOLDER,
+        recipientType: "DESTINATION_CHAIN",
+        deadline: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+    } catch (cause) {
+      if (!(cause instanceof OneClickRefused)) throw cause;
+      expect(cause.upstream).toBe("Quoting for this pair is not available");
+    }
   });
 
   it("refuses a contract address before asking, as 1Click itself does", async () => {
