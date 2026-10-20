@@ -18,7 +18,7 @@ overrides:
 # Supply chain. A compromised release of our widget would harm every wallet that
 # embedded it, which is why these are tighter than the defaults rather than left alone.
 
-# pnpm 11's default, kept deliberately rather than raised. pnpm's own rationale is that
+# pnpm's default since 11, kept deliberately rather than raised. pnpm's own rationale is that
 # malicious releases are almost always pulled within an hour, so a day is a 24x margin.
 # A week was tried first and rejected: it blocks any tool released in the last 7 days,
 # which means permanently running week-old tooling and churning pins to chase the window.
@@ -32,7 +32,7 @@ minimumReleaseAge: 1440
 # stays short. The controls that remain are the ones doing the real work: exact
 # pins, the lockfile, a day's soak on new releases, and the build allowlist.
 
-# Already the default in pnpm 11; set explicitly so an audit can see it was a decision.
+# Already pnpm's default; set explicitly so an audit can see it was a decision.
 blockExoticSubdeps: true
 
 # Install scripts run only where we have said so, by name. Anything not listed fails

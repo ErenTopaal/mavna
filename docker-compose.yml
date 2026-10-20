@@ -13,12 +13,12 @@ services:
   # trailing "...", because the workspace packages resolve to their dist/ and a
   # fresh checkout has none.
   build:
-    image: node:24.19.0-alpine
+    image: node:24.22.0-alpine
     working_dir: /repo
     volumes:
       - .:/repo
     command: >
-      sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
+      sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@12.14.0;
              pnpm install --frozen-lockfile &&
              pnpm turbo run build --filter=@mavna/app... --filter=@mavna/sponsor-service..."
     # The app's settings are inlined when it is built, so they belong here. The
@@ -35,7 +35,7 @@ services:
       VITE_MAVNA_MAINNET_SPONSOR_URL: ${MAVNA_MAINNET_SPONSOR_URL:-}
 
   app:
-    image: node:24.19.0-alpine
+    image: node:24.22.0-alpine
     working_dir: /repo/apps/app
     volumes:
       - .:/repo

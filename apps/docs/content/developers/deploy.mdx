@@ -101,7 +101,7 @@ docker run -d --restart unless-stopped --name mavna-sponsor \
   --env-file sponsor.env \
   -v mavna-sponsor-state:/var/lib/mavna \
   -p 127.0.0.1:8787:8787 \
-  -v "$PWD":/repo -w /repo node:24.19.0-alpine \
+  -v "$PWD":/repo -w /repo node:24.22.0-alpine \
   node services/sponsor/dist/main.mjs
 ```
 
