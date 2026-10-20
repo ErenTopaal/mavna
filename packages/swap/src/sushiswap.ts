@@ -162,6 +162,20 @@ export class SushiSwapProvider implements SwapProvider {
       });
     }
     const route = validated("SushiSwap", sushiRaw, request.quote.raw);
+    // the quote travelled through the caller, so what executes is checked again
+    if (
+      route.path[0] !== toContractId(request.quote.assetIn, this.network) ||
+      route.path.at(-1) !== toContractId(request.quote.assetOut, this.network)
+    ) {
+      throw new MavnaError("SushiSwap was handed a swap path for other tokens.", {
+        retryable: false,
+      });
+    }
+    if (route.fees.length !== route.path.length - 1 || route.pools.length !== route.fees.length) {
+      throw new MavnaError("SushiSwap was handed a swap path that does not hold together.", {
+        retryable: false,
+      });
+    }
     const hints = await Promise.all(route.pools.map((pool) => this.hintsFor(pool)));
     const owner = request.account.accountId();
     return buildContractCall(

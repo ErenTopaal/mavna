@@ -234,3 +234,38 @@ describe("sushiswap builds", () => {
     expect((error as MavnaError).retryable).toBe(false);
   });
 });
+
+describe("a sushiswap quote that came back altered", () => {
+  async function quoted() {
+    vi.stubGlobal("fetch", routedFetch({ [RPC]: sushiChain([]) }).fetch);
+    const provider = new SushiSwapProvider({ network: "mainnet", rpcUrl: RPC });
+    return { provider, quote: await provider.quote(request) };
+  }
+  const account = () => new Account(Keypair.random().publicKey(), "1");
+
+  it("is not built when its path ends in another token", async () => {
+    const { provider, quote } = await quoted();
+    const raw = { path: [USDT0, XLM], fees: [500], pools: [USDT0_USDC_500] };
+    const error = await provider
+      .build({ quote: { ...quote, raw }, account: account() })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).message).toMatch(/other tokens/);
+  });
+
+  it("is not built when its path starts somewhere else", async () => {
+    const { provider, quote } = await quoted();
+    const raw = { path: [XLM, USDC], fees: [500], pools: [USDT0_USDC_500] };
+    await expect(provider.build({ quote: { ...quote, raw }, account: account() })).rejects.toThrow(
+      /other tokens/,
+    );
+  });
+
+  it("is not built when its fees and pools do not match its hops", async () => {
+    const { provider, quote } = await quoted();
+    const raw = { path: [USDT0, USDC], fees: [500, 3000], pools: [USDT0_USDC_500] };
+    await expect(provider.build({ quote: { ...quote, raw }, account: account() })).rejects.toThrow(
+      /does not hold together/,
+    );
+  });
+});
