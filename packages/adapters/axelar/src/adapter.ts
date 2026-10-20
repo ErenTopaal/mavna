@@ -657,11 +657,43 @@ export class AxelarAdapter implements BridgeAdapter {
     }
 
     const second = (await this.gmp.byMessageId(first.callbackId))[0];
-    if (second === undefined || !legDelivered(second)) {
-      return { phase: "pending", ref, expectedByUnix: 0 };
+    if (second === undefined) return { phase: "pending", ref, expectedByUnix: 0 };
+
+    // The hub-to-Stellar leg fails in the same two ways the first can, and
+    // waiting on it would leave someone watching "still moving" until the
+    // widget gives up, never offered the top-up that would release it.
+    if (second.underpaid) {
+      return {
+        phase: "stalled",
+        ref,
+        overdueSeconds: 0,
+        remedy: {
+          kind: "add-gas",
+          // gas for both legs is paid on the sending chain, so that is where
+          // a top-up goes too
+          chainId: first.sourceChain ?? handle.sourceChainId ?? "unknown",
+          because:
+            "The transfer reached Axelar but was not paid enough to be delivered to " +
+            "Stellar. Your funds are still in it, and paying the rest releases them.",
+        },
+      };
     }
 
-    return { phase: "done", ref, received: this.amountFrom(first) };
+    if (second.errored) {
+      return {
+        phase: "failed",
+        cause: "Axelar could not deliver this transfer to Stellar.",
+        remedy: {
+          kind: "retry",
+          because: "The transfer did not complete. Nothing further happens on its own.",
+        },
+        ref,
+      };
+    }
+
+    if (!legDelivered(second)) return { phase: "pending", ref, expectedByUnix: 0 };
+
+    return { phase: "done", ref, received: await this.receivedFrom(second) };
   }
 
   /**
@@ -699,7 +731,14 @@ export class AxelarAdapter implements BridgeAdapter {
         { retryable: true },
       );
     }
-    if (!first.underpaid) {
+    // Either leg can be the underpaid one. The top-up is paid on the sending
+    // chain against the first leg's event in both cases, which is what Axelar's
+    // own recovery does: "add gas at source chain".
+    const underpaid =
+      first.underpaid ||
+      (first.callbackId !== undefined &&
+        (await this.gmp.byMessageId(first.callbackId))[0]?.underpaid === true);
+    if (!underpaid) {
       throw new MavnaError(
         "That transfer was not underpaid, so adding gas would not move it along. " +
           "Refusing to charge for a signature that changes nothing.",
@@ -824,17 +863,70 @@ export class AxelarAdapter implements BridgeAdapter {
     );
   }
 
-  private amountFrom(record: GmpRecord): Amount {
-    const decimals = record.decimals ?? 7;
+  /**
+   * What landed, from the leg that landed it, named as the Stellar asset it is.
+   *
+   * The first leg's record is the sending side: its amount can be in the source
+   * chain's precision and its token is Axelar's id rather than anything a
+   * Stellar wallet shows. So the asset is resolved on the ledger the same way a
+   * quote resolves it, and a record missing what is needed is refused rather
+   * than filled in.
+   */
+  private async receivedFrom(second: GmpRecord): Promise<Amount> {
+    const { tokenId, amount } = second;
+    if (tokenId === undefined || amount === undefined || !/^\d+$/.test(amount)) {
+      throw new MavnaError(
+        "Axelar reports this transfer delivered but its record does not say how much " +
+          "arrived, so no amount is shown rather than a guessed one.",
+        { retryable: true },
+      );
+    }
+
+    const stellarIts = await this.stellarReader();
+    const token = await stellarIts.registeredTokenAddress(tokenId);
+    if (token === undefined) {
+      throw new MavnaError(
+        "Axelar reports this transfer delivered, but Stellar's token service has no " +
+          "token under its id, so what arrived cannot be named.",
+        { retryable: false },
+      );
+    }
+    const [delivered, decimals] = await Promise.all([
+      stellarIts.deliveredAs(token),
+      stellarIts.tokenDecimals(token),
+    ]);
+
+    // Axelar's record states the precision it counted in. If that is not the
+    // token's own on Stellar, the amount is in some other unit.
+    if (second.decimals !== undefined && second.decimals !== decimals) {
+      throw new MavnaError(
+        `Axelar states the delivered amount in ${second.decimals} decimals, and the token ` +
+          `on Stellar has ${decimals}. Refusing to show an amount in the wrong unit.`,
+        { retryable: false },
+      );
+    }
+
+    const symbol =
+      delivered.kind === "classic"
+        ? delivered.asset.isNative()
+          ? "XLM"
+          : delivered.asset.getCode()
+        : second.symbol;
+    if (symbol === undefined || symbol.length === 0) {
+      throw new MavnaError("Axelar's record of this delivery does not name the token.", {
+        retryable: true,
+      });
+    }
+
     return {
       asset: {
         chainId: stellarChainId(this.network),
-        id: record.tokenId ?? "unknown",
-        symbol: record.symbol ?? "",
+        id: delivered.id,
+        symbol,
         decimals,
-        curatedBy: "Axelar",
+        curatedBy: undefined,
       },
-      baseUnits: record.amount ?? "0",
+      baseUnits: amount,
     };
   }
 
