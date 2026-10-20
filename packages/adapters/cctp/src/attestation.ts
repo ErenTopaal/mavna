@@ -82,7 +82,7 @@ export class AttestationService {
     sourceDomain: number,
   ): Promise<readonly Attestation[]> {
     const url = `${this.baseUrl}/v2/messages/${sourceDomain}${query}`;
-    const response = await fetch(url);
+    const response = await reach(url);
 
     if (response.status === 404) {
       // Not an error. The service has not seen the burn yet, which is the normal
@@ -118,7 +118,7 @@ export class AttestationService {
     sourceDomain: number,
     destinationDomain: number,
   ): Promise<readonly { finalityThreshold: number; minimumFee: number }[]> {
-    const response = await fetch(
+    const response = await reach(
       `${this.baseUrl}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}`,
     );
     // An unroutable pair comes back as a 400 carrying Circle's own explanation,
@@ -136,7 +136,7 @@ export class AttestationService {
     }
     if (!response.ok) {
       throw new MavnaError(`Fee lookup failed with ${response.status}.`, {
-        retryable: response.status >= 500,
+        retryable: response.status >= 500 || response.status === 429,
       });
     }
     const body = await response.json();
@@ -147,6 +147,27 @@ export class AttestationService {
       );
     }
     return body as { finalityThreshold: number; minimumFee: number }[];
+  }
+}
+
+/** How long Circle gets to answer before a quote or a status check moves on. */
+const IRIS_TIMEOUT_MS = 15_000;
+
+/**
+ * A request to Circle that cannot hang. A host that accepts the connection and
+ * then stalls would otherwise hold a status check on one await indefinitely,
+ * and a stall or an unreachable host says nothing about the transfer, so both
+ * are a retry.
+ */
+async function reach(url: string): Promise<Response> {
+  try {
+    return await fetch(url, { signal: AbortSignal.timeout(IRIS_TIMEOUT_MS) });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new MavnaError(`Circle's attestation service could not be reached: ${detail}`, {
+      retryable: true,
+      cause,
+    });
   }
 }
 
