@@ -203,7 +203,9 @@ export function toRouteView(route: Route): RouteView {
     exact: route.receivesAtLeast.baseUnits === route.receives.baseUnits,
     minutes: Math.max(1, Math.round(route.estimatedSeconds / 60)),
     sigs: route.signaturesRequired,
-    sigsUpTo: (route.optionalSignatures ?? 0) > 0,
+    // an approval the allowance already covers is skipped, on any rail
+    sigsUpTo:
+      (route.optionalSignatures ?? 0) > 0 || route.steps.some((s) => s.kind === "approve-source"),
     newAccount: route.steps.some((s) => s.kind === "prepare-account"),
     reserveXlm:
       reserve === undefined
@@ -676,8 +678,16 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
       convertsInto(route, check) !== undefined
         ? 1
         : 0);
+    // a preparation the sponsor has to build again is signed once more, at most
+    const again = funding === "sponsor" && route.steps.some((s) => s.kind === "settle-account");
     routes.push(
-      extra === 0 ? route : { ...route, signaturesRequired: route.signaturesRequired + extra },
+      extra === 0 && !again
+        ? route
+        : {
+            ...route,
+            signaturesRequired: route.signaturesRequired + extra + (again ? 1 : 0),
+            ...(again ? { optionalSignatures: (route.optionalSignatures ?? 0) + 1 } : {}),
+          },
     );
   }
   return { routes, rejected, complete: set.complete };

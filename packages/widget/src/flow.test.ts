@@ -511,3 +511,10 @@ describe("Flow.props.onAwaitingUser", () => {
     expect(told).toEqual([true, false]);
   });
 });
+
+describe("how many wallet approvals a route says", () => {
+  it("says up to, when an approval may be skipped on any rail", () => {
+    expect(toRouteView(routeFor("cctp", { approve: true })).sigsUpTo).toBe(true);
+    expect(toRouteView(routeFor("axelar")).sigsUpTo).toBe(false);
+  });
+});

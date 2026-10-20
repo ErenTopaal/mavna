@@ -212,9 +212,14 @@ describe("applySponsorTerms", () => {
         xlmStroopsPerUsdc: 100_000_000n,
       },
     );
-    // the new account's repayment is one more approval
+    // the new account's repayment is one more approval, and a preparation the
+    // sponsor has to build again may ask for one more after that
     expect(set.routes).toEqual([
-      { ...fresh, signaturesRequired: fresh.signaturesRequired + 1 },
+      {
+        ...fresh,
+        signaturesRequired: fresh.signaturesRequired + 2,
+        optionalSignatures: (fresh.optionalSignatures ?? 0) + 1,
+      },
       ready,
     ]);
     expect(set.rejected).toEqual([]);
@@ -842,7 +847,7 @@ describe("how many approvals a route asks for", () => {
     const fresh = routeFor("layerzero", { newAccount: true });
     const set = { routes: [fresh], rejected: [], complete: true };
     expect(applySponsorTerms(set, terms("sponsor")).routes[0]?.signaturesRequired).toBe(
-      fresh.signaturesRequired + 1,
+      fresh.signaturesRequired + 2,
     );
     // paying its own reserve, the account signs a trustline and no repayment
     expect(applySponsorTerms(set, terms("self")).routes[0]?.signaturesRequired).toBe(
