@@ -131,6 +131,11 @@ export interface SponsorServerOptions {
    */
   readonly channelFloor?: number;
   /**
+   * Channels the server may fund in an hour. Twelve by default. Past it, no
+   * channel is funded until the hour has passed, and the refusal is logged.
+   */
+  readonly fundingsPerHour?: number;
+  /**
    * Settlements one client address may have waiting on a channel at once,
    * before anything backs them. Zero turns the limit off. Two by default.
    */
@@ -401,6 +406,7 @@ const documentShapes = {
   channels: z.object({
     secrets: z.array(z.unknown()),
     leases: z.array(z.unknown()),
+    quarantined: z.array(z.unknown()).optional(),
     pending: z.unknown().optional(),
   }),
 } as const;
@@ -451,6 +457,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const provisionalLimit = options.provisionalSettlements ?? DEFAULT_PROVISIONAL_SETTLEMENTS;
   const perClient = options.settlementsPerClient ?? DEFAULT_SETTLEMENTS_PER_CLIENT;
   const channelFloor = options.channelFloor ?? DEFAULT_CHANNEL_FLOOR;
+  const fundingsPerHour = options.fundingsPerHour ?? DEFAULT_FUNDINGS_PER_HOUR;
   if (!Number.isSafeInteger(channelFloor) || channelFloor < 0) {
     throw new Error(`The channel floor must be a whole number; got ${channelFloor}.`);
   }
@@ -483,8 +490,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * paid for, or is two days old. Written down with the rest of the state.
    */
   const watch = new Map<string, WatchEntry>();
-  /** Which client asked for each watched burn. Kept in memory only. */
-  const watchClients = new Map<string, string>();
   const watchLimits = options.watchLimits ?? DEFAULT_WATCH_LIMITS;
 
   /**
@@ -942,10 +947,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           reject("channels", value, `lease ${index}`);
         }
       });
+      const quarantined: string[] = [];
+      (channelDocument.quarantined ?? []).forEach((value, index) => {
+        if (secretShape.safeParse(value).success) quarantined.push(value as string);
+        else reject("channels", value, `quarantined ${index}`);
+      });
       if (channels !== undefined) {
         adopt(channels).restoreLeases(leases, now);
-      } else if (secrets.length > 0) {
-        channels = adopt(ChannelPool.fromSnapshot({ secrets, leases }, now, keptLease));
+        for (const secret of quarantined) channels.restoreQuarantined(Keypair.fromSecret(secret));
+      } else if (secrets.length > 0 || quarantined.length > 0) {
+        channels = adopt(
+          ChannelPool.fromSnapshot({ secrets, leases, quarantined }, now, keptLease),
+        );
       }
       const pending = channelDocument.pending;
       if (pending !== undefined && !secretShape.safeParse(pending).success) {
@@ -1135,8 +1148,25 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * of anything but taking a new slot. The key stays written down, so if the
    * failed attempt did land after all, the retry finds it funded.
    */
+  /** When each recent funding was started, for the hourly bound. */
+  const fundingStartedMs: number[] = [];
+
   function fundOne(): Promise<ChannelPool> {
     if (Date.now() < fundingRetryAtMs) return Promise.reject(new FundingBackoff());
+    if (funding === undefined) {
+      while ((fundingStartedMs[0] ?? Number.POSITIVE_INFINITY) <= Date.now() - 3_600_000) {
+        fundingStartedMs.shift();
+      }
+      if (fundingStartedMs.length >= fundingsPerHour) {
+        // a sponsor normally funds a few a day; this many means something is wrong
+        console.error(
+          `[sponsor] CHANNEL FUNDING PAUSED: ${fundingStartedMs.length} channels funded in the ` +
+            "last hour, the most allowed; none more until the hour has passed",
+        );
+        return Promise.reject(new FundingBackoff());
+      }
+      fundingStartedMs.push(Date.now());
+    }
     funding ??= fundChannel()
       .then(
         (pool) => {
@@ -1182,6 +1212,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return adopt(channels);
   }
 
+  /**
+   * A channel's account, or undefined only when two reads in a row, each from
+   * a node at or past what this process has seen, say it does not exist. One
+   * miss is taken for a lagging or faulty read, never as proof.
+   */
+  async function channelAccountOf(address: string): Promise<Account | undefined> {
+    for (let read = 0; read < 2; read += 1) {
+      try {
+        return await options.rpc.loadAccount(address);
+      } catch (cause) {
+        if (!(cause instanceof AccountNotFound)) throw cause;
+      }
+    }
+    return undefined;
+  }
+
   /** When each free channel was first seen idle, by address. */
   const idleSince = new Map<string, number>();
 
@@ -1218,16 +1264,24 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         await mergeChannel(lease.keypair);
         console.error(`[sponsor] merged idle channel ${address} back into the sponsor`);
       } catch (cause) {
-        if (!(cause instanceof AccountNotFound)) {
-          pool.release(address, address);
+        if (cause instanceof AccountNotFound) {
+          // never forgotten on a read: set aside and looked at again
           console.error(
-            `[sponsor] could not merge idle channel ${address}:`,
-            cause instanceof Error ? cause.message : cause,
+            `[sponsor] channel ${address} reads as having no account; setting it aside`,
           );
+          pool.quarantine(address, address);
+          idleSince.delete(address);
+          await persist();
           continue;
         }
-        console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
+        pool.release(address, address);
+        console.error(
+          `[sponsor] could not merge idle channel ${address}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+        continue;
       }
+      // merged: its XLM is the sponsor's again, and the account is closed
       pool.drop(address, address);
       idleSince.delete(address);
       await persist();
@@ -1263,14 +1317,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const running = toppingUp.get(address);
     if (running !== undefined) return running;
     const work = (async () => {
-      const entry = await readAccountEntry(options.rpc, address);
+      const entry =
+        (await readAccountEntry(options.rpc, address)) ??
+        (await readAccountEntry(options.rpc, address));
       if (entry === undefined) {
-        // gone (merged back before a crash, say): out of the pool while free,
-        // so no settlement is ever built on it
+        // missing twice over (merged back before a crash, or a node at fault):
+        // set aside while free, key kept, so no settlement is built on it
         const pool = channels;
         if (pool?.acquireThis(address, address, nowUnix() + 60, nowUnix()) !== undefined) {
-          console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
-          pool.drop(address, address);
+          console.error(
+            `[sponsor] channel ${address} reads as having no account; setting it aside`,
+          );
+          pool.quarantine(address, address);
           await persist();
         }
         return;
@@ -1385,6 +1443,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * failing is logged and does not stop the rest.
    */
   async function sweepHeld(): Promise<void> {
+    // set-aside channels whose account the node shows again go back in the pool
+    for (const address of reserveFunding === "sponsor"
+      ? (channels?.quarantinedAddresses() ?? [])
+      : []) {
+      try {
+        if ((await readAccountEntry(options.rpc, address)) !== undefined) {
+          channels?.restore(address);
+          console.error(`[sponsor] channel ${address} reads as existing again; back in the pool`);
+          await persist();
+        }
+      } catch (cause) {
+        console.error(
+          `[sponsor] could not look at set-aside channel ${address}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     // in self mode nothing is settled, and the sponsor spends nothing
     for (const address of reserveFunding === "sponsor" ? (channels?.addresses() ?? []) : []) {
       try {
@@ -2093,6 +2168,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         origin,
       );
     let pool: ChannelPool;
+    // funding the very first channel counts as this request's one funding
+    const hadPool = channels !== undefined;
     try {
       pool = await ensureChannels();
     } catch (cause) {
@@ -2157,12 +2234,15 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // signing and committing, all free, can never keep a slot.
     let channel: Channel | undefined;
     let channelAccount: Account | undefined;
-    // A channel whose account is gone (merged back, and the process stopped
-    // before the pool was rewritten) is dropped where it is found, and the
-    // next one taken, so this never answers for it with a failure.
+    // At most one channel funded and a couple set aside per request: a node
+    // that answers every account as missing must not turn one request into a
+    // stream of fundings, and no key is ever forgotten on its word.
+    let funded = !hadPool;
+    let setAside = 0;
     while (channelAccount === undefined) {
       channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
-      while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
+      if (channel === undefined) {
+        if (funded || options.channels !== undefined || pool.size >= poolLimit()) break;
         try {
           pool = await fundOne();
         } catch (cause) {
@@ -2170,16 +2250,24 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           await noSlot();
           return;
         }
-        channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+        funded = true;
+        continue;
       }
-      if (channel === undefined) break;
-      try {
-        channelAccount = await options.rpc.loadAccount(channel.address);
-      } catch (cause) {
-        if (!(cause instanceof AccountNotFound)) throw cause;
-        console.error(`[sponsor] channel ${channel.address} no longer exists; dropping it`);
-        pool.drop(account, channel.address);
-        await persist();
+      channelAccount = await channelAccountOf(channel.address);
+      if (channelAccount !== undefined) break;
+      // missing twice over: set aside with its key, looked at again by the sweep
+      console.error(
+        `[sponsor] channel ${channel.address} reads as having no account; setting it aside`,
+      );
+      pool.quarantine(account, channel.address);
+      await persist();
+      setAside += 1;
+      if (setAside >= MAX_SET_ASIDE_PER_REQUEST) {
+        console.error(
+          "[sponsor] several channels read as missing in one request; taking it as a node " +
+            "fault and stopping",
+        );
+        break;
       }
     }
     if (channel === undefined || channelAccount === undefined) {
@@ -3142,22 +3230,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   function watchBurn(txHash: string, domain: number, client: string): void {
     const key = watchKey(txHash, domain);
     if (watch.has(key)) return;
-    const mine = [...watchClients.values()].filter((asker) => asker === client).length;
+    const mine = [...watch.values()].filter((entry) => entry.client === client).length;
     if (mine >= watchLimits.perClient || watch.size >= watchLimits.total) return;
     const now = nowUnix();
     watch.set(key, {
       txHash,
       domain,
+      client,
       addedAtUnix: now,
       nextAtUnix: now + WATCH_FIRST_RETRY_SECONDS,
       tries: 0,
     });
-    watchClients.set(key, client);
   }
 
   function forgetBurn(key: string): void {
     watch.delete(key);
-    watchClients.delete(key);
   }
 
   /**
@@ -3166,19 +3253,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * the minimum and the settlement that follows all apply as they would there.
    */
   async function sweepWatched(): Promise<void> {
-    let tried = 0;
+    const startedAt = nowUnix();
     for (const [key, entry] of [...watch]) {
-      const now = nowUnix();
-      if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < now) {
+      if (entry.addedAtUnix + WATCH_MAX_AGE_SECONDS < startedAt) {
         forgetBurn(key);
         console.error(
           `[sponsor] stopped watching burn ${entry.txHash} on domain ${entry.domain}: ` +
             "not delivered within two days",
         );
-        continue;
       }
-      if (entry.nextAtUnix > now || tried >= WATCH_PER_SWEEP) continue;
-      tried += 1;
+    }
+    // Longest due first, so a burn retried a moment ago waits behind one that
+    // has not been tried yet: however many are ahead, each gets its turn.
+    const due = [...watch]
+      .filter(([, entry]) => entry.nextAtUnix <= startedAt)
+      .sort(([, a], [, b]) => a.nextAtUnix - b.nextAtUnix)
+      .slice(0, WATCH_PER_SWEEP);
+    for (const [key, entry] of due) {
       let result: BurnResult;
       try {
         result = await deliverBurn(entry.txHash, entry.domain);
@@ -3220,10 +3311,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       body: { error: "Circle's attestation service did not answer usefully.", retryable: true },
       next: "later",
     };
+    // Circle has never heard of it: not watched, since anyone can make up a
+    // hash, and a real burn Circle has not indexed yet is watched once it has
     const notYet: BurnResult = {
       status: 404,
       body: { error: "Circle has no attested record of that transaction yet.", retryable: true },
-      next: "watch",
+      next: "unknown",
     };
     let iris: Response;
     try {
@@ -3617,6 +3710,10 @@ const PROVISIONAL_LEASE_SECONDS = 600;
 
 /** Channels kept however idle, and how long one sits unused before it is merged back. */
 const DEFAULT_CHANNEL_FLOOR = 4;
+
+/** Channels funded in an hour at most, and set aside in one request at most. */
+const DEFAULT_FUNDINGS_PER_HOUR = 12;
+const MAX_SET_ASIDE_PER_REQUEST = 2;
 const CHANNEL_IDLE_MERGE_SECONDS = 24 * 60 * 60;
 
 /** Watched burns: per client and in all, first retry, longest wait, oldest, and per sweep. */
@@ -3806,6 +3903,8 @@ const ALREADY_HOLDS_USDC =
 interface WatchEntry {
   readonly txHash: string;
   readonly domain: number;
+  /** Who asked first, so each client's share holds across a restart. */
+  readonly client?: string | undefined;
   readonly addedAtUnix: number;
   nextAtUnix: number;
   tries: number;
@@ -3815,12 +3914,13 @@ interface WatchEntry {
 interface BurnResult {
   readonly status: number;
   readonly body: Record<string, unknown>;
-  readonly next: "watch" | "later" | "done" | "never";
+  readonly next: "watch" | "unknown" | "later" | "done" | "never";
 }
 
 const watchEntryShape = z.object({
   txHash: z.string().max(200),
   domain: z.number().int().nonnegative(),
+  client: z.string().max(100).optional(),
   addedAtUnix: z.number().int(),
   nextAtUnix: z.number().int(),
   tries: z.number().int().nonnegative(),
