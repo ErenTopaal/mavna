@@ -96,8 +96,12 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
       network: network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET,
     });
     initialised = true;
-    // the kit's own changes: an account picked again, or disconnected from its profile
-    stopKit = StellarWalletsKit.on(KitEventType.STATE_UPDATED, (event) =>
+    if (listeners.size > 0) watchKit();
+  };
+
+  // the kit's own changes: an account picked again, or disconnected from its profile
+  const watchKit = (): void => {
+    stopKit ??= StellarWalletsKit.on(KitEventType.STATE_UPDATED, (event) =>
       tell(event.payload.address),
     );
   };
@@ -108,6 +112,7 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
   const watchFreighter = (): void => {
     freighter?.stop();
     freighter = undefined;
+    if (listeners.size === 0) return;
     if (StellarWalletsKit.selectedModule.productId !== FREIGHTER_ID) return;
     const watch = new WatchWalletChanges(FREIGHTER_WATCH_MS);
     watch.watch(({ address, error }) => {
@@ -149,10 +154,15 @@ export function createStellarWallet(network: NetworkId): StellarWalletApi {
     },
     onChange(listener) {
       listeners.add(listener);
+      if (initialised) {
+        watchKit();
+        if (freighter === undefined && known !== undefined) watchFreighter();
+      }
       return () => {
         listeners.delete(listener);
         if (listeners.size === 0) {
           freighter?.stop();
+          freighter = undefined;
           stopKit?.();
           stopKit = undefined;
         }

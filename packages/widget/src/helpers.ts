@@ -38,11 +38,14 @@ export function rememberConnection(wallet: StellarWalletApi): StellarWalletApi {
   const tell = (address: string | undefined): void => {
     for (const listener of listeners) listener(address);
   };
-  // an account switched or disconnected in the wallet replaces what was remembered
-  wallet.onChange?.((address) => {
+  // An account switched or disconnected in the wallet replaces what was
+  // remembered. Heard only while someone listens here, so a flow that is gone,
+  // or an engine replaced by another, leaves no poll of the wallet running.
+  let stopWallet: (() => void) | undefined;
+  const hear = (address: string | undefined): void => {
     connected = address === undefined ? undefined : Promise.resolve(address);
     tell(address);
-  });
+  };
   return {
     connect() {
       if (connected === undefined) {
@@ -72,8 +75,13 @@ export function rememberConnection(wallet: StellarWalletApi): StellarWalletApi {
     },
     onChange(listener) {
       listeners.add(listener);
+      stopWallet ??= wallet.onChange?.(hear);
       return () => {
         listeners.delete(listener);
+        if (listeners.size === 0) {
+          stopWallet?.();
+          stopWallet = undefined;
+        }
       };
     },
   };
