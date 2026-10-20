@@ -840,7 +840,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       const { channel, preparation, ...rest } = parsed.data;
       // written by the address as sent before held settlements were keyed by
       // account; the account is the key now
-      heldSettlements.set(signerFor(destination), {
+      const account = signerFor(destination);
+      if (heldSettlements.has(account)) {
+        // one account written under two spellings: the first is kept
+        reject("held", value, destination);
+        continue;
+      }
+      heldSettlements.set(account, {
         ...rest,
         channel,
         preparation,

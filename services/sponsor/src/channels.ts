@@ -110,7 +110,13 @@ export class ChannelPool {
       const index = this.available.findIndex((channel) => channel.address === lease.channel);
       const channel = this.available[index];
       if (channel === undefined) continue;
+      // Two leases for one owner (state written before leases were keyed by
+      // account, or edited): the later one is kept and the other channel goes
+      // back to the pool, so no key drops out of the next snapshot.
+      const earlier = this.leased.get(lease.owner);
+      if (earlier !== undefined && earlier.untilUnix >= lease.untilUnix) continue;
       this.available.splice(index, 1);
+      if (earlier !== undefined) this.available.push(earlier.channel);
       this.leased.set(lease.owner, { channel, heldFor: lease.owner, untilUnix: lease.untilUnix });
     }
   }

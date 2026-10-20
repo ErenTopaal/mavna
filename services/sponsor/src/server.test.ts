@@ -4447,3 +4447,24 @@ describe("round 2: a channel funding that failed is retried later, not on every 
     expect(attempts).toBe(2);
   });
 });
+
+describe("round 2: two stored settlements for one account", () => {
+  it("keeps one and sets the other aside, saying so", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const document = (await state.read("held")) as { held: Record<string, unknown> };
+    const entry = document.held[user.publicKey()];
+    const muxed = new MuxedAccount(new Account(user.publicKey(), "0"), "9").accountId();
+    await state.write("held", { ...document, held: { [user.publicKey()]: entry, [muxed]: entry } });
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await second.server.ready();
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/held/);
+    errors.mockRestore();
+    const rejected = (await state.read("rejected")) as Record<string, { entry?: string }[]>;
+    expect(rejected.held?.some((item) => item.entry === muxed)).toBe(true);
+  });
+});

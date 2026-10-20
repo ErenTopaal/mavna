@@ -238,3 +238,24 @@ describe("round 2: a lease nobody paid for", () => {
     expect(pool.holds("a", channel, 500)).toBe(false);
   });
 });
+
+describe("round 2: restoring two leases for one owner", () => {
+  it("keeps every channel's key, and the later lease", () => {
+    const first = Keypair.random();
+    const second = Keypair.random();
+    const pool = ChannelPool.fromSnapshot(
+      {
+        secrets: [first.secret(), second.secret()],
+        leases: [
+          { owner: "a", channel: first.publicKey(), untilUnix: 500 },
+          { owner: "a", channel: second.publicKey(), untilUnix: 900 },
+        ],
+      },
+      0,
+    );
+    expect(pool.size).toBe(2);
+    expect(pool.snapshot().secrets).toHaveLength(2);
+    expect(pool.holds("a", second.publicKey(), 0)).toBe(true);
+    expect(pool.availableCount).toBe(1);
+  });
+});
