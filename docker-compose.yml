@@ -38,7 +38,7 @@ services:
   # executor and the Arrival Contract's renewal. It cannot touch user funds;
   # that is checkable by reading services/sponsor.
   sponsor:
-    image: node:24.19.0-alpine
+    image: node:24.22.0-alpine
     working_dir: /repo
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
