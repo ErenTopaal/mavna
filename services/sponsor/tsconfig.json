@@ -4,5 +4,8 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  // tests reach into other packages' sources (fixtures, the widget's sponsor
+  // client) and are checked by tsconfig.test.json
+  "exclude": ["src/**/*.test.ts"]
 }

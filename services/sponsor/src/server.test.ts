@@ -44,6 +44,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import arrivalEntries from "../../../packages/adapters/layerzero/src/__fixtures__/testnet-ledger-entries.json" with {
   type: "json",
 };
+// the widget's own client, so the /deliver contract is checked from both ends at once
+import { createSponsorClient, SponsorRefusal } from "../../../packages/widget/src/sponsor.js";
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
@@ -5024,5 +5026,68 @@ describe("round 3: the sweep drops a free channel whose account is gone", () => 
     logged.mockRestore();
     const after = (await state.read("channels")) as { secrets: string[] };
     expect(after.secrets).toEqual([]);
+  });
+});
+
+describe("round 3: the widget reads the watching flag exactly as the sponsor sends it", () => {
+  // the widget's own client over real HTTP to this server: neither side stubbed
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+
+  it("carries watching through a not-attested answer and a recipient that cannot hold USDC yet", async () => {
+    stubIris(() => new Response("{}", { status: 404 }));
+    const server = await startServer({ buildDelivery });
+    const client = createSponsorClient(server.url);
+    expect(await client.requestDelivery(`0x${"a1".repeat(32)}`, 0)).toEqual({
+      kind: "not-attested-yet",
+      watching: true,
+    });
+
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { message: cctpMessage(Keypair.random().publicKey()), attestation: ATTESTATION },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    server.rpc.prepare = async () => {
+      throw new Error("HostError: Error(Contract, #13) trustline entry is missing for account");
+    };
+    const notReady = await client.requestDelivery(`0x${"a2".repeat(32)}`, 0);
+    expect(notReady).toMatchObject({ kind: "recipient-not-ready", watching: true });
+  });
+
+  it("carries watching on a delivery whose outcome is not known yet", async () => {
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              { message: cctpMessage(Keypair.random().publicKey()), attestation: ATTESTATION },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const server = await startServer({ buildDelivery });
+    server.rpc.submit = async (_label, build) => {
+      await build();
+      throw new InclusionUnknown(
+        "cctp delivery (feed) was not seen included; it may still land.",
+        "feed",
+        false,
+      );
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refused = await createSponsorClient(server.url)
+      .requestDelivery(`0x${"a3".repeat(32)}`, 0)
+      .catch((e: unknown) => e);
+    logged.mockRestore();
+    expect(refused).toBeInstanceOf(SponsorRefusal);
+    expect((refused as SponsorRefusal).watching).toBe(true);
+    expect((refused as SponsorRefusal).retryable).toBe(true);
   });
 });

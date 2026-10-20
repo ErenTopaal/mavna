@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --project unit --passWithNoTests --root ../.. services/sponsor",
     "publish:check": "echo 'not published'",
     "start": "node dist/main.mjs"
