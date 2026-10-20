@@ -19,6 +19,7 @@ import {
   sorobanNode,
 } from "./__fixtures__/network.js";
 import { AquariusProvider, decodeSwapChain } from "./aquarius.js";
+import { SwapRefusal } from "./provider.js";
 
 const API = "https://amm-api-testnet.aqua.network";
 const RPC = "https://rpc.example";
@@ -373,9 +374,12 @@ describe("a conversion path built from the router's own pools between listed tok
         via: [AQUA],
       })
       .catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(MavnaError);
-    expect((error as MavnaError).message).toMatch(/no pools that connect/);
-    expect((error as MavnaError).message).toMatch(/#2006/);
+    expect(error).toBeInstanceOf(SwapRefusal);
+    // what a user reads is ours; the router's own words are kept for an operator
+    expect((error as SwapRefusal).message).toBe(
+      "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses.",
+    );
+    expect((error as SwapRefusal).detail).toMatch(/#2006/);
   });
 
   it("refuses plainly when no pools connect the pair through listed tokens", async () => {

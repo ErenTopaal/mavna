@@ -1,5 +1,5 @@
 import type { Asset, ComposeQuoteRequest, Route, RouteRejection } from "@mavna/core";
-import { isRejection } from "@mavna/core";
+import { isRejection, MavnaError } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { Keypair, Networks, Asset as StellarAsset, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
@@ -426,6 +426,29 @@ describe("a compose route", () => {
     });
     const result = await quoteComposeRoute(ctx, request());
     expect(result).toMatchObject({ reason: "no-liquidity" });
+  });
+
+  it("keeps the venue's own error out of what the user reads, and hands it to the operator", async () => {
+    // the shape packages/swap throws: a fixed message and the router's words apart
+    const refusal = Object.assign(
+      new MavnaError("Aquarius has no pools that connect these assets.", { retryable: false }),
+      { detail: "estimate_swap: HostError: Error(Contract, #2006) at https://rpc.example" },
+    );
+    const { ctx } = context({
+      venue: {
+        id: "aquarius",
+        quotePath: async () => {
+          throw refusal;
+        },
+      },
+    });
+    const result = (await quoteComposeRoute(ctx, request())) as RouteRejection;
+    expect(result.reason).toBe("no-liquidity");
+    expect(result.explanation).toBe(
+      "There is no way to convert XLM into USDC on arrival right now. The plain route still delivers it.",
+    );
+    expect(result.detail).toContain("HostError");
+    expect(result.detail).toContain("rpc.example");
   });
 
   it("offers nothing when the wanted asset is what arrives anyway", async () => {

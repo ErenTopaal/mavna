@@ -1,4 +1,4 @@
-import type { NetworkId } from "@mavna/core";
+import { MavnaError, type NetworkId } from "@mavna/core";
 import type { Account, Transaction } from "@stellar/stellar-sdk";
 
 /**
@@ -131,4 +131,29 @@ export function applySlippage(amountOut: string, maxSlippageBps: number): string
   }
   const out = BigInt(amountOut);
   return ((out * BigInt(10_000 - maxSlippageBps)) / 10_000n).toString();
+}
+
+/**
+ * A venue chain's "no", with what a person reads kept apart from what an
+ * operator needs.
+ *
+ * `message` is ours and fixed, because callers show it to users. `detail`
+ * carries the venues' own reasons: host error lines, node URLs, fetch causes.
+ * Those help whoever runs the integration and can carry raw node errors, so
+ * they never go in `message`.
+ */
+export class SwapRefusal extends MavnaError {
+  readonly detail: string;
+
+  constructor(message: string, detail: string, options: { retryable: boolean; cause?: unknown }) {
+    super(message, options);
+    this.name = "SwapRefusal";
+    this.detail = detail;
+  }
+}
+
+/** A cause's operator detail: a refusal's own detail, or its message. */
+export function detailOf(cause: unknown): string {
+  if (cause instanceof SwapRefusal) return `${cause.message} ${cause.detail}`.trim();
+  return cause instanceof Error ? cause.message : String(cause);
 }

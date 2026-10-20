@@ -173,6 +173,11 @@ export interface RouteRejection {
    * that cannot tell them apart either retries forever or gives up too soon.
    */
   readonly retryable: boolean;
+  /**
+   * For whoever runs the integration, never shown to the user: a venue's or a
+   * node's own words (host errors, URLs), which can carry raw protocol text.
+   */
+  readonly detail?: string;
 }
 
 /**

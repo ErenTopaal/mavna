@@ -1,12 +1,14 @@
 import { MavnaError, type NetworkId } from "@mavna/core";
 import type { Transaction } from "@stellar/stellar-sdk";
 import { AquariusProvider } from "./aquarius.js";
-import type {
-  SwapBuildRequest,
-  SwapProvider,
-  SwapQuote,
-  SwapQuoteRequest,
-  Usability,
+import {
+  detailOf,
+  type SwapBuildRequest,
+  type SwapProvider,
+  type SwapQuote,
+  type SwapQuoteRequest,
+  SwapRefusal,
+  type Usability,
 } from "./provider.js";
 import { SoroswapProvider } from "./soroswap.js";
 import { SushiSwapProvider } from "./sushiswap.js";
@@ -146,9 +148,7 @@ export class SwapVenues implements SwapProvider {
       try {
         if (venue.serves?.(request.assetIn, request.assetOut) ?? true) serving.push(venue);
       } catch (cause) {
-        reasons.push(
-          `${venue.provider.id}: ${cause instanceof Error ? cause.message : String(cause)}`,
-        );
+        reasons.push(`${venue.provider.id}: ${detailOf(cause)}`);
         retryable ||= cause instanceof MavnaError && cause.retryable;
       }
     }
@@ -170,7 +170,7 @@ export class SwapVenues implements SwapProvider {
           outcome = { quote: await venue.provider.quote(request) };
         }
       } catch (cause) {
-        const why = cause instanceof Error ? cause.message : String(cause);
+        const why = detailOf(cause);
         outcome = {
           reason: `${venue.provider.id}: ${why}`,
           retryable: !(cause instanceof MavnaError) || cause.retryable,
@@ -204,7 +204,7 @@ export class SwapVenues implements SwapProvider {
         for (const o of outcomes.slice(i))
           if (o !== undefined && "reason" in o) reasons.push(o.reason);
         reasons.push(`${waiting.join(", ")} did not answer in time`);
-        throw new MavnaError(`No swap venue could convert this in time. ${reasons.join("; ")}`, {
+        throw new SwapRefusal("No swap venue could convert this in time.", reasons.join("; "), {
           retryable: true,
         });
       }
@@ -212,10 +212,11 @@ export class SwapVenues implements SwapProvider {
       reasons.push(outcome.reason);
       retryable ||= outcome.retryable;
     }
-    throw new MavnaError(
+    throw new SwapRefusal(
       reasons.length === 0
         ? "No swap venue serves this pair on this network."
-        : `No swap venue could convert this. ${reasons.join("; ")}`,
+        : "No swap venue could convert this.",
+      reasons.join("; "),
       { retryable },
     );
   }

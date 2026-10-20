@@ -70,7 +70,11 @@ asset, appends a `swap` step, adds its time to the estimate, and adds one to the
 signature count, because the user signs the conversion themselves. If no venue
 can quote the conversion, the whole route comes back as a `no-liquidity`
 rejection that names the wanted asset, rather than a route that cannot complete.
-The venues' own reasons are not shown, because they can carry raw node errors.
+The venues' own reasons are not shown, because they can carry raw node errors. A
+venue chain that cannot convert throws a `SwapRefusal`: its `message` is a fixed
+sentence fit to show, and its `detail` carries each venue's reason (host errors,
+node URLs) for whoever runs the integration. A compose route declined for the same
+cause keeps that text in the rejection's `detail`, never in its `explanation`.
 
 The rail's quote and its conversion share one budget (`ADAPTER_QUOTE_TIMEOUT_MS`
 in a route race). The conversion gets what the rail's quote left of it, and if

@@ -101,6 +101,13 @@ export interface ComposeContext {
 
 const BPS = 10_000n;
 
+/** A failure's words for an operator: its message, plus a swap refusal's own detail. */
+function operatorDetail(cause: unknown): string {
+  if (!(cause instanceof Error)) return String(cause);
+  const detail = (cause as { detail?: unknown }).detail;
+  return typeof detail === "string" && detail !== "" ? `${cause.message} ${detail}` : cause.message;
+}
+
 const SELF_PAYMENT =
   "A conversion on arrival cannot pay the Arrival Contract itself, as the recipient or as " +
   "the fee account: it would hold the funds with no way to send them on.";
@@ -350,11 +357,16 @@ export async function quoteComposeRoute(
       via: config.pathTokens,
     });
   } catch (cause) {
-    return ctx.decline(
-      "no-liquidity",
-      `There is no way to convert ${arriving.symbol} into ${wanted.symbol} on arrival right now.` +
-        (cause instanceof MavnaError ? ` ${cause.message}` : ""),
-    );
+    // the venue's reason can carry a router's host error or a node's URL, so it
+    // goes to the operator and the user reads only our sentence
+    return {
+      ...ctx.decline(
+        "no-liquidity",
+        `There is no way to convert ${arriving.symbol} into ${wanted.symbol} on arrival right ` +
+          "now. The plain route still delivers it.",
+      ),
+      detail: operatorDetail(cause),
+    };
   }
 
   if (!arrivalConverts(config, request.arrivingContract, request.wantedContract, venue.path)) {
