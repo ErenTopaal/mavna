@@ -22,6 +22,7 @@ import {
   declineUnsettleable,
   railsLabel,
   runQuote,
+  type SponsorCheck,
   toRouteView,
   trustlineName,
 } from "./quote";
@@ -875,7 +876,7 @@ describe("a conversion on Stellar the recipient must be able to hold", () => {
   })();
   const check = (
     reserveFunding: "self" | "sponsor",
-    holdsWanted: "ready" | "missing" | "unauthorized" | Error,
+    holdsWanted: SponsorCheck["holdsWanted"],
     spareStroops = 100_000_000n,
   ) => ({
     network: "testnet",
@@ -905,6 +906,14 @@ describe("a conversion on Stellar the recipient must be able to hold", () => {
       expect(only(check(funding, "unauthorized")).rejected[0]?.explanation).toMatch(
         /not authorised/,
       );
+    }
+  });
+
+  it("is declined with the node's reason when the trustline cannot take the arrival", () => {
+    for (const funding of ["self", "sponsor"] as const) {
+      const set = only(check(funding, { unusable: "Its USDC trustline is at its limit." }));
+      expect(set.routes).toEqual([]);
+      expect(set.rejected[0]?.explanation).toMatch(/at its limit.*Receive USDT0 instead/);
     }
   });
 

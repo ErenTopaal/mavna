@@ -386,7 +386,15 @@ export interface SponsorCheck {
    * recipient's own transaction whoever funds reserves.
    */
   readonly convertsInto?: Asset;
-  readonly holdsWanted?: "ready" | "missing" | "unauthorized" | "no-account" | Error | undefined;
+  readonly holdsWanted?:
+    | "ready"
+    | "missing"
+    | "unauthorized"
+    | "no-account"
+    /** The trustline is there but cannot take the arrival (unauthorised, or full), and why. */
+    | { readonly unusable: string }
+    | Error
+    | undefined;
 }
 
 const message = (cause: unknown): string =>
@@ -517,6 +525,12 @@ function convertBlocker(
     return [
       "temporarily-unavailable",
       `Whether the receiving account can hold ${wanted.symbol} could not be checked: ${message(state)}`,
+    ];
+  }
+  if (typeof state === "object") {
+    return [
+      "destination-unsupported",
+      `${state.unusable} Converting into ${wanted.symbol} would fail. Receive ${arrives} instead.`,
     ];
   }
   if (state === "unauthorized") {
@@ -688,13 +702,15 @@ async function checkSponsor(
         new StellarAsset(code ?? "", issuer),
       );
       holdsWanted =
-        state.lane.kind === "needs-account"
-          ? "no-account"
-          : state.lane.kind === "needs-trustline"
-            ? "missing"
-            : state.trustline !== undefined && !state.trustline.authorized
-              ? "unauthorized"
-              : "ready";
+        state.lane.kind === "unusable"
+          ? { unusable: state.lane.reason }
+          : state.lane.kind === "needs-account"
+            ? "no-account"
+            : state.lane.kind === "needs-trustline"
+              ? "missing"
+              : state.trustline !== undefined && !state.trustline.authorized
+                ? "unauthorized"
+                : "ready";
     } catch (cause) {
       holdsWanted = cause instanceof Error ? cause : new Error(String(cause));
     }

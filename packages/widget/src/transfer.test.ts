@@ -33,6 +33,7 @@ import {
   burnDomain,
   DeliveredAsCame,
   finishDelivery,
+  holdBlocker,
   runTransfer,
   StillMoving,
   type TransferDeps,
@@ -1627,5 +1628,15 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(outcome).toMatchObject({ kind: "recipient-not-ready" });
     expect(outcome.kind === "recipient-not-ready" && outcome.detail).toMatch(/GAAZI…CWN7/);
     expect(log).not.toContain("sponsor /prepare");
+  });
+});
+
+describe("holdBlocker", () => {
+  it("lets a ready trustline through, opens a missing one, and refuses an unusable one", () => {
+    expect(holdBlocker({ kind: "ready", slotsNeeded: 0 }, "USDC")).toBeUndefined();
+    expect(holdBlocker({ kind: "needs-trustline", slotsNeeded: 1 }, "USDC")).toBe("opens");
+    expect(
+      holdBlocker({ kind: "unusable", slotsNeeded: 0, reason: "It is not authorised." }, "USDC"),
+    ).toMatch(/not authorised.*Nothing has been sent/);
   });
 });

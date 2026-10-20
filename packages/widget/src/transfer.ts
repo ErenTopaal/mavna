@@ -14,7 +14,7 @@
 import { AttestationService, fromHex, parseForwarderHookData } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
 import {
   FeeBumpTransaction,
   Asset as StellarAsset,
@@ -735,6 +735,23 @@ async function assertSponsorable(engine: TransferEngine, route: Route): Promise<
 }
 
 /**
+ * What the account's trustline for a conversion target needs: nothing, to be
+ * opened, or a refusal when it is there and cannot take the arrival at all
+ * (unauthorised by its issuer, or at its limit), which no new trustline fixes.
+ */
+export function holdBlocker(lane: DestinationLane, symbol: string): "opens" | string | undefined {
+  switch (lane.kind) {
+    case "ready":
+    case "contract-ready":
+      return undefined;
+    case "unusable":
+      return `${lane.reason} Converting into ${symbol} would fail after the money arrives. Nothing has been sent.`;
+    default:
+      return "opens";
+  }
+}
+
+/**
  * LayerZero and Axelar: the rail delivers by itself, to an account that must
  * already be able to hold what arrives, so the account is prepared before the
  * send. The sponsor submits the held repayment once the funds have landed.
@@ -765,7 +782,9 @@ async function runRelayed(
       route.destination,
       new StellarAsset(code ?? "", issuer),
     );
-    if (state.lane.kind !== "ready" && state.lane.kind !== "contract-ready") {
+    const blocked = holdBlocker(state.lane, convertsTo.symbol);
+    if (blocked !== undefined && blocked !== "opens") throw new Error(blocked);
+    if (blocked === "opens") {
       const terms = await termsOf(engine, `Converting into ${convertsTo.symbol} on Stellar`);
       if (terms.reserveFunding !== "self") {
         throw new Error(
