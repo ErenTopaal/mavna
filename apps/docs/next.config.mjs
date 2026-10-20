@@ -33,10 +33,24 @@ export default function config(phase) {
         "the live widgets will call, for example NEXT_PUBLIC_MAVNA_SPONSOR_URL=https://sponsor.mavna.app.",
     );
   }
+  // honoured when building only by build:test; a host build with it left in a
+  // shell would write elsewhere and leave an old .next to be served. Serving
+  // (next start for the browser tests) reads it to find the test build.
+  const distDir = process.env.MAVNA_NEXT_DIST_DIR || undefined;
+  if (
+    phase === PHASE_PRODUCTION_BUILD &&
+    distDir !== undefined &&
+    process.env.npm_lifecycle_event !== "build:test"
+  ) {
+    throw new Error(
+      "MAVNA_NEXT_DIST_DIR set for a host build. Only build:test, the browser tests' build, " +
+        "may set it; unset it and build again.",
+    );
+  }
   return withNextra({
     // .next is what a host serves; the browser tests build into their own
     // directory, so their test-sponsor build never replaces it
-    ...(process.env.MAVNA_NEXT_DIST_DIR ? { distDir: process.env.MAVNA_NEXT_DIST_DIR } : {}),
+    ...(distDir === undefined ? {} : { distDir }),
     reactStrictMode: true,
     // Do not write CLAUDE.md / AGENTS.md into this app on every dev run.
     agentRules: false,

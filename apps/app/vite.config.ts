@@ -27,15 +27,35 @@ function requireSponsors(env: Record<string, string>): void {
   }
 }
 
+/**
+ * The browser tests' settings, honoured only by `build:test`: a host build with
+ * either left in a shell would put a test harness into dist/, or leave an old
+ * dist/ to be deployed while it writes elsewhere. So a host build refuses them.
+ */
+function testBuildSettings(command: string): { outDir: string; harness: boolean } {
+  const testBuild = process.env.npm_lifecycle_event === "build:test";
+  const leaked = ["MAVNA_BUILD_OUT_DIR", "MAVNA_BROWSER_HARNESS"].filter(
+    (name) => (process.env[name] ?? "") !== "",
+  );
+  if (command === "build" && !testBuild && leaked.length > 0) {
+    throw new Error(
+      `${leaked.join(" and ")} set for a host build. Only build:test, the browser tests' ` +
+        "build, may set them; unset them and build again.",
+    );
+  }
+  return {
+    outDir: testBuild ? process.env.MAVNA_BUILD_OUT_DIR || "dist-test" : "dist",
+    harness: testBuild && process.env.MAVNA_BROWSER_HARNESS === "1",
+  };
+}
+
 export default defineConfig(({ command, mode }) => {
   if (command === "build" && mode === "production") {
     requireSponsors(loadEnv(mode, fileURLToPath(new URL(".", import.meta.url)), "VITE_"));
   }
-  // the browser tests' harness page, never part of a build that gets hosted
-  const harness = process.env.MAVNA_BROWSER_HARNESS === "1";
-  // dist/ is what a host is given; the browser tests build elsewhere
-  // (MAVNA_BUILD_OUT_DIR), so their test-sponsor build never replaces it
-  const outDir = process.env.MAVNA_BUILD_OUT_DIR || "dist";
+  // dist/ is what a host is given; the browser tests build elsewhere, with the
+  // harness page, so their test-sponsor build never replaces it
+  const { outDir, harness } = testBuildSettings(command);
   return {
     plugins: [react()],
     build: {

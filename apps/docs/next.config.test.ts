@@ -1,4 +1,8 @@
-import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants.js";
+import {
+  PHASE_DEVELOPMENT_SERVER,
+  PHASE_PRODUCTION_BUILD,
+  PHASE_PRODUCTION_SERVER,
+} from "next/constants.js";
 import { afterEach, describe, expect, it } from "vitest";
 import config from "./next.config.mjs";
 
@@ -26,21 +30,40 @@ describe("the docs build", () => {
 });
 
 describe("where the docs build writes", () => {
-  const savedDir = process.env.MAVNA_NEXT_DIST_DIR;
+  const NAMES = ["MAVNA_NEXT_DIST_DIR", "npm_lifecycle_event"] as const;
+  const kept = Object.fromEntries(NAMES.map((name) => [name, process.env[name]]));
   afterEach(() => {
-    if (savedDir === undefined) delete process.env.MAVNA_NEXT_DIST_DIR;
-    else process.env.MAVNA_NEXT_DIST_DIR = savedDir;
+    for (const name of NAMES) {
+      const value = kept[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   });
 
-  it("writes .next by default, the build a host serves", () => {
+  it("writes .next for the host build, the build a host serves", () => {
     process.env.NEXT_PUBLIC_MAVNA_SPONSOR_URL = "https://sponsor.mavna.app";
+    process.env.npm_lifecycle_event = "build";
     delete process.env.MAVNA_NEXT_DIST_DIR;
     expect(config(PHASE_PRODUCTION_BUILD).distDir ?? ".next").toBe(".next");
   });
 
-  it("writes where MAVNA_NEXT_DIST_DIR says, so a test build never replaces .next", () => {
+  it("writes where build:test says, so a test build never replaces .next", () => {
     process.env.NEXT_PUBLIC_MAVNA_SPONSOR_URL = "https://sponsor.mavna.test";
+    process.env.npm_lifecycle_event = "build:test";
     process.env.MAVNA_NEXT_DIST_DIR = ".next-test";
     expect(config(PHASE_PRODUCTION_BUILD).distDir).toBe(".next-test");
+  });
+
+  it("refuses a host build with MAVNA_NEXT_DIST_DIR left in the environment", () => {
+    process.env.NEXT_PUBLIC_MAVNA_SPONSOR_URL = "https://sponsor.mavna.app";
+    process.env.npm_lifecycle_event = "build";
+    process.env.MAVNA_NEXT_DIST_DIR = ".next-test";
+    expect(() => config(PHASE_PRODUCTION_BUILD)).toThrow(/MAVNA_NEXT_DIST_DIR.*build:test/);
+  });
+
+  it("serves the test build when told to, which is how the browser tests start it", () => {
+    process.env.npm_lifecycle_event = "test:browser";
+    process.env.MAVNA_NEXT_DIST_DIR = ".next-test";
+    expect(config(PHASE_PRODUCTION_SERVER).distDir).toBe(".next-test");
   });
 });
