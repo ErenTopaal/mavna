@@ -46,6 +46,25 @@ describe("a plain Axelar transfer to the Arrival Contract", () => {
     expect("explanation" in result && result.explanation).toMatch(/Arrival Contract/);
   });
 
+  it("is declined by default, with no Arrival Contract passed in", async () => {
+    const plain = new AxelarAdapter({
+      network: "testnet",
+      rpc: nowhere(),
+      baseReserveStroops: 5_000_000,
+    });
+    const result = await plain.quote({
+      from,
+      to,
+      sends: { asset: from, baseUnits: "25000000" },
+      destination: ARRIVAL,
+      maxSlippageBps: 50,
+    });
+    expect(result).toMatchObject({ reason: "destination-unsupported", retryable: false });
+    await expect(
+      plain.buildTransactions({ destination: ARRIVAL } as unknown as Route),
+    ).rejects.toThrow(/Arrival Contract/);
+  });
+
   it("is refused again when a route naming it is built", async () => {
     await expect(
       adapter().buildTransactions({ destination: ARRIVAL } as unknown as Route),

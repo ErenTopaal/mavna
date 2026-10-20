@@ -1,4 +1,4 @@
-import type { NetworkId } from "@mavna/core";
+import { ARRIVAL_CONTRACT_IDS, type NetworkId } from "@mavna/core";
 
 /**
  * Where LayerZero is, per network, and which chains this rail routes from.
@@ -349,7 +349,8 @@ export interface ArrivalDeployment {
  */
 export const ARRIVAL_CONTRACTS: Readonly<Record<NetworkId, ArrivalDeployment | undefined>> = {
   testnet: {
-    contract: "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ",
+    // the id every rail refuses as a plain destination, held once in core
+    contract: ARRIVAL_CONTRACT_IDS.testnet,
     wasmSha256: "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b",
     endpoint: "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV",
     router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",

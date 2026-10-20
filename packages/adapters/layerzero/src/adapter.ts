@@ -17,6 +17,7 @@ import type {
   UnsignedTransaction,
 } from "@mavna/core";
 import {
+  ARRIVAL_CONTRACT_IDS,
   arrivalContractRefusal,
   MavnaError,
   rejectionIsRetryable,
@@ -52,7 +53,6 @@ import {
   quoteComposeRoute,
 } from "./compose-route.js";
 import {
-  ARRIVAL_CONTRACTS,
   chainIdForLayerZeroKey,
   type EvmSource,
   explorerTxUrl,
@@ -1085,7 +1085,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
    * conversions are not set up here.
    */
   private arrivalContracts(): readonly (string | undefined)[] {
-    return [this.composing?.arrival.contract, ARRIVAL_CONTRACTS[this.network]?.contract];
+    return [this.composing?.arrival.contract, ARRIVAL_CONTRACT_IDS[this.network]];
   }
 
   /** `detail` is for whoever runs the integration and is never shown to the user. */

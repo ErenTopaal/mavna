@@ -12,7 +12,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { arrivalContractRefusal, MavnaError, rejectionIsRetryable } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+} from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -83,8 +88,9 @@ export interface AxelarAdapterOptions {
   /** How a node is asked which chain it serves. Injectable for the same reason. */
   readonly ethChainId?: EthChainId;
   /**
-   * The Mavna Arrival Contract on this network, when one is in use. A plain
-   * transfer to it would be stuck there, so it is refused as a destination.
+   * A Mavna Arrival Contract in use besides the one deployed on this network,
+   * which is refused by default. A plain transfer to either would be stuck
+   * there, so both are refused as destinations.
    */
   readonly arrivalContract?: string;
 }
@@ -157,7 +163,10 @@ export class AxelarAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
-    const stuck = arrivalContractRefusal(request.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(request.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
@@ -488,7 +497,10 @@ export class AxelarAdapter implements BridgeAdapter {
    */
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
     // a route is data the caller hands back, so this is checked again
-    const stuck = arrivalContractRefusal(route.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(route.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     if (route.source !== this.id) {
       throw new MavnaError(

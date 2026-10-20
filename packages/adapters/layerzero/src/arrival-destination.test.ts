@@ -1,4 +1,4 @@
-import type { Route } from "@mavna/core";
+import { ARRIVAL_CONTRACT_IDS, type Route } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { describe, expect, it } from "vitest";
 import { LayerZeroAdapter } from "./adapter.js";
@@ -53,6 +53,8 @@ describe("a plain LayerZero transfer to the Arrival Contract", () => {
 
   it("is declined for the network's deployed one even with no conversion set up", async () => {
     expect(ARRIVAL_CONTRACTS.testnet?.contract).toBe(ARRIVAL);
+    // the same id core holds for every rail
+    expect(ARRIVAL_CONTRACT_IDS.testnet).toBe(ARRIVAL);
     const adapter = new LayerZeroAdapter({
       network: "testnet",
       rpc: nowhere(),

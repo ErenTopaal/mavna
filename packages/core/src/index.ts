@@ -11,6 +11,7 @@ export type {
 } from "./adapter.js";
 export {
   ADAPTER_QUOTE_TIMEOUT_MS,
+  ARRIVAL_CONTRACT_IDS,
   arrivalContractRefusal,
   isRejection,
   SENDER_ADDRESS,

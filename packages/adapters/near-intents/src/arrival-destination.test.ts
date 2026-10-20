@@ -1,4 +1,4 @@
-import type { Route } from "@mavna/core";
+import { ARRIVAL_CONTRACT_IDS, type Route } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
 import { describe, expect, it } from "vitest";
 import { NearIntentsAdapter } from "./adapter.js";
@@ -44,6 +44,30 @@ describe("a plain NEAR Intents transfer to the Arrival Contract", () => {
     });
     expect(result).toMatchObject({ reason: "destination-unsupported", retryable: false });
     expect("explanation" in result && result.explanation).toMatch(/Arrival Contract/);
+  });
+
+  it("refuses its network's deployed one by default, with no Arrival Contract passed in", async () => {
+    // NEAR Intents quotes on mainnet only, which has no Arrival Contract yet, so
+    // the default is read from the same table every rail uses
+    const plain = new NearIntentsAdapter({
+      network: "testnet",
+      rpc: nowhere(),
+      baseReserveStroops: 5_000_000,
+    });
+    expect(ARRIVAL_CONTRACT_IDS.testnet).toBe(ARRIVAL);
+    const result = await plain.quote({
+      from,
+      to: { ...to, chainId: "stellar-testnet" },
+      sends: { asset: from, baseUnits: "25000000" },
+      destination: ARRIVAL,
+      maxSlippageBps: 50,
+    });
+    expect(result).toMatchObject({ reason: "destination-unsupported", retryable: false });
+    await expect(
+      plain.buildTransactions({ destination: ARRIVAL } as unknown as Route, {
+        sender: "0x2527D02599Ba641c19FEa793cD0F167589a0f10D",
+      }),
+    ).rejects.toThrow(/Arrival Contract/);
   });
 
   it("is refused again when a route naming it is built", async () => {

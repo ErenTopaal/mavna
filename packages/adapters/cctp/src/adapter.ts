@@ -13,7 +13,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { arrivalContractRefusal, MavnaError, rejectionIsRetryable } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+} from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -92,8 +97,9 @@ export interface CctpAdapterOptions {
   /** Circle's attestation service. Overridable to an integrator's own proxy. */
   readonly irisUrl?: string;
   /**
-   * The Mavna Arrival Contract on this network, when one is in use. A plain
-   * transfer to it would be stuck there, so it is refused as a destination.
+   * A Mavna Arrival Contract in use besides the one deployed on this network,
+   * which is refused by default. A plain transfer to either would be stuck
+   * there, so both are refused as destinations.
    */
   readonly arrivalContract?: string;
 }
@@ -147,7 +153,10 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
-    const stuck = arrivalContractRefusal(request.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(request.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     // Circle's domain is all quoting needs; how the burn is built is a question
     // for later and differs per family.
@@ -337,7 +346,10 @@ export class CctpAdapter implements BridgeAdapter {
     options: BuildOptions = {},
   ): Promise<readonly UnsignedTransaction[]> {
     // a route is data the caller hands back, so this is checked again
-    const stuck = arrivalContractRefusal(route.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(route.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     // A rail builds its own routes and nobody else's. Without this, handing a
     // route quoted by another adapter to this one produces a Circle burn priced

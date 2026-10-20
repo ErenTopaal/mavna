@@ -214,6 +214,19 @@ export function isRejection(result: Route | RouteRejection): result is RouteReje
 }
 
 /**
+ * The Mavna Arrival Contract deployed on each network, by id. Every rail
+ * refuses it as a plain destination by default; the LayerZero rail also
+ * converts through it. None on mainnet yet.
+ */
+export const ARRIVAL_CONTRACT_IDS: {
+  readonly testnet: string;
+  readonly mainnet: string | undefined;
+} = {
+  testnet: "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ",
+  mainnet: undefined,
+};
+
+/**
  * Why a plain transfer to a Mavna Arrival Contract is refused, or undefined
  * when the destination is not one.
  *

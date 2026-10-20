@@ -14,7 +14,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { arrivalContractRefusal, MavnaError, rejectionIsRetryable } from "@mavna/core";
+import {
+  ARRIVAL_CONTRACT_IDS,
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+} from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -84,8 +89,9 @@ export interface NearIntentsAdapterOptions extends OneClickOptions {
    */
   readonly depositWindowSeconds?: number;
   /**
-   * The Mavna Arrival Contract on this network, when one is in use. A plain
-   * transfer to it would be stuck there, so it is refused as a destination.
+   * A Mavna Arrival Contract in use besides the one deployed on this network,
+   * which is refused by default. A plain transfer to either would be stuck
+   * there, so both are refused as destinations.
    */
   readonly arrivalContract?: string;
 }
@@ -143,7 +149,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
-    const stuck = arrivalContractRefusal(request.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(request.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     const slippage = badSlippage(request.maxSlippageBps);
     if (slippage !== undefined) {
@@ -316,7 +325,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
     context?: BuildContext,
   ): Promise<readonly UnsignedTransaction[]> {
     // a route is data the caller hands back, so this is checked again
-    const stuck = arrivalContractRefusal(route.destination, [this.arrivalContract]);
+    const stuck = arrivalContractRefusal(route.destination, [
+      ARRIVAL_CONTRACT_IDS[this.network],
+      this.arrivalContract,
+    ]);
     if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     const sender = context?.sender;
     if (sender === undefined || !EVM_ADDRESS.test(sender)) {
