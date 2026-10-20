@@ -11,6 +11,7 @@
       "**",
       "!dist",
       "!.next",
+      "!.next-test",
       "!.turbo",
       "!node_modules",
       "!generated",

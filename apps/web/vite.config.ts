@@ -14,5 +14,8 @@ export default defineConfig(({ command, mode }) => {
       );
     }
   }
-  return { plugins: [react()] };
+  // dist/ is what a host is given; the browser tests build elsewhere
+  // (MAVNA_BUILD_OUT_DIR), so their test-sponsor build never replaces it
+  const outDir = process.env.MAVNA_BUILD_OUT_DIR || "dist";
+  return { plugins: [react()], build: { outDir } };
 });

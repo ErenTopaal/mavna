@@ -5,6 +5,9 @@
 !.env.example
 node_modules/
 dist/
+# the browser tests' own builds, kept apart from what a host is given
+dist-test/
+.next-test/
 .turbo/
 *.tsbuildinfo
 cctp-chains.verified.json

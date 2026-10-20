@@ -38,6 +38,10 @@ pages).
 After changing a package, build it again (`pnpm build` skips what has not changed) before the dev
 server sees it.
 
+`docker compose up` builds from `scripts/compose-files.txt`, the tracked files it copies. After
+adding or removing a tracked file, run `node scripts/compose-sync.mjs --write-manifest`; a test
+fails until you do.
+
 Copy `.env.example` to `.env` and set the values before running against a live network.
 
 ## License

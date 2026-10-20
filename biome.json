@@ -4,6 +4,7 @@
     "includes": [
       "**",
       "!**/dist",
+      "!**/dist-test",
       "!**/.turbo",
       "!**/.claude",
       "!**/node_modules",

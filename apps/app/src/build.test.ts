@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { build } from "vite";
+import { build, resolveConfig } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -55,5 +55,35 @@ describe("a production build", () => {
       VITE_MAVNA_SPONSOR_URL: "https://sponsor.mavna.test",
     });
     await expect(productionBuild()).rejects.toThrow(/VITE_MAVNA_MAINNET_SPONSOR_URL/);
+  });
+});
+
+describe("where a build writes", () => {
+  const savedOut = process.env.MAVNA_BUILD_OUT_DIR;
+  afterEach(() => {
+    if (savedOut === undefined) delete process.env.MAVNA_BUILD_OUT_DIR;
+    else process.env.MAVNA_BUILD_OUT_DIR = savedOut;
+  });
+
+  const outDir = async () =>
+    (
+      await resolveConfig(
+        { root, configFile: `${root}vite.config.ts`, mode: "production" },
+        "build",
+      )
+    ).build.outDir;
+
+  it("writes dist/ by default, the folder a host is given", async () => {
+    process.env.VITE_MAVNA_SPONSOR_URL = "https://sponsor.mavna.app";
+    delete process.env.MAVNA_BUILD_OUT_DIR;
+    expect(await outDir()).toBe("dist");
+  });
+
+  // the browser tests build for a sponsor that does not exist; that build must
+  // never land where a deploy copies from
+  it("writes where MAVNA_BUILD_OUT_DIR says, so a test build never replaces dist/", async () => {
+    process.env.VITE_MAVNA_SPONSOR_URL = "https://sponsor.mavna.test";
+    process.env.MAVNA_BUILD_OUT_DIR = "dist-test";
+    expect(await outDir()).toBe("dist-test");
   });
 });
