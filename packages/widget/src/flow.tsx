@@ -945,7 +945,16 @@ export class Flow extends React.Component<FlowProps, State> {
   setDestination(destination: string): void {
     if (this.transferring) return;
     this.currentQuote?.cancel();
-    this.setState({ destination, routes: [], complete: false }, () => this.requote());
+    this.setState({ destination, routes: [], complete: false, quoting: true }, () =>
+      this.requote(),
+    );
+  }
+
+  /** Change the amount. As with the recipient, the old routes are dropped at once. */
+  setAmount(amount: string): void {
+    if (this.transferring) return;
+    this.currentQuote?.cancel();
+    this.setState({ amount, routes: [], complete: false, quoting: true }, () => this.requote());
   }
 
   /**

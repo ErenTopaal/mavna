@@ -132,9 +132,7 @@ export function renderSend(
         <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
           <input
             value={st.amount}
-            onChange={(e) =>
-              c.setState({ amount: e.target.value.replace(/[^0-9.]/g, "") }, () => c.requote())
-            }
+            onChange={(e) => c.setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
             spellCheck={false}
             autoComplete="off"

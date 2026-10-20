@@ -229,3 +229,18 @@ describe("review and flight", () => {
     }
   });
 });
+
+describe("Flow.setAmount", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("drops the routes quoted for the old amount at once and quotes again", () => {
+    vi.useFakeTimers();
+    const asked = { terms: 0 };
+    const flow = quotedFlow(asked);
+    flow.setAmount("100");
+    expect(flow.state.amount).toBe("100");
+    expect(flow.state.routes).toEqual([]);
+    vi.advanceTimersByTime(500);
+    expect(asked.terms).toBe(1);
+  });
+});
