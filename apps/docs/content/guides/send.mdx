@@ -68,9 +68,17 @@ too. [Send to a new address](/guides/new-account) walks through those prompts.
 The page narrates the wait step by step: sent, then Circle attests the transfer,
 then Mavna delivers it on Stellar. (On a deployment where the sponsor funds nothing,
 that last step is a prompt in the receiving wallet, which pays the delivery's small
-XLM fee. mavna.app's sponsor delivers it for you.) Attestation takes a few minutes, and the page
-says it is safe to close the page while it happens. Every on-chain step links to the
-block explorer for the chain it happened on.
+XLM fee. mavna.app's sponsor delivers it for you.) Attestation takes a few minutes.
+Every on-chain step links to the block explorer for the chain it happened on.
+
+While Circle attests, the page first says **Keep this page open until the sponsor
+has the transfer**. Once the sponsor confirms it has written the transfer down, the
+note changes to **Safe to close this page: the sponsor delivers it when Circle
+attests**, and from then on the sponsor keeps checking and delivers it without the
+page, for up to two days. The page says closing *pauses* the transfer instead, and
+you finish it later under Activity, in three cases: the sponsor could not take it on,
+a brand-new account still has to be set up by its own wallet, or the receiving
+wallet signs the delivery itself.
 
 If the wait outlives the estimate, nothing is wrong with your funds. The delivery
 can be triggered again safely at any time, from this page or later from
