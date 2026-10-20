@@ -67,6 +67,7 @@ import {
   buildSteps,
   burnDomain,
   DeliveredAsCame,
+  DeliveredUnverified,
   type FlightRow,
   type FlightStep,
   finishDelivery,
@@ -1103,6 +1104,29 @@ export class Flow extends React.Component<FlowProps, State> {
   endWith(error: unknown): void {
     if (error instanceof StillMoving) {
       this.stillMoving(error.message);
+      return;
+    }
+    if (error instanceof DeliveredUnverified) {
+      this.emit({
+        type: "transferDeliveredUnverified",
+        reason: error.message,
+        txHash: error.txHash,
+        explorerUrl: error.explorerUrl,
+      });
+      // ended, shown with its note on the step it ended on, never as failed
+      this.setState(
+        (st) => ({
+          steps: st.steps.map((step) =>
+            step.phase === "blocked" || step.phase === "pending"
+              ? { ...step, phase: "done" as const, note: error.message }
+              : step,
+          ),
+          note: error.message,
+          noteKind: "quiet" as const,
+          history: readHistory(this.engine.historyKey),
+        }),
+        () => this.advanceStep(),
+      );
       return;
     }
     if (error instanceof DeliveredAsCame) {

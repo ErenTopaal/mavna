@@ -83,6 +83,23 @@ export class DeliveredAsCame extends Error {
   }
 }
 
+/**
+ * The rail says the transfer executed on Stellar, but can no longer prove what
+ * arrived. It has ended, so it is neither still moving nor a failure; the
+ * Stellar transaction is there for the user to check.
+ */
+export class DeliveredUnverified extends Error {
+  readonly txHash: string;
+  readonly explorerUrl: string;
+
+  constructor(message: string, txHash: string, explorerUrl: string) {
+    super(message);
+    this.name = "DeliveredUnverified";
+    this.txHash = txHash;
+    this.explorerUrl = explorerUrl;
+  }
+}
+
 /** A flight step row, shaped for the flight screen's markup. */
 export interface FlightRow {
   key: string;
@@ -1073,8 +1090,10 @@ async function runRelayed(
         ? ""
         : ` It was not converted: whatever arrived stays in ${swap.from.asset.symbol}; convert it ` +
           `to ${swap.to.asset.symbol} in your wallet if you still want it.`;
-    throw new StillMoving(
+    throw new DeliveredUnverified(
       `${endedNote(tracked.phase)}${unconverted} Activity shows it with the transaction to check.`,
+      tracked.phase.ref.txHash,
+      tracked.phase.ref.explorerUrl,
     );
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));

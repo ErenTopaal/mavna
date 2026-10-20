@@ -36,6 +36,7 @@ import {
   buildSteps,
   burnDomain,
   DeliveredAsCame,
+  DeliveredUnverified,
   finishDelivery,
   holdBlocker,
   mapEvm,
@@ -1563,7 +1564,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(log).not.toContain("stellar sign PREPARATION");
   });
 
-  it("ends a delivery the rail cannot prove any more as still to check, never as failed", async () => {
+  it("ends a delivery the rail cannot prove any more as its own outcome, never as failed", async () => {
     const unverified = {
       phase: "delivered-unverified" as const,
       ref: {
@@ -1578,7 +1579,7 @@ describe("runTransfer when the account pays its own reserve", () => {
       transactions: [layerZeroSend("1")],
     });
     const error = await run(adapter, routeFor("axelar"), patches().patch).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(StillMoving);
+    expect(error).toBeInstanceOf(DeliveredUnverified);
     expect((error as Error).message).toMatch(/too old to read back.*Activity/);
   });
 
@@ -2082,7 +2083,12 @@ describe("a delivery the rail can no longer prove", () => {
       },
     });
     const error = await run(adapter, route, patches().patch).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(StillMoving);
+    // ended, though unproven: its own outcome, with the Stellar transaction to check
+    expect(error).toBeInstanceOf(DeliveredUnverified);
+    expect((error as DeliveredUnverified).txHash).toBe("f00d");
+    expect((error as DeliveredUnverified).explorerUrl).toBe(
+      "https://stellar.expert/explorer/testnet/tx/f00d",
+    );
     expect((error as Error).message).toMatch(/not converted.*USDC.*XLM/);
     expect(conversionAmounts).toEqual([]);
   });
