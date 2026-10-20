@@ -44,7 +44,7 @@ import {
   stepsFor,
   trackDelivery,
 } from "./rails";
-import type { SponsorDelivery, SponsorTerms } from "./sponsor";
+import { type SponsorDelivery, SponsorRefusal, type SponsorTerms } from "./sponsor";
 import { preparationProblem, readSettlement } from "./sponsored";
 import type { Connection } from "./wallet";
 
@@ -200,7 +200,23 @@ async function collectSettlement(
         "Connect that wallet, or send to an address that can already receive.",
     );
   }
-  const built = await engine.sponsor.requestSettlement(route.destination, chainId);
+  let built: Awaited<ReturnType<typeof engine.sponsor.requestSettlement>>;
+  try {
+    built = await engine.sponsor.requestSettlement(route.destination, chainId);
+  } catch (cause) {
+    // too many waiting for this client, or every channel in use: nothing is
+    // wrong with this transfer, and it can simply be started again shortly
+    if (
+      cause instanceof SponsorRefusal &&
+      cause.retryable &&
+      (cause.status === 429 || cause.status === 503)
+    ) {
+      throw new Error(
+        `${cause.message} Nothing has been sent, and the transfer is ready to start again in a moment.`,
+      );
+    }
+    throw cause;
+  }
   // held and submitted later against the arrival, so it is read in full first
   const read = readSettlement(built.xdr, engine.stellarNetwork.passphrase, route, built.channel);
   if ("problem" in read) {
@@ -316,16 +332,26 @@ async function prepareNow(
   /** What to tell the user about their funds if this is refused. */
   funds: string,
 ): Promise<void> {
-  const preparation = await engine.sponsor.requestPreparation(route.destination, chainId);
-  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
-    destination: route.destination,
-    holds: route.deliveredAtLeast.asset,
-  });
-  if (problem !== undefined) {
-    throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
+  // once more at most: a preparation the sponsor's own account overtook while it
+  // was being signed can never land, and only a new one, signed again, can
+  for (let attempt = 0; ; attempt += 1) {
+    const preparation = await engine.sponsor.requestPreparation(route.destination, chainId);
+    const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
+      destination: route.destination,
+      holds: route.deliveredAtLeast.asset,
+    });
+    if (problem !== undefined) {
+      throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
+    }
+    const signed = await engine.stellar.sign(preparation.xdr, address);
+    try {
+      await engine.sponsor.submitPreparation(signed);
+      return;
+    } catch (cause) {
+      if (!(cause instanceof SponsorRefusal) || !cause.prepareAgain) throw cause;
+      if (attempt >= 1) throw new Error(`${cause.message} ${funds}`);
+    }
   }
-  const signed = await engine.stellar.sign(preparation.xdr, address);
-  await engine.sponsor.submitPreparation(signed);
 }
 
 /** Convert the arrived USDC into XLM through the first venue that serves the pair. */

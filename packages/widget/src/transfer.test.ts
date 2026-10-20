@@ -56,6 +56,9 @@ let settleReplies: Array<[number, unknown]>;
 let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
 let refuses: "PREPARATION" | "CONVERSION" | undefined;
+/** What /submit and /settlement answer before their usual 200, in turn. */
+let submitRefusals: Array<[number, unknown]>;
+let settlementRefusals: Array<[number, unknown]>;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
@@ -145,6 +148,8 @@ beforeEach(() => {
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   refuses = undefined;
+  submitRefusals = [];
+  settlementRefusals = [];
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -181,8 +186,11 @@ beforeEach(() => {
           reserveFunding: funding,
           minDeliveryBaseUnits: "1000000",
         });
-      case "/settlement":
+      case "/settlement": {
+        const refusal = settlementRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
+      }
       case "/settlement/commit":
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
@@ -214,11 +222,14 @@ beforeEach(() => {
           .toXDR();
         return reply(200, { xdr: preparation, selfFunded: true });
       }
-      case "/submit":
+      case "/submit": {
         expect(bodyOf(init)).toEqual({
           signedXdr: `signed ${funding === "self" ? preparation : sponsoredPreparation}`,
         });
+        const refusal = submitRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { txHash: "9e9", ledger: 1 });
+      }
       case "/deliver": {
         onDeliver?.();
         const next = deliverReplies.length > 1 ? deliverReplies.shift() : deliverReplies[0];
@@ -1695,6 +1706,56 @@ describe("a destination that cannot receive at all", () => {
       expect(log).not.toContain("sponsor /prepare");
     }
   });
+});
+
+describe("what the sponsor answers back", () => {
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+  const stale = {
+    error: "The sponsor's account moved on before this preparation went out, so it can never land.",
+    retryable: true,
+    prepareAgain: true,
+  };
+
+  it("asks for a new preparation once when the old one can never land, and signs that", async () => {
+    submitRefusals = [[409, stale]];
+    await run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch);
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+    expect(log.filter((l) => l === "stellar sign PREPARATION")).toHaveLength(2);
+    expect(log.filter((l) => l === "sponsor /submit")).toHaveLength(2);
+    expect(log).toContain(`history ${SEND_HASH}`);
+  });
+
+  it("does not ask a third time, and says nothing was sent", async () => {
+    submitRefusals = [
+      [409, stale],
+      [409, stale],
+    ];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/can never land.*Nothing has been sent/);
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it.each([
+    [429, "This address already has as many settlements waiting as it may."],
+    [503, "Every settlement slot is in use. Try again shortly."],
+  ])(
+    "turns a busy settlement answer (%i) into a plain retry, signing nothing",
+    async (status, said) => {
+      settlementRefusals = [[status, { error: said, retryable: true }]];
+      const error = await run(
+        relayed(),
+        routeFor("layerzero", { newAccount: true }),
+        patches().patch,
+      ).catch((e: unknown) => e);
+      expect((error as Error).message).toBe(
+        `${said} Nothing has been sent, and the transfer is ready to start again in a moment.`,
+      );
+      expect(log.some((l) => l.startsWith("stellar sign") || l.startsWith("evm"))).toBe(false);
+    },
+  );
 });
 
 describe("holdBlocker", () => {

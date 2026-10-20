@@ -16,6 +16,23 @@
 interface SponsorError {
   readonly error: string;
   readonly retryable: boolean;
+  readonly prepareAgain?: boolean;
+}
+
+/** A refusal the sponsor answered, with what it said about trying again. */
+export class SponsorRefusal extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+  /** The preparation can never land; a new one, signed again, can. */
+  readonly prepareAgain: boolean;
+
+  constructor(message: string, status: number, retryable: boolean, prepareAgain: boolean) {
+    super(message);
+    this.name = "SponsorRefusal";
+    this.status = status;
+    this.retryable = retryable;
+    this.prepareAgain = prepareAgain;
+  }
 }
 
 export type SponsorDelivery =
@@ -161,10 +178,15 @@ export function createSponsorClient(
     return { status: response.status, ok: response.ok, body: parsed };
   }
 
-  function failure(answer: Answer): Error {
+  function failure(answer: Answer): SponsorRefusal {
     // The server writes its errors for people, so they pass through as said.
-    const said = (answer.body as Partial<SponsorError> | null)?.error;
-    return new Error(said ?? `The sponsor answered ${answer.status}.`);
+    const body = answer.body as Partial<SponsorError> | null;
+    return new SponsorRefusal(
+      body?.error ?? `The sponsor answered ${answer.status}.`,
+      answer.status,
+      body?.retryable === true,
+      body?.prepareAgain === true,
+    );
   }
 
   async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
