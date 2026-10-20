@@ -390,7 +390,8 @@ export async function convertOnStellar(
   const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
   const signed = await engine.stellar.sign(unsigned.toXDR(), account);
   const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
-  await engine.rpc.submit("conversion", async () => parsed as never);
+  // signed by the user, so its sequence is fixed: a stale one cannot be resent
+  await engine.rpc.submit("conversion", async () => parsed as never, { presigned: true });
   return "converted";
 }
 
