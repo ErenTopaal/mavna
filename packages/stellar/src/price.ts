@@ -4,7 +4,7 @@ import type { Asset } from "@stellar/stellar-sdk";
 /**
  * What XLM is worth, read from Stellar's own order book.
  *
- * The floors in `cost_decision.md` §9 are derived from the live reserve cost and
+ * The minimum transfer sizes (see reserve.ts) are derived from the live reserve cost and
  * the live XLM price, so that they track the market rather than being constants
  * somebody has to remember to edit. That needs a price, and a price has to come
  * from somewhere real.

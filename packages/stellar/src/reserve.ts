@@ -6,7 +6,7 @@ import type { DestinationLane } from "./destination.js";
  *
  * All of this follows from one measured fact: Stellar locks a deposit per unit of
  * ledger space, an account occupies 2 units and each trustline 1, at 0.5 XLM per
- * unit. See resources/cost_decision.md, which is the authority.
+ * unit (the network's base reserve, read from its config).
  */
 
 /** Slots consumed by holding one additional asset. */
@@ -112,9 +112,9 @@ export interface ArrivingValue {
 /**
  * Convert an amount of some other asset into XLM, at a price read from the chain.
  *
- * `cost_decision.md` §9 is explicit that the floors are computed from the live
- * reserve cost and the live XLM price rather than stored as constants, so they
- * track the market without anyone editing a number. This is that conversion.
+ * The floors are computed from the live reserve cost and the live XLM price
+ * rather than stored as constants, so they track the market without anyone
+ * editing a number. This is that conversion.
  *
  * The price is given as XLM per one whole unit of the asset, in stroops. Passing
  * it in rather than fetching it here keeps this package free of a network call on
