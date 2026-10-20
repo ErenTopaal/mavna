@@ -764,6 +764,21 @@ describe("building an Axelar transfer", () => {
     sending.stellarTrusts = false;
     await expect(adapter().buildTransactions(route)).rejects.toThrow(/not currently carrying/);
   });
+
+  it("refuses a route another rail quoted", async () => {
+    classicUsdc();
+    const route = routeOf(await adapter().quote(ask()));
+    await expect(adapter().buildTransactions({ ...route, source: "cctp" })).rejects.toThrow(
+      /another rail/,
+    );
+  });
+
+  it("refuses when the token would now land as a different Stellar asset than quoted", async () => {
+    classicUsdc();
+    const route = routeOf(await adapter().quote(ask()));
+    interchainToken();
+    await expect(adapter().buildTransactions(route)).rejects.toThrow(/quoted/);
+  });
 });
 
 describe("what the sending chain says about the token", () => {

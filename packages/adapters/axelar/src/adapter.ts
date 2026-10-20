@@ -475,6 +475,14 @@ export class AxelarAdapter implements BridgeAdapter {
    * a failed transaction but a stuck one.
    */
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+    if (route.source !== this.id) {
+      throw new MavnaError(
+        `Refusing to build a route quoted by another rail (${route.source}) as an Axelar ` +
+          "transfer. The numbers shown were that rail's, not these.",
+        { retryable: false },
+      );
+    }
+
     const [stellar, source] = await Promise.all([
       this.registry.stellarChain(),
       evmTokenService(this.network, route.fromChain.id),
@@ -505,6 +513,17 @@ export class AxelarAdapter implements BridgeAdapter {
         "Axelar is not currently carrying transfers between those two chains. " +
           "Refusing to build one, because the message would be sent and dropped.",
         { retryable: true },
+      );
+    }
+
+    // What lands is read again too. A token re-registered since the quote would
+    // credit a different Stellar asset than the one the user was shown.
+    const delivered = await stellarIts.deliveredAs(token.stellarToken);
+    if (delivered.id !== route.receives.asset.id) {
+      throw new MavnaError(
+        `This transfer would now arrive as ${delivered.id}, not the ${route.receives.asset.id} ` +
+          "it was quoted as. Refusing to build it; quote again.",
+        { retryable: false },
       );
     }
 
