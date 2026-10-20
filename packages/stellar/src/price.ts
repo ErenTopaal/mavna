@@ -20,11 +20,23 @@ import type { Asset } from "@stellar/stellar-sdk";
  * the prohibition on Horizon for exactly this class of use.
  */
 
-/** Enough of Horizon's order book response to price one asset. */
+/**
+ * Enough of Horizon's order book response to price one asset. With XLM as the
+ * selling asset, a price is the asset per XLM; a bid's amount is in the asset
+ * and an ask's amount is in XLM.
+ */
 interface OrderBook {
-  readonly bids?: readonly { readonly price?: string }[];
-  readonly asks?: readonly { readonly price?: string }[];
+  readonly bids?: readonly { readonly price?: string; readonly amount?: string }[];
+  readonly asks?: readonly { readonly price?: string; readonly amount?: string }[];
 }
+
+/**
+ * How much XLM each side of the book is walked through. The top level alone can
+ * be a dust order anywhere inside the spread; over this much, one barely counts.
+ */
+const DEPTH_XLM = 1_000;
+/** Levels asked for per side, enough to reach that depth on the books seen live. */
+const BOOK_LEVELS = 50;
 
 const STROOPS_PER_XLM = 10_000_000n;
 
@@ -58,7 +70,7 @@ export class XlmPriceSource {
   }
 
   /**
-   * The mid price, from the best bid and the best ask.
+   * The mid price, from what the first DEPTH_XLM of bids and of asks average.
    *
    * The mid rather than either side, because this is not a trade: nothing is
    * being executed against this number. It decides whether a transfer clears a
@@ -88,7 +100,7 @@ export class XlmPriceSource {
       buying_asset_type: asset.getCode().length <= 4 ? "credit_alphanum4" : "credit_alphanum12",
       buying_asset_code: asset.getCode(),
       buying_asset_issuer: issuer,
-      limit: "1",
+      limit: String(BOOK_LEVELS),
     });
 
     const response = await fetch(`${this.horizonUrl}/order_book?${params.toString()}`, {
@@ -96,23 +108,38 @@ export class XlmPriceSource {
     });
     if (!response.ok) {
       throw new MavnaError(`Could not read the order book (HTTP ${response.status}).`, {
-        retryable: response.status >= 500,
+        // a rate limit passes like an outage does
+        retryable: response.status >= 500 || response.status === 429,
       });
     }
 
-    const book = (await response.json()) as OrderBook;
-    // Selling XLM for the asset, so a price is the asset per one XLM.
-    const bid = book.bids?.[0]?.price;
-    const ask = book.asks?.[0]?.price;
-    if (bid === undefined || ask === undefined) {
+    let book: OrderBook;
+    try {
+      book = JSON.parse(await response.text()) as OrderBook;
+    } catch (cause) {
+      throw new MavnaError("Horizon answered the order book with something that is not JSON.", {
+        retryable: true,
+        cause,
+      });
+    }
+    if ((book.bids?.length ?? 0) === 0 || (book.asks?.length ?? 0) === 0) {
       throw new MavnaError(
         `Stellar's market for ${asset.getCode()} has no price right now, so a minimum ` +
           "transfer size cannot be worked out. Nothing has been sent.",
         { retryable: true },
       );
     }
+    const bid = averageOver(book.bids ?? [], "asset");
+    const ask = averageOver(book.asks ?? [], "xlm");
+    if (bid === undefined || ask === undefined) {
+      throw new MavnaError(
+        `Stellar's market for ${asset.getCode()} is too thin to price: one side holds less ` +
+          `than ${DEPTH_XLM} XLM. Nothing has been sent.`,
+        { retryable: true },
+      );
+    }
 
-    const assetPerXlm = (Number(bid) + Number(ask)) / 2;
+    const assetPerXlm = (bid + ask) / 2;
     if (!Number.isFinite(assetPerXlm) || assetPerXlm <= 0) {
       throw new MavnaError("Stellar's market returned a price that is not a number.", {
         retryable: true,
@@ -132,4 +159,30 @@ export class XlmPriceSource {
     this.cache.set(key, { at: Date.now(), stroops });
     return stroops;
   }
+}
+
+/**
+ * The average price, in the asset per XLM, of the first DEPTH_XLM on one side of
+ * the book. `amountIn` says which unit that side states its amounts in. Undefined
+ * when the side holds less than that, or a level is not a number.
+ */
+function averageOver(
+  levels: readonly { readonly price?: string; readonly amount?: string }[],
+  amountIn: "asset" | "xlm",
+): number | undefined {
+  let xlm = 0;
+  let value = 0;
+  for (const level of levels) {
+    const price = Number(level.price);
+    const amount = Number(level.amount);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) {
+      return undefined;
+    }
+    const available = amountIn === "xlm" ? amount : amount / price;
+    const take = Math.min(available, DEPTH_XLM - xlm);
+    xlm += take;
+    value += take * price;
+    if (xlm >= DEPTH_XLM) return value / xlm;
+  }
+  return undefined;
 }
