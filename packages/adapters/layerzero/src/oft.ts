@@ -220,6 +220,20 @@ export function stellarToLocal(
   return amountSd * 10n ** BigInt(localDecimals - sharedDecimals);
 }
 
+/**
+ * A slippage the floor can be built from: a whole number of basis points, at
+ * least zero and under the whole. A fraction cannot become a BigInt, the whole
+ * makes the floor zero (accepting anything back), and more makes it negative.
+ * The widget always passes 50; this is for SDK callers.
+ */
+export function badSlippage(bps: number): string | undefined {
+  if (Number.isInteger(bps) && bps >= 0 && bps < 10_000) return undefined;
+  return (
+    `A slippage of ${bps} cannot be used. It must be a whole number of basis points from ` +
+    "0 up to but not including 10000."
+  );
+}
+
 export interface SendParam {
   readonly dstEid: number;
   readonly to: `0x${string}`;

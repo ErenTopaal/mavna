@@ -488,6 +488,18 @@ describe("quoting USDT0 into Stellar", () => {
     expect((result as RouteRejection).reason).toBe("asset-unsupported");
   });
 
+  it.each([0.5, -1, 10_000, 12_000, Number.NaN])(
+    "declines a slippage of %s basis points instead of throwing or accepting anything",
+    async (bps) => {
+      const result = await mainnet().quote({ ...(await ask(READY)), maxSlippageBps: bps });
+      expect(isRoute(result)).toBe(false);
+      const rejection = result as RouteRejection;
+      expect(rejection.reason).toBe("errored");
+      expect(rejection.retryable).toBe(false);
+      expect(rejection.explanation).toMatch(/whole number of basis points/);
+    },
+  );
+
   it("builds a send whose on-chain minimum is the quoted floor", async () => {
     const adapter = mainnet();
     const route = routeOf(await adapter.quote(await ask(READY)));

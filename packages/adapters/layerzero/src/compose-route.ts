@@ -33,6 +33,7 @@ import {
 import { STELLAR_DECIMALS, STELLAR_SIDE, stellarExplorerTxUrl } from "./config.js";
 import type { Discovery, ResolvedRoute } from "./discovery.js";
 import {
+  badSlippage,
   buildSendParam,
   bytes32ToStellarContract,
   MSG_TYPE_SEND_AND_CALL,
@@ -226,6 +227,12 @@ export async function quoteComposeRoute(
   const { plain, arriving } = request;
   const wanted = request.to;
   if (wanted.id === arriving.id) return undefined;
+
+  const slippage = badSlippage(request.maxSlippageBps);
+  if (slippage !== undefined) {
+    // the caller's input, so asking again will not help
+    return { ...ctx.decline("errored", slippage), retryable: false };
+  }
 
   const destination = request.destination;
   if (!/^[GC]/.test(destination)) {

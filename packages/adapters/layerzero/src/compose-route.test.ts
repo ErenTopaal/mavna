@@ -271,6 +271,14 @@ describe("a compose route", () => {
     expect((result as RouteRejection).explanation).toMatch(/not a Stellar account/);
   });
 
+  it("declines a slippage that is not a whole number of basis points under the whole", async () => {
+    const { ctx } = context();
+    for (const bps of [0.5, -1, 10_000]) {
+      const result = await quoteComposeRoute(ctx, { ...request(), maxSlippageBps: bps });
+      expect(result).toMatchObject({ reason: "errored", retryable: false });
+    }
+  });
+
   it("is refused, readably, for an account that cannot hold the wanted asset", async () => {
     const { ctx } = context();
     const result = await quoteComposeRoute(ctx, request(NO_TRUSTLINE));

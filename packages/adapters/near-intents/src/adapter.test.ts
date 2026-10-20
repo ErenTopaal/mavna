@@ -502,6 +502,16 @@ describe("quoting", () => {
     expect(route.steps.map((s) => s.kind)).toEqual(["bridge"]);
   });
 
+  it.each([0.5, -1, 10_000, 12_000, Number.NaN])(
+    "declines a slippage of %s basis points without asking 1Click",
+    async (bps) => {
+      const result = rejectionOf(await adapter().quote(ask({ maxSlippageBps: bps })));
+      expect(result.reason).toBe("errored");
+      expect(result.retryable).toBe(false);
+      expect(result.explanation).toMatch(/whole number of basis points/);
+    },
+  );
+
   it("lists the EVM chains 1Click currently carries a token on", async () => {
     expect(await adapter().supportedChains()).toEqual(["arbitrum", "base", "bsc"]);
   });

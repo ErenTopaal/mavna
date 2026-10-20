@@ -136,6 +136,11 @@ export class NearIntentsAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const slippage = badSlippage(request.maxSlippageBps);
+    if (slippage !== undefined) {
+      // the caller's input, so asking again will not help
+      return { ...this.decline("errored", slippage), retryable: false };
+    }
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
     }
@@ -799,6 +804,19 @@ function readable(units: bigint, decimals: number): string {
   return fraction.length === 0 ? (units / scale).toString() : `${units / scale}.${fraction}`;
 }
 
+/**
+ * A slippage the floor can be built from: a whole number of basis points, at
+ * least zero and under the whole. A fraction cannot become a BigInt, the whole
+ * makes the floor zero (accepting anything back), and more makes it negative.
+ * The widget always passes 50; this is for SDK callers.
+ */
+function badSlippage(bps: number): string | undefined {
+  if (Number.isInteger(bps) && bps >= 0 && bps < 10_000) return undefined;
+  return (
+    `A slippage of ${bps} cannot be used. It must be a whole number of basis points from ` +
+    "0 up to but not including 10000."
+  );
+}
 function readinessOf(lane: DestinationLane): "ready" | "needs-trustline" | "needs-account" {
   switch (lane.kind) {
     case "needs-account":

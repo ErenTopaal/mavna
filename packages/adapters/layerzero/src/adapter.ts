@@ -60,6 +60,7 @@ import {
 } from "./discovery.js";
 import { describeDvnStack } from "./dvn.js";
 import {
+  badSlippage,
   buildApproval,
   buildSendParam,
   bytes32ToStellarContract,
@@ -265,6 +266,11 @@ export class LayerZeroAdapter implements BridgeAdapter {
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
     const stellarChainId = STELLAR_SIDE[this.network].chainId;
+    const slippage = badSlippage(request.maxSlippageBps);
+    if (slippage !== undefined) {
+      // the caller's input, so asking again will not help
+      return { ...this.decline("errored", slippage), retryable: false };
+    }
 
     if (request.to.chainId !== stellarChainId) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
