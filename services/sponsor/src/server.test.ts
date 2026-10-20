@@ -5356,3 +5356,103 @@ describe("round 4: a channel the node says is missing is never forgotten", () =>
     ).toBe(200);
   });
 });
+
+describe("round 5: a channel carrying a live loan is never set aside or handed out", () => {
+  it("keeps the owner's channel when its own repeat ask reads it as missing", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const pool = [Keypair.random(), Keypair.random()];
+    const server = await startServer({
+      channels: new ChannelPool({ channels: pool }),
+      settlementsPerClient: 0,
+    });
+    for (const channel of pool) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const owner = Keypair.random();
+    await preparedWithSettlementHeld(server, owner);
+    const held = (await server.post("/settlement", {
+      destination: owner.publicKey(),
+      sourceChainId: "1",
+    })) as { body: Body };
+    const loanChannel = held.body.channel as string;
+
+    // the node misses the loan's channel for the owner's next ask
+    let misses = 2;
+    server.rpc.hides = (address) => {
+      if (address !== loanChannel || misses === 0) return false;
+      misses -= 1;
+      return true;
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const again = await server.post("/settlement", {
+      destination: owner.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(again.status).toBe(503);
+    expect(again.body.retryable).toBe(true);
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+
+    const stranger = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(stranger.status).toBe(200);
+    expect(stranger.body.channel).not.toBe(loanChannel);
+    server.rpc.holding(owner, PLENTY);
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: owner.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+});
+
+describe("round 5: a set-aside channel a loan rides on goes back to that loan", () => {
+  it("re-leases it to the held settlement's account, never to the next caller", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const pool = [Keypair.random(), Keypair.random()];
+    const state = new MemoryDocumentStore();
+    const first = await startServer({
+      state,
+      channels: new ChannelPool({ channels: pool }),
+      settlementsPerClient: 0,
+    });
+    for (const channel of pool) first.rpc.accounts.set(channel.publicKey(), 300n);
+    const owner = Keypair.random();
+    await preparedWithSettlementHeld(first, owner);
+    const heldDocument = (await state.read("held")) as {
+      held: Record<string, { channel: string }>;
+    };
+    const loanChannel = heldDocument.held[owner.publicKey()]?.channel ?? "";
+    // as an earlier version could leave it: the loan's channel set aside, its lease gone
+    const channels = (await state.read("channels")) as {
+      secrets: string[];
+      leases: { channel: string }[];
+    };
+    const loanSecret = pool.find((key) => key.publicKey() === loanChannel)?.secret() ?? "";
+    await state.write("channels", {
+      secrets: channels.secrets.filter((secret) => secret !== loanSecret),
+      leases: channels.leases.filter((lease) => lease.channel !== loanChannel),
+      quarantined: [loanSecret],
+    });
+
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state, settlementsPerClient: 0 }, { restartOf: first });
+    second.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await second.server.stopSweep();
+    logged.mockRestore();
+
+    const stranger = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(stranger.body.channel).not.toBe(loanChannel);
+    second.rpc.holding(owner, PLENTY);
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await second.post("/settle", { destination: owner.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+});

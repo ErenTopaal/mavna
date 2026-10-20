@@ -757,6 +757,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
   }
 
+  /** Whether any held settlement rides on this channel. */
+  function heldOn(channelAddress: string): boolean {
+    for (const held of heldSettlements.values()) if (held.channel === channelAddress) return true;
+    return false;
+  }
+
   /** Whether a landed preparation backs the account's held settlement. */
   function landed(account: string): boolean {
     return heldSettlements.get(account)?.prepared === true;
@@ -1450,6 +1456,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       try {
         if ((await readAccountEntry(options.rpc, address)) !== undefined) {
           channels?.restore(address);
+          // back to the settlement that rides on it, never to whoever asks next
+          for (const [owner, held] of heldSettlements) {
+            if (held.channel === address) {
+              channels?.acquireThis(owner, address, held.maxTimeUnix, nowUnix());
+            }
+          }
           console.error(`[sponsor] channel ${address} reads as existing again; back in the pool`);
           await persist();
         }
@@ -2255,6 +2267,25 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
       channelAccount = await channelAccountOf(channel.address);
       if (channelAccount !== undefined) break;
+      // A lease this account already held, or one a held settlement rides on,
+      // is a loan's channel: a missing read on it is unknown, never a reason to
+      // set it aside, and the sweep reads it again.
+      if (live.includes(account) || heldOn(channel.address)) {
+        console.error(
+          `[sponsor] channel ${channel.address} reads as missing, and it carries ${account}'s ` +
+            "settlement; keeping it and asking again later",
+        );
+        await answer(
+          res,
+          503,
+          {
+            error: "This account's settlement slot cannot be read right now. Try again shortly.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
       // missing twice over: set aside with its key, looked at again by the sweep
       console.error(
         `[sponsor] channel ${channel.address} reads as having no account; setting it aside`,
