@@ -71,7 +71,10 @@ export class ScanService {
 
   constructor(network: NetworkId, options: ScanOptions = {}) {
     this.baseUrl = SCAN_BASE_URL[network];
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    const injected = options.fetch;
+    // called as a plain function, never as a method of this object: a browser's
+    // fetch throws "Illegal invocation" when `this` is anything but the window
+    this.fetchImpl = (input, init) => (injected ?? globalThis.fetch)(input, init);
     this.timeoutMs = options.timeoutMs ?? 8000;
   }
 

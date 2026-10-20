@@ -186,7 +186,10 @@ export class Discovery {
     this.rpc = options.rpc;
     this.evmOptions = options.evm ?? {};
     this.extraOfts = options.ofts ?? [];
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    const injected = options.fetch;
+    // called as a plain function, never as a method of this object: a browser's
+    // fetch throws "Illegal invocation" when `this` is anything but the window
+    this.fetchImpl = (input, init) => (injected ?? globalThis.fetch)(input, init);
   }
 
   /**
