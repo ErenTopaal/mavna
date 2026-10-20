@@ -38,8 +38,9 @@ export class SponsorRefusal extends Error {
 export type SponsorDelivery =
   | { kind: "delivered"; txHash: string; ledger: number }
   | { kind: "already-delivered" }
-  | { kind: "recipient-not-ready"; detail: string }
-  | { kind: "not-attested-yet" };
+  | { kind: "recipient-not-ready"; detail: string; watching?: boolean }
+  /** `watching`: the sponsor wrote the burn down and keeps asking about it by itself. */
+  | { kind: "not-attested-yet"; watching?: boolean };
 
 /** What finishing a conversion on arrival came to. */
 export type SponsorCompose =
@@ -212,7 +213,10 @@ export function createSponsorClient(
       const answer = await send("/deliver", { txHash, domain, destination });
       // Not attested yet (404) and recipient not ready (409) are the polling
       // loop's ordinary answers, so they come back as outcomes, not errors.
-      if (answer.status === 404) return { kind: "not-attested-yet" };
+      if (answer.status === 404) {
+        const watching = (answer.body as { watching?: unknown } | null)?.watching === true;
+        return watching ? { kind: "not-attested-yet", watching } : { kind: "not-attested-yet" };
+      }
       if (answer.status === 409 && (answer.body as { kind?: unknown } | null)?.kind) {
         return answer.body as SponsorDelivery;
       }

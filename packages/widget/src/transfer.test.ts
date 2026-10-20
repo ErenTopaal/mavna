@@ -33,6 +33,7 @@ import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
 import {
+  buildSteps,
   burnDomain,
   DeliveredAsCame,
   finishDelivery,
@@ -2054,6 +2055,64 @@ describe("a delivery the rail can no longer prove", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/not converted.*USDC.*XLM/);
     expect(conversionAmounts).toEqual([]);
+  });
+});
+
+describe("whether closing the page is safe while Circle attests", () => {
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+  const attestNotes = (seen: Array<{ id: string; patch: Record<string, unknown> }>) =>
+    seen
+      .filter((p) => p.id === "attest" && typeof p.patch.note === "string")
+      .map((p) => p.patch.note);
+
+  it("is said only once the sponsor has the burn on its watch list", async () => {
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    expect(attestNotes(seen)[0]).toMatch(/Safe to close this page: the sponsor delivers it/);
+  });
+
+  it("is not said when the sponsor does not say it is watching, or cannot be reached", async () => {
+    for (const first of [
+      [404, { error: "Not attested yet.", retryable: true }],
+      [0, undefined],
+    ] as Array<[number, unknown]>) {
+      deliverReplies = [first, [200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
+      const { seen, patch } = patches();
+      await run(cctp(), routeFor("cctp"), patch);
+      const notes = attestNotes(seen);
+      expect(notes.some((n) => /Safe to close/.test(String(n)))).toBe(false);
+      expect(
+        notes.some((n) => /Closing this page pauses the delivery.*Activity/.test(String(n))),
+      ).toBe(true);
+    }
+  });
+
+  it("is not said for a new account, which its own wallet still has to set up", async () => {
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp", { newAccount: true }), patch);
+    const notes = attestNotes(seen);
+    expect(notes.some((n) => /Safe to close/.test(String(n)))).toBe(false);
+    expect(notes[0]).toMatch(/Closing this page pauses setting up the new account.*Activity/);
+  });
+
+  it("is never said when the account signs its own delivery", () => {
+    const steps = buildSteps(toRouteView(routeFor("cctp")), "self");
+    const attest = steps.find((s) => s.id === "attest");
+    expect(attest?.note).not.toMatch(/Safe to close/);
+    expect(attest?.note).toMatch(/closing this page pauses it.*Activity/);
+    // before the sponsor has answered, nothing calls it safe either
+    const sponsored = buildSteps(toRouteView(routeFor("cctp")), "sponsor");
+    expect(sponsored.find((s) => s.id === "attest")?.note).not.toMatch(/Safe to close/);
   });
 });
 

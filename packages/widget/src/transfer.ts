@@ -572,6 +572,23 @@ async function deliverToStellar(
   patch("attest", { phase: "pending" });
   let prepared = alreadyPrepared;
   let lastError: string | undefined;
+  // The sponsor's first answer says whether it keeps delivering by itself once
+  // this page is gone; only then is closing it safe. A new account still needs
+  // its own wallet to be set up, which no sponsor can do for it.
+  let told = ownDelivery;
+  const tellClosing = (watching: boolean): void => {
+    if (told) return;
+    told = true;
+    patch("attest", {
+      phase: "pending",
+      note: !watching
+        ? "A few minutes. Closing this page pauses the delivery; you can finish it under Activity."
+        : !prepared && route.steps.some((s) => s.kind === "prepare-account")
+          ? "A few minutes. Closing this page pauses setting up the new account, which your " +
+            "wallet signs once Circle attests; you can finish it under Activity."
+          : "A few minutes. Safe to close this page: the sponsor delivers it when Circle attests.",
+    });
+  };
   for (let attempt = 0; attempt < 90; attempt += 1) {
     // a page that is gone asks for no more signatures
     if (gone(signal)) throw new StillMoving(STOPPED_WATCHING);
@@ -588,12 +605,16 @@ async function deliverToStellar(
       // The burn is done, so a node or sponsor that did not answer this once is
       // asked again; it is not a reason to call the transfer failed.
       lastError = asError(cause).message;
+      tellClosing(false);
       patch("attest", {
         phase: "pending",
         note: `The last check failed (${lastError}). Trying again.`,
       });
       await wait(20_000, signal);
       continue;
+    }
+    if (outcome.kind === "not-attested-yet" || outcome.kind === "recipient-not-ready") {
+      tellClosing("watching" in outcome && outcome.watching === true);
     }
     if (outcome.kind === "too-costly") {
       throw new StillMoving(tooCostly(outcome.feeStroops));
