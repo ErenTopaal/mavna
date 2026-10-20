@@ -205,13 +205,7 @@ export class AxelarAdapter implements BridgeAdapter {
       if (cause instanceof UnsupportedToken) {
         return this.decline("asset-unsupported", cause.message);
       }
-      return this.declineFrom(
-        cause,
-        "temporarily-unavailable",
-        // Names the rail rather than the vendor, and says the thing that matters
-        // most to someone looking at it: nothing left their wallet.
-        "This route did not answer in time. Nothing has been sent, and it is worth trying again.",
-      );
+      return this.resolutionFailed(cause);
     }
 
     if (!trusted) {
@@ -997,6 +991,28 @@ export class AxelarAdapter implements BridgeAdapter {
 
   private decline(reason: RouteRejection["reason"], explanation: string): RouteRejection {
     return { source: this.id, reason, explanation, retryable: rejectionIsRetryable(reason) };
+  }
+
+  /**
+   * Why resolving the token failed, as it is. Only a failure that may pass is
+   * worth asking again about: a node or a request that did not get through. A
+   * permanent refusal or a fault in this code says what it is, so it is never
+   * passed off as a slow answer that a retry would fix.
+   */
+  private resolutionFailed(cause: unknown): RouteRejection {
+    const unreachable =
+      cause instanceof TypeError && /fetch|network|load failed/i.test(cause.message);
+    if ((cause instanceof MavnaError && cause.retryable) || unreachable) {
+      return this.decline(
+        "temporarily-unavailable",
+        "Axelar did not answer just now. Nothing has been sent, and it is worth trying again.",
+      );
+    }
+    const why = cause instanceof Error ? cause.message : String(cause);
+    return {
+      ...this.decline("errored", `This route could not be checked: ${why} Nothing has been sent.`),
+      retryable: false,
+    };
   }
 
   /** A rejection that keeps a retryable failure distinct from a permanent no. */

@@ -92,6 +92,8 @@ interface SendingChain {
   stellarTrusts: boolean;
   /** A node too busy to answer the token manager read. */
   busy: boolean;
+  /** What the token manager read throws instead, when a test makes it fail another way. */
+  fault?: Error;
   /** The gas service the token service names on-chain. */
   gasService: string;
 }
@@ -123,6 +125,7 @@ async function ethCall(_rpcUrl: string, to: string, data: string): Promise<strin
     if (sending.busy) {
       throw new MavnaError("An EVM node could not answer: server busy", { retryable: true });
     }
+    if (sending.fault !== undefined) throw sending.fault;
     return `0x${word(TOKEN_MANAGER_ADDRESS)}`;
   }
   if (selector === SELECTORS.getImplementationTypeAndTokenAddress) {
@@ -849,6 +852,31 @@ describe("what the sending chain says about the token", () => {
     const result = await adapter().quote(ask());
     expect((result as RouteRejection).reason).toBe("asset-unsupported");
   });
+
+  it.each([
+    ["a fault in this code", new ReferenceError("Buffer is not defined"), false],
+    [
+      "a permanent refusal",
+      new MavnaError("The token manager answered something unreadable.", { retryable: false }),
+      false,
+    ],
+    ["a request the browser could not send", new TypeError("Failed to fetch"), true],
+  ] as const)(
+    "says what actually went wrong on %s, not that it timed out",
+    async (_what, fault, retry) => {
+      classicUsdc();
+      sending.fault = fault;
+      const result = (await adapter().quote(ask())) as RouteRejection;
+      expect(result.explanation).not.toMatch(/did not answer in time/);
+      expect(result.retryable).toBe(retry);
+      if (retry) {
+        expect(result.reason).toBe("temporarily-unavailable");
+      } else {
+        expect(result.reason).toBe("errored");
+        expect(result.explanation).toContain(fault.message);
+      }
+    },
+  );
 
   it("says a busy node is a retry, not an unsupported token", async () => {
     classicUsdc();
