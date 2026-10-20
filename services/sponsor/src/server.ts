@@ -44,6 +44,7 @@ import type { ReserveFunding } from "./config.js";
 import { Deliverer, type DeliveryOutcome } from "./deliver.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
 import type { SoroswapProxy } from "./soroswap.js";
+import { DirectSpendQuote } from "./spend.js";
 import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -103,6 +104,8 @@ export interface SponsorServerOptions {
   readonly settlementsPerClient?: number;
   /** Prices the reserve in the arriving asset, for the settlement's ceiling. */
   readonly prices?: XlmPriceSource;
+  /** Quotes what a settlement's direct path spends now, for the balance check. */
+  readonly spendQuote?: DirectSpendQuote;
   /**
    * Origins allowed to call this from a browser. The app's own origin in
    * production; localhost while developing. Never `*`: this server spends
@@ -817,6 +820,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   let channels = options.channels;
   /** A channel key written down whose funding has not been seen to land. */
   let pendingChannel: Keypair | undefined;
+  const spendQuote =
+    options.spendQuote ??
+    new DirectSpendQuote({
+      horizonUrl:
+        options.networkId === "mainnet"
+          ? "https://horizon.stellar.org"
+          : "https://horizon-testnet.stellar.org",
+    });
   const prices =
     options.prices ??
     new XlmPriceSource({
@@ -2075,7 +2086,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const line = await readTrustline(options.rpc, signerFor(destination), payment.sendAsset);
     if (line === undefined || !line.authorized) return false;
     // what the owner's own offers have promised away cannot pay the settlement
-    return line.balanceStroops - line.sellingStroops >= decimalToStroops(payment.sendMax);
+    const spendable = line.balanceStroops - line.sellingStroops;
+    // What the trade costs now on the settlement's own direct path, not the
+    // ceiling it was signed with: an arrival between the two would otherwise
+    // never settle. A quote over the ceiling would fail on-chain and burn the
+    // channel's sequence, so it waits for the market instead.
+    const cost = await spendQuote.directSpendStroops(payment.sendAsset, payment.destAmount);
+    if (cost === undefined) return false;
+    const ceiling = decimalToStroops(payment.sendMax);
+    const withMargin = (cost * (10_000n + SPEND_MARGIN_BASIS_POINTS)) / 10_000n;
+    if (cost > ceiling) return false;
+    return spendable >= (withMargin < ceiling ? withMargin : ceiling);
   }
 
   /** Countersign what the user signed, and submit it. This is where money moves. */
@@ -2929,6 +2950,12 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/**
+ * Room over the quoted cost, in basis points, for the market moving in the
+ * seconds between the quote and the trade.
+ */
+const SPEND_MARGIN_BASIS_POINTS = 100n;
 
 /** Below this a channel is topped up: its 1 XLM minimum plus a few surge fees. */
 const CHANNEL_LOW_STROOPS = 15_000_000n;

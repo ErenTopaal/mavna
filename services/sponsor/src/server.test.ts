@@ -47,6 +47,7 @@ import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps
 import { ChannelPool } from "./channels.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
+import { DirectSpendQuote } from "./spend.js";
 import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -368,6 +369,25 @@ class FixedPrice extends XlmPriceSource {
   }
 }
 
+/**
+ * Horizon's quote for the settlement's direct path, answered here: by default
+ * the fixed price above (five XLM a USDC), or `quote` when a test sets it,
+ * null for a market with no direct path.
+ */
+class FixedSpend extends DirectSpendQuote {
+  quote: bigint | null | undefined = undefined;
+  constructor() {
+    super({ horizonUrl: "https://127.0.0.1:9" });
+  }
+
+  override async directSpendStroops(_asset: Asset, destXlm: string): Promise<bigint | undefined> {
+    if (this.quote === null) return undefined;
+    if (this.quote !== undefined) return this.quote;
+    const [whole = "0", fraction = ""] = destXlm.split(".");
+    return (BigInt(whole) * 10_000_000n + BigInt(fraction.padEnd(7, "0"))) / 5n;
+  }
+}
+
 interface TestServer {
   readonly server: SponsorServer;
   readonly url: string;
@@ -447,6 +467,7 @@ async function startServer(
     irisUrl: IRIS,
     channels: new ChannelPool({ channels: [channel] }),
     prices: new FixedPrice(),
+    spendQuote: new FixedSpend(),
     allowedOrigins: [],
     ...overrides,
   };
@@ -1979,6 +2000,55 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(server.rpc.submissions).toHaveLength(1);
     expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
     expect((await caps.usage()).stranded).toBe(0);
+  });
+});
+
+describe("an arrival below the signed ceiling that still covers the trade", () => {
+  // 1.5 XLM at five XLM a USDC: 0.3 USDC, against a ceiling of 0.6
+  it("settles when the account holds what the direct path spends now, with a margin", async () => {
+    const spend = new FixedSpend();
+    spend.quote = 3_000_000n;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+
+    server.rpc.holding(user, 3_010_000n);
+    const short = await server.post("/settle", { destination: user.publicKey() });
+    expect(short.body.settled).toBe(false);
+    expect(server.rpc.submissions).toEqual([]);
+
+    server.rpc.holding(user, 3_100_000n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+
+  it("does not settle when the market has no direct path, whatever the balance", async () => {
+    const spend = new FixedSpend();
+    spend.quote = null;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("does not settle on a quote above the ceiling the account signed", async () => {
+    const spend = new FixedSpend();
+    spend.quote = 7_000_000n;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, 6_500_000n);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      false,
+    );
+    expect(server.rpc.submissions).toEqual([]);
   });
 });
 

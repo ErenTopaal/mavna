@@ -213,9 +213,11 @@ Answers:
 
 Submits the held settlement for an account, for rails that deliver without this
 server: LayerZero and Axelar land funds on Stellar by themselves. It submits only
-once the account's preparation has landed and the account's trustline holds the
-most the settlement may spend; until then it answers that it did not settle and
-that asking again can. A sweep does the same for every held settlement on an
+once the account's preparation has landed and the account can spend what the
+trade costs now: Horizon's quote for the settlement's own direct path plus 1%,
+never more than the ceiling the account signed, out of USDC not promised to its
+own open offers. A quote over that ceiling, or no direct path at all, waits for the
+market. Until then it answers that it did not settle and that asking again can. A sweep does the same for every held settlement on an
 interval, so a closed tab does not leave the reserve unpaid; see
 `MAVNA_SETTLE_SWEEP_SECONDS` in the [configuration](/developers/sponsor#configuration).
 
