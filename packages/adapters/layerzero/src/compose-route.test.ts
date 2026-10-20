@@ -1,7 +1,7 @@
 import type { Asset, ComposeQuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { isRejection } from "@mavna/core";
 import { RpcClient } from "@mavna/stellar";
-import { Keypair, Networks, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Keypair, Networks, Asset as StellarAsset, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import entries from "./__fixtures__/testnet-ledger-entries.json" with { type: "json" };
 import { LayerZeroAdapter } from "./adapter.js";
@@ -64,12 +64,60 @@ const source: Asset = {
   curatedBy: undefined,
 };
 
+/** An account entry, and a USDC trustline with this much room under its limit. */
+function accountWithRoom(address: string, room: bigint) {
+  const accountId = Keypair.fromPublicKey(address).xdrAccountId();
+  const at = (key: xdr.LedgerKey, data: xdr.LedgerEntryData) => ({
+    key: key.toXDR("base64"),
+    xdr: data.toXDR("base64"),
+    lastModifiedLedgerSeq: entries.arrival.latestLedger,
+  });
+  const [code, issuer] = usdc.id.split(":");
+  const line = new StellarAsset(code ?? "", issuer).toTrustLineXDRObject();
+  return [
+    at(
+      xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId })),
+      xdr.LedgerEntryData.account(
+        new xdr.AccountEntry({
+          accountId,
+          balance: xdr.Int64.fromString("100000000"),
+          seqNum: xdr.Int64.fromString("1"),
+          numSubEntries: 1,
+          inflationDest: null,
+          flags: 0,
+          homeDomain: "",
+          thresholds: Buffer.from([1, 0, 0, 0]),
+          signers: [],
+          ext: new xdr.AccountEntryExt(0),
+        }),
+      ),
+    ),
+    at(
+      xdr.LedgerKey.trustline(new xdr.LedgerKeyTrustLine({ accountId, asset: line })),
+      xdr.LedgerEntryData.trustline(
+        new xdr.TrustLineEntry({
+          accountId,
+          asset: line,
+          balance: xdr.Int64.fromString("0"),
+          limit: xdr.Int64.fromString(room.toString()),
+          flags: 1,
+          ext: new xdr.TrustLineEntryExt(0),
+        }),
+      ),
+    ),
+  ];
+}
+
+/** A recipient whose USDC trustline has room for only 0.05 USDC. */
+const NEARLY_FULL = Keypair.random().publicKey();
+
 function rpcFromRecording(): RpcClient {
   const client = new RpcClient({ url: "https://rpc.invalid" });
   const known = new Map<string, { readonly xdr: string; readonly lastModifiedLedgerSeq: number }>();
   for (const recorded of Object.values(entries)) {
     for (const e of recorded.entries) known.set(e.key, e);
   }
+  for (const e of accountWithRoom(NEARLY_FULL, 500_000n)) known.set(e.key, e);
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => ({
     latestLedger: entries.arrival.latestLedger,
     entries: keys.flatMap((k) => {
@@ -286,6 +334,22 @@ describe("a compose route", () => {
     expect((result as RouteRejection).explanation).toMatch(/cannot hold USDC yet/);
   });
 
+  it("is refused for an account whose trustline has no room for what the conversion pays", async () => {
+    // the venue quotes 0.1 USDC, twice what the limit leaves room for
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, request(NEARLY_FULL));
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+    expect((result as RouteRejection).explanation).toMatch(/room for only 0\.05 USDC/);
+  });
+
+  it("is refused for a contract id with nothing deployed behind it", async () => {
+    const { ctx } = context();
+    const empty = StrKey.encodeContract(Buffer.alloc(32, 3));
+    const result = await quoteComposeRoute(ctx, request(empty));
+    expect(result).toMatchObject({ reason: "destination-unsupported" });
+    expect((result as RouteRejection).explanation).toMatch(/No contract exists/);
+  });
+
   it("leaves a brand-new account to the plain route", async () => {
     const { ctx } = context();
     const result = await quoteComposeRoute(ctx, request(Keypair.random().publicKey()));
@@ -432,6 +496,9 @@ describe("building a compose send", () => {
         resolved,
       ),
     ).rejects.toThrow(/does not exist yet/);
+    await expect(
+      composeSendFor(ctx, { ...route, compose: route.compose, destination: NEARLY_FULL }, resolved),
+    ).rejects.toThrow(/room for only/);
     await expect(
       composeSendFor(
         ctx,

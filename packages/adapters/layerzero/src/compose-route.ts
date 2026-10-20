@@ -12,7 +12,7 @@ import type {
   StepPhase,
 } from "@mavna/core";
 import { amountOf, MavnaError } from "@mavna/core";
-import { AccountNotFound, inspectDestination, type RpcClient } from "@mavna/stellar";
+import { inspectDestination, type RpcClient } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import {
   type ArrivalConfig,
@@ -126,12 +126,17 @@ function stellarAssetOf(asset: Asset): StellarAsset | undefined {
   }
 }
 
-/** Why `destination` cannot take `asset` from a contract right now, or undefined. */
+/**
+ * Why `destination` cannot take `asset` from a contract right now, or undefined.
+ * With an amount, a trustline whose limit leaves less room than that counts as
+ * unable: the contract would deliver as it came, or keep the compose queued.
+ */
 async function cannotHold(
   rpc: RpcClient,
   destination: string,
   asset: Asset,
   role: "wanted" | "arriving",
+  amountStroops?: bigint,
 ): Promise<string | undefined> {
   const stellar = stellarAssetOf(asset);
   if (stellar === undefined) {
@@ -140,18 +145,14 @@ async function cannotHold(
   const newAccount =
     "That Stellar account does not exist yet, and a contract cannot create one, so it cannot " +
     "receive a conversion on arrival. The plain route sets the account up.";
-  if (stellar.isNative()) {
-    // an account holds XLM by existing, and a contract always can
-    if (destination.startsWith("C")) return undefined;
-    try {
-      await rpc.loadAccount(destination);
-      return undefined;
-    } catch (cause) {
-      if (cause instanceof AccountNotFound) return newAccount;
-      throw cause;
-    }
-  }
-  const state = await inspectDestination(rpc, destination, stellar);
+  // one check for every case: it reads an account for XLM and a contract's
+  // instance for a C address, so nothing is assumed to exist
+  const state = await inspectDestination(
+    rpc,
+    destination,
+    stellar,
+    amountStroops === undefined ? {} : { amountStroops },
+  );
   switch (state.lane.kind) {
     case "contract-ready":
       return undefined;
@@ -167,9 +168,6 @@ async function cannotHold(
             `conversion cannot meet your minimum. Add a ${asset.symbol} trustline, or take the ` +
             "plain route.";
     case "ready":
-      if (state.trustline !== undefined && !state.trustline.authorized) {
-        return `The issuer of ${asset.symbol} has not authorised that account to hold it.`;
-      }
       return undefined;
   }
 }
@@ -313,7 +311,13 @@ export async function quoteComposeRoute(
   try {
     const why =
       (await cannotHold(ctx.rpc, destination, wanted, "wanted")) ??
-      (await cannotHold(ctx.rpc, destination, arriving, "arriving"));
+      (await cannotHold(
+        ctx.rpc,
+        destination,
+        arriving,
+        "arriving",
+        BigInt(plain.receives.baseUnits),
+      ));
     if (why !== undefined) return ctx.decline("destination-unsupported", why);
     if (fee !== undefined && fee.bps > 0) {
       const feeWhy = await cannotHold(ctx.rpc, fee.recipient, wanted, "wanted");
@@ -371,6 +375,19 @@ export async function quoteComposeRoute(
     return ctx.decline(
       "amount-too-small",
       `Too little would arrive to convert into ${wanted.symbol}. The plain route still delivers it.`,
+    );
+  }
+
+  // the payout is known now, so the recipient's limit is held to it
+  try {
+    const why = await cannotHold(ctx.rpc, destination, wanted, "wanted", out - taken);
+    if (why !== undefined) return ctx.decline("destination-unsupported", why);
+  } catch (cause) {
+    return ctx.decline(
+      "temporarily-unavailable",
+      cause instanceof MavnaError && cause.retryable
+        ? "Stellar did not answer freshly enough to check that address. Try again in a moment."
+        : "That address could not be checked for a conversion on arrival.",
     );
   }
 
@@ -523,9 +540,27 @@ export async function composeSendFor(
   // the contract cannot send anything back once it holds it, so a recipient that
   // cannot be named in the message, or cannot take what arrives, is never sent to
   const composeMsg = encodeArrivalMessage(route.destination, route.compose);
+  const arrived = route.steps.find((s) => s.kind === "compose")?.from.baseUnits;
+  if (arrived === undefined) {
+    throw new MavnaError("This route has no conversion step to say how much arrives.", {
+      retryable: false,
+    });
+  }
   const why =
-    (await cannotHold(ctx.rpc, route.destination, route.compose.arriving, "arriving")) ??
-    (await cannotHold(ctx.rpc, route.destination, route.compose.wanted, "wanted"));
+    (await cannotHold(
+      ctx.rpc,
+      route.destination,
+      route.compose.arriving,
+      "arriving",
+      BigInt(arrived),
+    )) ??
+    (await cannotHold(
+      ctx.rpc,
+      route.destination,
+      route.compose.wanted,
+      "wanted",
+      BigInt(route.receives.baseUnits),
+    ));
   if (why !== undefined) throw new MavnaError(why, { retryable: false });
   return {
     to: route.compose.contract,
