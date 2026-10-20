@@ -1,4 +1,11 @@
-import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
+import {
+  type Asset,
+  MavnaError,
+  type QuoteRequest,
+  type Route,
+  type RouteRejection,
+  type StepPhase,
+} from "@mavna/core";
 import {
   createNetworkConfig,
   PUBLIC_MAINNET_RPC_URLS,
@@ -10,9 +17,11 @@ import { describe, expect, it } from "vitest";
 import { AxelarAdapter } from "./adapter.js";
 import { chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { discoverLiveChains, discoverStellarChain } from "./discovery.js";
-import { EvmReader } from "./evm.js";
+import { EvmReader, fetchEthChainId } from "./evm.js";
 import { estimateItsFee, priceTransfer } from "./fees.js";
+import { PINNED_DEPLOYMENTS } from "./pinned.js";
 import { StellarItsReader } from "./stellar-its.js";
+import { readHorizonExecution } from "./stellar-receipt.js";
 import { chainsTrustEachOther, resolveItsToken, TOKEN_MANAGER } from "./token.js";
 
 /**
@@ -132,7 +141,7 @@ describe("the identifiers, none of which are written down", () => {
 describe("the four bytes that would silently call the wrong function", () => {
   it("every selector is present in the deployed token service", async () => {
     const source = await evmTokenService("testnet", "hyperliquid");
-    const response = await fetch(source.rpcUrl, {
+    const response = await fetch(source.rpcUrls[0] ?? "", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -147,14 +156,18 @@ describe("the four bytes that would silently call the wrong function", () => {
 
     // The token service reads through a proxy, so the trust and token getters
     // are checked by calling them rather than by grepping the proxy's bytecode.
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     const { stellarChain } = await testnetReaders();
     await expect(evm.trustsChain(source.address, stellarChain.id)).resolves.toBe(true);
   });
 
   it("reads a token id back as the value the token itself reports", async () => {
     const source = await evmTokenService("testnet", "hyperliquid");
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     const tokenId = await evm.interchainTokenId(AXE_HYPERLIQUID);
     // The identifier the specification records for Stellar's AXE, arrived at
     // from the other end of the route.
@@ -169,7 +182,9 @@ describe("the trust check, which two token service versions answer differently",
   it("gets a real answer from a 2.1.x chain, which has no isTrustedChain at all", async () => {
     const source = await evmTokenService("testnet", "base-sepolia");
     const { stellarChain } = await testnetReaders();
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     // 2.1.x reverts on isTrustedChain and answers trustedAddress with "hub".
     // Reading only the first would decline every route on most of mainnet.
     await expect(evm.trustsChain(source.address, stellarChain.id)).resolves.toBe(true);
@@ -178,19 +193,25 @@ describe("the trust check, which two token service versions answer differently",
   it("gets a real answer from a 2.2.0 chain, which has no useful trustedAddress", async () => {
     const source = await evmTokenService("testnet", "hyperliquid");
     const { stellarChain } = await testnetReaders();
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     await expect(evm.trustsChain(source.address, stellarChain.id)).resolves.toBe(true);
   });
 
   it("says no to a name that does not exist, rather than erroring", async () => {
     const source = await evmTokenService("testnet", "base-sepolia");
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     await expect(evm.trustsChain(source.address, "not-a-real-chain")).resolves.toBe(false);
   });
 
   it("catches the unversioned Stellar name, which looks right and is not", async () => {
     const source = await evmTokenService("testnet", "hyperliquid");
-    const evm = new EvmReader(source.rpcUrl);
+    const evm = new EvmReader(source.rpcUrls, undefined, {
+      expectedChainId: source.chain.evmChainId,
+    });
     // "stellar" is the MAINNET name. On testnet it is a confident no.
     await expect(evm.trustsChain(source.address, "stellar")).resolves.toBe(false);
   });
@@ -200,7 +221,7 @@ describe("the trust check, which two token service versions answer differently",
     const { stellarChain, stellar } = await testnetReaders();
     await expect(
       chainsTrustEachOther({
-        evm: new EvmReader(source.rpcUrl),
+        evm: new EvmReader(source.rpcUrls, undefined, { expectedChainId: source.chain.evmChainId }),
         stellar,
         tokenService: source.address,
         sourceAxelarId: "base-sepolia",
@@ -224,7 +245,7 @@ describe("resolving a token against both chains", () => {
       sourceChainId: "base-sepolia",
       tokenService: source.address,
       tokenAddress: IXE_BASE_SEPOLIA,
-      evm: new EvmReader(source.rpcUrl),
+      evm: new EvmReader(source.rpcUrls, undefined, { expectedChainId: source.chain.evmChainId }),
       stellar,
     });
 
@@ -247,7 +268,7 @@ describe("resolving a token against both chains", () => {
       sourceChainId: "hyperliquid",
       tokenService: source.address,
       tokenAddress: AXE_HYPERLIQUID,
-      evm: new EvmReader(source.rpcUrl),
+      evm: new EvmReader(source.rpcUrls, undefined, { expectedChainId: source.chain.evmChainId }),
       stellar,
     });
 
@@ -269,7 +290,7 @@ describe("resolving a token against both chains", () => {
         tokenService: source.address,
         // A real ERC-20 on base-sepolia that was never linked: Circle's USDC.
         tokenAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        evm: new EvmReader(source.rpcUrl),
+        evm: new EvmReader(source.rpcUrls, undefined, { expectedChainId: source.chain.evmChainId }),
         stellar,
       }),
     ).rejects.toThrow();
@@ -444,7 +465,7 @@ describe("pricing, and the zero that means something else", () => {
     const base = await chainConfig("testnet", "base-sepolia");
     const symbol = base.nativeCurrency?.symbol;
     expect(symbol).toBe("ETH");
-    const response = await fetch(base.rpcUrl ?? "", {
+    const response = await fetch(base.rpcUrls[0] ?? "", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_gasPrice", params: [] }),
@@ -492,14 +513,15 @@ describe("status, across both legs", () => {
   const DELIVERED = "0x6d2b4dd58e2501708cd6bd73ca578097cec519fe634bc9fbadf6e86e9b05ca7f";
 
   it("reports a finished transfer as done, having checked the second leg too", async () => {
-    const phase = await adapter.status({
-      sourceTxHash: DELIVERED,
-      sourceChainId: "base-sepolia",
-      depositAddress: undefined,
-      destinationAddress: undefined,
-    });
-    expect(phase.phase).toBe("done");
-    if (phase.phase !== "done") return;
+    const phase = await doneOrUnverified(() =>
+      adapter.status({
+        sourceTxHash: DELIVERED,
+        sourceChainId: "base-sepolia",
+        depositAddress: undefined,
+        destinationAddress: undefined,
+      }),
+    );
+    if (phase === "unverified") return;
     expect(phase.received.baseUnits).toBe("10000000000");
     expect(phase.received.asset.symbol).toBe("IXE");
     // Axelar's own explorer, because it is the only view showing both legs.
@@ -570,7 +592,7 @@ describe("mainnet, where the assets people actually hold are", () => {
       // Real USDC. A plain ERC-20 that has no idea it is an interchain token, so
       // its identifier can only come from Axelar's published list.
       tokenAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      evm: new EvmReader(source.rpcUrl),
+      evm: new EvmReader(source.rpcUrls, undefined, { expectedChainId: source.chain.evmChainId }),
       stellar: new StellarItsReader(mainnetRpc, service, "mainnet"),
     });
 
@@ -611,5 +633,179 @@ describe("mainnet, where the assets people actually hold are", () => {
     const byApiName = await chainConfig("mainnet", "ethereum");
     const byContractName = await chainConfig("mainnet", "Ethereum");
     expect(byContractName.id).toBe(byApiName.id);
+  });
+});
+
+/**
+ * Done, or, for a token that is its own contract once its delivery has aged out
+ * of what public Stellar RPC keeps, the honest "executed, cannot re-verify"
+ * answer. Never done without an amount, never another amount.
+ */
+async function doneOrUnverified(
+  ask: () => Promise<StepPhase>,
+): Promise<Extract<StepPhase, { phase: "done" }> | "unverified"> {
+  // Axelar's search rate limits a burst with 429, which the adapter rightly
+  // reports as a retry, so a retry is what this does before judging.
+  let outcome: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    outcome = await ask().catch((cause: unknown) => cause);
+    if (!(outcome instanceof MavnaError && outcome.retryable)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  if (outcome instanceof Error) throw outcome;
+  const phase = outcome as StepPhase;
+  if (phase.phase === "delivered-unverified") {
+    expect(phase.ref.explorerUrl).toContain(phase.ref.txHash);
+    return "unverified";
+  }
+  expect(phase.phase).toBe("done");
+  if (phase.phase !== "done") throw new Error(`expected done, got ${phase.phase}`);
+  return phase;
+}
+
+describe("mainnet transfers whose Stellar-leg record misstates the amount", () => {
+  // Read-only. Axelar's record for the WETH leg carries no amount, and for BCB
+  // it says six decimals for a seven-decimal token. Both were delivered.
+  const mainnet = new AxelarAdapter({
+    network: "mainnet",
+    rpc: new RpcClient({ url: PUBLIC_MAINNET_RPC_URLS[0] ?? "" }),
+    baseReserveStroops: 5_000_000,
+  });
+
+  it("reads the WETH delivery from Stellar", async () => {
+    const phase = await doneOrUnverified(() =>
+      mainnet.status({
+        sourceTxHash: "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+        sourceChainId: "ethereum",
+        depositAddress: undefined,
+        destinationAddress: "GAY4QJXQ43JXXTUX3KKARXJS7ARPTK5KF5IK4R2B5CYKIEFY2Q4RCVNA",
+      }),
+    );
+    if (phase === "unverified") return;
+    expect(phase.received.baseUnits).toBe("149500000000000000");
+    expect(phase.received.asset.id).toBe(
+      "CDTRXQUOFLCNAEC7DBZT36MBVQ2EDUNUKT4GYOZHOMYOFR7QWTC5IIRV",
+    );
+    expect(phase.received.asset.decimals).toBe(18);
+  });
+
+  it("reads the BCB delivery from Stellar in the token's own seven decimals", async () => {
+    const phase = await doneOrUnverified(() =>
+      mainnet.status({
+        sourceTxHash: "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+        sourceChainId: "ethereum",
+        depositAddress: undefined,
+        destinationAddress: "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+      }),
+    );
+    // a Stellar asset: done however old, from Horizon once RPC has dropped it
+    if (phase === "unverified")
+      throw new Error("a Stellar asset must be proven, not left unverified");
+    expect(phase.received.baseUnits).toBe("30000000000");
+    expect(phase.received.asset.id).toBe(
+      "BCB:GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+    );
+    expect(phase.received.asset.decimals).toBe(7);
+  });
+});
+
+describe("the nodes the adapter reads each confirmed chain through", () => {
+  it("never answer as another chain, and at least one answers as each chain", async () => {
+    // a node that cannot be reached from here is allowed (the reader moves on);
+    // one that answers as a different chain, or a chain with no node answering,
+    // is not
+    for (const network of ["testnet", "mainnet"] as const) {
+      const chains = await loadChains(network);
+      const wrong: string[] = [];
+      for (const chain of chains.values()) {
+        if (chain.family !== "evm" || chain.interchainTokenService === undefined) continue;
+        let answered = false;
+        for (const url of PINNED_DEPLOYMENTS[network][chain.id]?.rpcUrls ?? []) {
+          const id = await fetchEthChainId(url).catch(() => undefined);
+          if (id === undefined) continue;
+          if (id === chain.evmChainId) answered = true;
+          else wrong.push(`${network}/${chain.id} ${url} answers ${id}`);
+        }
+        if (!answered) wrong.push(`${network}/${chain.id}: no node answered`);
+      }
+      expect(wrong, wrong.join("\n")).toEqual([]);
+    }
+  });
+});
+
+describe("quoting from Base mainnet, whose config node does not resolve", () => {
+  it("reads Base through its confirmed nodes and gives a real answer, not a retry", async () => {
+    // RMRK is an interchain token on Base (Axelar's list, token id 0xb689de70...).
+    // No token in that list is on both Base and Stellar, so the quote declines:
+    // it has to read Base's token service through the node list to do so, and
+    // Stellar's service also says false to is_trusted_chain("base"). Before the
+    // node list it said "did not answer just now" every time, because
+    // developer-access-mainnet.base.org has no address record.
+    const mainnet = new AxelarAdapter({
+      network: "mainnet",
+      rpc: new RpcClient({ url: PUBLIC_MAINNET_RPC_URLS[0] ?? "" }),
+      baseReserveStroops: 5_000_000,
+    });
+    const from: Asset = {
+      chainId: "base",
+      id: "0x524d524B4c9366be706D3A90dcf70076ca037aE3",
+      symbol: "RMRK",
+      decimals: 18,
+      curatedBy: "Axelar",
+    };
+    const result = await mainnet.quote({
+      from,
+      to: {
+        chainId: "stellar",
+        id: "native",
+        symbol: "XLM",
+        decimals: 7,
+        curatedBy: "Stellar",
+      },
+      sends: { asset: from, baseUnits: "1000000000000000000" },
+      destination: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+      maxSlippageBps: 50,
+    });
+    if (!("reason" in result)) throw new Error("expected a decline");
+    expect(result.reason, result.explanation).not.toBe("temporarily-unavailable");
+    expect(result.retryable).toBe(false);
+  });
+});
+
+describe("Horizon's record of the two mainnet deliveries", () => {
+  // Read-only, against horizon.stellar.org, which keeps every transaction.
+  const ITS = "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6";
+
+  it("shows the BCB execution, its message and the asset paid to the recipient", async () => {
+    const execution = await readHorizonExecution({
+      horizonUrl: "https://horizon.stellar.org",
+      txHash: "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+      tokenService: ITS,
+      messageId: "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+    });
+    expect(execution.tokenId).toBe(
+      "950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f",
+    );
+    expect(execution.recipient).toBe("GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL");
+    expect(execution.amount).toBe(30_000_000_000n);
+    expect(execution.balanceChanges).toContainEqual(
+      expect.objectContaining({
+        asset_code: "BCB",
+        asset_issuer: "GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+        to: "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+        amount: "3000.0000000",
+      }),
+    );
+  });
+
+  it("shows the WETH execution and its message, and no balance change to prove the amount", async () => {
+    const execution = await readHorizonExecution({
+      horizonUrl: "https://horizon.stellar.org",
+      txHash: "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+      tokenService: ITS,
+      messageId: "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+    });
+    expect(execution.amount).toBe(149_500_000_000_000_000n);
+    expect(execution.balanceChanges).toEqual([]);
   });
 });

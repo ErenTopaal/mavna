@@ -546,20 +546,35 @@ export class CctpAdapter implements BridgeAdapter {
           : nonEvmExplorerTxUrl(this.network, chainId, handle.sourceTxHash),
     };
 
-    // Every burn to Stellar in the transaction has to have landed before the
-    // transfer is done, and what arrived is all of them together.
+    // The recipient is read from each attested message rather than the handle,
+    // since the message is what the forwarder delivers to. A batch can pay
+    // several people, so when the handle names its recipient only the burns to
+    // that recipient are this transfer; one whose recipient cannot be read yet
+    // is kept, so it is waited for rather than skipped.
+    const recipientOf = (attestation: Attestation): string | undefined =>
+      attestation.hookData === undefined
+        ? undefined
+        : parseForwarderHookData(fromHex(attestation.hookData)).recipient;
+    const destination = handle.destinationAddress;
+    const ours = attestations.filter((attestation) => {
+      const recipient = recipientOf(attestation);
+      return destination === undefined || recipient === undefined || recipient === destination;
+    });
+    if (ours.length === 0) {
+      throw new MavnaError(
+        `This transaction burns USDC for Stellar, and none of it is for ${destination}.`,
+        { retryable: false },
+      );
+    }
+
+    // Every one of them has to have landed before the transfer is done, and
+    // what arrived is all of them together.
     let received = 0n;
-    for (const attestation of attestations) {
+    for (const attestation of ours) {
       if (attestation.status !== "complete" || attestation.message === undefined) {
         return { phase: "pending", ref, expectedByUnix: 0 };
       }
-      // The recipient is read from the attested message rather than the handle,
-      // since the message is what the forwarder delivers to.
-      const recipient =
-        attestation.hookData === undefined
-          ? undefined
-          : parseForwarderHookData(fromHex(attestation.hookData)).recipient;
-      const delivery = await this.proof.find(attestation.message, recipient);
+      const delivery = await this.proof.find(attestation.message, recipientOf(attestation));
       if (delivery === undefined) return { phase: "pending", ref, expectedByUnix: 0 };
       received += delivery.amount;
     }
@@ -636,7 +651,18 @@ export class CctpAdapter implements BridgeAdapter {
         "Circle is not quoting the standard path for this route right now.",
       );
     }
-    return circleFee(amount, standard.minimumFee);
+    try {
+      return circleFee(amount, standard.minimumFee);
+    } catch (cause) {
+      // A rate that cannot be read exactly is not priced in a guess, and a
+      // quote answers with a reason rather than throwing.
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+      );
+    }
   }
 
   private stellarUsdcAsset(): Asset {

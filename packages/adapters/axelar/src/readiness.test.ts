@@ -335,6 +335,7 @@ function adapter(): AxelarAdapter {
     baseReserveStroops: BASE_RESERVE,
     prices: new XlmPriceSource({ horizonUrl: HORIZON }),
     ethCall,
+    ethChainId: async () => 84532,
   });
 }
 
@@ -563,6 +564,7 @@ describe("a classic asset, by destination lane", () => {
       baseReserveStroops: BASE_RESERVE,
       prices: new XlmPriceSource({ horizonUrl: HORIZON }),
       ethCall,
+      ethChainId: async () => 84532,
     });
     const result = await instance.quote(ask());
 
@@ -716,50 +718,12 @@ describe("where an Axelar transfer stands, over both legs", () => {
     expect((await status()).phase).toBe("failed");
   });
 
-  it("names what arrived as the Stellar asset, in the Stellar leg's amount", async () => {
-    classicUsdc();
+  it("stays pending while Axelar has not named the Stellar transaction that delivered it", async () => {
+    // what arrived is read from that transaction (delivered.test.ts replays two
+    // real ones), so without it there is nothing to report done from
     gmp.first = [firstLeg()];
     gmp.second = [secondLeg()];
-    const phase = await status();
-    expect(phase.phase).toBe("done");
-    if (phase.phase !== "done") return;
-    expect(phase.received.asset.id).toBe(USDC_ID);
-    expect(phase.received.asset.chainId).toBe("stellar-testnet");
-    expect(phase.received.asset.symbol).toBe("USDC");
-    expect(phase.received.asset.decimals).toBe(7);
-    // the Stellar leg's figure, not the six-decimal one the sending side carried
-    expect(phase.received.baseUnits).toBe("100000000");
-  });
-
-  it("names an interchain token by its contract", async () => {
-    interchainToken();
-    gmp.first = [firstLeg()];
-    gmp.second = [
-      secondLeg({
-        interchain_transfer: { ...(secondLeg().interchain_transfer as object), symbol: "IXE" },
-      }),
-    ];
-    const phase = await status();
-    if (phase.phase !== "done") throw new Error(`expected done, got ${phase.phase}`);
-    expect(phase.received.asset.id).toBe(INTERCHAIN_TOKEN);
-    expect(phase.received.asset.symbol).toBe("IXE");
-  });
-
-  it("refuses to show an amount it cannot read rather than inventing one", async () => {
-    classicUsdc();
-    gmp.first = [firstLeg()];
-    gmp.second = [secondLeg({ interchain_transfer: { tokenId: TOKEN_ID.slice(2) } })];
-    const missing = await status().catch((cause: unknown) => cause);
-    expect(missing).toBeInstanceOf(MavnaError);
-
-    gmp.second = [
-      secondLeg({
-        interchain_transfer: { ...(secondLeg().interchain_transfer as object), decimals: 6 },
-      }),
-    ];
-    const wrongUnit = await status().catch((cause: unknown) => cause);
-    expect(wrongUnit).toBeInstanceOf(MavnaError);
-    expect((wrongUnit as MavnaError).message).toMatch(/6 decimals/);
+    expect((await status()).phase).toBe("pending");
   });
 });
 

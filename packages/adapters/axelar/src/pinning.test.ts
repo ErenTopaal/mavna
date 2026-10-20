@@ -82,3 +82,26 @@ describe("Axelar's deployment configuration", () => {
     expect((await evmTokenService("testnet", "base-sepolia")).address).toBe(ITS);
   });
 });
+
+describe("the nodes a confirmed chain is read through", () => {
+  it("are the ones the sweep confirmed, with the config's node only one more candidate", async () => {
+    const pinned = PINNED_DEPLOYMENTS.testnet["base-sepolia"];
+    expect(pinned?.rpcUrls.length).toBeGreaterThan(0);
+    publish({
+      "base-sepolia": { ...evmChain("base-sepolia", ITS, GAS), rpc: "https://dead.invalid" },
+    });
+    const { rpcUrls } = await evmTokenService("testnet", "base-sepolia");
+    expect(rpcUrls.slice(0, pinned?.rpcUrls.length)).toEqual(pinned?.rpcUrls);
+    expect(rpcUrls).toContain("https://dead.invalid");
+  });
+
+  it("are recorded for every confirmed EVM chain", () => {
+    for (const network of ["testnet", "mainnet"] as const) {
+      for (const [id, chain] of Object.entries(PINNED_DEPLOYMENTS[network])) {
+        if (chain.gasService === undefined) continue; // Stellar
+        expect(chain.rpcUrls.length, `${network}/${id}`).toBeGreaterThan(0);
+        for (const url of chain.rpcUrls) expect(url, `${network}/${id}`).toMatch(/^https:\/\//);
+      }
+    }
+  });
+});

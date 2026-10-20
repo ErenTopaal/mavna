@@ -95,22 +95,130 @@ function isRevert(code: number | undefined, message: string): boolean {
   return /revert|invalid opcode/i.test(message);
 }
 
+/** How a node is asked which chain it serves. Injectable so tests can hold one still. */
+export type EthChainId = (rpcUrl: string) => Promise<number>;
+
+export const fetchEthChainId: EthChainId = async (rpcUrl) => {
+  const reply = await requestJson("An EVM node", rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+  });
+  if (!reply.ok) {
+    throw new MavnaError(`An EVM node answered HTTP ${reply.status}.`, {
+      retryable: reply.status >= 500 || reply.status === 429,
+    });
+  }
+  const result = (reply.body as JsonRpcResponse).result;
+  if (typeof result !== "string" || !/^0x[0-9a-f]+$/i.test(result)) {
+    throw new MavnaError("An EVM node did not say which chain it serves.", { retryable: true });
+  }
+  return Number(BigInt(result));
+};
+
+/**
+ * What each node has said its chain is, for the life of the process. Asked once
+ * per node: a node does not change chains, and asking before every read would
+ * double the calls. Only answers are kept, never failures, so a node that was
+ * briefly unreachable is asked again next time.
+ */
+const checkedNodes = new Map<string, number>();
+
+/** Forgets every node's answer, so the next read asks again. */
+export function forgetCheckedNodes(): void {
+  checkedNodes.clear();
+}
+
+function nodeFailed(cause: unknown): boolean {
+  if (cause instanceof EvmRevert) return false;
+  if (cause instanceof MavnaError) return cause.retryable;
+  // what fetch throws when a request cannot be sent at all
+  return cause instanceof TypeError;
+}
+
+export interface EvmReaderOptions {
+  /**
+   * The chain the nodes must serve. A node answering another chain id is never
+   * read through: the token service sits at the same address on most chains, so
+   * a node on the wrong one gives a confident wrong answer rather than an error.
+   */
+  readonly expectedChainId?: number | undefined;
+  readonly chainIdOf?: EthChainId | undefined;
+}
+
 export class EvmReader {
   // Declared and assigned rather than written as constructor parameters. The repo
   // runs `erasableSyntaxOnly`, which forbids any syntax that emits runtime code,
   // and a parameter property is exactly that.
-  private readonly rpcUrl: string;
+  private readonly rpcUrls: readonly string[];
   private readonly call: EthCall;
+  private readonly expectedChainId: number | undefined;
+  private readonly chainIdOf: EthChainId;
 
-  constructor(rpcUrl: string, call: EthCall = fetchEthCall) {
-    this.rpcUrl = rpcUrl;
+  /**
+   * Nodes in order of preference: the ones the sweep confirmed, then Axelar's
+   * config node as one more candidate. A read goes to the first node that has
+   * said it is the expected chain and answers; one that is unreachable or busy
+   * passes the read to the next.
+   */
+  constructor(
+    rpcUrls: string | readonly string[],
+    call: EthCall = fetchEthCall,
+    options: EvmReaderOptions = {},
+  ) {
+    this.rpcUrls = typeof rpcUrls === "string" ? [rpcUrls] : rpcUrls;
+    if (this.rpcUrls.length === 0) {
+      throw new MavnaError("There is no node to read this chain through.", { retryable: false });
+    }
     this.call = call;
+    this.expectedChainId = options.expectedChainId;
+    this.chainIdOf = options.chainIdOf ?? fetchEthChainId;
+  }
+
+  private async read(to: string, data: string): Promise<string> {
+    let last: unknown;
+    for (const url of this.rpcUrls) {
+      if (this.expectedChainId !== undefined) {
+        let chainId = checkedNodes.get(url);
+        if (chainId === undefined) {
+          try {
+            chainId = await this.chainIdOf(url);
+          } catch (cause) {
+            // unreachable is not wrong, so this node is asked again next time
+            last = cause;
+            continue;
+          }
+          checkedNodes.set(url, chainId);
+        }
+        if (chainId !== this.expectedChainId) {
+          last = new MavnaError(`${url} serves chain ${chainId}, not ${this.expectedChainId}.`, {
+            retryable: false,
+          });
+          continue;
+        }
+      }
+      try {
+        return await this.call(url, to, data);
+      } catch (cause) {
+        // Only a node failing to answer is passed to the next node. A revert is
+        // the contract's answer, a permanent refusal is a refusal, and anything
+        // else is a fault in this code; every node would give the same one.
+        if (!nodeFailed(cause)) throw cause;
+        last = cause;
+      }
+    }
+    throw new MavnaError(
+      `No node for this chain answered as it. Last problem: ${
+        last instanceof Error ? last.message : String(last)
+      }`,
+      { retryable: true, cause: last },
+    );
   }
 
   /** The ERC-20 the token service has registered under this token id, on this chain. */
   async registeredTokenAddress(service: string, tokenId: string): Promise<string> {
     const data = encodeCall(SELECTORS.registeredTokenAddress, [encodeBytes32(tokenId)]);
-    return decodeAddress(await this.call(this.rpcUrl, service, data));
+    return decodeAddress(await this.read(service, data));
   }
 
   /**
@@ -123,40 +231,40 @@ export class EvmReader {
    */
   async deployedTokenManager(service: string, tokenId: string): Promise<string> {
     const data = encodeCall(SELECTORS.deployedTokenManager, [encodeBytes32(tokenId)]);
-    return decodeAddress(await this.call(this.rpcUrl, service, data));
+    return decodeAddress(await this.read(service, data));
   }
 
   /** How the token manager moves the token, and which token it moves. */
   async tokenManagerKind(tokenManager: string): Promise<{ type: number; token: string }> {
     const data = encodeCall(SELECTORS.getImplementationTypeAndTokenAddress);
-    const result = await this.call(this.rpcUrl, tokenManager, data);
+    const result = await this.read(tokenManager, data);
     return { type: Number(decodeUint(result, 0)), token: decodeAddress(result, 1) };
   }
 
   /** A token deployed by the service knows its own id. Plain ERC-20s do not. */
   async interchainTokenId(token: string): Promise<string> {
     const data = encodeCall(SELECTORS.interchainTokenId);
-    return decodeBytes32(await this.call(this.rpcUrl, token, data));
+    return decodeBytes32(await this.read(token, data));
   }
 
   /** The gas service the token service itself pays into. */
   async gasService(service: string): Promise<string> {
-    return decodeAddress(await this.call(this.rpcUrl, service, encodeCall(SELECTORS.gasService)));
+    return decodeAddress(await this.read(service, encodeCall(SELECTORS.gasService)));
   }
 
   async decimals(token: string): Promise<number> {
     const data = encodeCall(SELECTORS.decimals);
-    return Number(decodeUint(await this.call(this.rpcUrl, token, data)));
+    return Number(decodeUint(await this.read(token, data)));
   }
 
   async symbol(token: string): Promise<string> {
     const data = encodeCall(SELECTORS.symbol);
-    return decodeString(await this.call(this.rpcUrl, token, data));
+    return decodeString(await this.read(token, data));
   }
 
   async allowance(token: string, owner: string, spender: string): Promise<bigint> {
     const data = encodeCall(SELECTORS.allowance, [encodeAddress(owner), encodeAddress(spender)]);
-    return decodeUint(await this.call(this.rpcUrl, token, data));
+    return decodeUint(await this.read(token, data));
   }
 
   /**
@@ -180,12 +288,12 @@ export class EvmReader {
   async trustsChain(service: string, chainId: string): Promise<boolean> {
     try {
       const data = encodeStringCall(SELECTORS.isTrustedChain, chainId);
-      return decodeBool(await this.call(this.rpcUrl, service, data));
+      return decodeBool(await this.read(service, data));
     } catch (cause) {
       if (!(cause instanceof EvmRevert)) throw cause;
     }
 
     const data = encodeStringCall(SELECTORS.trustedAddress, chainId);
-    return decodeString(await this.call(this.rpcUrl, service, data)).length > 0;
+    return decodeString(await this.read(service, data)).length > 0;
   }
 }

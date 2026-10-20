@@ -46,6 +46,17 @@ describe("terminal states", () => {
     expect(canAdvance(pending, asCame)).toBe(true);
   });
 
+  it("treats a delivery too old to re-verify as an ending, and never as done", () => {
+    const unverified: StepPhase = {
+      phase: "delivered-unverified",
+      ref,
+      because: "The token is its own contract, and its movements are no longer kept.",
+    };
+    expect(isTerminal(unverified)).toBe(true);
+    expect(isSuccess(unverified)).toBe(false);
+    expect(canAdvance(unverified, done)).toBe(false);
+  });
+
   it("keeps a conversion still to run apart from both endings", () => {
     const converting: StepPhase = {
       phase: "delivered-conversion-pending",

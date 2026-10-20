@@ -30,8 +30,14 @@ export {
   discoverLiveChains,
   discoverStellarChain,
 } from "./discovery.js";
-export type { EthCall } from "./evm.js";
-export { EvmReader, EvmRevert, fetchEthCall } from "./evm.js";
+export type { EthCall, EthChainId, EvmReaderOptions } from "./evm.js";
+export {
+  EvmReader,
+  EvmRevert,
+  fetchEthCall,
+  fetchEthChainId,
+  forgetCheckedNodes,
+} from "./evm.js";
 export type { GasEstimate, PricedIn, TransferPrice } from "./fees.js";
 export { estimateGasFee, estimateItsFee, priceTransfer } from "./fees.js";
 export type { AddGasCall, GmpRecord, GmpStatus } from "./gmp.js";
@@ -41,6 +47,14 @@ export { REQUEST_TIMEOUT_MS, requestJson } from "./http.js";
 export type { PinnedChain } from "./pinned.js";
 export { DEPLOYMENTS_COMMIT, PINNED_DEPLOYMENTS } from "./pinned.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";
+export type { HorizonBalanceChange, StellarReceipt } from "./stellar-receipt.js";
+export {
+  decodeHubTransfer,
+  ReceiptAged,
+  readHorizonExecution,
+  readStellarReceipt,
+  tokenPaid,
+} from "./stellar-receipt.js";
 export type { ItsToken, ResolveInputs } from "./token.js";
 export {
   chainsTrustEachOther,

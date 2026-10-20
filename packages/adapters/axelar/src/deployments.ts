@@ -59,7 +59,13 @@ export interface AxelarChain {
   readonly family: string;
   /** The EVM chain id a wallet needs to switch networks. Absent off EVM. */
   readonly evmChainId: number | undefined;
-  readonly rpcUrl: string | undefined;
+  /**
+   * Nodes to read this chain through, in order: the ones the sweep confirmed
+   * (pinned.ts), then Axelar's own config node as one more candidate. Several
+   * config nodes are dead, so it is never the only one. A reader checks each
+   * node's chain id before reading through it.
+   */
+  readonly rpcUrls: readonly string[];
   readonly explorerUrl: string | undefined;
   readonly nativeCurrency: NativeCurrency | undefined;
   readonly interchainTokenService: string | undefined;
@@ -142,7 +148,13 @@ async function fetchChains(network: NetworkId): Promise<ReadonlyMap<string, Axel
       name: chain.name ?? id,
       family: chain.chainType ?? "unknown",
       evmChainId: typeof chain.chainId === "number" ? chain.chainId : undefined,
-      rpcUrl: chain.rpc,
+      rpcUrls: [
+        ...new Set(
+          [...(PINNED_DEPLOYMENTS[network][id]?.rpcUrls ?? []), chain.rpc].filter(
+            (url): url is string => typeof url === "string" && url.length > 0,
+          ),
+        ),
+      ],
       explorerUrl: chain.explorer?.url,
       nativeCurrency:
         symbol === undefined || decimals === undefined ? undefined : { symbol, decimals },
@@ -225,7 +237,7 @@ export async function chainConfig(network: NetworkId, id: string): Promise<Axela
 export async function evmTokenService(
   network: NetworkId,
   id: string,
-): Promise<{ chain: AxelarChain; address: string; rpcUrl: string }> {
+): Promise<{ chain: AxelarChain; address: string; rpcUrls: readonly string[] }> {
   const chain = await chainConfig(network, id);
   if (chain.family !== "evm") {
     throw new MavnaError(
@@ -239,12 +251,12 @@ export async function evmTokenService(
       retryable: false,
     });
   }
-  if (chain.rpcUrl === undefined) {
+  if (chain.rpcUrls.length === 0) {
     throw new MavnaError(
-      `Axelar publishes no node URL for ${chain.name}, so the token service there ` +
+      `There is no node to read ${chain.name} through, so the token service there ` +
         "cannot be questioned before quoting.",
       { retryable: false },
     );
   }
-  return { chain, address: chain.interchainTokenService, rpcUrl: chain.rpcUrl };
+  return { chain, address: chain.interchainTokenService, rpcUrls: chain.rpcUrls };
 }

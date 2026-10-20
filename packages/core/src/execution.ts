@@ -112,6 +112,20 @@ export type StepPhase =
       readonly ref: OnChainRef;
       readonly received: Amount;
       readonly because: string;
+    }
+  /**
+   * The rail's own record says the transfer executed on Stellar, in the
+   * transaction `ref` names, and that transaction is now older than any
+   * source this can read it back from (public RPC keeps days, and Horizon
+   * shows no movement of a token that is its own Soroban contract). An ending,
+   * shown as information with the link to check it: never a success, because
+   * what arrived was not read from the chain, and never a failure, because
+   * nothing says it failed.
+   */
+  | {
+      readonly phase: "delivered-unverified";
+      readonly ref: OnChainRef;
+      readonly because: string;
     };
 
 /**
@@ -138,6 +152,7 @@ export const TERMINAL_PHASES = [
   "failed",
   "delivered-and-converted",
   "delivered-as-came",
+  "delivered-unverified",
 ] as const;
 export type TerminalPhase = (typeof TERMINAL_PHASES)[number];
 
@@ -187,4 +202,5 @@ export const PHASE_ORDER: Readonly<Record<StepPhase["phase"], number>> = {
   "delivered-conversion-pending": 3,
   "delivered-and-converted": 4,
   "delivered-as-came": 4,
+  "delivered-unverified": 4,
 };

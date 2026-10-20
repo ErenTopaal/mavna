@@ -81,6 +81,15 @@ export interface GmpRecord {
   readonly symbol: string | undefined;
   readonly decimals: number | undefined;
   readonly tokenId: string | undefined;
+  /**
+   * The transaction that executed this leg on its destination chain, and its
+   * block. For the hub-to-Stellar leg this is the Stellar transaction to read
+   * what arrived from, which is all this record is trusted for.
+   */
+  readonly executedTransactionHash: string | undefined;
+  readonly executedLedger: number | undefined;
+  /** When Axelar says it executed, in unix seconds. */
+  readonly executedAtUnix: number | undefined;
 }
 
 interface RawRecord {
@@ -100,6 +109,12 @@ interface RawRecord {
     tokenId?: string;
     decimals?: number;
     destinationChain?: string;
+  };
+  readonly executed?: {
+    transactionHash?: string;
+    blockNumber?: number;
+    block_timestamp?: number;
+    created_at?: { ms?: number };
   };
   readonly call?: {
     chain?: string;
@@ -179,6 +194,15 @@ function read(row: RawRecord): GmpRecord {
     symbol: transfer?.symbol,
     decimals: transfer?.decimals,
     tokenId: transfer?.tokenId === undefined ? undefined : withPrefix(transfer.tokenId),
+    executedTransactionHash: row.executed?.transactionHash,
+    executedLedger:
+      typeof row.executed?.blockNumber === "number" ? row.executed.blockNumber : undefined,
+    executedAtUnix:
+      typeof row.executed?.block_timestamp === "number"
+        ? row.executed.block_timestamp
+        : typeof row.executed?.created_at?.ms === "number"
+          ? Math.floor(row.executed.created_at.ms / 1000)
+          : undefined,
   };
 }
 
