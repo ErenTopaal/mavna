@@ -2368,10 +2368,25 @@ describe("the held settlement stays put while a preparation lands against it", (
   });
 });
 
-describe("a settlement slot is held for a day only once the settlement is signed", () => {
+describe("a settlement slot is held for a day only once something backs it", () => {
   function skip(seconds: number): void {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + seconds * 1000);
+  }
+
+  /** A POST as one client behind the trusted proxy. */
+  async function postAs(
+    server: TestServer,
+    client: string,
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Body }> {
+    const response = await fetch(`${server.url}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as Body };
   }
 
   it("gives the channel to the next caller once an unsigned settlement's short lease lapses", async () => {
@@ -2390,6 +2405,7 @@ describe("a settlement slot is held for a day only once the settlement is signed
       sourceChainId: "1",
     });
     expect(early.status).toBe(503);
+    expect(early.body.retryable).toBe(true);
 
     // Five minutes and the clock-drift grace later, it is free again.
     skip(300);
@@ -2407,9 +2423,35 @@ describe("a settlement slot is held for a day only once the settlement is signed
     expect(late.status).toBe(409);
   });
 
-  it("keeps a signed settlement's channel until the settlement's own time bound", async () => {
+  it("gives the channel back when a signed settlement is never followed by a preparation", async () => {
     const server = await startServer();
-    await holdSettlementFor(server, Keypair.random());
+    // a key the caller made up: the account need not exist and nothing is spent
+    const attacker = Keypair.random();
+    await holdSettlementFor(server, attacker);
+
+    skip(60);
+    const blocked = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(blocked.status).toBe(503);
+
+    skip(PROVISIONAL_AND_GRACE_SECONDS);
+    const victim = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(victim.status).toBe(200);
+
+    // the lapsed hold backs nothing any more, so no preparation goes out on it
+    const signed = await preparedAndSigned(server, attacker);
+    expect((await server.post("/submit", { signedXdr: signed })).status).toBe(409);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("keeps a prepared settlement's channel until the settlement's own time bound", async () => {
+    const server = await startServer();
+    await preparedWithSettlementHeld(server, Keypair.random());
 
     skip(3_600);
     const later = await server.post("/settlement", {
@@ -2417,8 +2459,83 @@ describe("a settlement slot is held for a day only once the settlement is signed
       sourceChainId: "1",
     });
     expect(later.status).toBe(503);
+    expect(later.body.retryable).toBe(true);
+  });
+
+  it("gives the slot back soon after the network refused the preparation outright", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    server.rpc.rejectNext = new MavnaError("sponsored preparation was rejected: txMalformed", {
+      retryable: false,
+    });
+    expect((await server.post("/submit", { signedXdr: prepared })).status).toBe(502);
+
+    skip(PROVISIONAL_AND_GRACE_SECONDS);
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("lets one client wait on only a few settlements at once", async () => {
+    const channels = [Keypair.random(), Keypair.random(), Keypair.random(), Keypair.random()];
+    const server = await startServer({
+      channels: new ChannelPool({ channels }),
+      trustProxy: true,
+      settlementsPerClient: 2,
+    });
+    for (const channel of channels) server.rpc.accounts.set(channel.publicKey(), 300n);
+
+    const ask = (client: string, user: Keypair) =>
+      postAs(server, client, "/settlement", { destination: user.publicKey(), sourceChainId: "1" });
+    const repeated = Keypair.random();
+    expect((await ask("203.0.113.1", repeated)).status).toBe(200);
+    expect((await ask("203.0.113.1", Keypair.random())).status).toBe(200);
+    // asking again for an account it already waits on takes nothing new
+    expect((await ask("203.0.113.1", repeated)).status).toBe(200);
+    const third = await ask("203.0.113.1", Keypair.random());
+    expect(third.status).toBe(429);
+    expect(third.body.retryable).toBe(true);
+    expect((await ask("203.0.113.2", Keypair.random())).status).toBe(200);
+  });
+
+  it("grows its own pool to the size it is given, one funded channel per slot in use", async () => {
+    const server = await startServer(
+      { channelPoolSize: 2, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    const funded = () => server.rpc.submissions.filter((s) => s.label === "channel funding");
+
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    expect(funded()).toHaveLength(1);
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    expect(funded()).toHaveLength(2);
+    const full = await server.post("/settlement", { destination: Keypair.random().publicKey() });
+    expect(full.status).toBe(503);
+    expect(full.body.retryable).toBe(true);
+    expect(funded()).toHaveLength(2);
+  });
+
+  it("keeps every channel it funded across a restart", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ channelPoolSize: 2, state }, { fundsOwnChannel: true });
+    for (let i = 0; i < 2; i += 1) {
+      await first.post("/settlement", { destination: Keypair.random().publicKey() });
+    }
+    const channels = (await state.read("channels")) as { secrets: string[] };
+    expect(channels.secrets).toHaveLength(2);
   });
 });
+
+/** The provisional lease and the reclaim grace, plus a second. */
+const PROVISIONAL_AND_GRACE_SECONDS = 300 + 30 + 1;
 
 describe("the sponsor does not take a failed read for a missing account", () => {
   function failAccountReads(server: TestServer, user: Keypair): void {
@@ -2738,6 +2855,9 @@ describe("the sponsor writes its state only when it changed", () => {
       sourceChainId: "1",
     });
     order.length = 0;
+    // a minute on, so holding it moves the lease's end and the lease is rewritten
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 60_000);
     await server.post("/settlement/commit", {
       destination: user.publicKey(),
       signedXdr: signXdr(built.body.xdr as string, user),

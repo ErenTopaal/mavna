@@ -19,6 +19,27 @@ describe("the sponsor's configuration, read from the environment", () => {
     expect(config.trustProxy).toBe(false);
     expect(config.stateDir).toBeUndefined();
     expect(config.port).toBe(8787);
+    expect(config.channelPoolSize).toBe(4);
+    expect(config.settlementsPerClient).toBe(2);
+  });
+
+  it("reads the channel pool size and the settlements one client may wait on", () => {
+    const config = readSponsorConfig({
+      ...base,
+      MAVNA_CHANNEL_POOL_SIZE: "10",
+      MAVNA_SETTLEMENTS_PER_CLIENT: "0",
+    });
+    expect(config.channelPoolSize).toBe(10);
+    expect(config.settlementsPerClient).toBe(0);
+  });
+
+  it("refuses a channel pool of none", () => {
+    expect(() => readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "0" })).toThrow(
+      /MAVNA_CHANNEL_POOL_SIZE/,
+    );
+    expect(() => readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "two" })).toThrow(
+      /MAVNA_CHANNEL_POOL_SIZE/,
+    );
   });
 
   it("runs mainnet against the first public mainnet node by default", () => {

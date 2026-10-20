@@ -153,9 +153,11 @@ path payment buys exactly the XLM the reserve needs and spends at most twice its
 value at the live orderbook rate, so the signer's exposure is a number they can
 read.
 
-Building takes a channel for five minutes. Committing the signed settlement extends
-that to the settlement's own time bound, a day; a settlement left unsigned gives its
-channel back once the five minutes are up.
+Building takes a channel for five minutes, and committing the signed settlement
+holds it for five minutes more. Only submitting the preparation that the settlement
+repays holds it to the settlement's own time bound, a day. A settlement left
+unsigned, or signed and never followed by a preparation, gives its channel back
+once its five minutes are up, and the held settlement is dropped with it.
 
 Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
 
@@ -165,9 +167,10 @@ Answers:
 - `400` for a missing or unusable destination, or one that needs no settling
 - `409`, retryable, while the account's previous settlement is still being
   submitted
-- `429` on a cap refusal
-- `503` when every settlement slot is in use: one channel carries one in-flight
-  settlement
+- `429` on a cap refusal, or, retryable, when this client address already has as
+  many settlements waiting on a preparation as it may
+- `503`, retryable, when every settlement slot is in use: one channel carries one
+  in-flight settlement
 
 ## `POST /settlement/commit`
 

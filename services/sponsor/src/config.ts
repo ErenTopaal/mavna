@@ -27,9 +27,20 @@ export interface SponsorConfig {
   /** Requests per address per minute; zero turns the limit off. */
   readonly rateLimitPerMinute: number;
   readonly trustProxy: boolean;
+  /** Channels the sponsor funds for itself, each on first need. */
+  readonly channelPoolSize: number;
+  /** Settlements one client address may have waiting on a preparation; zero for no limit. */
+  readonly settlementsPerClient: number;
   readonly stateDir: string | undefined;
   readonly port: number;
 }
+
+/**
+ * Four settlements in flight at once by default. A channel is funded only when
+ * every one before it is busy, 2 XLM of the sponsor's each, so an idle sponsor
+ * spends no more than one.
+ */
+export const DEFAULT_CHANNEL_POOL_SIZE = 4;
 
 /** A configuration mistake, worded for the operator who made it. */
 export class SponsorConfigError extends Error {
@@ -100,6 +111,10 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
   };
 
   const sweep = get("MAVNA_SETTLE_SWEEP_SECONDS");
+  const channelPoolSize = whole("MAVNA_CHANNEL_POOL_SIZE", DEFAULT_CHANNEL_POOL_SIZE);
+  if (channelPoolSize < 1) {
+    throw new SponsorConfigError("MAVNA_CHANNEL_POOL_SIZE must be at least 1; got 0.");
+  }
 
   return {
     networkId: network,
@@ -135,6 +150,8 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
     ),
     rateLimitPerMinute: whole("MAVNA_RATE_LIMIT_PER_MINUTE", 120),
     trustProxy: trust === "true",
+    channelPoolSize,
+    settlementsPerClient: whole("MAVNA_SETTLEMENTS_PER_CLIENT", 2),
     stateDir: get("MAVNA_STATE_DIR"),
     port: whole("PORT", 8787),
   };

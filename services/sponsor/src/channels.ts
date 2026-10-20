@@ -141,6 +141,42 @@ export class ChannelPool {
   }
 
   /**
+   * Add a channel the caller has just funded. A key already in the pool is
+   * not added twice, since two entries for one account would hand its one
+   * sequence to two settlements.
+   */
+  add(keypair: Keypair): void {
+    const address = keypair.publicKey();
+    const known =
+      this.available.some((channel) => channel.address === address) ||
+      [...this.leased.values()].some((lease) => lease.channel.address === address);
+    if (known) return;
+    this.available.push({ keypair, address });
+  }
+
+  /**
+   * Bring a lease's end forward to `untilUnix` if it is later than that. For a
+   * lease lengthened for something that then definitely did not happen.
+   */
+  limit(transferId: string, channelAddress: string, untilUnix: number): void {
+    const lease = this.leased.get(transferId);
+    if (lease === undefined || lease.channel.address !== channelAddress) return;
+    this.leased.set(transferId, { ...lease, untilUnix: Math.min(lease.untilUnix, untilUnix) });
+  }
+
+  /** Whether this owner still holds a live lease on this channel. */
+  holds(transferId: string, channelAddress: string, nowUnix: number): boolean {
+    this.reclaim(nowUnix);
+    return this.leased.get(transferId)?.channel.address === channelAddress;
+  }
+
+  /** Owners holding a live lease right now. */
+  owners(nowUnix: number): string[] {
+    this.reclaim(nowUnix);
+    return [...this.leased.keys()];
+  }
+
+  /**
    * Lengthen a lease its owner still holds on this channel, to `untilUnix`.
    * False when the owner holds no live lease on it: the lease lapsed, or the
    * channel has since gone to someone else, whose settlement now owns the
@@ -198,5 +234,10 @@ export class ChannelPool {
 
   get leasedCount(): number {
     return this.leased.size;
+  }
+
+  /** Every channel in the pool, leased or not. */
+  get size(): number {
+    return this.available.length + this.leased.size;
   }
 }

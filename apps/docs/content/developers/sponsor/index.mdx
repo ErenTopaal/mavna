@@ -62,6 +62,8 @@ Everything is environment variables, read once at start.
 | `MAVNA_MIN_DELIVERY_USDC` | no | `1` | The smallest Circle mint, in USDC (up to six decimals), the sponsor pays to deliver. `0` delivers any amount |
 | `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. `0` turns it off |
 | `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. This also counts clients for the Soroswap proxy's limits. Set it only when the sponsor's port is reachable from the proxy alone (the compose file binds it to `127.0.0.1`); a port open to the world lets anyone send their own `X-Forwarded-For`. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
+| `MAVNA_CHANNEL_POOL_SIZE` | no | `4` | Settlement channels the sponsor funds for itself, 2 XLM each. One channel carries one settlement in flight; the next is funded only when every one before it is busy. Kept in the state directory with their keys |
+| `MAVNA_SETTLEMENTS_PER_CLIENT` | no | `2` | Settlements one client address (counted as the rate limit counts it) may have waiting on a preparation at once. `0` turns it off |
 | `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
 | `MAVNA_ARRIVAL_CONTRACT` | no | none; `/compose` answers that it finishes nothing | The Mavna Arrival Contract whose overdue conversions this sponsor finishes. Also kept alive daily (instance and code TTL), paid by the sponsor key. In self mode neither happens, so the sponsor spends nothing, and start-up says so |
 | `MAVNA_ARRIVAL_EXECUTOR_SECRET` | with `MAVNA_ARRIVAL_CONTRACT`, in sponsor mode | none; the process exits without it in sponsor mode | A separate key named as the conversion's executor. It signs only `lz_compose` authorizations and holds only its 1 XLM minimum, created by the sponsor on first use. Never the sponsor key: a token named in a message must not reach funded keys |
@@ -101,13 +103,18 @@ the account you fund.
 
 ## Capacity and caps
 
-Settlements ride on channel accounts, one in-flight settlement per channel. With no
-pool configured, the server creates and funds one channel from the sponsor on first
-use, which is a capacity of one concurrent settlement: enough to run everything
-yourself, and the pool is the knob when it is not. A full pool answers `503`.
-Building a settlement holds a channel for five minutes, and only a settlement the
-user has signed holds it for its whole day, so an unsigned request cannot keep a
-slot for long.
+Settlements ride on channel accounts, one in-flight settlement per channel. The
+server creates and funds its own channels from the sponsor, one at a time and only
+when every channel before it is busy, up to `MAVNA_CHANNEL_POOL_SIZE` (4 by
+default). A full pool answers `503`, retryable.
+
+A settlement costs its caller nothing until a preparation backs it, so until then
+its channel is held only briefly: five minutes from building it, and five minutes
+again from committing it signed. Only the preparation going out holds the channel
+to the settlement's own time bound, a day; a preparation the network refuses
+outright gives it back to the short hold. One client address may have at most
+`MAVNA_SETTLEMENTS_PER_CLIENT` settlements (2 by default) waiting on a preparation
+at once, and further asks answer `429`, retryable.
 
 Two daily caps bound the money at risk, from the
 [sponsorship design](/developers/concepts/sponsorship): a volume cap per source-chain

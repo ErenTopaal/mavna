@@ -186,3 +186,36 @@ describe("a channel pool written down and read back", () => {
     expect(given.acquire("other", NOW + DAY, NOW)).toBeDefined();
   });
 });
+
+describe("a pool that grows", () => {
+  it("adds a funded channel once, and leases it like any other", () => {
+    const first = Keypair.random();
+    const added = Keypair.random();
+    const pool = new ChannelPool({ channels: [first] });
+    pool.add(added);
+    pool.add(added);
+    pool.add(first);
+    expect(pool.size).toBe(2);
+    expect(pool.acquire("a", 100, 0)?.address).toBeDefined();
+    expect(pool.acquire("b", 100, 0)?.address).toBeDefined();
+    expect(pool.acquire("c", 100, 0)).toBeUndefined();
+  });
+
+  it("says whether an owner still holds its lease, and lets a lapsed one go", () => {
+    const pool = new ChannelPool({ channels: [Keypair.random()] });
+    const channel = pool.acquire("a", 100, 0);
+    expect(pool.holds("a", channel?.address ?? "", 50)).toBe(true);
+    expect(pool.owners(50)).toEqual(["a"]);
+    expect(pool.holds("a", channel?.address ?? "", 200)).toBe(false);
+    expect(pool.owners(200)).toEqual([]);
+  });
+
+  it("brings a lease's end forward, never later", () => {
+    const pool = new ChannelPool({ channels: [Keypair.random()] });
+    const channel = pool.acquire("a", 1_000, 0)?.address ?? "";
+    pool.limit("a", channel, 2_000);
+    expect(pool.holds("a", channel, 1_020)).toBe(true);
+    pool.limit("a", channel, 100);
+    expect(pool.holds("a", channel, 200)).toBe(false);
+  });
+});

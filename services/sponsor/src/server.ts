@@ -89,6 +89,17 @@ export interface SponsorServerOptions {
    * and the pool is the knob when it is not.
    */
   readonly channels?: ChannelPool;
+  /**
+   * How many channels the server funds for itself when no pool is given, each
+   * on first need. One by default. Each is 2 XLM of the sponsor's, and each is
+   * one settlement in flight at a time.
+   */
+  readonly channelPoolSize?: number;
+  /**
+   * Settlements one client address may have waiting on a channel at once,
+   * before anything backs them. Zero turns the limit off. Two by default.
+   */
+  readonly settlementsPerClient?: number;
   /** Prices the reserve in the arriving asset, for the settlement's ceiling. */
   readonly prices?: XlmPriceSource;
   /**
@@ -370,6 +381,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     throw new Error(`The minimum delivery cannot be negative; got ${minDelivery}.`);
   }
   const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
+  const poolSize = options.channelPoolSize ?? 1;
+  const perClient = options.settlementsPerClient ?? DEFAULT_SETTLEMENTS_PER_CLIENT;
+  for (const [name, value, least] of [
+    ["channel pool size", poolSize, 1],
+    ["settlements per client", perClient, 0],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < least) {
+      throw new Error(`The ${name} must be a whole number of at least ${least}; got ${value}.`);
+    }
+  }
+  /**
+   * The client address that asked for each account's lease. A settlement costs
+   * its caller nothing until a preparation backs it, so the leases one address
+   * may hold that way are counted against it. Pruned to live leases on every use.
+   */
+  const leaseClients = new Map<string, string>();
   const composesPerClient = new RequestLimiter(COMPOSES_PER_CLIENT_PER_MINUTE);
   const deliverer = new Deliverer({
     rpc: options.rpc,
@@ -470,6 +497,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await resolvePreparation(destination, held);
     }
     if (heldSettlements.get(destination) !== held) return heldSettlements.get(destination);
+    // Nothing backs a settlement before its preparation, so its lease stays
+    // short; once that lapses the channel is someone else's and so is the
+    // sequence this one was built on. Dropped, and no stranding: nothing went out.
+    if (
+      !held.prepared &&
+      !held.preparing &&
+      held.preparation === undefined &&
+      held.channel !== undefined &&
+      channels !== undefined &&
+      !channels.holds(destination, held.channel, nowUnix())
+    ) {
+      heldSettlements.delete(destination);
+      await persist();
+      return undefined;
+    }
     if (held.maxTimeUnix <= nowUnix()) {
       heldSettlements.delete(destination);
       await persist();
@@ -508,8 +550,26 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (found.status === "FAILED" || sent.expiresAtUnix + PREPARATION_GRACE_SECONDS < nowUnix()) {
       held.preparation = undefined;
+      shortenLease(destination, held);
       await persist();
     }
+  }
+
+  /** Whether a preparation backs the account's held settlement, landed or on its way. */
+  function backed(account: string): boolean {
+    const held = heldSettlements.get(account);
+    return (
+      held !== undefined && (held.prepared || held.preparing || held.preparation !== undefined)
+    );
+  }
+
+  /**
+   * Back to the short lease, for a settlement whose preparation definitely did
+   * not land: the account may try once more, but the slot is not kept for it.
+   */
+  function shortenLease(destination: string, held: HeldSettlement): void {
+    if (held.channel === undefined || channels === undefined) return;
+    channels.limit(destination, held.channel, nowUnix() + PROVISIONAL_LEASE_SECONDS);
   }
 
   /** What is written down, read back. Runs once, before the first request. */
@@ -599,7 +659,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       const pending = channelDocument.pending;
       if (pending !== undefined && !secretShape.safeParse(pending).success) {
         reject("channels", pending, "pending");
-      } else if (channels === undefined && pending !== undefined) {
+      } else if (pending !== undefined && options.channels === undefined) {
+        // a channel whose funding was under way when the process stopped,
+        // finished on the next need for one
         pendingChannel = Keypair.fromSecret(pending as string);
       }
     }
@@ -693,27 +755,24 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     });
 
   /**
-   * The one channel this deployment runs on, created and funded on first use.
+   * The channels this deployment runs on, created and funded as they are
+   * needed, up to `poolSize`.
    *
-   * 2 XLM: the account's own 1 XLM minimum plus fee headroom for the
-   * settlements it will carry. Reused serially; the pool is the upgrade path.
-   * The funding is shared by every request that arrives while it runs, so two
-   * first settlements fund one channel, and forgotten if it fails so the next
-   * request tries again.
+   * 2 XLM each: the account's own 1 XLM minimum plus fee headroom for the
+   * settlements it will carry. A funding is shared by every request that
+   * arrives while it runs, so two first settlements fund one channel, and
+   * forgotten if it fails so the next request tries again.
    */
   let funding: Promise<ChannelPool> | undefined;
   function ensureChannels(): Promise<ChannelPool> {
-    if (channels !== undefined) return Promise.resolve(channels);
-    funding ??= fundChannel().then(
-      (pool) => {
-        channels = pool;
-        return pool;
-      },
-      (cause: unknown) => {
-        funding = undefined;
-        throw cause;
-      },
-    );
+    if (channels !== undefined && pendingChannel === undefined) return Promise.resolve(channels);
+    return fundOne();
+  }
+
+  function fundOne(): Promise<ChannelPool> {
+    funding ??= fundChannel().finally(() => {
+      funding = undefined;
+    });
     return funding;
   }
 
@@ -727,11 +786,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (!(await accountExists(options.rpc, channel.publicKey()))) {
       await submitChannelFunding(channel);
     }
-    const pool = new ChannelPool({ channels: [channel] });
-    channels = pool;
+    if (channels === undefined) channels = new ChannelPool({ channels: [channel] });
+    else channels.add(channel);
     pendingChannel = undefined;
     await persist();
-    return pool;
+    return channels;
   }
 
   async function submitChannelFunding(channel: Keypair): Promise<void> {
@@ -995,7 +1054,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement") {
-      await settlement(bodyOf(settlementBody, await readJson(req)), res, origin);
+      await settlement(bodyOf(settlementBody, await readJson(req)), res, origin, client);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement/commit") {
@@ -1322,6 +1381,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     body: SettlementBody,
     res: ServerResponse,
     origin: string | undefined,
+    client: string,
   ): Promise<void> {
     if (body.destination === undefined) {
       await answer(res, 400, { error: "Say which account will settle.", retryable: false }, origin);
@@ -1391,12 +1451,41 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     const createdAccount = !(await accountExists(options.rpc, account));
 
-    const pool = await ensureChannels();
+    let pool = await ensureChannels();
     const now = nowUnix();
-    // Short until the settlement comes back signed, which settlementCommit
-    // extends to the settlement's own bound. Anyone can ask for a settlement,
-    // and a day-long lease per request would let one caller take every slot.
-    const channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
+    const live = pool.owners(now);
+    for (const owner of leaseClients.keys()) {
+      if (!live.includes(owner)) leaseClients.delete(owner);
+    }
+    // Asking again for an account already leased takes nothing new. Otherwise
+    // a client may wait on only so many settlements nothing backs yet.
+    if (perClient > 0 && !live.includes(account)) {
+      const waiting = live.filter(
+        (owner) => leaseClients.get(owner) === client && !backed(owner),
+      ).length;
+      if (waiting >= perClient) {
+        await answer(
+          res,
+          429,
+          {
+            error:
+              "This address already has settlements waiting on a preparation. Finish or " +
+              "abandon one, then try again.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+    }
+    // Short until a preparation backs it, which only /submit extends to the
+    // settlement's own bound. Anyone can ask for a settlement, and a day-long
+    // lease that nothing paid for would let one caller take every slot.
+    let channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
+    while (channel === undefined && options.channels === undefined && pool.size < poolSize) {
+      pool = await fundOne();
+      channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+    }
     if (channel === undefined) {
       await answer(
         res,
@@ -1406,6 +1495,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    if (!leaseClients.has(account)) leaseClients.set(account, client);
 
     // Account 2 slots + one trustline = 3, or 1 when the account already exists.
     const slots = createdAccount ? 3 : 1;
@@ -1556,12 +1646,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The settlement sits on its channel's next sequence, which is only this
     // account's while it holds the lease. A lease that lapsed or moved on means
     // that sequence now belongs to someone else's settlement, and holding this
-    // one would let it spend theirs. Held, the lease runs to the settlement's
-    // own bound.
+    // one would let it spend theirs. Held, the lease is still the short one:
+    // a signature from a key the caller made up backs nothing, and only the
+    // preparation going out lengthens it to the settlement's own bound.
     const pool = await ensureChannels();
     if (
       record.channel === undefined ||
-      !pool.extend(record.signer, record.channel, record.expiresAtUnix, nowUnix())
+      !pool.extend(
+        record.signer,
+        record.channel,
+        Math.min(record.expiresAtUnix, nowUnix() + PROVISIONAL_LEASE_SECONDS),
+        nowUnix(),
+      )
     ) {
       await answer(
         res,
@@ -1926,6 +2022,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         return;
       }
 
+      // From here the reserve may go out, so the settlement that repays it
+      // keeps its channel to its own bound, whatever becomes of this request.
+      const pool = await ensureChannels();
+      if (
+        held.channel === undefined ||
+        !pool.extend(record.signer, held.channel, held.maxTimeUnix, nowUnix())
+      ) {
+        await refuse(
+          record,
+          res,
+          origin,
+          409,
+          "The settlement held for this account has lost its slot. Ask for a new one.",
+        );
+        return;
+      }
       transaction.sign(keypair);
       // Written down before it is sent, so a restart mid-flight looks this
       // preparation up by hash instead of letting another in beside it.
@@ -1935,6 +2047,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         await persist();
       } catch (cause) {
         held.preparation = undefined;
+        shortenLease(record.signer, held);
         throw cause;
       }
       try {
@@ -1943,7 +2056,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         const retryable = cause instanceof MavnaError ? cause.retryable : true;
         // A refusal is final. Anything else (a timeout, an answer that never
         // came) may still land, so the mark stays and the next touch looks it up.
-        if (!retryable && held.preparation === sent) held.preparation = undefined;
+        if (!retryable && held.preparation === sent) {
+          held.preparation = undefined;
+          shortenLease(record.signer, held);
+        }
         await answer(
           res,
           502,
@@ -2573,6 +2689,9 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/** Settlements one client may have waiting on a preparation, unless configured. */
+const DEFAULT_SETTLEMENTS_PER_CLIENT = 2;
 
 /**
  * Whether an address is one a settlement can be held for: an account or muxed
