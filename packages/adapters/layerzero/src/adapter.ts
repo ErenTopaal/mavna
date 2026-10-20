@@ -897,9 +897,10 @@ export class LayerZeroAdapter implements BridgeAdapter {
    *
    * A message is not verified until the source chain reaches the confirmation
    * depth the application configured, so the honest estimate is that depth in
-   * blocks plus the executor's turnaround. USDT0 asks for 65 confirmations,
-   * which is fifteen seconds on Arbitrum and twelve minutes on Ethereum. One
-   * number for both would be wrong for both.
+   * blocks plus the executor's turnaround. The depth is per chain and comes
+   * from the live config (USDT0: 65 on Ethereum, 4000 on Arbitrum) and the block
+   * time from the chain's table entry, so one number for every chain would be
+   * wrong for most.
    */
   private estimateSeconds(route: ResolvedRoute): number {
     const confirmations = Number(route.uln.confirmations);
