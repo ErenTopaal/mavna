@@ -601,8 +601,8 @@ export function Landing(): ReactNode {
               "margin: 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 44ch",
             )}
           >
-            Grouped by how you use Mavna. Every page is generated from the source, so it always
-            matches the code.
+            Grouped by how you use Mavna. Every reference page is generated from the source, so the
+            API it lists always matches the code.
           </p>
         </div>
         <div
@@ -782,7 +782,11 @@ export function Landing(): ReactNode {
             { name: "Circle CCTP", asset: "USDC", who: "Circle itself" },
             { name: "LayerZero OFT", asset: "USDT0", who: "The verifiers the token trusts" },
             { name: "Axelar ITS", asset: "Interchain assets", who: "A named group of validators" },
-            { name: "NEAR Intents", asset: "Native assets, BTC to XLM", who: "Traders bid for it" },
+            {
+              name: "NEAR Intents",
+              asset: "ERC-20 from 13 EVM chains, to USDC or XLM",
+              who: "Traders bid for it",
+            },
           ].map((rail, i, arr) => (
             <Hover
               key={rail.name}
@@ -850,7 +854,8 @@ export function Landing(): ReactNode {
             >
               We put it up for you, and the money coming in pays us back inside the same transfer.
               The 1.5 XLM stays locked in your own account. It is not a fee anyone keeps, and it is
-              released back to you if you ever close the account.
+              released back to you if you ever close the account. That is for USDC, with a sponsor
+              that fronts reserves, as the one behind mavna.app does.
             </p>
           </div>
           <div>
@@ -994,8 +999,8 @@ export function Landing(): ReactNode {
                 "margin: clamp(16px, 2vw, 22px) 0 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 34ch",
               )}
             >
-              We say yes to the coin for you, inside the transfer, whether the account is brand new
-              or has simply never held that coin before. Your users never see the word, and it is
+              For USDC, we say yes to the coin for you, inside the transfer, whether the account is
+              brand new or has simply never held it before. Your users never see the word, and it is
               never a step they can get wrong.
             </p>
           </div>
@@ -1995,8 +2000,9 @@ export function Landing(): ReactNode {
                 "margin: clamp(16px, 2vw, 22px) 0 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
               )}
             >
-              Offer only the bridges you stand behind, add your own fee, or switch a provider off.
-              Each one is a setting in config, not a rebuild of the flow.
+              Offer only the bridges you stand behind, add your own fee on routes that convert on
+              arrival, or switch a provider off. Each one is a setting in config, not a rebuild of
+              the flow.
             </p>
           </div>
         </div>
