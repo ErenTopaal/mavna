@@ -100,7 +100,6 @@ describe("pressing twice, or looking up twice", () => {
     historyKey: "test.transfers",
     sourceChainDetail: () => ({ kind: "other", name: "Somewhere", family: "move" }),
   } as unknown as Engine;
-  const compose = { contract: "C", from: "G", guid: "ab".repeat(32), index: 0, message: "0x01" };
 
   it("asks for one delivery, however fast Finish is pressed again", async () => {
     let asked = 0;
