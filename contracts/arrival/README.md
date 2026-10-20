@@ -80,7 +80,7 @@ The same commit built from a clean `git archive` in another directory gives the 
 
 | Network | Contract                                                   | Wasm sha256                                                        | Allowlist                                                                                                  |
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| testnet | `CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A` | `688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
+| testnet | `CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X` | `66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its allowlisted sender is
 a key that queues compose messages on the real testnet endpoint itself. It proves the endpoint
@@ -109,10 +109,12 @@ What the constructor is given decides what the contract will ever trust, so on m
   router upgraded by them, can change what a swap does with the funds it is given. The router's
   source was not reviewed here; check these roles again at deployment time.
 
-Earlier testnet instances hold nothing and are not used. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`)
-swapped without estimating first, and its fallback failed on-chain whenever the swap reverted,
-because a rolled-back swap still costs ledger writes that simulation does not predict.
-`CB4B235W...JS7F` (`47921dcd...d714`) did not treat a trustline the issuer has not authorised as
-unable to hold the wanted asset. `CBSWBSEL...6252` (`56e2acc5...e35f`) called any wanted asset or
-path token the message named, which let a hostile token spend an executor's authorization; it had no
-lists of what it may convert into and route through.
+Earlier testnet instances hold nothing and are not used. `CD5M6IBU...P35A` (`688456b0...6155`)
+trapped when a trustline limit refused the payout, leaving the compose queued instead of delivering
+it as it came. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`) swapped without estimating first, and its
+fallback failed on-chain whenever the swap reverted, because a rolled-back swap still costs ledger
+writes that simulation does not predict. `CB4B235W...JS7F` (`47921dcd...d714`) did not treat a
+trustline the issuer has not authorised as unable to hold the wanted asset. `CBSWBSEL...6252`
+(`56e2acc5...e35f`) called any wanted asset or path token the message named, which let a hostile
+token spend an executor's authorization; it had no lists of what it may convert into and route
+through.
