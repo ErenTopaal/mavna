@@ -249,7 +249,9 @@ async function collectSettlement(
   // a conversion has to leave the repayment its share
   const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
   const signed = await engine.stellar.sign(built.xdr, address);
-  await engine.sponsor.commitSettlement(route.destination, signed);
+  await engine.sponsor.commitSettlement(route.destination, signed).catch((cause: unknown) => {
+    throw withFunds(cause, "Nothing has been sent.");
+  });
   return { owner: address, repaysAtMost };
 }
 
@@ -291,7 +293,11 @@ async function openOwnTrustline(
   if (name === undefined) {
     throw new Error(`The sponsor curates no trustline for ${holds.symbol}. ${funds}`);
   }
-  const preparation = await engine.sponsor.requestPreparation(route.destination, chainId, name);
+  const preparation = await engine.sponsor
+    .requestPreparation(route.destination, chainId, name)
+    .catch((cause: unknown) => {
+      throw withFunds(cause, funds);
+    });
   // The account pays for this one, and the sponsor names the issuer by its own
   // list, so it is checked against what the rail will deliver before the user
   // is asked to sign: a trustline to anything else lets the delivery fail.
@@ -302,7 +308,9 @@ async function openOwnTrustline(
     );
   }
   const signed = await engine.stellar.sign(preparation.xdr, address);
-  await engine.sponsor.submitPreparation(signed);
+  await engine.sponsor.submitPreparation(signed).catch((cause: unknown) => {
+    throw withFunds(cause, funds);
+  });
 }
 
 /** Whether a transaction does nothing but open `assetId` for `account`, from it. */
@@ -349,14 +357,34 @@ async function prepareNow(
   /** What to tell the user about their funds if this is refused. */
   funds: string,
 ): Promise<void> {
-  // once more at most: a preparation the sponsor's own account overtook while it
-  // was being signed can never land, and only a new one, signed again, can
+  await prepareSponsored(
+    engine,
+    { destination: route.destination, holds: route.deliveredAtLeast.asset },
+    chainId,
+    address,
+    funds,
+  );
+}
+
+/**
+ * Have the account sign the sponsor's preparation, checked first. Once more at
+ * most: one the sponsor's own account overtook while it was being signed can
+ * never land, and only a new one, signed again, can.
+ */
+async function prepareSponsored(
+  engine: TransferEngine,
+  opens: { readonly destination: string; readonly holds: Route["deliveredAtLeast"]["asset"] },
+  chainId: string,
+  address: string,
+  funds: string,
+): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
-    const preparation = await engine.sponsor.requestPreparation(route.destination, chainId);
-    const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
-      destination: route.destination,
-      holds: route.deliveredAtLeast.asset,
-    });
+    const preparation = await engine.sponsor
+      .requestPreparation(opens.destination, chainId)
+      .catch((cause: unknown) => {
+        throw withFunds(cause, funds);
+      });
+    const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, opens);
     if (problem !== undefined) {
       throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
     }
@@ -365,10 +393,16 @@ async function prepareNow(
       await engine.sponsor.submitPreparation(signed);
       return;
     } catch (cause) {
-      if (!(cause instanceof SponsorRefusal) || !cause.prepareAgain) throw cause;
-      if (attempt >= 1) throw new Error(`${cause.message} ${funds}`);
+      if (!(cause instanceof SponsorRefusal) || !cause.prepareAgain || attempt >= 1) {
+        throw withFunds(cause, funds);
+      }
     }
   }
+}
+
+/** A sponsor's refusal, with what it means for the user's funds said after it. */
+function withFunds(cause: unknown, funds: string): unknown {
+  return cause instanceof SponsorRefusal ? new Error(`${cause.message} ${funds}`) : cause;
 }
 
 /** Convert the arrived USDC into XLM through the first venue that serves the pair. */
@@ -611,21 +645,13 @@ export async function finishDelivery(
         "Stellar wallet to let it hold USDC.",
     };
   }
-  const preparation = await engine.sponsor.requestPreparation(
-    recipient,
+  await prepareSponsored(
+    engine,
+    { destination: recipient, holds: engine.usdcOnStellar },
     sourceChainId ?? "unknown",
+    address,
+    "The funds are safe on Circle's side and still deliverable.",
   );
-  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
-    destination: recipient,
-    holds: engine.usdcOnStellar,
-  });
-  if (problem !== undefined) {
-    throw new Error(
-      `The sponsor's preparation was not signed: ${problem}. The funds are safe on Circle's ` +
-        "side and still deliverable.",
-    );
-  }
-  await engine.sponsor.submitPreparation(await engine.stellar.sign(preparation.xdr, address));
   return engine.sponsor.requestDelivery(burnHash, domain, recipient);
 }
 

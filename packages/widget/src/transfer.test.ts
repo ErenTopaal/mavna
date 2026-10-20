@@ -65,6 +65,8 @@ let xlmPerUsdc: bigint | Error;
 /** What /submit and /settlement answer before their usual 200, in turn. */
 let submitRefusals: Array<[number, unknown]>;
 let settlementRefusals: Array<[number, unknown]>;
+let prepareRefusals: Array<[number, unknown]>;
+let commitRefusals: Array<[number, unknown]>;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
@@ -167,6 +169,8 @@ beforeEach(() => {
   sendFails = false;
   submitRefusals = [];
   settlementRefusals = [];
+  prepareRefusals = [];
+  commitRefusals = [];
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -208,15 +212,20 @@ beforeEach(() => {
         if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
       }
-      case "/settlement/commit":
+      case "/settlement/commit": {
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
           signedXdr: `signed ${settlementXdr}`,
         });
+        const refusal = commitRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { held: true });
+      }
       case "/prepare": {
         const asked = bodyOf(init) as { assets: string[] };
         askedAssets.push(asked.assets);
+        const refusal = prepareRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         if (funding === "sponsor") {
           return reply(200, { xdr: sponsoredPreparation, sponsor: SPONSOR_STELLAR });
         }
@@ -1797,6 +1806,18 @@ describe("finishing a Circle delivery from Activity", () => {
     ];
   };
 
+  it("asks for a new preparation once from Activity when the old one can never land", async () => {
+    attestedTo(DESTINATION);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    submitRefusals = [[409, { error: "It can never land.", retryable: true, prepareAgain: true }]];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+  });
+
   it("prepares a new account the flow never got to, checked, then delivers", async () => {
     attestedTo(DESTINATION);
     deliverReplies = [
@@ -1897,6 +1918,29 @@ describe("what the sponsor answers back", () => {
       expect(log.some((l) => l.startsWith("stellar sign") || l.startsWith("evm"))).toBe(false);
     },
   );
+});
+
+describe("a sponsor refusal before anything is sent", () => {
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+
+  it("says nothing has been sent when the account's own trustline cannot be prepared", async () => {
+    funding = "self";
+    prepareRefusals = [[429, { error: "Too many requests from this address.", retryable: true }]];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow("Too many requests from this address. Nothing has been sent.");
+  });
+
+  it("says nothing has been sent when the signed repayment is not held", async () => {
+    commitRefusals = [
+      [409, { error: "That settlement has expired. Ask for a new one.", retryable: false }],
+    ];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow("That settlement has expired. Ask for a new one. Nothing has been sent.");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
 });
 
 describe("holdBlocker", () => {
