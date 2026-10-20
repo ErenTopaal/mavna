@@ -4,6 +4,7 @@ import { AquariusProvider } from "./aquarius.js";
 import { SdexProvider } from "./sdex.js";
 import { SoroswapProvider } from "./soroswap.js";
 import { SushiSwapProvider } from "./sushiswap.js";
+import { toContractId } from "./wire.js";
 
 /**
  * A fetch that only ever finishes by being aborted, which is what a hung
@@ -125,5 +126,32 @@ describe("a caller that stops waiting", () => {
         signal: soon(),
       }),
     );
+  });
+});
+
+describe("the orderbook's answers", () => {
+  it("treats a rate limit as worth asking again, like every other venue", async () => {
+    vi.stubGlobal("fetch", async () => new Response("slow down", { status: 429 }));
+    const error = await new SdexProvider("testnet")
+      .quote({
+        ...request,
+        assetIn: "native",
+        assetOut: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).retryable).toBe(true);
+  });
+
+  it("refuses a bare XLM code, because a bare code is not an identity", async () => {
+    vi.stubGlobal("fetch", async () => new Response("{}"));
+    await expect(
+      new SdexProvider("testnet").quote({
+        ...request,
+        assetIn: "XLM",
+        assetOut: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      }),
+    ).rejects.toThrow(/CODE:ISSUER or native/);
+    expect(() => toContractId("XLM", "testnet")).toThrow();
   });
 });

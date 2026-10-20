@@ -52,7 +52,7 @@ const pathsResponse = z.object({
 
 /** `CODE:ISSUER`, or `native` for XLM. The identity form, never a bare code. */
 function parseAsset(id: string): Asset {
-  if (id === "native" || id === "XLM") return Asset.native();
+  if (id === "native") return Asset.native();
   const [code, issuer] = id.split(":");
   if (code === undefined || issuer === undefined || issuer === "") {
     throw new MavnaError(
@@ -148,7 +148,7 @@ export class SdexProvider implements SwapProvider {
     );
     if (!response.ok) {
       throw new MavnaError(`Stellar's exchange could not be read (HTTP ${response.status}).`, {
-        retryable: response.status >= 500,
+        retryable: response.status === 429 || response.status >= 500,
       });
     }
 

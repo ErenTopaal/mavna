@@ -86,7 +86,7 @@ export const PASSPHRASE: Readonly<Record<NetworkId, string>> = {
  */
 export function toContractId(id: string, network: NetworkId): string {
   if (/^C[A-Z2-7]{55}$/.test(id)) return id;
-  if (id === "native" || id === "XLM") return Asset.native().contractId(PASSPHRASE[network]);
+  if (id === "native") return Asset.native().contractId(PASSPHRASE[network]);
   const [code, issuer] = id.split(":");
   if (code === undefined || issuer === undefined || issuer === "") {
     throw new MavnaError(
