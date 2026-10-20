@@ -51,6 +51,9 @@ describe("Flow.start", () => {
     if (view === undefined) throw new Error("no route chosen");
     // a source family this page cannot sign for ends the transfer at once
     await flow.runTransfer(view, { kind: "other", name: "Somewhere", family: "move" });
+    // that quote is spent; a fresh one for the same transfer can be started
+    const fresh = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, routes: [fresh], selected: fresh.id };
     flow.start();
     expect(started()).toBe(2);
   });
@@ -633,7 +636,8 @@ describe("a transfer that ended without arriving", () => {
       const inside = {};
       (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
       flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
-      expect(flow.state.screen).toBe("review");
+      // never back to the review of the quote that was sent: the form, quoting afresh
+      expect(flow.state.screen).toBe("send");
       flow.setAmount("2");
       await vi.advanceTimersByTimeAsync(500);
       vi.useRealTimers();
@@ -642,5 +646,121 @@ describe("a transfer that ended without arriving", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a route that was sent", () => {
+  const endings: Array<[string, () => Error, boolean]> = [
+    ["failed", () => new Error("The network refused it."), false],
+    ["still moving", () => new StillMoving("This page stopped watching."), true],
+    [
+      "delivered, unproven",
+      () =>
+        new DeliveredUnverified(
+          "The rail's record no longer says what arrived.",
+          "f00d",
+          "https://stellar.expert/explorer/testnet/tx/f00d",
+        ),
+      true,
+    ],
+  ];
+
+  /** A flow that sent the fixture route and then ended, as the runner ends it. */
+  const sentAndEnded = (variant: "wide" | "compact", ending: () => Error) => {
+    const events: MavnaWidgetEvent[] = [];
+    const quoting = {
+      ...engine,
+      usdcOnStellar: STELLAR_USDC,
+      xlmOnStellar: STELLAR_XLM,
+      adapters: [],
+      sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+      usdt0Chains: [],
+      sponsorTerms: () => new Promise(() => {}),
+      xlmStroopsPerUsdc: async () => 100_000_000n,
+    } as unknown as Engine;
+    const flow = applied(new Flow({ engine: quoting, variant, emit: (e) => events.push(e) }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id, screen: "review" };
+    flow.start();
+    flow.endWith(ending());
+    flow.runEnded();
+    const started = () => events.filter((e) => e.type === "transferStarted").length;
+    return { flow, view, started };
+  };
+
+  for (const variant of ["wide", "compact"] as const) {
+    for (const [name, ending] of endings) {
+      it(`${name}, ${variant}: cannot be started again, and Back leads to the form`, () => {
+        vi.useFakeTimers();
+        try {
+          const { flow, view, started } = sentAndEnded(variant, ending);
+          expect(started()).toBe(1);
+          expect(flow.state.routes).toEqual([]);
+          flow.back();
+          expect(flow.state.screen).toBe("send");
+          // nothing chosen any more, so Start sends nothing
+          flow.start();
+          expect(started()).toBe(1);
+          // and the spent quote itself is refused even if it were chosen again
+          flow.state = { ...flow.state, routes: [view], selected: view.id };
+          flow.start();
+          expect(started()).toBe(1);
+          expect(flow.state.note).toMatch(/already sent/);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    }
+  }
+
+  for (const [name, ending, moved] of endings) {
+    it(`${name}: a fresh quote for the same recipient and amount ${moved ? "asks first" : "starts"}`, () => {
+      vi.useFakeTimers();
+      try {
+        const { flow, started } = sentAndEnded("compact", ending);
+        const fresh = toRouteView(routeFor("layerzero"));
+        flow.state = { ...flow.state, routes: [fresh], selected: fresh.id, screen: "review" };
+        flow.start();
+        if (!moved) {
+          expect(started()).toBe(2);
+          return;
+        }
+        expect(started()).toBe(1);
+        const html = renderToStaticMarkup(
+          renderReview(flow, { r: fresh, chain: { id: "x", name: "X" }, sym: "USDC" }),
+        );
+        expect(html).toMatch(/may still arrive/);
+        expect(html).toContain("Send it again");
+        flow.confirmSendAgain();
+        expect(started()).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+});
+
+describe("the flight's eyebrow after an ending", () => {
+  it("does not say Working for a transfer that ended, on screen or to a screen reader", () => {
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = {
+      ...flow.state,
+      ...FORM,
+      routes: [view],
+      selected: view.id,
+      flying: view,
+      screen: "flight",
+      phase: "sending",
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "pending" }],
+    };
+    flow.endWith(new StillMoving("This page stopped watching."));
+    const vals = flow.flightVals(false);
+    expect(vals.stepEyebrow).toBe("Still on its way");
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC", arrived: false }),
+    );
+    expect(html).not.toMatch(/>Working</);
+    expect(html).toMatch(/role="status"[^>]*>Still on its way/);
   });
 });

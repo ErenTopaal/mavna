@@ -560,6 +560,37 @@ describe("sending USDT0", () => {
     warned.mockRestore();
   });
 
+  it("gives the operator the refusal's own detail, not only its user sentence", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    const node =
+      "No usable node answered for chain 1. Last problem: https://1rpc.io/eth answered HTTP 503.";
+    const refusal = Object.assign(
+      new MavnaError("LayerZero could not be read for this chain right now.", { retryable: true }),
+      { detail: node },
+    );
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const set = await quoteWith(async () => {
+      throw refusal;
+    }, rail);
+    expect(set.rejected[0]?.detail).toContain(node);
+    expect(set.rejected[0]?.explanation).not.toContain("1rpc");
+    expect(warned.mock.calls.flat().join(" ")).toContain("HTTP 503");
+    warned.mockRestore();
+  });
+
+  it("shows a final refusal in its own words, its detail only to the operator", async () => {
+    const rail = new Recorder("layerzero", [{ phase: "idle" }]);
+    const refusal = Object.assign(
+      new MavnaError("No OFT on this chain reaches Stellar.", { retryable: false }),
+      { detail: "peers(30401) returned 0x00 from https://node.example" },
+    );
+    const set = await quoteWith(async () => {
+      throw refusal;
+    }, rail);
+    expect(set.rejected[0]?.explanation).toBe("No OFT on this chain reaches Stellar.");
+    expect(set.rejected[0]?.detail).toContain("node.example");
+  });
+
   it("declines a new-account USDT0 route, saying the sponsor only curates USDC", () => {
     const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
     const ready = routeFor("layerzero", { delivers: usdt0To });

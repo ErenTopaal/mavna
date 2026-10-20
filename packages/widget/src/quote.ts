@@ -851,21 +851,24 @@ export function runQuote(
     /** Said instead of a node's own words when the cause is a node that did not answer. */
     unreachable = "The chain could not be asked just now. Try again in a moment.",
   ): void => {
+    // a refusal keeps the node's own words as detail; the operator needs those
+    const own = (cause as { detail?: unknown } | null)?.detail;
     const said = cause instanceof Error ? cause.message : String(cause);
+    const forOperator = typeof own === "string" && own !== "" ? `${said} ${own}` : said;
     // A node that did not answer is not a chain with no route, and its own text
     // (addresses, endpoints, status codes) is for whoever runs the page.
     const transient = cause instanceof MavnaError && cause.retryable;
     const reason = transient
       ? ("temporarily-unavailable" as const)
       : ("asset-unsupported" as const);
-    if (transient) console.warn("[mavna] the quote could not start:", said);
+    if (transient) console.warn("[mavna] the quote could not start:", forOperator);
     const declined: RouteSet = {
       routes: [],
       rejected: adapters.map((a) => ({
         source: a.id,
         reason,
         explanation: transient ? unreachable : said,
-        ...(transient ? { detail: said } : {}),
+        ...(transient || forOperator !== said ? { detail: forOperator } : {}),
         retryable: rejectionIsRetryable(reason),
       })),
       complete: true,

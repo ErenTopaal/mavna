@@ -1061,19 +1061,46 @@ export function renderReview(
           </div>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={() => c.start()}
-        className={pseudo({
-          hover: "background:var(--mv-cta-hover)",
-          active: "transform:translateY(1px)",
-        })}
-        style={s(
-          "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
-        )}
-      >
-        Start transfer
-      </button>
+      {c.state.askAgain && r !== undefined ? (
+        <div
+          role="alert"
+          style={s(
+            "display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--mv-signal-line);border-radius:14px",
+          )}
+        >
+          <p
+            style={s(
+              "margin:0;font-size:12.5px;line-height:1.5;color:var(--mv-ink-strong);text-wrap:pretty",
+            )}
+          >
+            {`The transfer you just sent, ${sentLabel(r)} to ${short(r.route.destination)}, may still arrive. Starting this sends it again, as a second transfer. Check Activity first if you are not sure.`}
+          </p>
+          <button
+            type="button"
+            onClick={() => c.confirmSendAgain()}
+            className={pseudo({ hover: "background:var(--mv-surface-3)" })}
+            style={s(
+              "width:100%;padding:13px 20px;background:transparent;color:var(--mv-ink);border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600",
+            )}
+          >
+            Send it again
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => c.start()}
+          className={pseudo({
+            hover: "background:var(--mv-cta-hover)",
+            active: "transform:translateY(1px)",
+          })}
+          style={s(
+            "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+          )}
+        >
+          Start transfer
+        </button>
+      )}
     </div>
   );
 }
