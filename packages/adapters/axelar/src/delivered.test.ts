@@ -32,6 +32,8 @@ const CONFIG_URL = `https://raw.githubusercontent.com/axelarnetwork/axelar-contr
 let transfer: (typeof deliveries.transfers)[Name];
 /** What the Stellar node answers for the delivery transaction. */
 let stellarTx: unknown;
+/** What Horizon answers for the delivery transaction's operations. */
+let horizonOperations: unknown;
 
 function json(value: unknown): Response {
   return new Response(JSON.stringify(value), {
@@ -77,6 +79,9 @@ function services(): void {
       });
     }
     if (url === "https://api.axelarscan.io/api/getITSAssets") return json(deliveries.itsAssets);
+    if (url === `https://horizon.stellar.org/transactions/${transfer.stellarTx}/operations`) {
+      return json(horizonOperations);
+    }
     if (url === "https://api.gmp.axelarscan.io/searchGMP") {
       const query = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       return json({ data: query.messageId === undefined ? transfer.first : transfer.second });
@@ -133,6 +138,19 @@ function tokenIdOf(t: (typeof deliveries.transfers)[Name]): string {
 function use(name: Name): void {
   transfer = deliveries.transfers[name];
   stellarTx = transfer.getTransaction;
+  horizonOperations = transfer.horizonOperations;
+}
+
+/** The node has dropped the transaction: it answers NOT_FOUND, kept back to a later ledger. */
+function agedOut(): void {
+  const t = transfer.getTransaction as Record<string, unknown>;
+  stellarTx = {
+    status: "NOT_FOUND",
+    latestLedger: Number(t.ledger) + 200_000,
+    latestLedgerCloseTime: String(Number(t.latestLedgerCloseTime) + 1_200_000),
+    oldestLedger: Number(t.ledger) + 100_000,
+    oldestLedgerCloseTime: String(Number(t.latestLedgerCloseTime) + 600_000),
+  };
 }
 
 function handle(destination?: string): TransferHandle {
@@ -218,5 +236,51 @@ describe("what a delivered Axelar transfer brought, read from Stellar", () => {
     };
     const phase = await statusOf().catch((cause: unknown) => cause);
     expect((phase as StepPhase).phase === "done").toBe(false);
+  });
+});
+
+describe("a delivery older than the Stellar node keeps", () => {
+  it("is done for a Stellar asset, proven from Horizon's record of the execution", async () => {
+    use("bcb");
+    agedOut();
+    const phase = await statusOf("GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL");
+    if (phase.phase !== "done") throw new Error(`expected done, got ${phase.phase}`);
+    expect(phase.received.baseUnits).toBe("30000000000");
+    expect(phase.received.asset.id).toBe(
+      "BCB:GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+    );
+    expect(phase.received.asset.decimals).toBe(7);
+  });
+
+  it("is never done for a token that is its own contract, which Horizon cannot show moving", async () => {
+    use("weth");
+    agedOut();
+    const phase = await statusOf();
+    if (phase.phase !== "delivered-unverified") {
+      throw new Error(`expected delivered-unverified, got ${phase.phase}`);
+    }
+    expect(phase.ref.txHash).toBe(transfer.stellarTx);
+    expect(phase.ref.chainId).toBe("stellar");
+    expect(phase.ref.explorerUrl).toBe(
+      `https://stellar.expert/explorer/public/tx/${transfer.stellarTx}`,
+    );
+    expect(phase.because).toMatch(/Axelar/);
+  });
+
+  it("is not done when Horizon's record is of another message", async () => {
+    use("bcb");
+    agedOut();
+    horizonOperations = deliveries.transfers.weth.horizonOperations;
+    const failure = await statusOf().catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(MavnaError);
+  });
+
+  it("is not done when Horizon shows the asset paid to someone else", async () => {
+    use("bcb");
+    agedOut();
+    const failure = await statusOf(
+      "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    ).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(MavnaError);
   });
 });

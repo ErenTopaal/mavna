@@ -21,6 +21,7 @@ import { EvmReader, fetchEthChainId } from "./evm.js";
 import { estimateItsFee, priceTransfer } from "./fees.js";
 import { PINNED_DEPLOYMENTS } from "./pinned.js";
 import { StellarItsReader } from "./stellar-its.js";
+import { readHorizonExecution } from "./stellar-receipt.js";
 import { chainsTrustEachOther, resolveItsToken, TOKEN_MANAGER } from "./token.js";
 
 /**
@@ -512,7 +513,7 @@ describe("status, across both legs", () => {
   const DELIVERED = "0x6d2b4dd58e2501708cd6bd73ca578097cec519fe634bc9fbadf6e86e9b05ca7f";
 
   it("reports a finished transfer as done, having checked the second leg too", async () => {
-    const phase = await doneOrAged(() =>
+    const phase = await doneOrUnverified(() =>
       adapter.status({
         sourceTxHash: DELIVERED,
         sourceChainId: "base-sepolia",
@@ -520,7 +521,7 @@ describe("status, across both legs", () => {
         destinationAddress: undefined,
       }),
     );
-    if (phase === "aged") return;
+    if (phase === "unverified") return;
     expect(phase.received.baseUnits).toBe("10000000000");
     expect(phase.received.asset.symbol).toBe("IXE");
     // Axelar's own explorer, because it is the only view showing both legs.
@@ -636,14 +637,13 @@ describe("mainnet, where the assets people actually hold are", () => {
 });
 
 /**
- * Done, or the one refusal allowed once the delivery transaction has aged out
- * of what public Stellar RPC keeps (days, not months). What arrived is read
- * from that transaction, so after that the honest answer is that it cannot be
- * shown, never a done without it and never another amount.
+ * Done, or, for a token that is its own contract once its delivery has aged out
+ * of what public Stellar RPC keeps, the honest "executed, cannot re-verify"
+ * answer. Never done without an amount, never another amount.
  */
-async function doneOrAged(
+async function doneOrUnverified(
   ask: () => Promise<StepPhase>,
-): Promise<Extract<StepPhase, { phase: "done" }> | "aged"> {
+): Promise<Extract<StepPhase, { phase: "done" }> | "unverified"> {
   // Axelar's search rate limits a burst with 429, which the adapter rightly
   // reports as a retry, so a retry is what this does before judging.
   let outcome: unknown;
@@ -652,12 +652,12 @@ async function doneOrAged(
     if (!(outcome instanceof MavnaError && outcome.retryable)) break;
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
-  if (outcome instanceof MavnaError && /no longer keeps/.test(outcome.message)) {
-    expect(outcome.retryable).toBe(false);
-    return "aged";
-  }
   if (outcome instanceof Error) throw outcome;
   const phase = outcome as StepPhase;
+  if (phase.phase === "delivered-unverified") {
+    expect(phase.ref.explorerUrl).toContain(phase.ref.txHash);
+    return "unverified";
+  }
   expect(phase.phase).toBe("done");
   if (phase.phase !== "done") throw new Error(`expected done, got ${phase.phase}`);
   return phase;
@@ -673,7 +673,7 @@ describe("mainnet transfers whose Stellar-leg record misstates the amount", () =
   });
 
   it("reads the WETH delivery from Stellar", async () => {
-    const phase = await doneOrAged(() =>
+    const phase = await doneOrUnverified(() =>
       mainnet.status({
         sourceTxHash: "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
         sourceChainId: "ethereum",
@@ -681,7 +681,7 @@ describe("mainnet transfers whose Stellar-leg record misstates the amount", () =
         destinationAddress: "GAY4QJXQ43JXXTUX3KKARXJS7ARPTK5KF5IK4R2B5CYKIEFY2Q4RCVNA",
       }),
     );
-    if (phase === "aged") return;
+    if (phase === "unverified") return;
     expect(phase.received.baseUnits).toBe("149500000000000000");
     expect(phase.received.asset.id).toBe(
       "CDTRXQUOFLCNAEC7DBZT36MBVQ2EDUNUKT4GYOZHOMYOFR7QWTC5IIRV",
@@ -690,7 +690,7 @@ describe("mainnet transfers whose Stellar-leg record misstates the amount", () =
   });
 
   it("reads the BCB delivery from Stellar in the token's own seven decimals", async () => {
-    const phase = await doneOrAged(() =>
+    const phase = await doneOrUnverified(() =>
       mainnet.status({
         sourceTxHash: "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
         sourceChainId: "ethereum",
@@ -698,7 +698,9 @@ describe("mainnet transfers whose Stellar-leg record misstates the amount", () =
         destinationAddress: "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
       }),
     );
-    if (phase === "aged") return;
+    // a Stellar asset: done however old, from Horizon once RPC has dropped it
+    if (phase === "unverified")
+      throw new Error("a Stellar asset must be proven, not left unverified");
     expect(phase.received.baseUnits).toBe("30000000000");
     expect(phase.received.asset.id).toBe(
       "BCB:GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
@@ -767,5 +769,43 @@ describe("quoting from Base mainnet, whose config node does not resolve", () => 
     if (!("reason" in result)) throw new Error("expected a decline");
     expect(result.reason, result.explanation).not.toBe("temporarily-unavailable");
     expect(result.retryable).toBe(false);
+  });
+});
+
+describe("Horizon's record of the two mainnet deliveries", () => {
+  // Read-only, against horizon.stellar.org, which keeps every transaction.
+  const ITS = "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6";
+
+  it("shows the BCB execution, its message and the asset paid to the recipient", async () => {
+    const execution = await readHorizonExecution({
+      horizonUrl: "https://horizon.stellar.org",
+      txHash: "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+      tokenService: ITS,
+      messageId: "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+    });
+    expect(execution.tokenId).toBe(
+      "950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f",
+    );
+    expect(execution.recipient).toBe("GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL");
+    expect(execution.amount).toBe(30_000_000_000n);
+    expect(execution.balanceChanges).toContainEqual(
+      expect.objectContaining({
+        asset_code: "BCB",
+        asset_issuer: "GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+        to: "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+        amount: "3000.0000000",
+      }),
+    );
+  });
+
+  it("shows the WETH execution and its message, and no balance change to prove the amount", async () => {
+    const execution = await readHorizonExecution({
+      horizonUrl: "https://horizon.stellar.org",
+      txHash: "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+      tokenService: ITS,
+      messageId: "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+    });
+    expect(execution.amount).toBe(149_500_000_000_000_000n);
+    expect(execution.balanceChanges).toEqual([]);
   });
 });

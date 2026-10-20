@@ -1,5 +1,5 @@
 {
-  "source": "Read-only from api.gmp.axelarscan.io and https://mainnet.sorobanrpc.com on 2026-10-20. Mainnet, both delivered. itsAssets from api.axelarscan.io/api/getITSAssets the same day. Neither token id is in api.axelarscan.io/api/getITSAssets (152 entries) the same day, so itsAssets is empty.",
+  "source": "Read-only from api.gmp.axelarscan.io and https://mainnet.sorobanrpc.com on 2026-10-20. Mainnet, both delivered. itsAssets from api.axelarscan.io/api/getITSAssets the same day. Neither token id is in api.axelarscan.io/api/getITSAssets (152 entries) the same day, so itsAssets is empty. horizonOperations from horizon.stellar.org/transactions/{stellarTx}/operations the same day.",
   "transfers": {
     "weth": {
       "sourceTxHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
@@ -852,6 +852,80 @@
           ],
           "latestLedger": 65043195
         }
+      },
+      "horizonOperations": {
+        "_links": {
+          "self": {
+            "href": "https://horizon.stellar.org/transactions/25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6/operations?cursor=&limit=10&order=asc"
+          },
+          "next": {
+            "href": "https://horizon.stellar.org/transactions/25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6/operations?cursor=279222627141791745&limit=10&order=asc"
+          },
+          "prev": {
+            "href": "https://horizon.stellar.org/transactions/25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6/operations?cursor=279222627141791745&limit=10&order=desc"
+          }
+        },
+        "_embedded": {
+          "records": [
+            {
+              "_links": {
+                "self": {
+                  "href": "https://horizon.stellar.org/operations/279222627141791745"
+                },
+                "transaction": {
+                  "href": "https://horizon.stellar.org/transactions/25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6"
+                },
+                "effects": {
+                  "href": "https://horizon.stellar.org/operations/279222627141791745/effects"
+                },
+                "succeeds": {
+                  "href": "https://horizon.stellar.org/effects?order=desc&cursor=279222627141791745"
+                },
+                "precedes": {
+                  "href": "https://horizon.stellar.org/effects?order=asc&cursor=279222627141791745"
+                }
+              },
+              "id": "279222627141791745",
+              "paging_token": "279222627141791745",
+              "transaction_successful": true,
+              "source_account": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "type": "invoke_host_function",
+              "type_i": 24,
+              "created_at": "2026-10-18T17:15:02Z",
+              "transaction_hash": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+              "function": "HostFunctionTypeHostFunctionTypeInvokeContract",
+              "parameters": [
+                {
+                  "value": "AAAAEgAAAAFGFiHFOa1CxwfY9ymjQzhdYwxhFFUCUDyJoEDU3+SIQQ==",
+                  "type": "Address"
+                },
+                {
+                  "value": "AAAADwAAAAdleGVjdXRlAA==",
+                  "type": "Sym"
+                },
+                {
+                  "value": "AAAADgAAAAZheGVsYXIAAA==",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADgAAAEoweDJkNDE0Mjc5MDgzODZjM2Y4ZGY5Y2FhOTQ5Nzk2Y2ZhOTIxZWRkMDYzYzhkY2JjMDIwYzQ3MTRiOGE5YjM5YzktNzUxOTU3OQAA",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADgAAAEFheGVsYXIxYXFjajU0bHp6MHJrMjJndnFnY244ZnI1dHg0cnp3ZHY1d3Y1ajlkbW5hY2dlZnZkN3d6c3kyajJtcgAAAA==",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADQAAAkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEV0aGVyZXVtAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJYsAIjw4U9aR+kciSTy1ZhmywI3wTXsvNASbOnuOwGkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITIXU568AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFNZIk8JuQZRr2uf5tBp4fnSyiIu3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADhHQVk0UUpYUTQzSlhYVFVYM0tLQVJYSlM3QVJQVEs1S0Y1SUs0UjJCNUNZS0lFRlkyUTRSQ1ZOQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  "type": "Bytes"
+                }
+              ],
+              "address": "",
+              "salt": "",
+              "asset_balance_changes": null
+            }
+          ]
+        }
       }
     },
     "bcb": {
@@ -1686,6 +1760,90 @@
             }
           ],
           "latestLedger": 65043195
+        }
+      },
+      "horizonOperations": {
+        "_links": {
+          "self": {
+            "href": "https://horizon.stellar.org/transactions/02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77/operations?cursor=&limit=10&order=asc"
+          },
+          "next": {
+            "href": "https://horizon.stellar.org/transactions/02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77/operations?cursor=279139188812222465&limit=10&order=asc"
+          },
+          "prev": {
+            "href": "https://horizon.stellar.org/transactions/02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77/operations?cursor=279139188812222465&limit=10&order=desc"
+          }
+        },
+        "_embedded": {
+          "records": [
+            {
+              "_links": {
+                "self": {
+                  "href": "https://horizon.stellar.org/operations/279139188812222465"
+                },
+                "transaction": {
+                  "href": "https://horizon.stellar.org/transactions/02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77"
+                },
+                "effects": {
+                  "href": "https://horizon.stellar.org/operations/279139188812222465/effects"
+                },
+                "succeeds": {
+                  "href": "https://horizon.stellar.org/effects?order=desc&cursor=279139188812222465"
+                },
+                "precedes": {
+                  "href": "https://horizon.stellar.org/effects?order=asc&cursor=279139188812222465"
+                }
+              },
+              "id": "279139188812222465",
+              "paging_token": "279139188812222465",
+              "transaction_successful": true,
+              "source_account": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "type": "invoke_host_function",
+              "type_i": 24,
+              "created_at": "2026-10-17T14:16:07Z",
+              "transaction_hash": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+              "function": "HostFunctionTypeHostFunctionTypeInvokeContract",
+              "parameters": [
+                {
+                  "value": "AAAAEgAAAAFGFiHFOa1CxwfY9ymjQzhdYwxhFFUCUDyJoEDU3+SIQQ==",
+                  "type": "Address"
+                },
+                {
+                  "value": "AAAADwAAAAdleGVjdXRlAA==",
+                  "type": "Sym"
+                },
+                {
+                  "value": "AAAADgAAAAZheGVsYXIAAA==",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADgAAAEoweDlkMzA2OWRhMzAxYjYzZjlhMzZkZWYyNjkyMDBmYTJlNzFlMmIzZmMwZmM1ZWQ2OWYxNDUwYWQ5MGU2NDcxZWUtNzUxMDQ0NwAA",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADgAAAEFheGVsYXIxYXFjajU0bHp6MHJrMjJndnFnY244ZnI1dHg0cnp3ZHY1d3Y1ajlkbW5hY2dlZnZkN3d6c3kyajJtcgAAAA==",
+                  "type": "Str"
+                },
+                {
+                  "value": "AAAADQAAAkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEV0aGVyZXVtAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJUJd/RDT0cUCO3K0aYOnX+zklBNqyvFme3HrUKmouofAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAb8I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFPqairYu6XjGaWLPU/5atQ61MH5JAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADhHREtGQlRKUEFVNzRDTlg2NFJUTTQ3RVNRUjRRU1lTWEMyTk1IQjdCSFFUU0dMRFpRVFM2Q0FYTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  "type": "Bytes"
+                }
+              ],
+              "address": "",
+              "salt": "",
+              "asset_balance_changes": [
+                {
+                  "asset_type": "credit_alphanum4",
+                  "asset_code": "BCB",
+                  "asset_issuer": "GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+                  "type": "transfer",
+                  "from": "CAUABM5TK53XYWO3EOVM4TN7XWIK6WH7HKPAWJ3FRXA2O6Z46NVKBPA5",
+                  "to": "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+                  "amount": "3000.0000000"
+                }
+              ]
+            }
+          ]
         }
       }
     }

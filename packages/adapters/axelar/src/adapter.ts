@@ -34,7 +34,13 @@ import { type EthCall, type EthChainId, EvmReader, fetchEthCall, fetchEthChainId
 import { type PricedIn, priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
-import { readStellarReceipt, tokenPaid } from "./stellar-receipt.js";
+import {
+  type HorizonBalanceChange,
+  ReceiptAged,
+  readHorizonExecution,
+  readStellarReceipt,
+  tokenPaid,
+} from "./stellar-receipt.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
 import {
   buildApproval,
@@ -96,6 +102,7 @@ export class AxelarAdapter implements BridgeAdapter {
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
   private readonly prices: XlmPriceSource;
+  private readonly horizonUrl: string;
   private readonly ethCall: EthCall;
   private readonly ethChainId: EthChainId;
   private readonly gmp: GmpApi;
@@ -105,15 +112,12 @@ export class AxelarAdapter implements BridgeAdapter {
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
-    this.prices =
-      options.prices ??
-      new XlmPriceSource({
-        horizonUrl:
-          options.horizonUrl ??
-          (options.network === "mainnet"
-            ? "https://horizon.stellar.org"
-            : "https://horizon-testnet.stellar.org"),
-      });
+    this.horizonUrl =
+      options.horizonUrl ??
+      (options.network === "mainnet"
+        ? "https://horizon.stellar.org"
+        : "https://horizon-testnet.stellar.org");
+    this.prices = options.prices ?? new XlmPriceSource({ horizonUrl: this.horizonUrl });
     this.ethCall = options.ethCall ?? fetchEthCall;
     this.ethChainId = options.ethChainId ?? fetchEthChainId;
     this.gmp = new GmpApi(options.network);
@@ -728,11 +732,20 @@ export class AxelarAdapter implements BridgeAdapter {
       return { phase: "pending", ref, expectedByUnix: 0 };
     }
 
-    return {
-      phase: "done",
-      ref,
-      received: await this.receivedOnStellar(second, handle.destinationAddress),
-    };
+    const received = await this.receivedOnStellar(second, handle.destinationAddress);
+    if ("unverified" in received) {
+      const txHash = second.executedTransactionHash;
+      return {
+        phase: "delivered-unverified",
+        ref: {
+          chainId: stellarChainId(this.network),
+          txHash,
+          explorerUrl: stellarRef(this.network).explorerTxUrl(txHash),
+        },
+        because: received.unverified,
+      };
+    }
+    return { phase: "done", ref, received: received.amount };
   }
 
   /**
@@ -930,20 +943,26 @@ export class AxelarAdapter implements BridgeAdapter {
   private async receivedOnStellar(
     second: GmpRecord,
     destination: string | undefined,
-  ): Promise<Amount> {
+  ): Promise<{ readonly amount: Amount } | { readonly unverified: string }> {
     const stellar = await this.registry.stellarChain();
     const stellarIts = await this.stellarReader();
     const tokenService = (await chainConfig(this.network, stellar.id)).interchainTokenService ?? "";
 
-    const receipt = await readStellarReceipt({
-      client: this.rpc,
-      txHash: second.executedTransactionHash ?? "",
-      ledger: second.executedLedger,
-      atUnix: second.executedAtUnix,
-      gateway: stellar.gateway,
-      tokenService,
-      messageId: second.messageId ?? "",
-    });
+    let receipt: Awaited<ReturnType<typeof readStellarReceipt>>;
+    try {
+      receipt = await readStellarReceipt({
+        client: this.rpc,
+        txHash: second.executedTransactionHash ?? "",
+        ledger: second.executedLedger,
+        atUnix: second.executedAtUnix,
+        gateway: stellar.gateway,
+        tokenService,
+        messageId: second.messageId ?? "",
+      });
+    } catch (cause) {
+      if (!(cause instanceof ReceiptAged)) throw cause;
+      return this.receivedPerHorizon(second, destination, tokenService, stellarIts);
+    }
 
     if (destination !== undefined && receipt.recipient !== destination) {
       throw new MavnaError(
@@ -981,14 +1000,92 @@ export class AxelarAdapter implements BridgeAdapter {
         : await this.contractTokenLabel(receipt.tokenId, token, stellarIts);
 
     return {
-      asset: {
-        chainId: stellarChainId(this.network),
-        id: delivered.id,
-        symbol: label.symbol,
-        decimals,
-        curatedBy: label.curatedBy,
+      amount: {
+        asset: {
+          chainId: stellarChainId(this.network),
+          id: delivered.id,
+          symbol: label.symbol,
+          decimals,
+          curatedBy: label.curatedBy,
+        },
+        baseUnits: receipt.amount.toString(),
       },
-      baseUnits: receipt.amount.toString(),
+    };
+  }
+
+  /**
+   * The same question once the Stellar node has dropped the transaction, put to
+   * Horizon, which keeps all of it (see readHorizonExecution). A Stellar asset's
+   * contract leaves a balance change there, so what arrived is still proven. A
+   * token that is its own contract leaves none, and is never reported done from
+   * this: the answer is the transaction Axelar names and that it can no longer
+   * be checked here.
+   */
+  private async receivedPerHorizon(
+    second: GmpRecord,
+    destination: string | undefined,
+    tokenService: string,
+    stellarIts: StellarItsReader,
+  ): Promise<{ readonly amount: Amount } | { readonly unverified: string }> {
+    const execution = await readHorizonExecution({
+      horizonUrl: this.horizonUrl,
+      txHash: second.executedTransactionHash ?? "",
+      tokenService,
+      messageId: second.messageId ?? "",
+    });
+    if (destination !== undefined && execution.recipient !== destination) {
+      throw new MavnaError(
+        `This transfer was delivered to ${execution.recipient}, not to ${destination}.`,
+        { retryable: false },
+      );
+    }
+
+    const token = await stellarIts.registeredTokenAddress(execution.tokenId);
+    if (token === undefined) {
+      throw new MavnaError(
+        "Stellar's token service has no token under the id it delivered, so what arrived " +
+          "cannot be named.",
+        { retryable: false },
+      );
+    }
+    const delivered = await stellarIts.deliveredAs(token);
+    if (delivered.kind !== "classic") {
+      return {
+        unverified:
+          "Axelar's record says this transfer executed on Stellar in this transaction, and " +
+          "Stellar's history shows the token service running it. The token is its own " +
+          "contract, whose movements Stellar's nodes keep for only a few days, so how much " +
+          "arrived can no longer be read back here.",
+      };
+    }
+
+    const paid = execution.balanceChanges.some(
+      (change) =>
+        (change.type === "transfer" || change.type === "mint") &&
+        change.to === execution.recipient &&
+        classicIdOf(change) === delivered.id &&
+        toBaseUnits(change.amount) === execution.amount,
+    );
+    if (!paid) {
+      throw new MavnaError(
+        "Horizon's record of the delivery shows no payment of this asset to the recipient for " +
+          "the amount the token service was told to deliver. Not reporting it as arrived.",
+        { retryable: false },
+      );
+    }
+
+    const decimals = await stellarIts.tokenDecimals(token);
+    return {
+      amount: {
+        asset: {
+          chainId: stellarChainId(this.network),
+          id: delivered.id,
+          symbol: delivered.asset.isNative() ? "XLM" : delivered.asset.getCode(),
+          decimals,
+          curatedBy: undefined,
+        },
+        baseUnits: execution.amount.toString(),
+      },
     };
   }
 
@@ -1202,4 +1299,17 @@ function nativeAsset(chain: AxelarChain, pricedIn: PricedIn): Asset {
 function gmpExplorerUrl(network: NetworkId, txHash: string): string {
   const host = network === "mainnet" ? "axelarscan.io" : "testnet.axelarscan.io";
   return `https://${host}/gmp/${txHash}`;
+}
+
+/** A Horizon balance change's asset, in the CODE:ISSUER form a route names it by. */
+function classicIdOf(change: HorizonBalanceChange): string {
+  if (change.asset_type === "native") return "native";
+  return `${change.asset_code ?? ""}:${change.asset_issuer ?? ""}`;
+}
+
+/** Horizon's seven-decimal amount ("3000.0000000") as base units, without a float. */
+function toBaseUnits(amount: string): bigint {
+  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(amount);
+  if (match === null) return -1n;
+  return BigInt(match[1] ?? "0") * 10_000_000n + BigInt((match[2] ?? "").padEnd(7, "0"));
 }

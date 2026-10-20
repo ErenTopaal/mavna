@@ -84,7 +84,22 @@ little, so it usually declines; the reason is on the route, in a sentence.
 
 Delivery is proven across both legs of the hub route. Either leg running short of
 gas reports the transfer as stalled with an add-gas remedy, paid on the sending
-chain; either leg erroring reports it as failed. What arrived is read from the
-Stellar leg and named as the Stellar asset. The adapter never reads Axelar's
+chain; either leg erroring reports it as failed. The adapter never reads Axelar's
 refund flag as a returned transfer, because that flag is leftover gas going home,
 not the tokens.
+
+What arrived is read from Stellar, not from Axelar's record, which on mainnet
+sometimes carries no amount or the wrong decimals. Axelar's record is used only to
+find the Stellar transaction that executed the message. In it, the gateway's
+`message_executed` names the message, the token service's
+`interchain_transfer_received` names the token, recipient and amount, and the
+token's own mint or transfer must agree. Decimals come from the token itself.
+
+Public Stellar RPC keeps transactions for days, not months. Once it has dropped
+the delivery, the adapter reads Horizon instead, which keeps every transaction:
+the token service's successful `execute` of this message, whose payload names the
+token, recipient and amount. A token linked to a Stellar asset also leaves a
+balance change there, so the amount is still proven and the transfer is done. A
+token that is its own contract leaves none. That transfer is reported as
+`delivered-unverified`: it executed on Stellar in the linked transaction, and how
+much arrived can no longer be read back. It is never reported as done.
