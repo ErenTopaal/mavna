@@ -18,6 +18,7 @@ const ATTACKER = Keypair.random().publicKey();
 const USDC = new Asset("USDC", USDC_ISSUER);
 // the fixture route delivers 5 USDC (50000000 at seven decimals) and quotes 1.5 XLM of reserve
 const route = routeFor("cctp", { newAccount: true });
+const opens = { destination: route.destination, holds: route.deliveredAtLeast.asset };
 
 function preparation(createAccount: boolean): string {
   return buildPreparation({
@@ -59,8 +60,8 @@ function built(
 
 describe("preparationProblem", () => {
   it("accepts what the sponsor builds, with and without creating the account", () => {
-    expect(preparationProblem(preparation(true), network.passphrase, route)).toBeUndefined();
-    expect(preparationProblem(preparation(false), network.passphrase, route)).toBeUndefined();
+    expect(preparationProblem(preparation(true), network.passphrase, opens)).toBeUndefined();
+    expect(preparationProblem(preparation(false), network.passphrase, opens)).toBeUndefined();
   });
 
   it("refuses one that also hands the account to someone else", () => {
@@ -75,7 +76,7 @@ describe("preparationProblem", () => {
         masterWeight: 0,
       }),
     ]);
-    expect(preparationProblem(hostile, network.passphrase, route)).toBe(
+    expect(preparationProblem(hostile, network.passphrase, opens)).toBe(
       "it does more than open the account",
     );
   });
@@ -86,7 +87,7 @@ describe("preparationProblem", () => {
       Operation.changeTrust({ asset: new Asset("USDC", ATTACKER), source: DESTINATION }),
       Operation.endSponsoringFutureReserves({ source: DESTINATION }),
     ]);
-    expect(preparationProblem(hostile, network.passphrase, route)).toMatch(/USDC trustline/);
+    expect(preparationProblem(hostile, network.passphrase, opens)).toMatch(/USDC trustline/);
   });
 
   it("refuses one the receiving account would pay for", () => {
@@ -95,11 +96,11 @@ describe("preparationProblem", () => {
       Operation.changeTrust({ asset: USDC, source: DESTINATION }),
       Operation.endSponsoringFutureReserves({ source: DESTINATION }),
     ]);
-    expect(preparationProblem(hostile, network.passphrase, route)).toMatch(/paid for/);
+    expect(preparationProblem(hostile, network.passphrase, opens)).toMatch(/paid for/);
   });
 
   it("refuses something unreadable", () => {
-    expect(preparationProblem("PREPARATION", network.passphrase, route)).toBe(
+    expect(preparationProblem("PREPARATION", network.passphrase, opens)).toBe(
       "it could not be read",
     );
   });

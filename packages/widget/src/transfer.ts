@@ -11,6 +11,7 @@
  * than as module singletons, so the same runner serves the app (env config) and
  * the widget (an integrator's config).
  */
+import { AttestationService, fromHex, parseForwarderHookData } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
 import { inspectDestination, stroopsToXlm } from "@mavna/stellar";
@@ -21,6 +22,7 @@ import {
 } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { type ExecutionEvent, execute, ReceiptTimedOut } from "./execute";
+import { short } from "./format";
 import { asError } from "./helpers";
 import { forget, remember } from "./history";
 import {
@@ -313,7 +315,10 @@ async function prepareNow(
   funds: string,
 ): Promise<void> {
   const preparation = await engine.sponsor.requestPreparation(route.destination, chainId);
-  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, route);
+  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
+    destination: route.destination,
+    holds: route.deliveredAtLeast.asset,
+  });
   if (problem !== undefined) {
     throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
   }
@@ -517,12 +522,62 @@ export async function finishDelivery(
   engine: TransferEngine,
   burnHash: string,
   domain: number,
+  /** The chain the burn left from, when known; the sponsor's limits are per chain. */
+  sourceChainId?: string,
 ): Promise<SponsorDelivery | OwnDelivery> {
   const terms = await engine.sponsorTerms();
   if (terms.reserveFunding === "self") {
     return deliverOwn(engine, burnHash, domain, await engine.stellar.connect());
   }
-  return engine.sponsor.requestDelivery(burnHash, domain);
+  const first = await engine.sponsor.requestDelivery(burnHash, domain);
+  if (first.kind !== "recipient-not-ready") return first;
+  // A new account the flow never got to prepare: the page closed during the
+  // attestation, or the prompt was missed. The account Circle will mint to is
+  // read from the attested message, and only its own wallet may open it.
+  const recipient = await attestedRecipient(engine, burnHash, domain);
+  if (recipient === undefined) return first;
+  const address = await engine.stellar.connect();
+  if (address !== recipient) {
+    return {
+      kind: "recipient-not-ready",
+      detail:
+        `${first.detail} Circle will mint to ${short(recipient)}, so connect that account's ` +
+        "Stellar wallet to let it hold USDC.",
+    };
+  }
+  const preparation = await engine.sponsor.requestPreparation(
+    recipient,
+    sourceChainId ?? "unknown",
+  );
+  const problem = preparationProblem(preparation.xdr, engine.stellarNetwork.passphrase, {
+    destination: recipient,
+    holds: engine.usdcOnStellar,
+  });
+  if (problem !== undefined) {
+    throw new Error(
+      `The sponsor's preparation was not signed: ${problem}. The funds are safe on Circle's ` +
+        "side and still deliverable.",
+    );
+  }
+  await engine.sponsor.submitPreparation(await engine.stellar.sign(preparation.xdr, address));
+  return engine.sponsor.requestDelivery(burnHash, domain, recipient);
+}
+
+/** Where Circle's v2 message body starts, and the forwarder's hook data inside it. */
+const MESSAGE_BODY_INDEX = 148;
+const HOOK_DATA_INDEX = 228;
+
+/** The Stellar account the attested burn's hook data names, or undefined when there is none yet. */
+async function attestedRecipient(
+  engine: Pick<TransferEngine, "network">,
+  burnHash: string,
+  domain: number,
+): Promise<string | undefined> {
+  const found = await new AttestationService(engine.network).byTransaction(domain, burnHash);
+  const message = found.find((a) => a.status === "complete" && a.message !== undefined)?.message;
+  if (message === undefined) return undefined;
+  return parseForwarderHookData(fromHex(message).subarray(MESSAGE_BODY_INDEX + HOOK_DATA_INDEX))
+    .recipient;
 }
 
 /** Why a delivery the account would pay for was left unsigned. */

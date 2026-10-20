@@ -1,4 +1,4 @@
-import { CctpAdapter } from "@mavna/adapter-cctp";
+import { buildForwarderHookData, CctpAdapter, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
 import { buildPreparation, createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { createSwapVenues } from "@mavna/swap";
@@ -1478,5 +1478,58 @@ describe("finishing a Circle delivery from Activity", () => {
     const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3);
     expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
     expect(log).toEqual(["sponsor /health", "sponsor /deliver"]);
+  });
+
+  /** An attested burn whose hook data names `recipient`, laid out as Circle's v2 message is. */
+  const attestedTo = (recipient: string) => {
+    const hook = buildForwarderHookData(recipient);
+    const message = new Uint8Array(148 + 228 + hook.length);
+    message.set(hook, 148 + 228);
+    irisReplies = [
+      [
+        200,
+        {
+          messages: [
+            {
+              status: "complete",
+              message: toHex(message),
+              attestation: "0x0304",
+              decodedMessage: {},
+            },
+          ],
+        },
+      ],
+    ];
+  };
+
+  it("prepares a new account the flow never got to, checked, then delivers", async () => {
+    attestedTo(DESTINATION);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log).toEqual([
+      "sponsor /health",
+      "sponsor /deliver",
+      "iris /v2/messages/3",
+      "stellar connect",
+      "sponsor /prepare",
+      "stellar sign PREPARATION",
+      "sponsor /submit",
+      "sponsor /deliver",
+    ]);
+  });
+
+  it("prepares nothing when the connected wallet is not the account Circle will mint to", async () => {
+    attestedTo(SENDER_STELLAR);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "recipient-not-ready" });
+    expect(outcome.kind === "recipient-not-ready" && outcome.detail).toMatch(/GAAZI…CWN7/);
+    expect(log).not.toContain("sponsor /prepare");
   });
 });

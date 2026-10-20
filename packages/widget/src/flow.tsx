@@ -1277,6 +1277,7 @@ export class Flow extends React.Component<FlowProps, State> {
         this.engine,
         hash.startsWith("0x") ? hash : `0x${hash}`,
         domain,
+        known?.sourceChainId,
       );
       if (outcome.kind === "too-costly") {
         this.setState({ lookupNote: tooCostly(outcome.feeStroops), lookupNoteKind: "fault" });

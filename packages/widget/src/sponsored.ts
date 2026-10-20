@@ -54,12 +54,13 @@ function sourcedBy(op: { readonly source?: string | undefined }, tx: Parsed): bo
 export function preparationProblem(
   xdr: string,
   passphrase: string,
-  route: Route,
+  /** The account being opened, and the asset it must be able to hold. */
+  wanted: { readonly destination: string; readonly holds: Route["deliveredAtLeast"]["asset"] },
 ): string | undefined {
   const tx = parse(xdr, passphrase);
   if (tx === undefined) return "it could not be read";
-  const account = route.destination;
-  const holds = route.deliveredAtLeast.asset;
+  const account = wanted.destination;
+  const holds = wanted.holds;
   if (tx.source === account) return "it would be paid for by the receiving account";
   if (!boundedBy(tx, PREPARATION_MAX_SECONDS)) return "it is not limited to a few minutes";
   const ops = [...tx.operations];
