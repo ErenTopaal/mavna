@@ -30,7 +30,7 @@ const USDC_DECIMALS_ON_EVM = 6;
 
 export type RailName = "Circle" | "Axelar" | "LayerZero" | "NEAR Intents";
 export type Priority = "best" | "fast";
-/** USDT0 lands as itself: no conversion leg is offered for it here. */
+/** What lands on Stellar. USDT0 needs a USDT0 send; USDC and XLM can come of either send. */
 export type Wanted = "USDC" | "XLM" | "USDT0";
 /** What the user sends, as the picker names it. */
 export type SendAsset = "USDC" | "USDT0";
@@ -256,24 +256,6 @@ export function buildAssets(
     curatedBy: "Circle",
   };
   return { from, to: wanted === "XLM" ? engine.xlmOnStellar : engine.usdcOnStellar };
-}
-
-/**
- * The assets for what the user picked to send.
- *
- * USDT0's come from the LayerZero deployment through the engine, never from a
- * symbol: the source id is the token the chain's OFT moves and the Stellar id is
- * the classic asset its Stellar token wraps. Nothing converts USDT0 here, so
- * what it lands as is what the recipient gets whatever `wanted` says.
- */
-export async function assetsFor(
-  engine: Pick<Engine, "network" | "usdcOnStellar" | "xlmOnStellar" | "usdt0Assets">,
-  chainId: string,
-  send: SendAsset,
-  wanted: Wanted,
-): Promise<{ from: Asset; to: Asset }> {
-  if (send === "USDT0") return engine.usdt0Assets(chainId);
-  return buildAssets(engine, chainId, wanted);
 }
 
 /**

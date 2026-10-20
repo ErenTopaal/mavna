@@ -17,7 +17,6 @@ import { routeFor, ScriptedAdapter, SOURCE_USDC, STELLAR_XLM } from "./__fixture
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import {
   applySponsorTerms,
-  assetsFor,
   buildAssets,
   declineUnsettleable,
   railsLabel,
@@ -314,24 +313,6 @@ describe("sending USDT0", () => {
     asked.push(chainId);
     return { from: { ...usdt0From, chainId }, to: usdt0To };
   };
-
-  it("takes both assets from the LayerZero deployment, whatever the receive toggle says", async () => {
-    for (const wanted of ["USDC", "XLM", "USDT0"] as const) {
-      const assets = await assetsFor({ ...engine, usdt0Assets }, "arbitrum", "USDT0", wanted);
-      expect(assets).toEqual({ from: usdt0From, to: usdt0To });
-    }
-    expect(asked).toEqual(["arbitrum", "arbitrum", "arbitrum"]);
-  });
-
-  it("still names USDC by its token address when USDC is picked", async () => {
-    const { from } = await assetsFor(
-      { ...engine, usdt0Assets },
-      "ethereum-sepolia",
-      "USDC",
-      "USDC",
-    );
-    expect(from.id).toBe(sourceUsdcFor("testnet", "ethereum-sepolia")?.address);
-  });
 
   /** Records what each rail is asked, and answers like a rail with no route. */
   class Recorder extends ScriptedAdapter {
