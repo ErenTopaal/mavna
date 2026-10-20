@@ -21,6 +21,12 @@ export interface BuiltRecord {
   readonly signer: string;
   readonly sourceChainId: string;
   readonly expiresAtUnix: number;
+  /**
+   * When the server stops honouring the record, if before `expiresAtUnix`. A
+   * settlement can only be held while its short channel lease lasts, so its
+   * record closes with that lease rather than living for the settlement's day.
+   */
+  readonly openUntilUnix?: number;
   readonly channel?: string;
   /**
    * For a settlement, what it repays: whether it revokes the account's own
@@ -41,12 +47,31 @@ export interface Repayment {
   readonly assets: readonly string[];
 }
 
+/**
+ * Open records the ledger holds before it refuses more. Every one is written to
+ * disk on each change, so this bounds what anonymous builds can make the
+ * sponsor carry and rewrite, far above what honest traffic leaves open.
+ */
+export const DEFAULT_OPEN_RECORDS = 10_000;
+
+/** Open records kept per account and kind; the oldest goes first. */
+const OPEN_PER_ACCOUNT = 3;
+
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
+  private readonly capacity: number;
+
+  constructor(capacity: number = DEFAULT_OPEN_RECORDS) {
+    this.capacity = capacity;
+  }
 
   /** Rebuild a ledger from what `snapshot` wrote, less what expired meanwhile. */
-  static fromSnapshot(records: readonly BuiltRecord[], nowUnix: number): BuiltLedger {
-    const ledger = new BuiltLedger();
+  static fromSnapshot(
+    records: readonly BuiltRecord[],
+    nowUnix: number,
+    capacity: number = DEFAULT_OPEN_RECORDS,
+  ): BuiltLedger {
+    const ledger = new BuiltLedger(capacity);
     for (const record of records) ledger.records.set(record.hash, record);
     ledger.prune(nowUnix);
     return ledger;
@@ -64,7 +89,21 @@ export class BuiltLedger {
    */
   record(record: BuiltRecord, nowUnix: number): void {
     this.prune(nowUnix);
+    // A few open builds per account and kind, the latest. Asking again builds
+    // afresh, and each answer would otherwise add one more record.
+    const same = [...this.records.values()].filter(
+      (open) => open.signer === record.signer && open.kind === record.kind,
+    );
+    for (const stale of same.slice(0, Math.max(0, same.length - (OPEN_PER_ACCOUNT - 1)))) {
+      this.records.delete(stale.hash);
+    }
     this.records.set(record.hash, record);
+  }
+
+  /** Whether as many records are open as the ledger holds, so the next build is refused. */
+  full(nowUnix: number): boolean {
+    this.prune(nowUnix);
+    return this.records.size >= this.capacity;
   }
 
   /**
@@ -84,7 +123,7 @@ export class BuiltLedger {
 
   private prune(nowUnix: number): void {
     for (const [key, record] of this.records) {
-      if (record.expiresAtUnix <= nowUnix) this.records.delete(key);
+      if ((record.openUntilUnix ?? record.expiresAtUnix) <= nowUnix) this.records.delete(key);
     }
   }
 

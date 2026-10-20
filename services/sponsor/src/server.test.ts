@@ -1959,6 +1959,36 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
   });
 });
 
+describe("what anonymous builds can make the sponsor write down", () => {
+  it("keeps a few settlements per account, and none past its short lease", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ state });
+    const user = Keypair.random();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 20; i += 1) {
+      // a second apart, so each build is a different transaction
+      vi.setSystemTime(Date.now() + 1_000);
+      const built = await server.post("/settlement", {
+        destination: user.publicKey(),
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+    }
+    const settlements = () =>
+      (state.read("built") as Promise<{ kind: string }[]>).then((records) =>
+        records.filter((record) => record.kind === "settlement"),
+      );
+    expect((await settlements()).length).toBe(3);
+
+    vi.setSystemTime(Date.now() + PROVISIONAL_AND_GRACE_SECONDS * 1_000);
+    await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect((await settlements()).length).toBe(1);
+  });
+});
+
 describe("a settlement that lands after the sponsor stopped waiting", () => {
   /** Sends the settlement, sees no inclusion in two minutes, then lets it land. */
   async function landsUnseen(server: TestServer, user: Keypair): Promise<void> {
@@ -2393,7 +2423,9 @@ describe("the held settlement stays put while a preparation lands against it", (
 
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
-    vi.setSystemTime(start + 1_000_000);
+    // built shortly before the first one's bound, within the short window a
+    // built settlement may still be committed in
+    vi.setSystemTime(start + 86_400_000 - 60_000);
     const newer = await server.post("/settlement", {
       destination: user.publicKey(),
       sourceChainId: "1",
@@ -2415,6 +2447,7 @@ describe("the held settlement stays put while a preparation lands against it", (
     // The stranded settlement and its channel are already given up, so the
     // newer one is turned away now rather than accepted and then dropped.
     expect(committed.status).toBe(409);
+    expect(committed.body.error).toMatch(/slot has lapsed or passed/);
     expect((await stranding).body.settlementRetryable).toBe(false);
     expect((await caps.usage()).stranded).toBe(1);
     expect((await server.post("/settle", { destination: user.publicKey() })).status).toBe(404);
@@ -2433,7 +2466,7 @@ describe("the held settlement stays put while a preparation lands against it", (
 
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
-    vi.setSystemTime(start + 1_000_000);
+    vi.setSystemTime(start + 86_400_000 - 60_000);
     const newer = await server.post("/settlement", {
       destination: user.publicKey(),
       sourceChainId: "1",

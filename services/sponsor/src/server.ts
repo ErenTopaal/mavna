@@ -313,6 +313,7 @@ const builtShape = z.object({
   signer: z.string(),
   sourceChainId: chainIdField,
   expiresAtUnix: z.number().int(),
+  openUntilUnix: z.number().int().optional(),
   channel: z.string().optional(),
   repays: repaymentShape.optional(),
   selfFunded: z.boolean().optional(),
@@ -588,6 +589,23 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       shortenLease(destination, held);
       await persist();
     }
+  }
+
+  /**
+   * Refuse to build while the ledger of open builds is full. Every build is
+   * written down until it closes, so this is the ceiling on what anonymous
+   * requests can make the sponsor carry, and it clears as builds close.
+   */
+  async function busyBuilding(res: ServerResponse, origin: string | undefined): Promise<boolean> {
+    if (!built.full(nowUnix())) return false;
+    console.error("[sponsor] the ledger of open builds is full; refusing to build more for now");
+    await answer(
+      res,
+      503,
+      { error: "This sponsor is building too much at once. Try again shortly.", retryable: true },
+      origin,
+    );
+    return true;
   }
 
   /** The hash a held settlement lands under; its signatures do not change it. */
@@ -1164,6 +1182,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await answer(res, 400, { error: "Say which account to prepare.", retryable: false }, origin);
       return;
     }
+    if (await busyBuilding(res, origin)) return;
 
     // The caps bound the sponsor's money, and an account paying for itself
     // spends none of it.
@@ -1508,6 +1527,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     const createdAccount = !(await accountExists(options.rpc, account));
 
+    if (await busyBuilding(res, origin)) return;
     let pool = await ensureChannels();
     const now = nowUnix();
     const live = pool.owners(now);
@@ -1584,6 +1604,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         signer: account,
         sourceChainId: body.sourceChainId ?? "unknown",
         expiresAtUnix: expiryOf(transaction),
+        // only holdable while the short lease lasts, so not kept past it
+        openUntilUnix: now + PROVISIONAL_LEASE_SECONDS + LEASE_RECLAIM_GRACE_SECONDS,
         channel: channel.address,
         repays: { createdAccount, assets: [usdc.toString()] },
       },
@@ -2801,6 +2823,9 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/** The channel pool's own grace past a lease's end, before it reuses the channel. */
+const LEASE_RECLAIM_GRACE_SECONDS = 30;
 
 /** How long a repayment found only after its time bound is still reported to a page. */
 const LATE_REPAYMENT_REPORTED_SECONDS = 3_600;
