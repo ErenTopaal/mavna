@@ -24,6 +24,23 @@ Press it, and one of a few things happens:
 - **Part of it arrived.** The status shows how much, and finishing the rest is safe
   to try again.
 
+## Who pays for finishing
+
+On mavna.app, the sponsor pays for the delivery on Stellar. On a deployment where
+the sponsor funds nothing, the receiving wallet connects, signs the delivery and
+pays its small fee from its own XLM (up to 0.1 XLM).
+
+## A conversion on arrival that has not run
+
+A transfer that converts on arrival lands at the Mavna Arrival Contract, and
+LayerZero's executor runs the conversion. If it has not, the transfer shows as
+delivered with the conversion pending, and it can be finished by anyone: the
+contract runs only the exact message that is waiting, with your minimum enforced
+inside it. With the sponsor funding, the sponsor finishes overdue ones; otherwise
+your Stellar wallet can, and the review showed **If you finish it yourself** with
+what that costs. If the conversion cannot meet your minimum, the token you sent
+arrives as it came.
+
 ## Why it is safe
 
 A delivery is idempotent: the network records that a transfer has been delivered, so

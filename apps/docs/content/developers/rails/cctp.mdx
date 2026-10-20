@@ -45,7 +45,10 @@ real contract before a byte is encoded, and a missing or unverified deployment i
 a hard refusal rather than a guess. The ERC-20 approval before a burn is for the
 exact amount, never unlimited.
 
-The mint is triggered and paid for by the [sponsor service](/developers/sponsor),
-because Circle's forwarder does not serve a Stellar destination that sets a
-destination caller, which Stellar requires. [Delivery](/developers/concepts/delivery)
+The mint is triggered on Stellar by the [sponsor service](/developers/sponsor),
+which pays for it, because Circle's forwarder does not serve a Stellar destination
+that sets a destination caller, which Stellar requires. When the sponsor is not
+funding (`MAVNA_RESERVE_FUNDING=self`), the receiving account signs and pays for
+the mint itself, so the route needs an existing account with up to 0.1 XLM to
+spare. [Delivery](/developers/concepts/delivery)
 covers how arrival is proven and why a repeat delivery cannot mint twice.

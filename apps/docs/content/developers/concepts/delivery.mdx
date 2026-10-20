@@ -15,11 +15,15 @@ user already held as though this transfer brought it.
 Circle's attestation service witnesses the burn on the source chain and signs a
 receipt that authorises the mint on Stellar. The receipt is public and keyless.
 
-The mint into Stellar is triggered and paid for by the [sponsor
-service](/developers/sponsor), because Circle's own forwarder does not serve a
-Stellar destination that sets a destination caller, which Stellar requires. The
-recipient is fixed inside the attested message, so the sponsor cannot redirect
-anything.
+The mint into Stellar has to be triggered by someone on Stellar, because Circle's
+own forwarder does not serve a Stellar destination that sets a destination caller,
+which Stellar requires. With the [sponsor service](/developers/sponsor) funding
+(`MAVNA_RESERVE_FUNDING=sponsor`, what mavna.app runs on the test network), the
+sponsor triggers and pays for it. When the sponsor is not funding (`self`), the
+receiving account signs and pays `mint_and_forward` from its own XLM, so a Circle
+route is offered only to an existing account that can sign for itself and spare
+up to 0.1 XLM. Either way the recipient is fixed inside the attested message, so
+nobody who triggers it can redirect anything.
 
 A transfer is proven delivered from the delivery itself, never from a balance.
 Starting from the burn transaction, Mavna reads the attested message from Circle

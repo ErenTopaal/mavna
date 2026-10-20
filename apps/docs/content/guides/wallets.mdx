@@ -33,4 +33,11 @@ You need a Stellar wallet on the receiving side in two cases:
   spends from the receiving account. [Arrive as XLM](/guides/receive-xlm) covers it.
 
 Sending USDC to an address that already holds USDC needs no Stellar wallet: the
-sending wallet does all the signing, and Mavna delivers the funds.
+sending wallet does all the signing, and Mavna delivers the funds. That is how
+mavna.app works today, with Mavna's sponsor paying for the delivery on Stellar.
+
+A Mavna deployment can also run with the sponsor paying for nothing. There, the
+receiving wallet connects and signs Circle's delivery on Stellar, paying its small
+fee from its own XLM, and opens its own trustline when it needs one; an address
+that does not exist yet cannot be sent to. The page says which applies before
+you send.
