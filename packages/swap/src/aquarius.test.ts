@@ -228,7 +228,9 @@ describe("aquarius builds", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).retryable).toBe(false);
-    expect((error as MavnaError).message).toContain("Error(Contract, #2006)");
+    // the host's words are an operator's, kept as detail and out of what a user reads
+    expect((error as MavnaError).message).toBe("Aquarius could not prepare this swap right now.");
+    expect((error as SwapRefusal).detail).toContain("Error(Contract, #2006)");
     expect((error as MavnaError).message).not.toContain("more");
   });
 });

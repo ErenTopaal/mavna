@@ -8,7 +8,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
-import type { Usability } from "./provider.js";
+import { SwapRefusal, type Usability } from "./provider.js";
 import { boundedBy, causeOf, PASSPHRASE, readValidated } from "./wire.js";
 
 /**
@@ -95,16 +95,22 @@ export async function simulate(
     );
   }
   const body = await readValidated("The Stellar RPC", response, rpcEnvelope);
+  // the node's and the host's own words are for whoever runs this, not for the
+  // person converting, so they ride along as detail
   if ("error" in body) {
-    throw new MavnaError(`The Stellar RPC could not simulate ${venue}: ${body.error.message}`, {
-      retryable: true,
-    });
+    throw new SwapRefusal(
+      `${venue} could not prepare this swap right now.`,
+      `The Stellar RPC could not simulate it: ${body.error.message}`,
+      { retryable: true },
+    );
   }
   const result = body.result;
   if (result.error !== undefined) {
-    throw new MavnaError(`${venue} cannot do this right now: ${firstLine(result.error)}`, {
-      retryable: false,
-    });
+    throw new SwapRefusal(
+      `${venue} could not prepare this swap right now.`,
+      `The simulation failed: ${firstLine(result.error)}`,
+      { retryable: false },
+    );
   }
   const first = result.results?.[0];
   if (first === undefined) {

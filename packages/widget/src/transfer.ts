@@ -15,6 +15,7 @@ import { AttestationService, fromHex, parseForwarderHookData } from "@mavna/adap
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
 import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import { detailOf } from "@mavna/swap";
 import {
   FeeBumpTransaction,
   Asset as StellarAsset,
@@ -472,7 +473,15 @@ export async function convertOnStellar(
     );
   }
   const stellarAccount = await engine.rpc.loadAccount(account);
-  const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
+  let unsigned: Awaited<ReturnType<typeof engine.swapVenues.build>>;
+  try {
+    unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
+  } catch (cause) {
+    // the user is told it in plain words by the refusal itself; the node's and
+    // the host's own text is for whoever runs the page
+    console.warn("[mavna] the conversion could not be built:", detailOf(cause));
+    throw cause;
+  }
   const signed = await engine.stellar.sign(unsigned.toXdr(), account);
   const parsed = TransactionBuilder.fromXdr(signed, unsigned.networkPassphrase);
   // signed by the user, so its sequence is fixed: a stale one cannot be resent
