@@ -13,11 +13,13 @@ services:
     volumes:
       - .:/repo
     # Preview rather than dev: the dev server inlines CSS through Vite's own
-    # pipeline, which serves a bundle no integrator ever receives.
+    # pipeline, which serves a bundle no integrator ever receives. Built through
+    # turbo with the trailing "...", because the workspace packages resolve to
+    # their dist/ and a fresh checkout has none.
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
              pnpm install --frozen-lockfile &&
-             pnpm --filter @mavna/app build &&
+             pnpm turbo run build --filter=@mavna/app... &&
              pnpm --filter @mavna/app exec vite preview --host --port 4319 --strictPort"
     ports:
       - "4319:4319"
@@ -43,7 +45,7 @@ services:
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
              pnpm install --frozen-lockfile &&
-             pnpm --filter @mavna/sponsor-service build &&
+             pnpm turbo run build --filter=@mavna/sponsor-service... &&
              node services/sponsor/dist/main.mjs"
     # Loopback only. Clients reach it through the reverse proxy in front, which
     # is what MAVNA_TRUST_PROXY=true assumes: a port open to the world would let

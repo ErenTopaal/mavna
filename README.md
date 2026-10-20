@@ -23,11 +23,14 @@ Requires Node 24 and pnpm.
 
 ```bash
 pnpm install
+pnpm build       # build everything; the apps import the packages from their dist/
 pnpm --filter @mavna/app dev   # also @mavna/web, @mavna/playground, @mavna/docs
-pnpm build       # build everything
 pnpm test        # unit tests
 pnpm typecheck
 ```
+
+After changing a package, build it again (`pnpm build` skips what has not changed)
+before the dev server sees it.
 
 Copy `.env.example` to `.env` and set the values before running against a live network.
 

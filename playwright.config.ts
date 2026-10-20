@@ -27,7 +27,7 @@ export default defineConfig({
     // Built rather than dev-served: the dev server inlines CSS through Vite's
     // own pipeline, which would test a bundle no integrator ever receives.
     command:
-      "pnpm --filter @mavna/app build && pnpm --filter @mavna/app exec vite preview --port 4319 --strictPort",
+      "pnpm turbo run build --filter=@mavna/app... && pnpm --filter @mavna/app exec vite preview --port 4319 --strictPort",
     url: "http://localhost:4319",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
