@@ -1351,7 +1351,18 @@ export class Flow extends React.Component<FlowProps, State> {
     const blocked = cur.phase === "blocked";
     const done = steps.filter((step) => step.phase === "done").length;
     return {
-      stepEyebrow: arrived ? "Complete" : blocked ? "Waiting for you" : "Working",
+      // an ended flight is no longer working: it is on its way still, or stopped
+      stepEyebrow: arrived
+        ? "Complete"
+        : this.state.phase === "ended"
+          ? cur.phase === "pending"
+            ? "Still on its way"
+            : cur.phase === "failed"
+              ? "Stopped"
+              : "Ended"
+          : blocked
+            ? "Waiting for you"
+            : "Working",
       stepCount: `${done} of ${steps.length} done`,
       stepRows: steps.map((step, j) => {
         const isDone = step.phase === "done";

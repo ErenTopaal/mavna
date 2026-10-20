@@ -739,3 +739,28 @@ describe("a route that was sent", () => {
     });
   }
 });
+
+describe("the flight's eyebrow after an ending", () => {
+  it("does not say Working for a transfer that ended, on screen or to a screen reader", () => {
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = {
+      ...flow.state,
+      ...FORM,
+      routes: [view],
+      selected: view.id,
+      flying: view,
+      screen: "flight",
+      phase: "sending",
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "pending" }],
+    };
+    flow.endWith(new StillMoving("This page stopped watching."));
+    const vals = flow.flightVals(false);
+    expect(vals.stepEyebrow).toBe("Still on its way");
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC", arrived: false }),
+    );
+    expect(html).not.toMatch(/>Working</);
+    expect(html).toMatch(/role="status"[^>]*>Still on its way/);
+  });
+});
