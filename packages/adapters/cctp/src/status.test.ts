@@ -12,6 +12,7 @@ import {
 import { CctpAdapter } from "./adapter.js";
 import { AttestationService } from "./attestation.js";
 import { CCTP_CONTRACTS } from "./config.js";
+import { buildForwarderHookData, toHex } from "./hook.js";
 
 const testnet = CCTP_CONTRACTS.testnet;
 
@@ -124,6 +125,50 @@ describe("status for a burn transaction carrying more than one message", () => {
       handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
     );
     expect(phase.phase).toBe("pending");
+  });
+});
+
+describe("status for a batch paying more than one Stellar recipient", () => {
+  it("counts only what arrived for the recipient the transfer is for", async () => {
+    // the same delivered message twice in one transaction, the second naming
+    // someone else in its hook data: only the first is this user's money
+    const body = (recent.iris as unknown as { decodedMessage: { decodedMessageBody: object } })
+      .decodedMessage.decodedMessageBody;
+    const forSomeoneElse = {
+      ...recent.iris,
+      decodedMessage: {
+        ...(recent.iris as unknown as { decodedMessage: object }).decodedMessage,
+        decodedMessageBody: {
+          ...body,
+          hookData: toHex(
+            buildForwarderHookData("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"),
+          ),
+        },
+      },
+    };
+    const adapter = adapterWith({
+      captured: recent,
+      irisMessages: [recent.iris, forSomeoneElse],
+      events: (request) => {
+        const filter = request.filters[0];
+        if (filter?.contractIds?.[0] === testnet.messageTransmitter) return recent.messageReceived;
+        if (filter?.contractIds?.[0] === testnet.cctpForwarder) return recent.mintAndForward;
+        throw new Error(`unexpected getEvents ${JSON.stringify(request)}`);
+      },
+    });
+    const phase = await adapter.status(
+      handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
+    );
+    expectDone(phase, "10000000");
+  });
+
+  it("says so rather than waiting when none of the burns is for that recipient", async () => {
+    const adapter = adapterWith({ captured: recent });
+    const failure = await adapter
+      .status(handleFor(recent.burn, "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"))
+      .catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(MavnaError);
+    expect((failure as MavnaError).retryable).toBe(false);
   });
 });
 
