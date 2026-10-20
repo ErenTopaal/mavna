@@ -155,11 +155,15 @@ const STROOPS_PER_XLM = 10_000_000n;
 
 /** Exact conversion. Amounts are integers in base units; no floating point, ever. */
 export function stroopsToXlm(stroops: bigint): string {
-  const whole = stroops / STROOPS_PER_XLM;
-  const fraction = stroops % STROOPS_PER_XLM;
-  if (fraction === 0n) return whole.toString();
+  // bigint division truncates toward zero, so the parts are taken from the
+  // magnitude and the sign put back in front
+  const sign = stroops < 0n ? "-" : "";
+  const magnitude = stroops < 0n ? -stroops : stroops;
+  const whole = magnitude / STROOPS_PER_XLM;
+  const fraction = magnitude % STROOPS_PER_XLM;
+  if (fraction === 0n) return `${sign}${whole}`;
   const padded = fraction.toString().padStart(7, "0").replace(/0+$/, "");
-  return `${whole}.${padded}`;
+  return `${sign}${whole}.${padded}`;
 }
 
 export function xlmToStroops(xlm: string): bigint {
