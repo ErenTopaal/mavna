@@ -3126,7 +3126,11 @@ describe("the sponsor funds its own channel once", () => {
       destination: Keypair.random().publicKey(),
       sourceChainId: "1",
     });
-    expect(failed.status).toBe(500);
+    expect(failed.status).toBe(503);
+    expect(failed.body.retryable).toBe(true);
+    // once its backoff is over
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
     const retried = await server.post("/settlement", {
       destination: Keypair.random().publicKey(),
       sourceChainId: "1",
@@ -3527,7 +3531,7 @@ describe("what the sponsor holds survives a restart", () => {
       destination: user.publicKey(),
       sourceChainId: "1",
     });
-    expect(failed.status).toBe(500);
+    expect(failed.status).toBe(503);
     const written = (await state.read("channels")) as { pending?: string };
     expect(written.pending).toBeDefined();
 
@@ -4322,7 +4326,7 @@ describe("round 2: a channel is held long only once a landed preparation backs i
     // a second account needs a second channel, whose funding fails
     expect(
       (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
-    ).toBe(500);
+    ).toBe(503);
     logged.mockRestore();
 
     server.rpc.holding(user, PLENTY);
@@ -4403,5 +4407,43 @@ describe("round 2: unreadable cap counts close sponsorship until repaired", () =
     });
     errors.mockRestore();
     expect(answered.status).toBe(503);
+  });
+});
+
+describe("round 2: a channel funding that failed is retried later, not on every request", () => {
+  it("backs off after a failed funding, answering a retryable 503 meanwhile, then tries again", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 4, "cheap-gas": 4 },
+    });
+    const server = await startServer({ caps, settlementsPerClient: 0 }, { fundsOwnChannel: true });
+    let attempts = 0;
+    let failing = true;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, opts) => {
+      if (label === "channel funding") {
+        attempts += 1;
+        if (failing) throw new MavnaError("channel funding failed on-chain.", { retryable: false });
+      }
+      return submit(label, build, opts);
+    };
+    const ask = () => server.post("/settlement", { destination: Keypair.random().publicKey() });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect((await ask()).status).toBe(503);
+    expect(attempts).toBe(1);
+    // within the backoff nothing is resent
+    const meanwhile = await ask();
+    expect(meanwhile.status).toBe(503);
+    expect(meanwhile.body.retryable).toBe(true);
+    expect(attempts).toBe(1);
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/channel funding/);
+    logged.mockRestore();
+
+    failing = false;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    expect((await ask()).status).toBe(200);
+    expect(attempts).toBe(2);
   });
 });

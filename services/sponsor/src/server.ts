@@ -1000,10 +1000,44 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return pool;
   }
 
+  /** Failed fundings in a row, and when the next may be tried. */
+  let fundingFailures = 0;
+  let fundingRetryAtMs = 0;
+
+  /**
+   * Fund one more channel, unless the last attempt failed moments ago. A
+   * funding that fails (the sponsor short of XLM, say) is tried again only
+   * after a backoff, never on every request, and it never stands in the way
+   * of anything but taking a new slot. The key stays written down, so if the
+   * failed attempt did land after all, the retry finds it funded.
+   */
   function fundOne(): Promise<ChannelPool> {
-    funding ??= fundChannel().finally(() => {
-      funding = undefined;
-    });
+    if (Date.now() < fundingRetryAtMs) return Promise.reject(new FundingBackoff());
+    funding ??= fundChannel()
+      .then(
+        (pool) => {
+          fundingFailures = 0;
+          fundingRetryAtMs = 0;
+          return pool;
+        },
+        (cause: unknown) => {
+          fundingFailures += 1;
+          const waitMs = Math.min(
+            FUNDING_BACKOFF_MS * 2 ** (fundingFailures - 1),
+            FUNDING_BACKOFF_MAX_MS,
+          );
+          fundingRetryAtMs = Date.now() + waitMs;
+          console.error(
+            `[sponsor] channel funding failed (${fundingFailures} in a row); trying again in ` +
+              `${Math.round(waitMs / 1000)} s:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          throw new FundingBackoff();
+        },
+      )
+      .finally(() => {
+        funding = undefined;
+      });
     return funding;
   }
 
@@ -1825,7 +1859,24 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     if (await busyBuilding(res, origin, client)) return;
-    let pool = await ensureChannels();
+    const noSlot = (): Promise<void> =>
+      answer(
+        res,
+        503,
+        {
+          error: "No settlement slot can be added right now. Try again in a few minutes.",
+          retryable: true,
+        },
+        origin,
+      );
+    let pool: ChannelPool;
+    try {
+      pool = await ensureChannels();
+    } catch (cause) {
+      if (!(cause instanceof FundingBackoff)) throw cause;
+      await noSlot();
+      return;
+    }
     const now = nowUnix();
     const live = pool.owners(now);
     for (const owner of leaseClients.keys()) {
@@ -1883,7 +1934,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // signing and committing, all free, can never keep a slot.
     let channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
     while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
-      pool = await fundOne();
+      try {
+        pool = await fundOne();
+      } catch (cause) {
+        if (!(cause instanceof FundingBackoff)) throw cause;
+        await noSlot();
+        return;
+      }
       channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
     }
     if (channel === undefined) {
@@ -3231,6 +3288,10 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  */
 const PROVISIONAL_LEASE_SECONDS = 600;
 
+/** The wait after a failed channel funding, doubled each time, to at most half an hour. */
+const FUNDING_BACKOFF_MS = 60_000;
+const FUNDING_BACKOFF_MAX_MS = 30 * 60_000;
+
 /**
  * Transactions one client may have built and not yet signed. Honest use leaves
  * a handful; this keeps a few clients from filling the whole ledger.
@@ -3403,4 +3464,12 @@ const ALREADY_HOLDS_USDC =
 /** A cap reached is 429; the counts themselves unreadable is the sponsor's own 503. */
 function capStatus(decision: CapDecision): number {
   return !decision.allowed && decision.cap === "state" ? 503 : 429;
+}
+
+/** A channel funding failed recently, so none is tried until its backoff ends. */
+class FundingBackoff extends MavnaError {
+  constructor() {
+    super("A channel funding failed recently and is not retried yet.", { retryable: true });
+    this.name = "FundingBackoff";
+  }
 }
