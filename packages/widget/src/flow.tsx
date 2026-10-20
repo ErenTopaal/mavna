@@ -214,8 +214,8 @@ export class Flow extends React.Component<FlowProps, State> {
     dir: "push",
     chainId: this.props.init?.chainId ?? this.engine.defaultSourceChain,
     send: this.props.init?.send ?? "USDC",
-    // a USDT0 send has no conversion leg, so it lands as USDT0
-    wanted: this.props.init?.send === "USDT0" ? "USDT0" : (this.props.init?.wanted ?? "USDC"),
+    // a USDT0 send lands as USDT0 unless the config asks for USDC or XLM from it
+    wanted: this.props.init?.wanted ?? (this.props.init?.send === "USDT0" ? "USDT0" : "USDC"),
     amount: this.props.init?.amount ?? "",
     destination: this.props.init?.destination ?? "",
     routes: [],
@@ -336,7 +336,14 @@ export class Flow extends React.Component<FlowProps, State> {
         ? preferred
         : (chains[0]?.id ?? "");
     this.setState(
-      { send, chainId, wanted: send === "USDT0" ? "USDT0" : "USDC", balance: null },
+      {
+        send,
+        chainId,
+        // USDC and XLM can come of either send; only USDT0 itself needs a USDT0 send
+        wanted:
+          this.state.wanted === "USDT0" ? (send === "USDT0" ? "USDT0" : "USDC") : this.state.wanted,
+        balance: null,
+      },
       () => {
         this.runQuote();
         void this.refreshBalance({ align: true });

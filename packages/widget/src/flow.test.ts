@@ -410,3 +410,30 @@ describe("an arrival that stayed as it came", () => {
     expect(html).toContain("USDC");
   });
 });
+
+describe("what the user wants to receive", () => {
+  it("follows the configured wanted on a USDT0 send", () => {
+    const flow = new Flow({ engine, init: { send: "USDT0", wanted: "XLM" } });
+    expect(flow.state.wanted).toBe("XLM");
+    expect(new Flow({ engine, init: { send: "USDT0" } }).state.wanted).toBe("USDT0");
+  });
+
+  it("is kept when the sent asset changes and can still deliver it", () => {
+    const flow = applied(
+      new Flow({
+        engine: {
+          ...engine,
+          usdt0Chains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+          sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+        } as unknown as Engine,
+        init: { wanted: "XLM" },
+      }),
+    );
+    // nothing to send and no wallet, so the quote and balance it asks for end at once
+    flow.setSend("USDT0");
+    expect(flow.state.wanted).toBe("XLM");
+    flow.state = { ...flow.state, wanted: "USDT0" };
+    flow.setSend("USDC");
+    expect(flow.state.wanted).toBe("USDC");
+  });
+});
