@@ -12,6 +12,11 @@
 # bind-mounted checkout, so the Linux packages the container installs and a
 # host's own never share a directory. The list follows pnpm-workspace.yaml, and
 # scripts/compose.test.ts fails when a package is added without one.
+#
+# On a Linux host, Docker creates each of those mount points in the checkout,
+# as root, when it is missing. Run compose from a checkout you do not also build
+# on the host, or give the directories back before a host install:
+#   sudo chown -R "$USER" node_modules */node_modules */*/node_modules */*/*/node_modules
 services:
   # Installs and builds once for both services. Two installs into the one
   # checkout race on pnpm's store and fail. Built through turbo with the
