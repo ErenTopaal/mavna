@@ -40,6 +40,11 @@ export interface StellarWalletApi {
   /** Sign one transaction with whatever wallet the user picked. */
   sign(xdr: string, address: string): Promise<string>;
   disconnect(): Promise<void>;
+  /**
+   * Drop a remembered connection without disconnecting the wallet, so the next
+   * connect asks it again. Present on the engine's own wrapper.
+   */
+  forget?(): void;
 }
 
 const PASSPHRASE: Readonly<Record<NetworkId, string>> = {

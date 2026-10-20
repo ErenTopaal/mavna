@@ -196,9 +196,12 @@ async function collectSettlement(
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
-    throw new Error(
-      "Only the owner of the receiving account can allow it to hold USDC. " +
-        "Connect that wallet, or send to an address that can already receive.",
+    throw wrongAccount(
+      engine,
+      address,
+      route.destination,
+      "Only the owner of the receiving account can allow it to hold USDC.",
+      "Nothing has been sent.",
     );
   }
   let built: Awaited<ReturnType<typeof engine.sponsor.requestSettlement>>;
@@ -264,10 +267,12 @@ async function prepareOwn(engine: TransferEngine, route: Route, chainId: string)
   const holds = route.deliveredAtLeast.asset;
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
-    throw new Error(
-      `Only the owner of the receiving account can allow it to hold ${holds.symbol}. ` +
-        "Connect that wallet, or send to an address that can already receive. " +
-        "Nothing has been sent.",
+    throw wrongAccount(
+      engine,
+      address,
+      route.destination,
+      `Only the owner of the receiving account can allow it to hold ${holds.symbol}.`,
+      "Nothing has been sent.",
     );
   }
   await openOwnTrustline(engine, route, chainId, address, "Nothing has been sent.");
@@ -424,9 +429,12 @@ export async function convertOnStellar(
   const wanted = swapStep?.to.asset ?? route.receivesAtLeast.asset;
   const account = owner ?? (await engine.stellar.connect());
   if (account !== route.destination) {
-    throw new Error(
-      "The conversion spends from the receiving account, so only its owner can " +
-        `sign it. The ${asset.symbol} has arrived and is theirs either way.`,
+    throw wrongAccount(
+      engine,
+      account,
+      route.destination,
+      "The conversion spends from the receiving account, so only its owner can sign it.",
+      `The ${asset.symbol} has arrived and is theirs either way.`,
     );
   }
   if (BigInt(arrived) <= 0n) {
@@ -496,6 +504,25 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
       // the error that follows says what happened to it
       return;
   }
+}
+
+/**
+ * The connected Stellar wallet is not the account that has to sign. The
+ * remembered connection is dropped, so trying again asks the wallet afresh
+ * rather than repeating the account it answered with before.
+ */
+function wrongAccount(
+  engine: Pick<TransferEngine, "stellar">,
+  connected: string,
+  needed: string,
+  why: string,
+  funds: string,
+): Error {
+  engine.stellar.forget?.();
+  return new Error(
+    `${why} The connected Stellar wallet is ${short(connected)}, not ${short(needed)}. ` +
+      `Switch to that account in your wallet and try again, or send to an address that can already receive. ${funds}`,
+  );
 }
 
 /** Whether the page went away. Read fresh each time: it can change during any await. */
@@ -638,6 +665,8 @@ export async function finishDelivery(
   if (recipient === undefined) return first;
   const address = await engine.stellar.connect();
   if (address !== recipient) {
+    // remembered from before, maybe for another account: asked afresh next time
+    engine.stellar.forget?.();
     return {
       kind: "recipient-not-ready",
       detail:
@@ -801,9 +830,12 @@ async function ownWallet(
 ): Promise<string> {
   const address = await engine.stellar.connect();
   if (address !== route.destination) {
-    throw new Error(
-      `Right now the receiving account pays for ${pays}, so only its owner can sign it. ` +
-        "Connect that wallet, or pick another route. Nothing has been sent.",
+    throw wrongAccount(
+      engine,
+      address,
+      route.destination,
+      `Right now the receiving account pays for ${pays}, so only its owner can sign it.`,
+      "Nothing has been sent.",
     );
   }
   return address;
@@ -1115,6 +1147,7 @@ function guardedEngine(engine: TransferEngine, signal: AbortSignal | undefined):
         return engine.stellar.sign(xdr, address);
       },
       disconnect: () => engine.stellar.disconnect(),
+      ...(engine.stellar.forget === undefined ? {} : { forget: engine.stellar.forget }),
     },
   };
 }

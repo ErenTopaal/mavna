@@ -1943,6 +1943,39 @@ describe("a sponsor refusal before anything is sent", () => {
   });
 });
 
+describe("a Stellar wallet connected to another account", () => {
+  it("is forgotten when it turns out not to be the receiving account, so the next try asks again", async () => {
+    let forgot = 0;
+    const engine = engineWith(new ScriptedAdapter("layerzero", [delivered()]));
+    const other = {
+      ...engine,
+      stellar: {
+        ...engine.stellar,
+        connect: async () => SENDER_STELLAR,
+        forget: () => {
+          forgot += 1;
+        },
+      },
+    };
+    await expect(
+      runTransfer({
+        engine: other,
+        view: toRouteView(routeFor("layerzero", { newAccount: true })),
+        chainId: "arbitrum-sepolia",
+        chainName: "Arbitrum Sepolia",
+        evmChainId: ARBITRUM_SEPOLIA,
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        connection: connection(),
+        wanted: "USDC",
+        patch: patches().patch,
+        onEvmEvent: () => {},
+        wait: instant,
+      }),
+    ).rejects.toThrow(/Switch to that account in your wallet/);
+    expect(forgot).toBe(1);
+  });
+});
+
 describe("holdBlocker", () => {
   it("lets a ready trustline through, opens a missing one, and refuses an unusable one", () => {
     expect(holdBlocker({ kind: "ready", slotsNeeded: 0 }, "USDC")).toBeUndefined();

@@ -32,16 +32,27 @@ export const shortAddr = (a: string): string =>
  * again next time, and a disconnect forgets the address.
  */
 export function rememberConnection(wallet: StellarWalletApi): StellarWalletApi {
-  let connected: string | undefined;
+  // the ask itself is kept, so two steps asking at once share one picker
+  let connected: Promise<string> | undefined;
   return {
-    async connect() {
-      connected ??= await wallet.connect();
+    connect() {
+      if (connected === undefined) {
+        const asked = wallet.connect();
+        connected = asked;
+        // a dismissed picker is not remembered: the next connect asks again
+        asked.catch(() => {
+          if (connected === asked) connected = undefined;
+        });
+      }
       return connected;
     },
     sign: (xdr, address) => wallet.sign(xdr, address),
     async disconnect() {
       connected = undefined;
       await wallet.disconnect();
+    },
+    forget() {
+      connected = undefined;
     },
   };
 }

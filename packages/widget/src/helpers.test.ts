@@ -51,3 +51,32 @@ describe("rememberConnection", () => {
     expect(await wallet.connect()).toBe("GABC");
   });
 });
+
+describe("rememberConnection, when the wallet changes underneath it", () => {
+  const counting = (addresses: string[]) => {
+    let opened = 0;
+    const wallet = rememberConnection({
+      connect: async () => {
+        opened += 1;
+        return addresses[Math.min(opened, addresses.length) - 1] ?? "";
+      },
+      sign: async (xdr) => xdr,
+      disconnect: async () => {},
+    });
+    return { wallet, opened: () => opened };
+  };
+
+  it("opens one picker for two connects asked at once", async () => {
+    const { wallet, opened } = counting(["GABC"]);
+    expect(await Promise.all([wallet.connect(), wallet.connect()])).toEqual(["GABC", "GABC"]);
+    expect(opened()).toBe(1);
+  });
+
+  it("asks the wallet again once told the remembered address was the wrong one", async () => {
+    const { wallet, opened } = counting(["GOLD", "GNEW"]);
+    expect(await wallet.connect()).toBe("GOLD");
+    wallet.forget?.();
+    expect(await wallet.connect()).toBe("GNEW");
+    expect(opened()).toBe(2);
+  });
+});
