@@ -137,6 +137,13 @@ as they are. `/health` reports this bound as `channels.maxSize`. The pool shrink
 again when the traffic is gone: the sweep merges a channel idle for a day back into
 the sponsor while more than `MAVNA_CHANNEL_FLOOR` (4) remain.
 
+A channel key is never forgotten on a read. A channel whose account reads as
+missing twice in a row is set aside in the state directory, with its key, and
+put back once the node shows the account again; only a merge that landed closes
+one for good. One request funds at most one new channel and sets aside at most
+two, and the server funds at most 12 channels an hour; past that, `/settlement`
+answers `503`, retryable, and the log says channel funding is paused.
+
 Each settlement's fee is paid by its channel. The sweep tops a channel back up to
 2 XLM from the sponsor once it falls below 1.5 XLM, and logs each top-up; a
 settlement the network refuses because its channel cannot pay the fee stays held

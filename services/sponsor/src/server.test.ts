@@ -178,6 +178,9 @@ class RecordingRpc extends RpcClient {
   /** Compose slots LayerZero's endpoint holds, by guid hex: the message hash in each. */
   readonly queuedComposes = new Map<string, Buffer>();
 
+  /** Accounts the node answers as missing though they exist, the way a faulty node does. */
+  hides: (address: string) => boolean = () => false;
+
   private entryFor(key: xdr.LedgerKey): xdr.LedgerEntryData | undefined {
     // the Arrival Contract's own storage, replayed from a testnet recording
     const recorded = RECORDED_CONTRACT_ENTRIES.get(key.toXdr("base64"));
@@ -185,6 +188,7 @@ class RecordingRpc extends RpcClient {
     if (key.type === "account") {
       const accountId = key.account.accountId;
       const holder = StrKey.encodeEd25519PublicKey(accountId.ed25519.toBytes());
+      if (this.hides(holder)) return undefined;
       const sequence = this.accounts.get(holder);
       if (sequence === undefined) return undefined;
       return xdr.LedgerEntryData.account(
@@ -3095,7 +3099,7 @@ describe("the sponsor funds its own channel once", () => {
     return () => funded;
   }
 
-  it("funds one channel per settlement, never two, when the first two arrive at once", async () => {
+  it("funds one channel when the first two settlements arrive at once", async () => {
     // The funding waits until both requests are past the cap check, so the
     // second reaches the channel step while the first is still funding.
     let checked = 0;
@@ -3126,9 +3130,10 @@ describe("the sponsor funds its own channel once", () => {
         server.post("/settlement", { destination: user.publicKey(), sourceChainId: "1" }),
       ),
     );
-    // one funding each at most, never two for the same need
-    expect(funded()).toBe(2);
-    expect(answers.map((a) => a.status)).toEqual([200, 200]);
+    // the first funding is shared, and counts as each request's one funding,
+    // so the second is turned away to ask again rather than fund another
+    expect(funded()).toBe(1);
+    expect(answers.map((a) => a.status).sort((a, b) => a - b)).toEqual([200, 503]);
   });
 
   it("tries the funding again after it failed", async () => {
@@ -4998,8 +5003,8 @@ describe("round 3: idle channels go back to the sponsor above a floor", () => {
   });
 });
 
-describe("round 3: a channel whose account is gone is dropped where it is found", () => {
-  it("drops a channel merged before a crash, and settles on another, never a 500", async () => {
+describe("round 3: a channel whose account is gone is set aside where it is found", () => {
+  it("sets aside a channel merged before a crash, and settles on another, never a 500", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const state = new MemoryDocumentStore();
     const first = await startServer(
@@ -5034,7 +5039,7 @@ describe("round 3: a channel whose account is gone is dropped where it is found"
   });
 });
 
-describe("round 3: the sweep drops a free channel whose account is gone", () => {
+describe("round 3: the sweep sets aside a free channel whose account is gone", () => {
   it("takes it out of the pool on its first pass", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     const state = new MemoryDocumentStore();
@@ -5247,5 +5252,107 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
     const third = (await (await askAs(second, "203.0.113.1", hash(3))).json()) as Body;
     expect(third.watching ?? false).toBe(false);
     expect(await watched(state)).toHaveLength(2);
+  });
+});
+
+describe("round 4: a channel the node says is missing is never forgotten", () => {
+  /** Every channel the server funded, by the accounts its funding created. */
+  function fundedKeys(server: TestServer): string[] {
+    return server.rpc.submissions
+      .filter((s) => s.label === "channel funding")
+      .map((s) => ((s.tx as Transaction).operations[0] as Operation.CreateAccount).destination);
+  }
+
+  async function keptKeys(state: MemoryDocumentStore): Promise<string[]> {
+    const document = (await state.read("channels")) as {
+      secrets: string[];
+      quarantined?: string[];
+    };
+    return [...document.secrets, ...(document.quarantined ?? [])].map((secret) =>
+      Keypair.fromSecret(secret).publicKey(),
+    );
+  }
+
+  it("funds at most one channel, keeps every key, and answers 503 when the node hides them", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer(
+      { state, provisionalSettlements: 16, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    // every account but the sponsor reads as missing
+    server.rpc.hides = (address) => address !== server.sponsor.publicKey();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const answered = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    logged.mockRestore();
+    expect(answered.status).toBe(503);
+    expect(answered.body.retryable).toBe(true);
+    expect(fundedKeys(server).length).toBeLessThanOrEqual(1);
+    for (const key of fundedKeys(server)) expect(await keptKeys(state)).toContain(key);
+  });
+
+  it("bounds the fundings an hour, refusing loudly past the bound", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer(
+      { state, provisionalSettlements: 16, settlementsPerClient: 0, fundingsPerHour: 2 },
+      { fundsOwnChannel: true },
+    );
+    server.rpc.hides = (address) => address !== server.sponsor.publicKey();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (let i = 0; i < 5; i += 1) {
+      const answered = await server.post("/settlement", {
+        destination: Keypair.random().publicKey(),
+        sourceChainId: "1",
+      });
+      expect(answered.status).toBe(503);
+    }
+    const lines = logged.mock.calls.flat().join(" ");
+    logged.mockRestore();
+    expect(fundedKeys(server)).toHaveLength(2);
+    expect(lines).toMatch(/CHANNEL FUNDING PAUSED/);
+    for (const key of fundedKeys(server)) expect(await keptKeys(state)).toContain(key);
+  });
+
+  it("takes one miss for a lagging read, not for a missing account", async () => {
+    const server = await startServer();
+    let misses = 1;
+    server.rpc.hides = (address) => {
+      if (address !== server.channel.publicKey() || misses === 0) return false;
+      misses -= 1;
+      return true;
+    };
+    const answered = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(answered.status).toBe(200);
+    expect(answered.body.channel).toBe(server.channel.publicKey());
+  });
+
+  it("puts a set-aside channel back once the node shows its account again", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ state, settlementsPerClient: 0 }, { fundsOwnChannel: true });
+    server.rpc.hides = (address) => address !== server.sponsor.publicKey();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(503);
+    server.rpc.hides = () => false;
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+    const document = (await state.read("channels")) as {
+      secrets: string[];
+      quarantined?: string[];
+    };
+    expect(document.quarantined ?? []).toEqual([]);
+    expect(document.secrets).toHaveLength(1);
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
   });
 });

@@ -40,6 +40,8 @@ export interface LeaseRecord {
 export interface ChannelPoolSnapshot {
   readonly secrets: readonly string[];
   readonly leases: readonly LeaseRecord[];
+  /** Keys of channels set aside because the node said their account is missing. */
+  readonly quarantined?: readonly string[];
 }
 
 interface Lease {
@@ -62,11 +64,12 @@ const RECLAIM_GRACE_SECONDS = 30;
 export class ChannelPool {
   private readonly available: Channel[];
   private readonly leased = new Map<string, Lease>();
+  private readonly quarantined: Channel[] = [];
   /** Owners whose lease is not reclaimed at its end, whatever its bound says. */
   private keep: (owner: string) => boolean = () => false;
 
-  constructor(options: ChannelPoolOptions) {
-    if (options.channels.length === 0) {
+  constructor(options: ChannelPoolOptions, emptyAllowed = false) {
+    if (options.channels.length === 0 && !emptyAllowed) {
       throw new MavnaError("A channel pool needs at least one channel.", { retryable: false });
     }
     this.available = options.channels.map((keypair) => ({
@@ -81,12 +84,17 @@ export class ChannelPool {
     nowUnix: number,
     keep?: (owner: string) => boolean,
   ): ChannelPool {
-    const pool = new ChannelPool({
-      channels: snapshot.secrets.map((secret) => Keypair.fromSecret(secret)),
-    });
+    // empty is fine here when every channel was set aside
+    const pool = new ChannelPool(
+      { channels: snapshot.secrets.map((secret) => Keypair.fromSecret(secret)) },
+      true,
+    );
     // before the leases, so one past its bound that must be kept is kept
     if (keep !== undefined) pool.holdWhile(keep);
     pool.restoreLeases(snapshot.leases, nowUnix);
+    for (const secret of snapshot.quarantined ?? []) {
+      pool.restoreQuarantined(Keypair.fromSecret(secret));
+    }
     return pool;
   }
 
@@ -100,7 +108,41 @@ export class ChannelPool {
         channel: lease.channel.address,
         untilUnix: lease.untilUnix,
       })),
+      ...(this.quarantined.length === 0
+        ? {}
+        : { quarantined: this.quarantined.map((channel) => channel.keypair.secret()) }),
     };
+  }
+
+  /**
+   * Set a channel aside, key and all, out of reach of every lease, from its
+   * owner's lease. For a channel the node says has no account: it is kept,
+   * written down, and looked at again later, never forgotten on a read.
+   */
+  quarantine(transferId: string, channelAddress: string): void {
+    const lease = this.leased.get(transferId);
+    if (lease?.channel.address !== channelAddress) return;
+    this.leased.delete(transferId);
+    this.quarantined.push(lease.channel);
+  }
+
+  /** Put a set-aside channel back in the pool, once its account is seen again. */
+  restore(channelAddress: string): void {
+    const index = this.quarantined.findIndex((channel) => channel.address === channelAddress);
+    const channel = this.quarantined[index];
+    if (channel === undefined) return;
+    this.quarantined.splice(index, 1);
+    this.available.push(channel);
+  }
+
+  /** Set a key aside as written down, at load. */
+  restoreQuarantined(keypair: Keypair): void {
+    this.quarantined.push({ keypair, address: keypair.publicKey() });
+  }
+
+  /** Channels set aside, public keys only. */
+  quarantinedAddresses(): string[] {
+    return this.quarantined.map((channel) => channel.address);
   }
 
   /**
@@ -295,7 +337,8 @@ export class ChannelPool {
   }
 
   /** Every channel in the pool, leased or not. */
+  /** Every channel the pool has, set aside or not, so none is funded past its bound. */
   get size(): number {
-    return this.available.length + this.leased.size;
+    return this.available.length + this.leased.size + this.quarantined.length;
   }
 }
