@@ -25,12 +25,21 @@ describe("the config the playground prints", () => {
     expect(typeof printedConfig(source).onEvent).toBe("function");
   });
 
-  it("carries every setting but this page's own sponsor", () => {
+  it("carries every setting, with the local sponsor in place of this page's own", () => {
     const { onEvent: _onEvent, ...printed } = printedConfig(buildSource(config));
     expect(printed).toEqual({
       integrator: "playground.mavna.app",
       network: "testnet",
+      sponsorUrl: "http://localhost:8787",
       variant: "compact",
     });
+  });
+
+  it("says beside sponsorUrl that a deployment names its own sponsor", () => {
+    const line = buildSource(config)
+      .split("\n")
+      .find((text) => text.includes("sponsorUrl"));
+    expect(line).toMatch(/\/\/ .*your own sponsor/);
+    expect(line).toContain("https://docs.mavna.app/developers/sponsor");
   });
 });
