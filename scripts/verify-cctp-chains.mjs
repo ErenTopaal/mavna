@@ -15,7 +15,7 @@
  * draft of this project shipped a bridge's addresses that had been dead for
  * months, which is why deriving beats transcribing here.
  *
- * Run: pnpm --filter @mavna/adapter-cctp exec node ../../../scripts/verify-cctp-chains.mjs
+ * Run from the repository root: node scripts/verify-cctp-chains.mjs
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { encodeFunctionData, pad } from "viem";
@@ -163,8 +163,8 @@ const CHAINS = {
     {
       id: "pharos",
       domain: 31,
-      evmChainId: 688688,
-      rpc: ["https://api.zan.top/public/pharos-mainnet"],
+      evmChainId: 1672,
+      rpc: ["https://rpc.pharos.xyz", "https://api.zan.top/public/pharos-mainnet"],
     },
     {
       id: "injective",
@@ -262,7 +262,8 @@ const CHAINS = {
       id: "arc-testnet",
       domain: 26,
       evmChainId: 5042002,
-      rpc: ["https://rpc.testnet.arc.network"],
+      // rpc.testnet.arc.network stopped answering; the chain moved to arc.io
+      rpc: ["https://rpc.testnet.arc.io"],
     },
     {
       id: "edge-testnet",
@@ -285,8 +286,11 @@ const CHAINS = {
       id: "pharos-testnet",
       domain: 31,
       evmChainId: 688689,
-      // Supplied by the project owner. The key is in the URL, so it lives in .env.
-      rpc: [secrets.get("PHAROS_TESTNET_RPC_URL")].filter(Boolean),
+      // The owner's keyed endpoint lives in .env; the public one is Pharos's own
+      // (DP Labs) and answers eth_chainId 0xa8231.
+      rpc: [secrets.get("PHAROS_TESTNET_RPC_URL"), "https://atlantic.dplabs-internal.com"].filter(
+        Boolean,
+      ),
     },
     {
       id: "injective-testnet",
@@ -295,7 +299,13 @@ const CHAINS = {
       rpc: ["https://k8s.testnet.json-rpc.injective.network"],
     },
     { id: "cronos-testnet", domain: 32, evmChainId: 338, rpc: ["https://evm-t3.cronos.org"] },
-    { id: "x-layer-sepolia", domain: 37, evmChainId: 195, rpc: ["https://testrpc.xlayer.tech"] },
+    {
+      id: "x-layer-sepolia",
+      domain: 37,
+      // 195 is the retired X Layer testnet; this endpoint serves its successor
+      evmChainId: 1952,
+      rpc: ["https://testrpc.xlayer.tech"],
+    },
   ],
 };
 
@@ -427,7 +437,48 @@ async function verifyUsdc(rpc, address) {
   return { symbol, decimals };
 }
 
-async function inspect(network, chain) {
+/**
+ * The endpoints that serve the chain this row claims to be, asked rather than
+ * assumed.
+ *
+ * The id in the table above is typed by a person, and it is the one value handed
+ * to a wallet to switch networks. A wrong one (Pharos once carried 688688, X
+ * Layer testnet the retired 195) still verified every contract, because the
+ * contracts were read through an RPC for the right chain. So every endpoint is
+ * asked eth_chainId: one answering a different chain fails the row outright, one
+ * that cannot be reached is left out, and a row with no endpoint confirming its
+ * id is not written.
+ */
+async function confirmChainId(chain) {
+  const confirmed = [];
+  const unreachable = [];
+  for (const url of chain.rpc) {
+    let answer;
+    try {
+      answer = await rpcCall([url], "eth_chainId", []);
+    } catch (error) {
+      unreachable.push(`${url}: ${error?.message ?? error}`);
+      continue;
+    }
+    const observed = Number(BigInt(answer));
+    if (observed !== chain.evmChainId) {
+      throw new Error(
+        `${url} answers eth_chainId ${observed}, not the ${chain.evmChainId} this row names`,
+      );
+    }
+    confirmed.push(url);
+  }
+  if (confirmed.length === 0) {
+    throw new Error(
+      `no endpoint confirmed chain id ${chain.evmChainId} (${unreachable.join("; ")})`,
+    );
+  }
+  return confirmed;
+}
+
+async function inspect(network, listed) {
+  // Only endpoints that confirmed the chain id are read from here on.
+  const chain = { ...listed, rpc: await confirmChainId(listed) };
   // A per-chain override wins. The deterministic address is a candidate to probe,
   // never a fact: EDGE keeps its mainnet messenger somewhere else entirely.
   const messenger = chain.messenger ?? MESSENGER[network];
@@ -540,7 +591,7 @@ const failures = [];
 for (const network of ["testnet", "mainnet"]) {
   // Confirm the seed is what we think it is before deriving anything from it.
   const seedChain = CHAINS[network][0];
-  await verifyUsdc(seedChain.rpc, SEED[network].usdc);
+  await verifyUsdc(await confirmChainId(seedChain), SEED[network].usdc);
   console.log(`  ${network}: seed USDC verified on ${seedChain.id}`);
 
   const wanted =
