@@ -266,6 +266,17 @@ export class SoroswapProvider implements SwapProvider {
         retryable: false,
       });
     }
+    // build refuses a platform this network has no contract for, and finding
+    // that out after the bridge leg has landed is too late to pick another venue
+    if (
+      quote.platform === "aggregator" &&
+      SOROSWAP_CONTRACTS[this.network].aggregator === undefined
+    ) {
+      throw new MavnaError(
+        `Soroswap priced this through its aggregator, which has no contract on ${this.network}.`,
+        { retryable: false },
+      );
+    }
     const isClassic = quote.platform === "sdex";
 
     // Belt and braces. The protocol set above should already prevent this, but a
