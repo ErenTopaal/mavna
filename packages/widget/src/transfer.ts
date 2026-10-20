@@ -476,6 +476,7 @@ async function deliverToStellar(
     if (outcome.kind === "too-costly") {
       throw new StillMoving(tooCostly(outcome.feeStroops));
     }
+    if (outcome.kind === "refused") throw new StillMoving(`${outcome.detail} ${AFTER_BURN}`);
     if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
       patch("attest", { phase: "done" });
       const deliverPatch: { phase: StepPhase; ref?: string; refUrl?: string; note?: string } = {

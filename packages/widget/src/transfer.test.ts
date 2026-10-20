@@ -123,6 +123,7 @@ beforeEach(() => {
   preparation = "";
   preparedFee = "182612";
   simulationFailures = [];
+  preparedAuth = undefined;
   irisReplies = [[200, attested]];
   irisByDomain = undefined;
   preparedLine = undefined;
@@ -312,6 +313,8 @@ let heldOnly: Set<string> | undefined;
 let preparedFee: string;
 /** What simulating the delivery answers instead, in turn, when a test makes it fail. */
 let simulationFailures: Error[];
+/** What the node's simulation says the delivery must authorize, when a test makes it more. */
+let preparedAuth: xdr.SorobanAuthorizationEntry[] | undefined;
 
 /**
  * A real client whose node is a double, so the destination check reads what a
@@ -363,7 +366,14 @@ function stellarNode(): RpcClient {
     log.push("stellar simulate delivery");
     const failure = simulationFailures.shift();
     if (failure !== undefined) throw failure;
-    return TransactionBuilder.cloneFrom(tx as never, { fee: preparedFee }).build() as never;
+    const priced = TransactionBuilder.cloneFrom(tx as never, { fee: preparedFee });
+    if (preparedAuth === undefined) return priced.build() as never;
+    const op = (tx as { operations: Operation.InvokeHostFunction[] }).operations[0];
+    if (op === undefined) throw new Error("nothing to prepare");
+    return priced
+      .clearOperations()
+      .addOperation(Operation.invokeHostFunction({ func: op.func, auth: preparedAuth }))
+      .build() as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
     const op = (tx as { operations: Array<{ type: string; func?: unknown }> }).operations[0];
@@ -1040,6 +1050,35 @@ describe("runTransfer when the account pays its own reserve", () => {
       "stellar send invokeHostFunction",
       "deliver done",
     ]);
+  });
+
+  it("over Circle, refuses unsigned a delivery that would authorize anything of the account's", async () => {
+    funding = "self";
+    // a forwarder that, after an upgrade, asked the payer to authorize a token transfer
+    preparedAuth = [
+      new xdr.SorobanAuthorizationEntry({
+        credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+        rootInvocation: new xdr.SorobanAuthorizedInvocation({
+          function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+            new xdr.InvokeContractArgs({
+              contractAddress: xdr.ScAddress.scAddressTypeContract(Buffer.alloc(32, 9) as never),
+              functionName: "transfer",
+              args: [],
+            }),
+          ),
+          subInvocations: [],
+        }),
+      }),
+    ];
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/authorize more than the delivery/);
+    expect(log).not.toContain("stellar sign DELIVERY");
   });
 
   it("over Circle, has the receiving account deliver and pay for the mint, never the sponsor", async () => {
