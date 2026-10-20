@@ -196,3 +196,11 @@ describe("progress tells the interface where to look", () => {
     expect(p.finished).toBe(false);
   });
 });
+
+describe("a transfer with no steps", () => {
+  it("is not reported as succeeded or finished, because nothing has happened", () => {
+    const empty = state();
+    expect(outcomeOf(empty)).toBe("in-flight");
+    expect(progressOf(empty).finished).toBe(false);
+  });
+});

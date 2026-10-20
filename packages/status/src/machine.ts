@@ -107,7 +107,8 @@ export function progressOf(state: TransferState): Progress {
     total: state.steps.length,
     current,
     needsUser,
-    finished: state.steps.every((s) => isTerminal(s.phase)),
+    // every() holds for no steps at all, and a transfer with none has not finished
+    finished: state.steps.length > 0 && state.steps.every((s) => isTerminal(s.phase)),
   };
 }
 
@@ -127,6 +128,6 @@ export function outcomeOf(
   if (state.steps.some((s) => s.phase.phase === "partial")) return "partial";
   // the money arrived, but not as the asset asked for, so it is not a success
   if (state.steps.some((s) => s.phase.phase === "delivered-as-came")) return "delivered-as-came";
-  if (state.steps.every((s) => isSuccess(s.phase))) return "succeeded";
+  if (state.steps.length > 0 && state.steps.every((s) => isSuccess(s.phase))) return "succeeded";
   return "in-flight";
 }
