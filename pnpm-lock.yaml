@@ -528,6 +528,9 @@ importers:
       '@mavna/swap':
         specifier: workspace:*
         version: link:../swap
+      '@stellar/freighter-api':
+        specifier: 6.0.1
+        version: 6.0.1
       '@stellar/stellar-sdk':
         specifier: 17.2.1
         version: 17.2.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
@@ -2410,6 +2413,9 @@ packages:
 
   '@stellar/freighter-api@6.0.0':
     resolution: {integrity: sha512-8CTQcKQmTq/wL715ZUzn1x1POpR0eYhYPKEiaeA7AT0WYBOauOGTxfWPFtSidX3ohAlJZP5HFXy1kG29cVjqxw==}
+
+  '@stellar/freighter-api@6.0.1':
+    resolution: {integrity: sha512-eqwakEqSg+zoLuPpSbKyrX0pG8DQFzL/J5GtbfuMCmJI+h+oiC9pQ5C6QLc80xopZQKdGt8dUAFCmDMNdAG95w==}
 
   '@stellar/js-xdr@5.0.0':
     resolution: {integrity: sha512-HBDNKnxr+ecdaEmbZ0mcKkirOF8tXXEbWSw34P3wT40Tn3g+u+cCH17xAWZymzscq8cojHB8340pR8QNVaD32w==}
@@ -8184,6 +8190,11 @@ snapshots:
       - utf-8-validate
 
   '@stellar/freighter-api@6.0.0':
+    dependencies:
+      buffer: 6.0.3
+      semver: 7.7.1
+
+  '@stellar/freighter-api@6.0.1':
     dependencies:
       buffer: 6.0.3
       semver: 7.7.1

@@ -181,6 +181,12 @@ export interface FlowProps {
   readonly onNetworkChange?: ((network: "testnet" | "mainnet") => void) | undefined;
   /** Told when a transfer starts running and when it has ended, so the host keeps it mounted. */
   readonly onTransferChange?: ((running: boolean) => void) | undefined;
+  /**
+   * Told when a step starts and stops waiting on the user's wallet. Only then is
+   * closing unsafe: a prompt would be left open with nothing behind it. Any other
+   * time the page can go, the transfer ending as still moving, finished under Activity.
+   */
+  readonly onAwaitingUser?: ((waiting: boolean) => void) | undefined;
 }
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
@@ -394,6 +400,7 @@ export class Flow extends React.Component<FlowProps, State> {
     document.addEventListener("keydown", this.onKey);
     this.stopWallets = watchWallets((wallets) => this.setState({ discovered: [...wallets] }));
     this.setState({ history: readHistory(this.engine.historyKey) });
+    this.followStellar();
     this.entrance();
     this.runQuote();
   }
@@ -413,8 +420,19 @@ export class Flow extends React.Component<FlowProps, State> {
     if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
   }
 
+  private stopStellar: (() => void) | undefined;
+
+  /** Keep the header's Stellar address to what the wallet says now, not what it said once. */
+  followStellar(): void {
+    this.stopStellar?.();
+    this.stopStellar = this.engine.stellar.onChange?.((address) =>
+      this.setState({ stellarAddress: address ?? null }),
+    );
+  }
+
   override componentWillUnmount(): void {
     this.unmounted.abort();
+    this.stopStellar?.();
     document.removeEventListener("mousedown", this.onDown);
     document.removeEventListener("keydown", this.onKey);
     this.timers.forEach(clearTimeout);
@@ -967,6 +985,7 @@ export class Flow extends React.Component<FlowProps, State> {
       (st) => ({ steps: st.steps.map((step) => (step.id === id ? { ...step, ...patch } : step)) }),
       () => {
         if (patch.phase === "blocked" || patch.phase === "pending") this.advanceStep();
+        this.tellWaiting(this.state.steps.some((step) => step.phase === "blocked"));
       },
     );
   }
@@ -1004,6 +1023,15 @@ export class Flow extends React.Component<FlowProps, State> {
     return undefined;
   }
 
+  private waitingOnUser = false;
+
+  /** Pass on a change in whether the wallet is waiting on the user. */
+  private tellWaiting(waiting: boolean): void {
+    if (waiting === this.waitingOnUser) return;
+    this.waitingOnUser = waiting;
+    this.props.onAwaitingUser?.(waiting);
+  }
+
   start(): void {
     // Set here and not through setState, which only lands on the next render:
     // a second press before then would otherwise start a second transfer.
@@ -1037,6 +1065,7 @@ export class Flow extends React.Component<FlowProps, State> {
       await this.runTransferOnce(view, chain);
     } finally {
       this.transferring = false;
+      this.tellWaiting(false);
       this.props.onTransferChange?.(false);
     }
   }

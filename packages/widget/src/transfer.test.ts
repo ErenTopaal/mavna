@@ -28,6 +28,7 @@ import {
   STELLAR_USDC,
   STELLAR_XLM,
 } from "./__fixtures__/scripted";
+import type { ExecutionEvent } from "./execute";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { toRouteView } from "./quote";
 import { createSponsorClient } from "./sponsor";
@@ -36,6 +37,7 @@ import {
   DeliveredAsCame,
   finishDelivery,
   holdBlocker,
+  mapEvm,
   runTransfer,
   StillMoving,
   type TransferDeps,
@@ -57,10 +59,16 @@ let settleReplies: Array<[number, unknown]>;
 /** Status 0 is no answer at all: the connection dropped. */
 let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
-let refuses: "PREPARATION" | "CONVERSION" | undefined;
+let refuses: "PREPARATION" | "CONVERSION" | "DELIVERY" | undefined;
+/** A signed transaction lands as failed on Stellar. */
+let sendFails: boolean;
+/** Horizon's order-book mid for USDC, in stroops per whole USDC: 5 XLM to the USDC. */
+let xlmPerUsdc: bigint | Error;
 /** What /submit and /settlement answer before their usual 200, in turn. */
 let submitRefusals: Array<[number, unknown]>;
 let settlementRefusals: Array<[number, unknown]>;
+let prepareRefusals: Array<[number, unknown]>;
+let commitRefusals: Array<[number, unknown]>;
 /** What the Stellar node says the destination holds. */
 let lane: "ready" | "needs-account" | "needs-trustline";
 /** Who the sponsor says pays a new account's reserve. */
@@ -159,8 +167,12 @@ beforeEach(() => {
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   refuses = undefined;
+  xlmPerUsdc = 50_000_000n;
+  sendFails = false;
   submitRefusals = [];
   settlementRefusals = [];
+  prepareRefusals = [];
+  commitRefusals = [];
   stored = new Map();
   settleReplies = [
     [200, { settled: false, settlementRetryable: true }],
@@ -202,15 +214,20 @@ beforeEach(() => {
         if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
       }
-      case "/settlement/commit":
+      case "/settlement/commit": {
         expect(bodyOf(init)).toEqual({
           destination: DESTINATION,
           signedXdr: `signed ${settlementXdr}`,
         });
+        const refusal = commitRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { held: true });
+      }
       case "/prepare": {
         const asked = bodyOf(init) as { assets: string[] };
         askedAssets.push(asked.assets);
+        const refusal = prepareRefusals.shift();
+        if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         if (funding === "sponsor") {
           return reply(200, { xdr: sponsoredPreparation, sponsor: SPONSOR_STELLAR });
         }
@@ -410,12 +427,11 @@ function stellarNode(): RpcClient {
     log.push(`stellar send ${op?.type}`);
     return { status: "PENDING", hash: "0ae1" } as never;
   });
-  vi.spyOn(client.server, "getTransaction").mockResolvedValue({
-    status: "SUCCESS",
-    txHash: "0ae1",
-    ledger: 101,
-    latestLedger: 101,
-  } as never);
+  vi.spyOn(client.server, "getTransaction").mockImplementation(async () =>
+    sendFails
+      ? ({ status: "FAILED", txHash: "0ae1", ledger: 101, latestLedger: 101 } as never)
+      : ({ status: "SUCCESS", txHash: "0ae1", ledger: 101, latestLedger: 101 } as never),
+  );
   return client;
 }
 
@@ -426,6 +442,11 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     adapters: [adapter],
     sponsor,
     sponsorTerms: () => sponsor.terms(),
+    // the order book, at Horizon's boundary
+    xlmStroopsPerUsdc: async () => {
+      if (xlmPerUsdc instanceof Error) throw xlmPerUsdc;
+      return xlmPerUsdc;
+    },
     // the stellar wallet, at its signing boundary
     stellar: {
       connect: async () => {
@@ -436,6 +457,10 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         const kind =
           xdr === preparation || xdr === sponsoredPreparation ? "PREPARATION" : "CONVERSION";
         if (refuses === kind) throw { code: -4, message: "The user rejected this request." };
+        if (refuses === "DELIVERY" && xdr.startsWith("AAAA") && xdr !== settlementXdr) {
+          log.push("stellar refuse DELIVERY");
+          throw { code: -4, message: "The user rejected this request." };
+        }
         if (xdr === preparation || xdr === sponsoredPreparation) {
           log.push("stellar sign PREPARATION");
           return `signed ${xdr}`;
@@ -670,9 +695,10 @@ describe("runTransfer over a relayed rail", () => {
 
   it("reports a transfer it stopped watching as still moving, not as failed", async () => {
     const controller = new AbortController();
-    controller.abort();
+    // gone once the send is out, while the rail is being watched
     const adapter = new ScriptedAdapter("layerzero", [pending()], {
       transactions: [layerZeroSend("777")],
+      onStatus: () => controller.abort(),
     });
     await expect(
       run(adapter, routeFor("layerzero"), patches().patch, connection(), {
@@ -749,6 +775,20 @@ describe("the send's hash", () => {
       id: "burn",
       patch: { ref: "0xabab…abab", refUrl: `https://sepolia.arbiscan.io/tx/${SEND_HASH}` },
     });
+  });
+
+  it("is forgotten again when the wallet cancels the send, which then never lands", async () => {
+    const conn = connection({
+      receipt: async ({ onReplaced }) => {
+        onReplaced?.({ reason: "cancelled" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    await expect(run(relayed(), routeFor("layerzero"), patches().patch, conn)).rejects.toThrow(
+      /cancelled in your wallet/,
+    );
+    const kept = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{ sourceTxHash: string }>;
+    expect(kept).toEqual([]);
   });
 
   it("follows a send the wallet sped up, so history holds the one that landed", async () => {
@@ -895,6 +935,30 @@ describe("a sponsor that fronts the reserve, read before the account signs", () 
     expect(log.some((l) => l.startsWith("evm"))).toBe(false);
   });
 
+  it("refuses a settlement that may spend more than twice the reserve's worth, though less than the arrival", async () => {
+    // 1.5 XLM at 5 XLM to the USDC is 0.3 USDC; twice that is 0.6, and 4.9 is asked
+    settlementXdr = settlementSpending("4.9");
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/more than twice the reserve's worth.*0\.63 USDC.*Nothing has been sent/);
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("refuses a settlement it could not hold to a price, rather than signing it unchecked", async () => {
+    xlmPerUsdc = new Error("The order book has no bids.");
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/no bids.*Nothing has been sent/);
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+  });
+
   it("tells the user the most the repayment may take before they sign it", async () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
@@ -951,6 +1015,26 @@ describe("after the money has left the wallet", () => {
 });
 
 describe("a page that went away mid-transfer", () => {
+  it("asks for nothing more when it closes before the send, and sends nothing", async () => {
+    const gone = new AbortController();
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    // closed while the sponsor was building the repayment
+    const done = run(
+      adapter,
+      routeFor("layerzero", { newAccount: true }),
+      patches().patch,
+      connection(),
+      {
+        signal: gone.signal,
+      },
+    );
+    gone.abort();
+    await expect(done).rejects.toThrow(/closed.*Nothing has been sent/);
+    expect(log.some((l) => l.startsWith("stellar sign") || l.startsWith("evm"))).toBe(false);
+  });
+
   it("asks for no more signatures once it is gone, and says the transfer is still moving", async () => {
     const gone = new AbortController();
     deliverReplies = [
@@ -1134,6 +1218,33 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(error).toBeInstanceOf(StillMoving);
     expect((error as Error).message).toMatch(/authorize more than the delivery/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, stops at a declined delivery signature and leaves it to Activity", async () => {
+    funding = "self";
+    refuses = "DELIVERY";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/The user rejected this request\..*Activity/);
+    expect(log.filter((l) => l === "stellar refuse DELIVERY")).toHaveLength(1);
+  });
+
+  it("over Circle, does not sign a second delivery after a signed one failed on Stellar", async () => {
+    funding = "self";
+    sendFails = true;
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log.filter((l) => l === "stellar sign DELIVERY")).toHaveLength(1);
   });
 
   it("over Circle, has the receiving account deliver and pay for the mint, never the sponsor", async () => {
@@ -1530,6 +1641,8 @@ describe("runTransfer when the account pays its own reserve", () => {
     it("skips the conversion and says the funds stay as they arrived when nothing would be left", async () => {
       // a repayment may never claim the whole arrival, so less arrives than it may take
       settlementXdr = settlementSpending("4.9");
+      // at 0.5 XLM to the USDC, the 1.5 XLM buy-back may honestly take up to 6 USDC
+      xlmPerUsdc = 5_000_000n;
       settleReplies = [[200, { settled: false, settlementRetryable: true }]];
       const adapter = new ScriptedAdapter("layerzero", [delivered()], {
         transactions: [layerZeroSend("777")],
@@ -1695,6 +1808,18 @@ describe("finishing a Circle delivery from Activity", () => {
     ];
   };
 
+  it("asks for a new preparation once from Activity when the old one can never land", async () => {
+    attestedTo(DESTINATION);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    submitRefusals = [[409, { error: "It can never land.", retryable: true, prepareAgain: true }]];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
+  });
+
   it("prepares a new account the flow never got to, checked, then delivers", async () => {
     attestedTo(DESTINATION);
     deliverReplies = [
@@ -1797,6 +1922,62 @@ describe("what the sponsor answers back", () => {
   );
 });
 
+describe("a sponsor refusal before anything is sent", () => {
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+
+  it("says nothing has been sent when the account's own trustline cannot be prepared", async () => {
+    funding = "self";
+    prepareRefusals = [[429, { error: "Too many requests from this address.", retryable: true }]];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow("Too many requests from this address. Nothing has been sent.");
+  });
+
+  it("says nothing has been sent when the signed repayment is not held", async () => {
+    commitRefusals = [
+      [409, { error: "That settlement has expired. Ask for a new one.", retryable: false }],
+    ];
+    await expect(
+      run(relayed(), routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow("That settlement has expired. Ask for a new one. Nothing has been sent.");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+});
+
+describe("a Stellar wallet connected to another account", () => {
+  it("is forgotten when it turns out not to be the receiving account, so the next try asks again", async () => {
+    let forgot = 0;
+    const engine = engineWith(new ScriptedAdapter("layerzero", [delivered()]));
+    const other = {
+      ...engine,
+      stellar: {
+        ...engine.stellar,
+        connect: async () => SENDER_STELLAR,
+        forget: () => {
+          forgot += 1;
+        },
+      },
+    };
+    await expect(
+      runTransfer({
+        engine: other,
+        view: toRouteView(routeFor("layerzero", { newAccount: true })),
+        chainId: "arbitrum-sepolia",
+        chainName: "Arbitrum Sepolia",
+        evmChainId: ARBITRUM_SEPOLIA,
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        connection: connection(),
+        wanted: "USDC",
+        patch: patches().patch,
+        onEvmEvent: () => {},
+        wait: instant,
+      }),
+    ).rejects.toThrow(/Switch to that account in your wallet/);
+    expect(forgot).toBe(1);
+  });
+});
+
 describe("holdBlocker", () => {
   it("lets a ready trustline through, opens a missing one, and refuses an unusable one", () => {
     expect(holdBlocker({ kind: "ready", slotsNeeded: 0 }, "USDC")).toBeUndefined();
@@ -1804,5 +1985,43 @@ describe("holdBlocker", () => {
     expect(
       holdBlocker({ kind: "unusable", slotsNeeded: 0, reason: "It is not authorised." }, "USDC"),
     ).toEqual({ refused: expect.stringMatching(/not authorised.*Nothing has been sent/) });
+  });
+});
+
+describe("mapEvm, a reset and an approval on one row", () => {
+  const H = `0x${"aa".repeat(32)}` as Hash;
+  const run3 = (events: ExecutionEvent[]) => {
+    const seen: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    for (const event of events) mapEvm(event, 3, (id, patch) => seen.push({ id, patch }));
+    return seen;
+  };
+
+  it("does not show the approval done when only the reset was skipped", () => {
+    const seen = run3([
+      { kind: "skipped", index: 0, why: "Nothing is allowed yet, so there is nothing to reset." },
+      { kind: "awaiting-signature", index: 1, describes: "Allow" },
+    ]);
+    expect(seen.some((p) => p.id === "approve" && p.patch.phase === "done")).toBe(false);
+    expect(seen.some((p) => p.patch.note !== undefined)).toBe(false);
+    expect(seen.at(-1)).toEqual({ id: "approve", patch: { phase: "blocked" } });
+  });
+
+  it("shows it done once the approval itself is confirmed, or skipped", () => {
+    expect(
+      run3([
+        { kind: "confirmed", index: 0, hash: H },
+        { kind: "awaiting-signature", index: 1, describes: "Allow" },
+        { kind: "sent", index: 1, hash: H },
+        { kind: "confirmed", index: 1, hash: H },
+      ]).filter((p) => p.patch.phase === "done"),
+    ).toEqual([{ id: "approve", patch: { phase: "done" } }]);
+    expect(
+      run3([
+        { kind: "skipped", index: 0, why: "reset" },
+        { kind: "skipped", index: 1, why: "You have already allowed this." },
+      ]).filter((p) => p.patch.phase === "done"),
+    ).toEqual([
+      { id: "approve", patch: { phase: "done", note: "You have already allowed this." } },
+    ]);
   });
 });

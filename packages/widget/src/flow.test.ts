@@ -496,3 +496,53 @@ describe("what a screen reader hears", () => {
     expect(html).toMatch(/role="status"[^>]*>[^<]*Send from Arbitrum[^<]*The network refused it\./);
   });
 });
+
+describe("Flow.props.onAwaitingUser", () => {
+  it("says when a step waits on the user's wallet, and when it no longer does", () => {
+    const told: boolean[] = [];
+    const flow = applied(new Flow({ engine, onAwaitingUser: (waiting) => told.push(waiting) }));
+    flow.state = {
+      ...flow.state,
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "idle" }],
+    };
+    flow.setStep("burn", { phase: "blocked" });
+    flow.setStep("burn", { phase: "pending" });
+    flow.setStep("burn", { phase: "done" });
+    expect(told).toEqual([true, false]);
+  });
+});
+
+describe("how many wallet approvals a route says", () => {
+  it("says up to, when an approval may be skipped on any rail", () => {
+    expect(toRouteView(routeFor("cctp", { approve: true })).sigsUpTo).toBe(true);
+    expect(toRouteView(routeFor("axelar")).sigsUpTo).toBe(false);
+  });
+});
+
+describe("the header's Stellar address", () => {
+  it("follows the wallet: a forgotten or switched account does not stay on screen", async () => {
+    let tell: ((address: string | undefined) => void) | undefined;
+    const flow = applied(
+      new Flow({
+        engine: {
+          ...engine,
+          stellar: {
+            connect: async () => "GOLD",
+            sign: async (x: string) => x,
+            disconnect: async () => {},
+            onChange: (listener: (a: string | undefined) => void) => {
+              tell = listener;
+              return () => {};
+            },
+          },
+        } as unknown as Engine,
+      }),
+    );
+    flow.followStellar();
+    flow.state = { ...flow.state, stellarAddress: "GOLD" };
+    tell?.("GNEW");
+    expect(flow.state.stellarAddress).toBe("GNEW");
+    tell?.(undefined);
+    expect(flow.state.stellarAddress).toBeNull();
+  });
+});

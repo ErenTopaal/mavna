@@ -60,6 +60,23 @@ export function nextFocus<T>(
   return undefined;
 }
 
+/**
+ * What a host's `open` prop asks of the drawer now. A close waits while the
+ * user's wallet is mid-prompt, and is taken up once it is not, so the drawer
+ * never stays open against the prop.
+ */
+export function hostWants(state: {
+  readonly open: boolean | undefined;
+  readonly mounted: boolean;
+  readonly closing: boolean;
+  readonly waitingOnUser: boolean;
+}): "open" | "close" | "none" {
+  if (state.open === undefined) return "none";
+  if (state.open) return state.mounted && !state.closing ? "none" : "open";
+  if (!state.mounted || state.closing || state.waitingOnUser) return "none";
+  return "close";
+}
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
 

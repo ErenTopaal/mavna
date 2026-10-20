@@ -29,6 +29,8 @@ export type ExecutionEvent =
   | { readonly kind: "skipped"; readonly index: number; readonly why: string }
   | { readonly kind: "awaiting-signature"; readonly index: number; readonly describes: string }
   | { readonly kind: "sent"; readonly index: number; readonly hash: Hash }
+  /** The wallet cancelled or replaced it with something else: `hash` will never land. */
+  | { readonly kind: "dropped"; readonly index: number; readonly hash: Hash }
   /** The wallet sped the transaction up: `hash` is the one that landed, `was` the one sent. */
   | { readonly kind: "replaced"; readonly index: number; readonly hash: Hash; readonly was: Hash }
   | { readonly kind: "confirmed"; readonly index: number; readonly hash: Hash };
@@ -42,6 +44,8 @@ export interface ExecuteOptions {
   /** Undefined for a chain the registry does not carry. Nothing is guessed. */
   readonly nativeCurrency: NativeCurrency | undefined;
   readonly onEvent: (event: ExecutionEvent) => void;
+  /** Aborted when the page goes away: nothing more is put to the wallet after that. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -110,6 +114,13 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     }
 
     const call = parseCall(transaction.payload, connection.address);
+    if (options.signal?.aborted === true) {
+      throw new Error(
+        index === 0
+          ? "This page closed before anything was signed. Nothing has been sent."
+          : "This page closed before the transfer was signed. The approval went through, but no funds moved. Nothing has been sent.",
+      );
+    }
     onEvent({ kind: "awaiting-signature", index, describes: transaction.describes });
 
     let hash: Hash;
@@ -161,6 +172,7 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
       throw cause;
     }
     if (replaced === "cancelled" || replaced === "replaced") {
+      onEvent({ kind: "dropped", index, hash });
       // a cancel is a self-send that succeeds, and moved none of the funds
       throw new Error(
         what === "transfer"

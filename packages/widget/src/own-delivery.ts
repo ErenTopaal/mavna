@@ -6,6 +6,7 @@ import {
 } from "@mavna/adapter-cctp";
 import { Address, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
+import { asError } from "./helpers";
 
 /**
  * Delivering a Circle transfer on Stellar from the receiving account itself.
@@ -95,17 +96,33 @@ export async function deliverOwn(
   const fee = BigInt(prepared.fee);
   if (fee > OWN_DELIVERY_FEE_BUDGET_STROOPS) return { kind: "too-costly", feeStroops: fee };
 
-  const signed = TransactionBuilder.fromXdr(
-    await engine.stellar.sign(prepared.toXdr(), payer),
-    engine.stellarNetwork.passphrase,
-  );
+  // A wallet that said no is the user's answer, and a signed delivery that did
+  // not go through has already cost its fee: neither is asked again on a timer.
+  // Activity re-simulates first, so finishing from there is safe either way.
+  let signedXdr: string;
+  try {
+    signedXdr = await engine.stellar.sign(prepared.toXdr(), payer);
+  } catch (cause) {
+    return {
+      kind: "refused",
+      detail: `${asError(cause).message} The delivery was not signed; finish it under Activity when you are ready.`,
+    };
+  }
+  const signed = TransactionBuilder.fromXdr(signedXdr, engine.stellarNetwork.passphrase);
   try {
     const result = await engine.rpc.submit("cctp delivery", async () => signed, {
       presigned: true,
     });
     return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
   } catch (cause) {
-    return refused(cause);
+    const known = knownRefusal(cause);
+    if (known !== undefined) return known;
+    return {
+      kind: "refused",
+      detail:
+        `The signed delivery did not go through on Stellar (${asError(cause).message}), so it ` +
+        "is not signed again here. Check it and finish under Activity.",
+    };
   }
 }
 
@@ -138,6 +155,12 @@ function authorizesOnlyDelivery(prepared: Transaction, payer: string, forwarder:
 }
 
 function refused(cause: unknown): OwnDelivery {
+  const known = knownRefusal(cause);
+  if (known !== undefined) return known;
+  throw cause;
+}
+
+function knownRefusal(cause: unknown): OwnDelivery | undefined {
   const failure = deliveryFailureOf(cause instanceof Error ? cause.message : String(cause));
   if (failure === "already-delivered") return { kind: "already-delivered" };
   if (failure === "recipient-not-ready") {
@@ -148,5 +171,5 @@ function refused(cause: unknown): OwnDelivery {
         "are still deliverable once their account is ready.",
     };
   }
-  throw cause;
+  return undefined;
 }
