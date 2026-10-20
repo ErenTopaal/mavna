@@ -117,7 +117,8 @@ interface State {
   priority: Priority;
   rails: Record<RailName, boolean>;
   showDeclined: boolean;
-  phase: "quote" | "sending" | "arrived";
+  /** "ended": the transfer stopped without arriving (failed, still moving, unproven). */
+  phase: "quote" | "sending" | "arrived" | "ended";
   steps: FlightStep[];
   chainQuery: string;
   expanded: string | null;
@@ -760,7 +761,8 @@ export class Flow extends React.Component<FlowProps, State> {
   // ------------------------------------------------------------ real quote ---
 
   requote(): void {
-    if (this.state.phase === "sending") return;
+    // only a transfer still running owns the form; one that ended does not
+    if (this.transferring) return;
     if (this.debounce !== undefined) clearTimeout(this.debounce);
     this.debounce = setTimeout(() => this.runQuote(), 430);
   }
@@ -1033,6 +1035,23 @@ export class Flow extends React.Component<FlowProps, State> {
     this.props.onAwaitingUser?.(waiting);
   }
 
+  /** Back to the form for a new transfer; the one that ended stays under Activity. */
+  sendAnother(): void {
+    this.setState(
+      {
+        phase: "quote",
+        steps: [],
+        note: null,
+        arrivedAs: null,
+        history: readHistory(this.engine.historyKey),
+      },
+      () => {
+        this.go("send", "pop");
+        this.runQuote();
+      },
+    );
+  }
+
   start(): void {
     // Set here and not through setState, which only lands on the next render:
     // a second press before then would otherwise start a second transfer.
@@ -1123,6 +1142,7 @@ export class Flow extends React.Component<FlowProps, State> {
           ),
           note: error.message,
           noteKind: "quiet" as const,
+          phase: "ended" as const,
           history: readHistory(this.engine.historyKey),
         }),
         () => this.advanceStep(),
@@ -1177,7 +1197,13 @@ export class Flow extends React.Component<FlowProps, State> {
             : st.steps.map((step, j) =>
                 j === i ? { ...step, phase: "pending" as const, note: message } : step,
               );
-        return { steps, note: message, noteKind: "quiet" as const };
+        return {
+          steps,
+          note: message,
+          noteKind: "quiet" as const,
+          phase: "ended" as const,
+          history: readHistory(this.engine.historyKey),
+        };
       },
       () => this.advanceStep(),
     );
@@ -1194,7 +1220,13 @@ export class Flow extends React.Component<FlowProps, State> {
             : st.steps.map((step, j) =>
                 j === i ? { ...step, phase: "failed" as const, note: message } : step,
               );
-        return { steps, note: message, noteKind: "fault" as const };
+        return {
+          steps,
+          note: message,
+          noteKind: "fault" as const,
+          phase: "ended" as const,
+          history: readHistory(this.engine.historyKey),
+        };
       },
       () => this.advanceStep(),
     );
@@ -1452,6 +1484,7 @@ export class Flow extends React.Component<FlowProps, State> {
 function renderApp(c: Flow): ReactNode {
   const st = c.state;
   const arrived = st.phase === "arrived";
+  const ended = st.phase === "ended";
   const sending = st.phase === "sending";
   const xlm = st.wanted === "XLM";
   const sym = c.sym();
@@ -1469,7 +1502,7 @@ function renderApp(c: Flow): ReactNode {
     priority: "Route priority",
     routes: "Select a route",
     review: "Review transfer",
-    flight: arrived ? "Arrived" : "In flight",
+    flight: arrived ? "Arrived" : ended ? "Transfer ended" : "In flight",
     activity: "Activity",
   };
 
@@ -1619,16 +1652,11 @@ function renderApp(c: Flow): ReactNode {
               </div>
             ) : null}
 
-            {arrived ? (
+            {arrived || ended ? (
               <div style={s("flex:0 0 auto;padding-top:12px")}>
                 <button
                   type="button"
-                  onClick={() =>
-                    c.setState({ phase: "quote", steps: [], note: null }, () => {
-                      c.go("send", "pop");
-                      c.runQuote();
-                    })
-                  }
+                  onClick={() => c.sendAnother()}
                   className={pseudo({
                     hover: "background:var(--mv-cta-hover)",
                     active: "transform:translateY(1px)",
@@ -1968,6 +1996,7 @@ function renderWallet(c: Flow): ReactNode {
 function renderCompact(c: Flow): ReactNode {
   const st = c.state;
   const arrived = st.phase === "arrived";
+  const ended = st.phase === "ended";
   const sending = st.phase === "sending";
   const xlm = st.wanted === "XLM";
   const sym = c.sym();
@@ -1985,7 +2014,7 @@ function renderCompact(c: Flow): ReactNode {
     priority: "Route priority",
     routes: "Select a route",
     review: "Review transfer",
-    flight: arrived ? "Arrived" : "In flight",
+    flight: arrived ? "Arrived" : ended ? "Transfer ended" : "In flight",
     activity: "Activity",
   };
 
@@ -2099,16 +2128,11 @@ function renderCompact(c: Flow): ReactNode {
         </div>
       ) : null}
 
-      {arrived ? (
+      {arrived || ended ? (
         <div style={s("flex:0 0 auto;padding:10px 16px 16px")}>
           <button
             type="button"
-            onClick={() =>
-              c.setState({ phase: "quote", steps: [], note: null }, () => {
-                c.go("send", "pop");
-                c.runQuote();
-              })
-            }
+            onClick={() => c.sendAnother()}
             className={pseudo({
               hover: "background:var(--mv-cta-hover)",
               active: "transform:translateY(1px)",
