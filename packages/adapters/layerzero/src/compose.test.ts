@@ -200,7 +200,7 @@ describe("proof of arrival from the contract's own event", () => {
     vi.restoreAllMocks();
   });
 
-  // recorded from testnet: CD5M6IBU..., the harness runs in the arrival report
+  // recorded from testnet: CDAIQ522..., the harness runs in the contract-stellar fixes
   const client = (events: { result: { events: unknown[]; latestLedger: number } }) => {
     const c = new RpcClient({ url: "https://rpc.invalid" });
     vi.spyOn(c.server, "getHealth").mockResolvedValue({
