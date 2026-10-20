@@ -22,8 +22,15 @@ workspace.
 git clone https://github.com/ErenTopaal/mavna.git mavna
 cd mavna
 pnpm install
+export VITE_MAVNA_SPONSOR_URL=http://localhost:8787 NEXT_PUBLIC_MAVNA_SPONSOR_URL=http://localhost:8787
 pnpm build
 ```
+
+The two exports name the sponsor the app, landing page, playground and docs will
+call. Their production builds stop without one, so a hosted page can never fall
+back to a sponsor on localhost; for a local build, point them at the sponsor you
+run yourself, as here. [Deploy to production](/developers/deploy) has the hosted
+values.
 
 `pnpm build` runs every package's build through Turbo. Each package emits ESM to
 its own `dist/` with bundled types. The workspace resolves `@mavna/core`,

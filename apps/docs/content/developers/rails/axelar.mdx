@@ -21,7 +21,8 @@ Chain names, nodes and token identifiers are resolved at runtime. Axelar's
 published deployment config is read at a pinned commit of
 `axelarnetwork/axelar-contract-deployments`, never from its main branch, because
 that file names the contract a user approves. `scripts/verify-axelar-deployments.mjs`
-pins the commit and confirms each chain on-chain: the node's chain id, code at the
+pins the commit it is given with `--commit=` (run bare, it only names main's latest
+for review) and confirms each chain on-chain: the node's chain id, code at the
 token service and the gas service, and the token service naming that gas service
 itself. Only confirmed addresses are accepted, and a config that names any other
 address for a confirmed chain is refused whole. Before quoting and again before

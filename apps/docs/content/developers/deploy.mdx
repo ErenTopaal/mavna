@@ -9,20 +9,40 @@ Everything a hosted Mavna needs is below, for Mavna's own deployment and for
 yours. [Run the whole thing](/developers/install#run-the-whole-thing) covers a
 local copy; this page is what changes when real users reach it.
 
-## The pages
+## Build
 
-The app, the landing page, the playground and the docs are static builds. Each one
-inlines the sponsor it calls at build time, and a production build stops with the
-variable's name when it is missing, so a hosted page can never quietly call
-`http://localhost:8787`, which no visitor can reach.
-
-Build from the repository root through turbo, which builds the packages first:
+The workspace needs Node 24.22.0 and pnpm 12.14.0, and refuses any other pnpm
+(`devEngines` in package.json), so build in an image that has both. Mavna builds
+in `node:24.22.0-slim` with pnpm installed at that version:
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm turbo run build --filter=@mavna/app... --filter=@mavna/web... \
-  --filter=@mavna/playground... --filter=@mavna/docs...
+docker run --rm -v "$PWD":/repo -w /repo \
+  -e VITE_MAVNA_SPONSOR_URL -e VITE_MAVNA_NETWORK -e VITE_STELLAR_RPC_URL \
+  -e NEXT_PUBLIC_MAVNA_SPONSOR_URL \
+  node:24.22.0-slim sh -c "npm i -g pnpm@12.14.0 && \
+    pnpm install --frozen-lockfile && \
+    pnpm turbo run build --filter=@mavna/app... --filter=@mavna/web... \
+      --filter=@mavna/playground... --filter=@mavna/docs... --filter=@mavna/sponsor-service..."
 ```
+
+Turbo builds the packages first, which the apps and the sponsor import from their
+`dist/`. The docs' `next build` is the heaviest step; on a shared host, give its
+container a memory limit so it cannot starve its neighbours. Run the docs and the
+sponsor in the same image they were built in, so the native packages pnpm linked
+match.
+
+## The pages
+
+The app, the landing page and the playground are static: serve each one's
+`dist/` (`apps/app/dist`, `apps/web/dist`, `apps/playground/dist`) as files, with
+any path that is not a file answered by `index.html`, since they route in the
+browser. The docs are a Next.js server instead: `next start` on a loopback port,
+behind the same proxy (its search index is written into `public/_pagefind` by the
+build and served from there).
+
+Each page inlines the sponsor it calls at build time, and a production build stops
+with the variable's name when it is missing, so a hosted page can never quietly
+call `http://localhost:8787`, which no visitor can reach.
 
 | Page | Variable | Mavna's testnet value |
 | --- | --- | --- |
@@ -75,7 +95,7 @@ Why each one matters:
 - **`MAVNA_TRUST_PROXY=true`, with the port bound to loopback.** Behind a reverse
   proxy every request otherwise arrives from the proxy's address, so all users
   share one rate limit and one client could exhaust it for everyone. It is safe
-  only when the proxy is the one way in: publish the port as `127.0.0.1:8787` and
+  only when the proxy is the one way in: publish the port on `127.0.0.1` only and
   let the proxy, which appends the client to `X-Forwarded-For`, face the internet.
 - **`MAVNA_RESERVE_FUNDING`.** Testnet runs `sponsor`: the sponsor fronts new
   accounts' reserves and pays Circle's deliveries on Stellar. Mainnet runs `self`:
@@ -95,26 +115,60 @@ Why each one matters:
   conversions on arrival and keep the contract alive. Mainnet has no contract
   until it is independently audited.
 
-Run it with the state on a named volume and the port on loopback only:
+## Running it
+
+The sponsor listens on 8787 inside its container. Publish it on a free loopback
+port of the host and point the proxy at that same port. Mavna's host already has
+8787 taken by another service, so it publishes the sponsor on 3007; the docs'
+`next start` listens on 3000 inside its container and is published on 3100:
 
 ```sh
 docker run -d --restart unless-stopped --name mavna-sponsor \
   --env-file sponsor.env \
   -v mavna-sponsor-state:/var/lib/mavna \
-  -p 127.0.0.1:8787:8787 \
-  -v "$PWD":/repo -w /repo node:24.22.0-alpine \
+  -p 127.0.0.1:3007:8787 \
+  -v "$PWD":/repo -w /repo node:24.22.0-slim \
   node services/sponsor/dist/main.mjs
+
+docker run -d --restart unless-stopped --name mavna-docs \
+  -p 127.0.0.1:3100:3000 \
+  -v "$PWD":/repo -w /repo/apps/docs node:24.22.0-slim \
+  node_modules/.bin/next start --port 3000
 ```
 
-`sponsor.env` holds the variables above and is readable only by its owner. A
-reverse proxy in front, for example Caddy, which discards any `X-Forwarded-For` a
-client sends and sets its own:
+`sponsor.env` holds the variables above and is readable only by its owner. The
+proxy in front, for example Caddy, which discards any `X-Forwarded-For` a client
+sends and sets its own. The ports in it are the host ports published above:
 
 ```
 sponsor.mavna.app {
-  reverse_proxy 127.0.0.1:8787
+  reverse_proxy 127.0.0.1:3007
+}
+
+docs.mavna.app {
+  reverse_proxy 127.0.0.1:3100
+}
+
+mavna.app, www.mavna.app {
+  root * /var/www/mavna-app
+  try_files {path} /index.html
+  file_server
+}
+
+web.mavna.app {
+  root * /var/www/mavna-web
+  try_files {path} /index.html
+  file_server
+}
+
+playground.mavna.app {
+  root * /var/www/mavna-playground
+  try_files {path} /index.html
+  file_server
 }
 ```
+
+Copy each page's `dist/` to its root after a build.
 
 ## Check it once it is up
 
