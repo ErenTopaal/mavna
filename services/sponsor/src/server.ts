@@ -276,6 +276,13 @@ interface HeldSettlement {
    * by hash before anything else is prepared or settled for the account.
    */
   preparation: { hash: string; expiresAtUnix: number } | undefined;
+  /**
+   * When this settlement was first sent, written down before it went. Once
+   * sent it may land unseen, after the wait or across a restart, and spend
+   * what the balance check reads, so from then on it is looked up by hash
+   * before anything else is decided about it.
+   */
+  sentAtUnix?: number | undefined;
 }
 
 /** Held settlements and recent repayments, as written to the state store. */
@@ -319,6 +326,7 @@ const heldShape = z.object({
   repays: repaymentShape,
   prepared: z.boolean(),
   preparation: z.object({ hash: z.string(), expiresAtUnix: z.number().int() }).optional(),
+  sentAtUnix: z.number().int().optional(),
 });
 const settledShape = z.object({ txHash: z.string(), untilUnix: z.number().int() });
 const secretShape = z.string().refine((value) => StrKey.isValidEd25519SecretSeed(value));
@@ -513,6 +521,33 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return undefined;
     }
     if (held.maxTimeUnix <= nowUnix()) {
+      // Sent before its bound, so it may have landed unseen: that is a
+      // repayment, not a stranding, and only the ledger can say which.
+      if (held.prepared && held.sentAtUnix !== undefined) {
+        let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+        try {
+          found = await options.rpc.findTransaction(settlementHash(held));
+        } catch (cause) {
+          // kept, unusable, for the next touch to ask again
+          console.error(
+            `[sponsor] could not look up the expired settlement sent for ${destination}:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          return undefined;
+        }
+        if (heldSettlements.get(destination) !== held) return heldSettlements.get(destination);
+        if (found.status === "SUCCESS") {
+          heldSettlements.delete(destination);
+          if (held.channel !== undefined) channels?.release(destination, held.channel);
+          pruneSettled();
+          recentlySettled.set(destination, {
+            txHash: settlementHash(held),
+            untilUnix: nowUnix() + LATE_REPAYMENT_REPORTED_SECONDS,
+          });
+          await persist();
+          return undefined;
+        }
+      }
       heldSettlements.delete(destination);
       await persist();
       if (held.prepared) await caps.recordStranded();
@@ -553,6 +588,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       shortenLease(destination, held);
       await persist();
     }
+  }
+
+  /** The hash a held settlement lands under; its signatures do not change it. */
+  function settlementHash(held: { readonly xdr: string }): string {
+    return TransactionBuilder.fromXDR(held.xdr, options.network.passphrase).hash().toString("hex");
   }
 
   /** Whether a preparation backs the account's held settlement, landed or on its way. */
@@ -1698,6 +1738,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       prepared: false,
       preparing: false,
       preparation: undefined,
+      sentAtUnix: undefined,
     });
     await answer(res, 200, { held: true }, origin);
   }
@@ -1795,22 +1836,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return { settled: false };
     }
 
-    // A delivery landing proves Circle minted something, not that it was this
-    // user's transfer or enough of it. Submitting before the money is there
-    // fails on-chain, burns the channel's sequence, and counts as a stranding,
-    // so a dust burn naming someone would spend their settlement for them.
-    let covered: boolean;
-    try {
-      covered = await holdsEnoughToSettle(destination, transaction);
-    } catch (cause) {
-      console.error(
-        "[sponsor] could not read the recipient's balance before settling:",
-        cause instanceof Error ? cause.message : cause,
-      );
-      return { settled: false, settlementRetryable: true };
-    }
-    if (!covered) return { settled: false, settlementRetryable: true };
-
     // The answer can arrive after this settlement was dropped as expired and
     // a newer one held for the account. That one, and its lease, are not this
     // call's to clear.
@@ -1837,6 +1862,43 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
       return { settled: false, settlementRetryable: false };
     };
+
+    // Sent before and not seen to land: it may have, after the wait or before
+    // a restart, and then the balance below no longer covers it though the
+    // loan is repaid. Asked by hash first.
+    if (held.sentAtUnix !== undefined) {
+      let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+      try {
+        found = await options.rpc.findTransaction(transaction.hash().toString("hex"));
+      } catch (cause) {
+        console.error(
+          `[sponsor] could not look up the settlement sent for ${destination}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+        return { settled: false, settlementRetryable: true };
+      }
+      if (found.status === "SUCCESS") return settled(transaction.hash().toString("hex"));
+      if (found.status === "FAILED") return await stranded();
+    }
+
+    // A delivery landing proves Circle minted something, not that it was this
+    // user's transfer or enough of it. Submitting before the money is there
+    // fails on-chain, burns the channel's sequence, and counts as a stranding,
+    // so a dust burn naming someone would spend their settlement for them.
+    let covered: boolean;
+    try {
+      covered = await holdsEnoughToSettle(destination, transaction);
+    } catch (cause) {
+      console.error(
+        "[sponsor] could not read the recipient's balance before settling:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      return { settled: false, settlementRetryable: true };
+    }
+    if (!covered) return { settled: false, settlementRetryable: true };
+
+    held.sentAtUnix ??= nowUnix();
+    await persist();
 
     try {
       transaction.sign(channelKeypair);
@@ -2739,6 +2801,9 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
  * abandoned or hostile request gives the slot back within minutes.
  */
 const PROVISIONAL_LEASE_SECONDS = 300;
+
+/** How long a repayment found only after its time bound is still reported to a page. */
+const LATE_REPAYMENT_REPORTED_SECONDS = 3_600;
 
 /** Settlements one client may have waiting on a preparation, unless configured. */
 const DEFAULT_SETTLEMENTS_PER_CLIENT = 2;

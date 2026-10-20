@@ -1959,6 +1959,59 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
   });
 });
 
+describe("a settlement that lands after the sponsor stopped waiting", () => {
+  /** Sends the settlement, sees no inclusion in two minutes, then lets it land. */
+  async function landsUnseen(server: TestServer, user: Keypair): Promise<void> {
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.holdInclusion = true;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const lookup = server.rpc.server.getTransaction.bind(server.rpc.server);
+    server.rpc.server.getTransaction = async (hash) => {
+      vi.setSystemTime(Date.now() + 10_000);
+      return lookup(hash);
+    };
+    const waited = await server.post("/settle", { destination: user.publicKey() });
+    expect(waited.body.settled).toBe(false);
+    server.rpc.server.getTransaction = lookup;
+    server.rpc.includePending();
+    server.rpc.holdInclusion = false;
+    // what it spent is gone, so the trustline no longer holds the ceiling
+    server.rpc.holding(user, 1n);
+  }
+
+  it("is found by hash on the next call, though the balance no longer covers it", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await landsUnseen(server, user);
+
+    vi.setSystemTime(Date.now() + 31_000);
+    const later = await server.post("/settle", { destination: user.publicKey() });
+    expect(later.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(later.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+
+    // and its channel is free for the next account
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("is looked up again before its time bound counts it as stranded", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await landsUnseen(server, user);
+
+    vi.setSystemTime(Date.now() + 86_400_000 + 60_000);
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect((await caps.usage()).stranded).toBe(0);
+    expect(asked.body.settled).toBe(true);
+  });
+});
+
 describe("a preparation whose sponsor sequence something else spent", () => {
   it("is sent once, frees the account to prepare again, and says so", async () => {
     const server = await startServer();
