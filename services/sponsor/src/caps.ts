@@ -154,6 +154,20 @@ export class CapLedger {
     return next;
   }
 
+  /**
+   * The class a sponsorship counts against when nothing the server trusts says
+   * which chain it came from: the one with the smaller daily allocation. The
+   * source chain is the caller's word at preparation time, since the transfer
+   * has not started yet, and taking that word would let anyone pick the larger
+   * allocation by naming the right chain.
+   */
+  unprovenClass(): SourceChainClass {
+    const { volumeCapPerDay } = this.config;
+    return volumeCapPerDay["expensive-gas"] < volumeCapPerDay["cheap-gas"]
+      ? "expensive-gas"
+      : "cheap-gas";
+  }
+
   async usage(): Promise<CapUsage> {
     return (await this.store.load(this.today())) ?? emptyUsage(this.today());
   }

@@ -138,4 +138,11 @@ The counters live behind a storage interface, on disk under `MAVNA_STATE_DIR`
 alongside the held settlements and channel keys: a cap that does not survive a
 restart is not a cap. Without a state directory they live in memory.
 
+The source chain a request names is only the caller's word: a preparation comes
+before the transfer starts, so nothing the server trusts says where it will come
+from. Every sponsorship therefore counts against the tighter of the two volume
+allocations (cheap-gas at the defaults), and naming an expensive-gas chain does
+not reach the larger one. In effect the daily volume is the smaller of the two
+settings; raise that one to allow more.
+
 The endpoint-by-endpoint contract is on the [HTTP API](/developers/sponsor/api) page.

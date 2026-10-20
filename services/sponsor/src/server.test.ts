@@ -764,9 +764,10 @@ describe("the sponsor only countersigns what it built", () => {
 
     await holdSettlementFor(server, user);
     const prepared = await preparedAndSigned(server, user);
-    // Another transfer from the same class of chain takes today's last slot
+    // Another sponsorship takes today's last slot in the tighter allocation, the
+    // one every claim counts against
     // between this user's preparation and their signature coming back.
-    await caps.recordStarted("expensive-gas");
+    await caps.recordStarted("cheap-gas");
 
     const refused = await server.post("/submit", { signedXdr: prepared });
     expect(refused.status).toBe(429);
@@ -2192,6 +2193,48 @@ describe("a channel that runs short of XLM for fees", () => {
   });
 });
 
+describe("the cap class is not the caller's to choose", () => {
+  it("counts a claimed expensive-gas chain against the tighter allocation", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 300, "cheap-gas": 1 },
+    });
+    const server = await startServer({ caps });
+    await preparedWithSettlementHeld(server, Keypair.random());
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 0, "cheap-gas": 1 });
+
+    // the tighter allocation is spent; claiming another chain does not reach the larger one
+    for (const sourceChainId of ["ethereum", "ethereum-sepolia", "1"]) {
+      for (const path of ["/prepare", "/settlement"]) {
+        const answered = await server.post(path, {
+          destination: Keypair.random().publicKey(),
+          assets: ["USDC"],
+          sourceChainId,
+        });
+        expect(answered.status, `${path} ${sourceChainId}`).toBe(429);
+      }
+    }
+  });
+
+  it("uses whichever allocation the operator made tighter", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 5, "cheap-gas": 50 },
+    });
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "base",
+    });
+    const signed = signXdr(built.body.xdr as string, user);
+    expect((await server.post("/submit", { signedXdr: signed })).status).toBe(200);
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 1, "cheap-gas": 0 });
+  });
+});
+
 describe("the sponsor fronts only a trustline that does not exist yet", () => {
   it("declines to build for an account that already holds USDC", async () => {
     const server = await startServer();
@@ -2595,7 +2638,7 @@ describe("the held settlement stays put while a preparation lands against it", (
       sourceChainId: "1",
     });
     expect(replacement.status).toBe(200);
-    await caps.recordStarted("expensive-gas");
+    await caps.recordStarted("cheap-gas");
 
     // Refused while the submission is still checking the cap...
     const stall = store.stallNext();
@@ -3427,7 +3470,7 @@ describe("what the sponsor holds survives a restart", () => {
     const server = await startServer({ state });
     await preparedWithSettlementHeld(server, Keypair.random());
     const counted = (await state.read("caps")) as Record<string, CapUsage>;
-    expect(Object.values(counted)[0]?.started["expensive-gas"]).toBe(1);
+    expect(Object.values(counted)[0]?.started["cheap-gas"]).toBe(1);
   });
 
   it("keeps the channel it funded itself, rather than funding another", async () => {

@@ -37,7 +37,7 @@ import {
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
-import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
+import { CapLedger } from "./caps.js";
 import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
@@ -1353,9 +1353,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The caps bound the sponsor's money, and an account paying for itself
     // spends none of it.
     if (reserveFunding === "sponsor") {
-      const decision = await caps.check(
-        classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
-      );
+      const decision = await caps.check(caps.unprovenClass());
       if (!decision.allowed) {
         await answer(res, 429, { error: decision.reason, retryable: true }, origin);
         return;
@@ -1679,9 +1677,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    const decision = await caps.check(
-      classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
-    );
+    const decision = await caps.check(caps.unprovenClass());
     if (!decision.allowed) {
       await answer(res, 429, { error: decision.reason, retryable: true }, origin);
       return;
@@ -2316,7 +2312,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // Marked before the first await, so the settlement just matched cannot be
     // swapped for a cheaper one while this preparation is on its way.
     held.preparing = true;
-    const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);
+    // the source chain is still only the caller's claim, so it does not pick the class
+    const source = caps.unprovenClass();
     let result: Awaited<ReturnType<RpcClient["submit"]>>;
     try {
       // The account may have opened the line itself since it was prepared. The
