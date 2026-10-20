@@ -268,6 +268,8 @@ export class Flow extends React.Component<FlowProps, State> {
     history: [],
   };
 
+  /** The widget's own outermost element; nothing outside it is the widget's to touch. */
+  rootRef = React.createRef<HTMLDivElement>();
   rowRef = React.createRef<HTMLDivElement>();
   cardRef = React.createRef<HTMLDivElement>();
   bodyRef = React.createRef<HTMLDivElement>();
@@ -378,24 +380,28 @@ export class Flow extends React.Component<FlowProps, State> {
       )
         this.setState({ menuOpen: false });
     };
-    this.onKey = (e) => {
-      if (e.key !== "Escape") return;
-      if (this.state.menuOpen) {
-        this.setState({ menuOpen: false });
-        return;
-      }
-      if (this.state.walletOpen) {
-        this.closeWallet();
-        return;
-      }
-      if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
-    };
+    this.onKey = (e) => this.handleKey(e);
     document.addEventListener("mousedown", this.onDown);
     document.addEventListener("keydown", this.onKey);
     this.stopWallets = watchWallets((wallets) => this.setState({ discovered: [...wallets] }));
     this.setState({ history: readHistory(this.engine.historyKey) });
     this.entrance();
     this.runQuote();
+  }
+
+  /** Escape closes a popover or goes back, but only when it was pressed in the widget. */
+  handleKey(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    if (this.rootRef.current === null || !this.rootRef.current.contains(e.target as Node)) return;
+    if (this.state.menuOpen) {
+      this.setState({ menuOpen: false });
+      return;
+    }
+    if (this.state.walletOpen) {
+      this.closeWallet();
+      return;
+    }
+    if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
   }
 
   override componentWillUnmount(): void {
@@ -454,7 +460,10 @@ export class Flow extends React.Component<FlowProps, State> {
 
   entrance(): void {
     if (!this.m || this.reduced) return;
-    const nodes = Array.from(document.querySelectorAll("header, main > div, footer"));
+    const root = this.rootRef.current;
+    if (root === null) return;
+    // the widget's own parts only: a host page's header is not ours to animate
+    const nodes = Array.from(root.querySelectorAll("header, main > div, footer"));
     this.anim(
       nodes,
       { opacity: [0, 1], y: [12, 0] },
@@ -1360,6 +1369,7 @@ function renderApp(c: Flow): ReactNode {
 
   return (
     <div
+      ref={c.rootRef}
       style={s(
         "position:relative;isolation:isolate;min-height:100dvh;background:var(--mv-ground);display:flex;flex-direction:column",
       )}
@@ -1872,6 +1882,7 @@ function renderCompact(c: Flow): ReactNode {
 
   return (
     <div
+      ref={c.rootRef}
       style={s(
         // 650 = the app card's 624 content height plus the 26px "Powered by Mavna"
         // strip below it, so the body keeps the full height and never scrolls for it.

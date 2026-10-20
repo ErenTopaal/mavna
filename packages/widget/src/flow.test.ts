@@ -278,3 +278,32 @@ describe("Flow.props.onTransferChange", () => {
     expect(told).toEqual([true, false]);
   });
 });
+
+describe("the host page around the widget", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is not animated on mount: only the widget's own parts are", () => {
+    const flow = new Flow({ engine });
+    const own = [{ own: 1 }];
+    const animated: unknown[] = [];
+    vi.stubGlobal("document", {
+      querySelectorAll: () => [{ host: "header" }],
+    });
+    flow.m = { animate: (nodes: unknown) => animated.push(nodes), stagger: () => 0 } as never;
+    flow.reduced = false;
+    (flow.rootRef as { current: unknown }).current = { querySelectorAll: () => own };
+    flow.entrance();
+    expect(animated).toEqual([own]);
+  });
+
+  it("does not take an Escape pressed elsewhere on the page as going back", () => {
+    const flow = applied(new Flow({ engine }));
+    flow.state = { ...flow.state, screen: "chains", cameFrom: "send" };
+    const inside = {};
+    (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
+    flow.handleKey({ key: "Escape", target: {} } as unknown as KeyboardEvent);
+    expect(flow.state.screen).toBe("chains");
+    flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
+    expect(flow.state.screen).toBe("send");
+  });
+});
