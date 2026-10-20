@@ -555,6 +555,10 @@ describe("building", () => {
     });
     expect(tx?.describes).toContain(`deposit address ${DEPOSIT}`);
     expect(tx?.describes).toContain(`returned to ${SENDER}`);
+    // 1Click's Stellar assets are HOT Omni tokens (nep245:v2_1.omni.hot.tg:1100_...),
+    // so the payout on Stellar is a HOT Bridge withdrawal, and consent has to say so
+    expect(tx?.describes).toContain("HOT Bridge");
+    expect(tx?.describes).not.toContain("inventory");
   });
 
   it("refuses a real quote whose floor fell below the route's", async () => {

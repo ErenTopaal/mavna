@@ -52,11 +52,14 @@ import { phaseFor } from "./status.js";
 /**
  * NEAR Intents as a rail the routing engine can race.
  *
- * A different shape from every other rail here. Nothing is burned, locked or
- * messaged: the user pays an ordinary token transfer into a deposit address, and
- * a market of solvers competes to deliver the asked-for asset on Stellar out of
- * their own inventory. Who is trusted is that market and the NEAR Intents
- * contract that settles it, which is why the trust model is the solver network.
+ * A different shape from every other rail here. The user pays an ordinary token
+ * transfer into a deposit address, and a market of solvers competes to fill the
+ * trade inside the NEAR Intents contract, which settles it. What they settle in
+ * is HOT's wrapped Stellar token, so the payout on Stellar is a HOT Bridge
+ * withdrawal: released from HOT's locker contract on a signature from HOT's MPC
+ * network. Who is trusted is that market, the NEAR Intents contract and the HOT
+ * Bridge. The trust model is the solver network because that is the part a
+ * user is choosing; the bridge is named wherever the trust is spelled out.
  *
  * Quoting is a dry request, which reserves nothing and hands out no address. The
  * deposit address only exists once a transfer is being built, because it is tied
@@ -89,7 +92,7 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export class NearIntentsAdapter implements BridgeAdapter {
   readonly id = "near-intents";
-  /** Competing solvers front the delivery; the NEAR Intents contract settles it. */
+  /** Competing solvers fill it, NEAR Intents settles it, the HOT Bridge pays out on Stellar. */
   readonly trustModel: TrustModel = "solver-network";
 
   private readonly network: NetworkId;
@@ -380,8 +383,8 @@ export class NearIntentsAdapter implements BridgeAdapter {
         format: "evm-tx",
         describes:
           `Send ${readable(amount, token.decimals)} ${token.symbol} on ${chain.name} to the ` +
-          `NEAR Intents deposit address ${depositAddress}. A solver delivers at least ` +
-          `${readable(floor, route.deliveredAtLeast.asset.decimals)} ` +
+          `NEAR Intents deposit address ${depositAddress}. A solver fills it and the HOT Bridge ` +
+          `pays at least ${readable(floor, route.deliveredAtLeast.asset.decimals)} ` +
           `${route.deliveredAtLeast.asset.symbol} to ${route.destination} on Stellar, or ` +
           `the deposit is returned to ${sender} once the quote expires` +
           (reply.quote.deadline === undefined ? "." : ` (${reply.quote.deadline}).`),

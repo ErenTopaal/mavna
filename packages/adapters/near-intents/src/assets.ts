@@ -12,9 +12,21 @@ import { type OriginChain, STELLAR_CODE } from "./chains.js";
  * its own decides nothing.
  */
 
+/**
+ * The prefix of a HOT Omni token inside NEAR Intents. 1Click's Stellar assets
+ * carry it, which means solvers settle in HOT's wrapped token and the payout on
+ * Stellar is a HOT Bridge withdrawal: released from HOT's locker contract on a
+ * signature from HOT's MPC network. NEAR Intents' bridge list names HOT as the
+ * only bridge serving Stellar (route `hot_bridge`).
+ */
+export const HOT_OMNI_PREFIX = "nep245:v2_1.omni.hot.tg:";
+
 /** What a 1Click Stellar token is on Stellar itself, or undefined when that cannot be said. */
 export function stellarIdentity(token: OneClickToken): string | undefined {
   if (token.blockchain !== STELLAR_CODE) return undefined;
+  // Another bridge would mean another party holding the funds, and the trust
+  // this rail states names HOT. Offering it anyway would make that untrue.
+  if (!token.assetId.startsWith(HOT_OMNI_PREFIX)) return undefined;
   if (token.contractAddress === undefined) {
     // Only Stellar's own coin has no issuer. Anything else without one has no
     // identity that could be checked, so it is not offered at all.
