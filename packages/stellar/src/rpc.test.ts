@@ -512,7 +512,6 @@ describe("preparing a contract call", () => {
     const answers = [simulated(90, "999"), simulated(100, "123")];
     let asked = 0;
     client.server.simulateTransaction = async () => answers[asked++] ?? simulated(100, "123");
-    client.server.getLatestLedger = async () => ({ id: "x", sequence: 100, protocolVersion: 23 });
 
     const call = new TransactionBuilder(new Account(Keypair.random().publicKey(), "1"), {
       fee: "100",
@@ -534,7 +533,6 @@ describe("preparing a contract call", () => {
     const client = clientForTest();
     client.server.simulateTransaction = async () =>
       ({ id: "1", latestLedger: 5, events: [], _parsed: true, error: "boom" }) as never;
-    client.server.getLatestLedger = async () => ({ id: "x", sequence: 5, protocolVersion: 23 });
     const call = new TransactionBuilder(new Account(Keypair.random().publicKey(), "1"), {
       fee: "100",
       networkPassphrase: Networks.TESTNET,
