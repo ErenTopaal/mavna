@@ -11,7 +11,7 @@ import type {
   RouteRejection,
   StepPhase,
 } from "@mavna/core";
-import { amountOf, MavnaError } from "@mavna/core";
+import { ARRIVAL_CONTRACT_IDS, amountOf, MavnaError } from "@mavna/core";
 import { inspectDestination, type RpcClient } from "@mavna/stellar";
 import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
 import {
@@ -106,6 +106,16 @@ export function operatorDetail(cause: unknown): string {
   if (!(cause instanceof Error)) return String(cause);
   const detail = (cause as { detail?: unknown }).detail;
   return typeof detail === "string" && detail !== "" ? `${cause.message} ${detail}` : cause.message;
+}
+
+/**
+ * Every Arrival Contract a compose must never pay as a plain transfer: the one
+ * it converts through and the network's default, which may be different
+ * contracts when an integrator runs their own.
+ */
+function arrivalIdsOf(ctx: ComposeContext): readonly string[] {
+  const ids = [ctx.arrival.contract, ARRIVAL_CONTRACT_IDS[ctx.network]];
+  return ids.filter((id): id is string => id !== undefined);
 }
 
 const SELF_PAYMENT =
@@ -252,8 +262,14 @@ export async function quoteComposeRoute(
     );
   }
 
-  // funds the contract pays to itself stay in it with no one able to take them out
-  if (destination === ctx.arrival.contract) {
+  // funds paid to an Arrival Contract as a plain transfer stay in it with no one
+  // able to take them out, whether it is this one or the network's default
+  const arrivals = arrivalIdsOf(ctx);
+  if (arrivals.includes(destination)) {
+    return ctx.decline("destination-unsupported", SELF_PAYMENT);
+  }
+  const feeTo = request.integratorFee;
+  if (feeTo !== undefined && feeTo.bps > 0 && arrivals.includes(feeTo.recipient)) {
     return ctx.decline("destination-unsupported", SELF_PAYMENT);
   }
 
@@ -321,9 +337,6 @@ export async function quoteComposeRoute(
       "The integrator's fee account is not a Stellar account or contract, so a conversion on " +
         "arrival has nowhere to pay it. The plain route is unaffected.",
     );
-  }
-  if (fee !== undefined && fee.bps > 0 && fee.recipient === ctx.arrival.contract) {
-    return ctx.decline("destination-unsupported", SELF_PAYMENT);
   }
   try {
     const why =
@@ -530,7 +543,13 @@ export async function composeSendFor(
   readonly composeMsg: `0x${string}`;
   readonly extraOptions: `0x${string}`;
 }> {
-  // a route is data the caller hands back, so what it names is checked again
+  // a route is data the caller hands back, so what it names is checked again,
+  // starting with the one thing that would strand funds whatever else holds
+  const arrivals = [...arrivalIdsOf(ctx), route.compose.contract];
+  const feeTo = route.compose.fee?.recipient;
+  if (arrivals.includes(route.destination) || (feeTo !== undefined && arrivals.includes(feeTo))) {
+    throw new MavnaError(SELF_PAYMENT, { retryable: false });
+  }
   const config = await assertArrivalServes(ctx, route.compose.contract, resolved);
   if (
     !arrivalConverts(
@@ -552,12 +571,6 @@ export async function composeSendFor(
         retryable: false,
       },
     );
-  }
-  if (
-    route.destination === route.compose.contract ||
-    route.compose.fee?.recipient === route.compose.contract
-  ) {
-    throw new MavnaError(SELF_PAYMENT, { retryable: false });
   }
   // the contract cannot send anything back once it holds it, so a recipient that
   // cannot be named in the message, or cannot take what arrives, is never sent to
