@@ -437,3 +437,9 @@ describe("what the user wants to receive", () => {
     expect(flow.state.wanted).toBe("USDC");
   });
 });
+
+describe("the NEAR Intents trust line", () => {
+  it("names the HOT Bridge that pays out on Stellar, not only the solvers", () => {
+    expect(toRouteView(routeFor("near-intents")).trust).toMatch(/HOT Bridge/);
+  });
+});

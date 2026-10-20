@@ -54,7 +54,9 @@ export const TRUST_LABEL: Readonly<Record<RailName, string>> = {
   Circle: "Issuer mint & burn",
   Axelar: "Validator set",
   LayerZero: "Issuer-chosen verifiers",
-  "NEAR Intents": "Competing solvers",
+  // solvers fill the intent, then HOT Bridge pays out on Stellar: its locker
+  // contract releases the funds on HOT's MPC signature, so HOT is trusted too
+  "NEAR Intents": "Competing solvers, HOT Bridge payout",
 };
 
 export interface QuoteInputs {
