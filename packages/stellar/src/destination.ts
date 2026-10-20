@@ -100,22 +100,34 @@ export async function inspectDestination(
         durability: xdr.ContractDataDurability.persistent,
       }),
     );
-    const found = await client.read(`contract ${address}`, async () => {
+    const instance = await client.read(`contract ${address}`, async () => {
       const response = await client.server.getLedgerEntries(instanceKey);
-      return { value: response.entries.length > 0, ledger: response.latestLedger };
+      return { value: response.entries[0], ledger: response.latestLedger };
     });
-    return {
-      address,
-      lane: found
-        ? { kind: "contract-ready", slotsNeeded: 0 }
-        : {
-            kind: "unusable",
-            slotsNeeded: 0,
-            reason: "No contract exists at that address on this network.",
-          },
-      account: undefined,
-      trustline: undefined,
-    };
+    // A Stellar asset contract never authorises a transfer out of its own
+    // balance, so pasting a token's id where the wallet's belongs loses the funds.
+    const data = instance?.val;
+    const isTokenItself =
+      data?.type === "contractData" &&
+      data.contractData.val.type === "scvContractInstance" &&
+      data.contractData.val.instance.executable.type === "contractExecutableStellarAsset";
+    let lane: DestinationLane;
+    if (instance === undefined) {
+      lane = {
+        kind: "unusable",
+        slotsNeeded: 0,
+        reason: "No contract exists at that address on this network.",
+      };
+    } else if (isTokenItself) {
+      lane = {
+        kind: "unusable",
+        slotsNeeded: 0,
+        reason: "That is a token's contract, not a wallet: anything sent to it can never be moved.",
+      };
+    } else {
+      lane = { kind: "contract-ready", slotsNeeded: 0 };
+    }
+    return { address, lane, account: undefined, trustline: undefined };
   }
 
   // A muxed address is a wrapper: the account entry and the trustline both belong
