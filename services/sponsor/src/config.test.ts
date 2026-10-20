@@ -6,6 +6,7 @@ import { readSponsorConfig } from "./config.js";
 
 const SECRET = Keypair.random().secret();
 const base = { SPONSOR_SECRET_KEY: SECRET };
+const durable = { MAVNA_STATE_DIR: "/var/lib/mavna" };
 
 describe("the sponsor's configuration, read from the environment", () => {
   it("runs on testnet against the public node when nothing else is said", () => {
@@ -58,7 +59,7 @@ describe("the sponsor's configuration, read from the environment", () => {
   });
 
   it("runs mainnet against the first public mainnet node by default", () => {
-    const config = readSponsorConfig({ ...base, MAVNA_NETWORK: "mainnet" });
+    const config = readSponsorConfig({ ...base, ...durable, MAVNA_NETWORK: "mainnet" });
     expect(config.rpcUrl).toBe(PUBLIC_MAINNET_RPC_URLS[0]);
     expect(config.irisUrl).toBe("https://iris-api.circle.com");
   });
@@ -66,6 +67,7 @@ describe("the sponsor's configuration, read from the environment", () => {
   it("takes the operator's node over the public one", () => {
     const config = readSponsorConfig({
       ...base,
+      ...durable,
       MAVNA_NETWORK: "mainnet",
       STELLAR_RPC_URL: "https://rpc.example",
     });
@@ -152,6 +154,27 @@ describe("the sponsor's configuration, read from the environment", () => {
   it("reads the state directory", () => {
     expect(readSponsorConfig({ ...base, MAVNA_STATE_DIR: "/var/lib/mavna" }).stateDir).toBe(
       "/var/lib/mavna",
+    );
+  });
+
+  it("refuses to run in production with its state in memory", () => {
+    // a restart would drop held settlements, channel keys and the day's caps
+    expect(() => readSponsorConfig({ ...base, MAVNA_NETWORK: "mainnet" })).toThrow(
+      /MAVNA_STATE_DIR/,
+    );
+    expect(() => readSponsorConfig({ ...base, MAVNA_PRODUCTION: "true" })).toThrow(
+      /MAVNA_STATE_DIR/,
+    );
+    expect(readSponsorConfig({ ...base, ...durable, MAVNA_PRODUCTION: "true" }).production).toBe(
+      true,
+    );
+    // a testnet trial keeps running from memory, as before
+    expect(readSponsorConfig(base).production).toBe(false);
+  });
+
+  it("refuses a production flag that is not true or false", () => {
+    expect(() => readSponsorConfig({ ...base, MAVNA_PRODUCTION: "yes" })).toThrow(
+      /MAVNA_PRODUCTION/,
     );
   });
 

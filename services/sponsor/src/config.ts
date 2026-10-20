@@ -34,6 +34,11 @@ export interface SponsorConfig {
   /** Delivery fees the sponsor may pay in one UTC day, in stroops. */
   readonly deliveryBudgetStroops: bigint;
   readonly stateDir: string | undefined;
+  /**
+   * Running for real: on mainnet, or on any network with MAVNA_PRODUCTION=true.
+   * A production sponsor never keeps its state in memory only.
+   */
+  readonly production: boolean;
   readonly port: number;
 }
 
@@ -118,6 +123,23 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
     throw new SponsorConfigError("MAVNA_CHANNEL_POOL_SIZE must be at least 1; got 0.");
   }
 
+  const productionFlag = get("MAVNA_PRODUCTION") ?? "false";
+  if (productionFlag !== "true" && productionFlag !== "false") {
+    throw new SponsorConfigError(
+      `MAVNA_PRODUCTION must be true or false; got "${productionFlag}".`,
+    );
+  }
+  const production = network === "mainnet" || productionFlag === "true";
+  const stateDir = get("MAVNA_STATE_DIR");
+  if (production && stateDir === undefined) {
+    // held settlements, channel keys and the day's caps would be lost on any restart
+    throw new SponsorConfigError(
+      "MAVNA_STATE_DIR must be set in production (mainnet, or MAVNA_PRODUCTION=true): " +
+        "without it, held settlements, channel keys and the daily caps live in memory and " +
+        "are lost on restart.",
+    );
+  }
+
   return {
     networkId: network,
     sponsorSecret,
@@ -158,7 +180,8 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
       "MAVNA_DELIVERY_BUDGET_XLM",
       get("MAVNA_DELIVERY_BUDGET_XLM") ?? "25",
     ),
-    stateDir: get("MAVNA_STATE_DIR"),
+    stateDir,
+    production,
     port: whole("PORT", 8787),
   };
 }

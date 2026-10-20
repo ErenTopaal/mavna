@@ -53,6 +53,7 @@ One sponsor per network, each its own process, key, state directory and hostname
 | `SPONSOR_SECRET_KEY` | the testnet sponsor key | its own key, never the testnet one |
 | `STELLAR_RPC_URL` | empty: the public testnet node | your own provider |
 | `MAVNA_RESERVE_FUNDING` | `sponsor` | `self` |
+| `MAVNA_PRODUCTION` | `true` | implied by `mainnet` |
 | `MAVNA_STATE_DIR` | a persistent private volume, e.g. `/var/lib/mavna` | a different persistent private volume |
 | `MAVNA_TRUST_PROXY` | `true` | `true` |
 | `MAVNA_ALLOWED_ORIGINS` | `https://mavna.app,https://www.mavna.app,https://web.mavna.app,https://playground.mavna.app,https://docs.mavna.app` | the app's origins only |
@@ -63,7 +64,8 @@ One sponsor per network, each its own process, key, state directory and hostname
 
 Why each one matters:
 
-- **`MAVNA_STATE_DIR` is not optional in production.** Without it the caps, held
+- **`MAVNA_STATE_DIR` is not optional in production.** A mainnet sponsor, or one
+  started with `MAVNA_PRODUCTION=true`, refuses to start without it. Without it the caps, held
   settlements, built preparations and channel keys live in memory, and every
   restart (a crash, a reboot, a redeploy) drops them: XLM funded into a channel
   becomes unreachable, a reserve fronted for a settlement that was waiting on
