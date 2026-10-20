@@ -53,6 +53,8 @@ afterAll(() => {
   expect(uses).toEqual([]);
 });
 
+// the two tests that import load the sdk afresh, which is slow when the whole
+// suite runs at once, so they get a longer limit
 describe("this package's runtime code never touches the Buffer global", () => {
   it("classifies addresses, builds the sponsorship pair and formats amounts", async () => {
     const sdk = await import("@stellar/stellar-sdk");
@@ -88,7 +90,7 @@ describe("this package's runtime code never touches the Buffer global", () => {
     expect(ladder).toHaveLength(2);
     expect(stellar.stroopsToXlm(-12_345_678n)).toBe("-1.2345678");
     expect(uses).toEqual([]);
-  });
+  }, 30_000);
 
   it("inspects destinations and submits through the guarded client", async () => {
     const sdk = await import("@stellar/stellar-sdk");
@@ -133,7 +135,7 @@ describe("this package's runtime code never touches the Buffer global", () => {
     const landed = await client.submit("bump", async () => tx);
     expect(landed.txHash).toMatch(/^[0-9a-f]{64}$/);
     expect(uses).toEqual([]);
-  });
+  }, 30_000);
 
   it("would notice if it did", () => {
     // the control: which frames count as this package's runtime code

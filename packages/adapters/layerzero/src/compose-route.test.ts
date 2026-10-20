@@ -26,6 +26,9 @@ const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const SENDER = "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB";
 const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const USDC_SAC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+// a deployed contract that is not a token (Circle's CCTP forwarder on testnet),
+// its instance recorded in the fixture
+const WALLET_CONTRACT = "CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ";
 const READY = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
 const NO_TRUSTLINE = "GDD7P7D5QG76BS4UNHTGCL4UOIHKASZFKPDP3TQ4GTA7JORM6TYEOK4Y";
 // on the testnet contract's path list, but not a wanted asset
@@ -359,8 +362,14 @@ describe("a compose route", () => {
 
   it("serves a contract recipient, which needs no trustline", async () => {
     const { ctx } = context();
-    const route = await quoteComposeRoute(ctx, request(USDC_SAC));
+    const route = await quoteComposeRoute(ctx, request(WALLET_CONTRACT));
     expect(route !== undefined && !isRejection(route)).toBe(true);
+  });
+
+  it("refuses a token's own contract as the recipient", async () => {
+    const { ctx } = context();
+    const result = await quoteComposeRoute(ctx, request(USDC_SAC));
+    expect((result as RouteRejection).explanation).toMatch(/token's contract, not a wallet/);
   });
 
   it("refuses a muxed address, which does not fit the message", async () => {

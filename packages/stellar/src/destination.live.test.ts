@@ -106,6 +106,12 @@ describe("inspectDestination against live testnet", () => {
     expect(state.lane.kind).not.toBe("unusable");
   });
 
+  it("a token's own contract is unusable, since it never sends from itself", async () => {
+    const usdcSac = usdc.contractId(network.passphrase);
+    const state = await inspectDestination(client, usdcSac, usdc);
+    expect(state.lane.kind).toBe("unusable");
+  });
+
   it("a contract id with nothing deployed behind it is unusable", async () => {
     const empty = StrKey.encodeContract(Keypair.random().rawPublicKey());
     const state = await inspectDestination(client, empty, usdc);

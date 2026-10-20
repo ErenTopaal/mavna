@@ -46,9 +46,14 @@ export interface RpcClientOptions {
    * accepts the connection and never answers holds the caller forever.
    */
   readonly timeoutMs?: number;
+  /** Allow a plain http endpoint on this machine (localhost, 127.0.0.1, ::1) and nowhere else. */
+  readonly allowHttp?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** Hostnames that can only be this machine, as `URL` writes them. */
+const LOOPBACK: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * How long past a transaction's time bound to keep asking when no node has yet
@@ -132,6 +137,22 @@ export class SubmitExhausted extends MavnaError {
  * callers can tell this answer from a read that failed, which says nothing
  * about whether the account exists.
  */
+/**
+ * A transaction was sent and no node has said whether it landed: either the
+ * wait ran out first or the endpoint stopped answering. `hash` is what to look it
+ * up by before doing anything else. Retryable only for an envelope that is sent
+ * again as it is, which cannot act twice; a rebuilt one would sit beside it.
+ */
+export class InclusionUnknown extends MavnaError {
+  readonly hash: string;
+
+  constructor(message: string, hash: string, retryable: boolean, cause?: unknown) {
+    super(message, { retryable, cause });
+    this.name = "InclusionUnknown";
+    this.hash = hash;
+  }
+}
+
 export class AccountNotFound extends MavnaError {
   readonly address: string;
 
@@ -150,7 +171,16 @@ export class RpcClient {
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(options: RpcClientOptions) {
-    this.server = new rpc.Server(options.url);
+    const url = new URL(options.url);
+    // plain http is for a node on this machine; anywhere else a reply could be
+    // rewritten in transit, and every answer here decides where money goes
+    if (options.allowHttp === true && url.protocol === "http:" && !LOOPBACK.has(url.hostname)) {
+      throw new MavnaError(
+        `Plain http is only allowed for a node on this machine, not ${url.hostname}.`,
+        { retryable: false },
+      );
+    }
+    this.server = new rpc.Server(options.url, { allowHttp: options.allowHttp === true });
     // rpc.Server's own `timeout` option is declared but never applied (sdk
     // 16.2.0, and still in 17.2.1), so the bound goes on the client it builds
     this.server.httpClient.defaults.timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -294,11 +324,13 @@ export class RpcClient {
         retryable: true,
       });
     }
-    if (found === "unknown") {
-      throw new MavnaError(
+    if (typeof found === "object" && "unknownBecause" in found) {
+      throw new InclusionUnknown(
         `Transaction ${hash} was not seen included, and no node has yet closed a ledger past ` +
           "its time bound; it may still land.",
-        { retryable: false },
+        hash,
+        false,
+        found.unknownBecause,
       );
     }
     return found;
@@ -309,20 +341,25 @@ export class RpcClient {
    *
    * "expired" only when a node at or past the high-water mark reports a ledger
    * closed after `maxTimeUnix`: the network's clock, not ours, decides whether
-   * the transaction can still be included. "unknown" when the local clock passes
-   * `stopAtUnix` first, which says nothing about the transaction's fate.
+   * the transaction can still be included. Unknown when the local clock passes
+   * `stopAtUnix` first, which says nothing about the transaction's fate, with the
+   * last request failure if there was one.
+   *
+   * A failed request is waited through like silence: the transaction was already
+   * sent, so a dropped connection says nothing about whether it lands.
    */
   private async pollUntil(
     hash: string,
     maxTimeUnix: number | undefined,
     stopAtUnix: number,
-  ): Promise<rpc.Api.GetTransactionResponse | "expired" | "unknown"> {
+  ): Promise<rpc.Api.GetTransactionResponse | "expired" | { readonly unknownBecause: unknown }> {
+    let lastFailure: unknown;
     for (;;) {
       let result: rpc.Api.GetTransactionResponse | undefined;
       try {
         result = await this.server.getTransaction(hash);
       } catch (cause) {
-        if (!isTimeout(cause)) throw cause;
+        lastFailure = cause;
       }
       if (result !== undefined && result.status !== "NOT_FOUND") {
         if (result.status === "SUCCESS") this.observeWrite(result.ledger);
@@ -332,11 +369,12 @@ export class RpcClient {
         result !== undefined &&
         maxTimeUnix !== undefined &&
         result.latestLedger >= this.floor.value &&
-        result.latestLedgerCloseTime > maxTimeUnix
+        // typed a number, but the live endpoint sends it as a string
+        Number(result.latestLedgerCloseTime) > maxTimeUnix
       ) {
         return "expired";
       }
-      if (Math.floor(Date.now() / 1000) > stopAtUnix) return "unknown";
+      if (Math.floor(Date.now() / 1000) > stopAtUnix) return { unknownBecause: lastFailure };
       await this.sleep(this.baseDelayMs * 2);
     }
   }
@@ -463,15 +501,17 @@ export class RpcClient {
           retryable: true,
         });
       }
-      if (result === "unknown") {
+      if (typeof result === "object" && "unknownBecause" in result) {
         // Sending the same signed envelope again cannot act twice, so a
         // presigned one may be retried. Anything rebuilt would be a new
         // transaction beside one that may still land.
-        throw new MavnaError(
+        throw new InclusionUnknown(
           capped < stopAt
-            ? `${label} was not seen included within ${options.waitSeconds} seconds; it may still land.`
-            : `${label} was not seen included, and no node has closed a ledger past its time bound; it may still land.`,
-          { retryable: options.presigned === true },
+            ? `${label} (${sent.hash}) was not seen included within ${options.waitSeconds} seconds; it may still land.`
+            : `${label} (${sent.hash}) was not seen included, and no node has closed a ledger past its time bound; it may still land.`,
+          sent.hash,
+          options.presigned === true,
+          result.unknownBecause,
         );
       }
       if (result.status === "SUCCESS") return result;

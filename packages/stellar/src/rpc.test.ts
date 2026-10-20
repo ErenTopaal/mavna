@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { MavnaError } from "@mavna/core";
 import {
   Account,
@@ -15,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AccountNotFound,
   createLedgerFloor,
+  InclusionUnknown,
   RpcClient,
   SubmitExhausted,
   SubmitRejected,
@@ -569,5 +572,146 @@ describe("preparing a contract call", () => {
       .setTimeout(30)
       .build();
     await expect(client.prepare(call)).rejects.toThrow("boom");
+  });
+});
+
+/** What a dropped connection looks like from the SDK's HTTP client. */
+function dropped(): Error {
+  return Object.assign(new Error("socket hang up"), { name: "AxiosError", code: "ECONNRESET" });
+}
+
+describe("a connection that drops while waiting", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps waiting, since the transaction may land all the same", async () => {
+    const client = clientForTest();
+    const tx = txValidFor(300);
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      if (asked < 3) throw dropped();
+      return landed(h, 9);
+    };
+    const result = await client.submit("delivery", async () => tx);
+    expect(result.ledger).toBe(9);
+  });
+
+  it("says which transaction may still land when the node never comes back", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const hash = xdr.encodeBytes(tx.hash(), "hex");
+    client.server.sendTransaction = async () => pendingTx(hash);
+    client.server.getTransaction = async () => {
+      throw dropped();
+    };
+    const failure = await client
+      .submit("delivery", async () => tx)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(InclusionUnknown);
+    expect((failure as InclusionUnknown).hash).toBe(hash);
+    expect((failure as InclusionUnknown).message).toContain(hash);
+    expect((failure as InclusionUnknown).message).toMatch(/may still land/);
+    // a rebuilt transaction would be a second one beside it
+    expect((failure as InclusionUnknown).retryable).toBe(false);
+    expect((failure as InclusionUnknown).cause).toBeInstanceOf(Error);
+  });
+
+  it("lets a presigned envelope be resent, which cannot act twice", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
+    client.server.getTransaction = async () => {
+      throw dropped();
+    };
+    const failure = await client
+      .submit("settlement", async () => tx, { presigned: true })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(InclusionUnknown);
+    expect((failure as InclusionUnknown).retryable).toBe(true);
+  });
+
+  it("keeps the hash when waiting on one directly", async () => {
+    const client = clockedClient();
+    const maxTime = Math.floor(Date.now() / 1000) + 30;
+    client.server.getTransaction = async () => {
+      throw dropped();
+    };
+    const failure = await client.waitForTransaction("ab", maxTime).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(InclusionUnknown);
+    expect((failure as InclusionUnknown).hash).toBe("ab");
+  });
+});
+
+describe("the ledger's close time", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is read as a number when the node sends it as a string, as the live endpoint does", async () => {
+    const client = clockedClient();
+    const tx = txValidFor(60);
+    const maxTime = Number(tx.timeBounds?.maxTime);
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
+    // first a ledger one second short of the bound, then one past it
+    let asked = 0;
+    client.server.getTransaction = async (h) => {
+      asked += 1;
+      return {
+        ...missing(h, 12, 0),
+        latestLedgerCloseTime: String(asked === 1 ? maxTime - 1 : maxTime + 1),
+      } as never;
+    };
+    const failure = await client
+      .submit("delivery", async () => tx, { attempts: 1 })
+      .catch((error: unknown) => error);
+    expect((failure as MavnaError).message).toMatch(/not included before it expired/);
+    expect(asked).toBe(2);
+  });
+});
+
+describe("a node that never answers", () => {
+  it("is given up on at the configured timeout", async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const client = new RpcClient({
+        url: `http://127.0.0.1:${port}`,
+        allowHttp: true,
+        timeoutMs: 300,
+      });
+      const started = Date.now();
+      const failure = await client.server.getLatestLedger().catch((error: unknown) => error);
+      const waited = Date.now() - started;
+      expect((failure as { code?: string }).code).toBe("ECONNABORTED");
+      expect(waited).toBeGreaterThanOrEqual(280);
+      expect(waited).toBeLessThan(2_000);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+});
+
+describe("plain http", () => {
+  it("is refused by default", () => {
+    expect(() => new RpcClient({ url: "http://127.0.0.1:8000" })).toThrow(/insecure/);
+  });
+
+  it("is allowed only for this machine, even when asked for", () => {
+    for (const url of ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"]) {
+      expect(() => new RpcClient({ url, allowHttp: true })).not.toThrow();
+    }
+    for (const url of [
+      "http://soroban-testnet.stellar.org",
+      "http://10.0.0.5:8000",
+      "http://localhost.example.com",
+      "http://127.0.0.1.nip.io",
+    ]) {
+      expect(() => new RpcClient({ url, allowHttp: true })).toThrow(MavnaError);
+    }
   });
 });

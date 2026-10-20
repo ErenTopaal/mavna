@@ -280,7 +280,12 @@ function stellarNode(): RpcClient {
       const kind = key.type;
       asked.push(`ledger ${kind}`);
       if (kind === "contractData") {
-        entries.push({ key, val: contractInstance(ledger.executable) });
+        // the token's own id is the token; any other contract is a wallet
+        const contract = Address.fromScAddress(key.contractData.contract).toString();
+        entries.push({
+          key,
+          val: contractInstance(contract === ledger.token ? ledger.executable : "wasm"),
+        });
       }
       if (key.type === "account" && ledger.account) {
         entries.push({

@@ -96,7 +96,12 @@ function trustlineEntry(
   );
 }
 
-function contractInstance(contractId: string): xdr.LedgerEntryData {
+function contractInstance(
+  contractId: string,
+  executable: xdr.ContractExecutable = xdr.ContractExecutable.contractExecutableWasm(
+    new Uint8Array(32).fill(7),
+  ),
+): xdr.LedgerEntryData {
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
       ext: xdr.ExtensionPoint.v0(),
@@ -105,7 +110,7 @@ function contractInstance(contractId: string): xdr.LedgerEntryData {
       durability: xdr.ContractDataDurability.persistent,
       val: xdr.ScVal.scvContractInstance(
         new xdr.ScContractInstance({
-          executable: xdr.ContractExecutable.contractExecutableStellarAsset(),
+          executable,
           storage: null,
         }),
       ),
@@ -116,6 +121,19 @@ function contractInstance(contractId: string): xdr.LedgerEntryData {
 const randomContract = (): string => StrKey.encodeContract(Keypair.random().rawPublicKey());
 
 describe("a contract destination", () => {
+  it("is unusable when it is a token's own contract, which never sends from itself", async () => {
+    const token = randomContract();
+    const state = await inspectDestination(
+      ledger([contractInstance(token, xdr.ContractExecutable.contractExecutableStellarAsset())]),
+      token,
+      usdc,
+    );
+    expect(state.lane.kind).toBe("unusable");
+    expect(state.lane.kind === "unusable" && state.lane.reason).toBe(
+      "That is a token's contract, not a wallet: anything sent to it can never be moved.",
+    );
+  });
+
   it("is ready when a contract instance exists at the address", async () => {
     const contract = randomContract();
     const state = await inspectDestination(ledger([contractInstance(contract)]), contract, usdc);
