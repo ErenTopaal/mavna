@@ -30,7 +30,7 @@
     "format:check": "prettier --check \"**/*.{md,yml,yaml}\"",
     "publish:check": "turbo run publish:check",
     "check:exports": "node scripts/check-exports.mjs",
-    "test:browser": "playwright test",
+    "test:browser": "node scripts/browser-test-build.mjs && playwright test",
     "size": "turbo run size"
   },
   "devDependencies": {

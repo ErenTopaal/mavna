@@ -1,27 +1,51 @@
-// Builds the four surfaces and serves them for the browser tests. Playwright
-// waits on one url, so the app (that url) starts only after the other three
-// answer, and every spec finds all four up.
-import { spawn, spawnSync } from "node:child_process";
+// Serves the four built surfaces for the browser tests. It does not build:
+// scripts/browser-test-build.mjs does, first, so Playwright's webServer timeout
+// covers serving only. Playwright waits on one url, so the app (that url)
+// starts only after the other three answer, and every spec finds all four up.
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SPONSOR_URL } from "../tests/env.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const base = Number(process.env.MAVNA_TEST_PORT ?? "4319");
 const port = (offset) => String(base + offset);
 
-const built = spawnSync(
-  "pnpm",
-  [
-    "turbo",
-    "run",
-    "build",
-    "--filter=@mavna/app...",
-    "--filter=@mavna/playground...",
-    "--filter=@mavna/web...",
-    "--filter=@mavna/docs...",
-  ],
-  { cwd: root, stdio: "inherit" },
-);
-if (built.status !== 0) process.exit(built.status ?? 1);
+/**
+ * The builds the specs need: made for the test sponsor, with the harness page.
+ * A build made for anything else (the gate's own `pnpm build`, say) would fail
+ * the specs for a reason that has nothing to do with them, so it is refused here.
+ */
+function testBuildProblem() {
+  for (const app of ["app", "playground", "web"]) {
+    const dist = join(root, "apps", app, "dist");
+    const page = join(dist, "index.html");
+    if (!existsSync(page)) return `apps/${app}/dist is missing`;
+    // the entry the page loads, not any file in assets/: a cache restore lays a
+    // build over the last one without clearing it, so old chunks can linger
+    const entry = /<script[^>]*src="\/?([^"]+\.js)"/.exec(readFileSync(page, "utf8"))?.[1];
+    if (entry === undefined || !existsSync(join(dist, entry))) {
+      return `apps/${app}/dist/index.html loads no script`;
+    }
+    if (!readFileSync(join(dist, entry), "utf8").includes(SPONSOR_URL)) {
+      return `apps/${app}/dist was built for another sponsor`;
+    }
+  }
+  if (!existsSync(join(root, "apps/app/dist/harness/buffer-free.html"))) {
+    return "apps/app/dist has no harness page";
+  }
+  if (!existsSync(join(root, "apps/docs/.next/BUILD_ID"))) return "apps/docs has no build";
+  return undefined;
+}
+
+const problem = testBuildProblem();
+if (problem !== undefined) {
+  console.error(
+    `${problem}. Run \`pnpm test:browser\`, which builds the surfaces for the tests first.`,
+  );
+  process.exit(1);
+}
 
 const children = [];
 function serve(pkg, args) {

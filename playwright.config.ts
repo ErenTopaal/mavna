@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { PORTS, SPONSOR_URL } from "./tests/env.js";
+import { PORTS } from "./tests/env.js";
 
 /**
  * Browser tests, kept apart from Vitest.
@@ -26,19 +26,14 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     // Built rather than dev-served: the dev server inlines CSS through Vite's
-    // own pipeline, which would test a bundle no integrator ever receives. The
-    // script serves the playground, landing and docs too, on the next three ports.
+    // own pipeline, which would test a bundle no integrator ever receives.
+    // `pnpm test:browser` builds first (scripts/browser-test-build.mjs), so this
+    // only serves the four surfaces, on this port and the next three, and its
+    // timeout is sized for serving rather than for a build under load.
     command: "node scripts/browser-test-servers.mjs",
     url: `http://localhost:${PORTS.app}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 300_000,
-    // a sponsor no test can reach by accident; the specs answer for it
-    env: {
-      VITE_MAVNA_SPONSOR_URL: SPONSOR_URL,
-      NEXT_PUBLIC_MAVNA_SPONSOR_URL: SPONSOR_URL,
-      // adds the harness page tests/buffer-free.spec.ts drives
-      MAVNA_BROWSER_HARNESS: "1",
-      MAVNA_TEST_PORT: String(PORTS.app),
-    },
+    timeout: 60_000,
+    env: { MAVNA_TEST_PORT: String(PORTS.app) },
   },
 });
