@@ -88,6 +88,30 @@ describe("monotonic status", () => {
     expect(canAdvance(pending, done)).toBe(true);
   });
 
+  it("refuses a late poll that walks a step that is not finished back to an earlier phase", () => {
+    const converting: StepPhase = {
+      phase: "delivered-conversion-pending",
+      ref,
+      deliveredAtUnix: 100,
+      finish: undefined,
+    };
+    const stalled: StepPhase = {
+      phase: "stalled",
+      ref,
+      overdueSeconds: 30,
+      remedy: { kind: "wait", untilUnix: 200, because: "the network is slow" },
+    };
+    expect(canAdvance(converting, pending)).toBe(false);
+    expect(canAdvance(converting, { phase: "idle" })).toBe(false);
+    expect(canAdvance(pending, { phase: "idle" })).toBe(false);
+    // the same transaction still reported pending is not news: it is still overdue
+    expect(canAdvance(stalled, pending)).toBe(false);
+    // a new transaction (the user acted on the remedy) does set the step moving again
+    expect(canAdvance(stalled, { ...pending, ref: { ...ref, txHash: "def" } })).toBe(true);
+    expect(canAdvance(stalled, converting)).toBe(true);
+    expect(canAdvance(pending, pending)).toBe(true);
+  });
+
   it("will not move from one terminal state to another", () => {
     expect(
       canAdvance(done, {

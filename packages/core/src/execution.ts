@@ -163,11 +163,18 @@ export function isSuccess(phase: StepPhase): boolean {
  */
 export function canAdvance(current: StepPhase, next: StepPhase): boolean {
   if (isTerminal(current)) return false;
-  if (current.phase === next.phase) return true;
-  return true;
+  if (PHASE_ORDER[next.phase] >= PHASE_ORDER[current.phase]) return true;
+  // The one way back: a stalled step that a new transaction set moving again,
+  // which is what acting on its remedy looks like. The same transaction still
+  // reported pending is the poll not knowing it is overdue.
+  return (
+    current.phase === "stalled" &&
+    next.phase === "pending" &&
+    next.ref.txHash !== current.ref.txHash
+  );
 }
 
-/** Ranks used only to describe progress; not an ordering the state machine enforces. */
+/** How far along each phase is. A step never moves to a lower rank, bar the one case above. */
 export const PHASE_ORDER: Readonly<Record<StepPhase["phase"], number>> = {
   idle: 0,
   blocked: 1,
