@@ -3,7 +3,7 @@ import { Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { assertFeeWithin, assertOnlyExecutorCompose, ComposeRefused, Composer } from "./compose.js";
 
-const CONTRACT = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
+const CONTRACT = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
 const executor = Keypair.random().publicKey();
 const args = [
   new Address(executor).toScVal(),

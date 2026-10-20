@@ -3986,7 +3986,7 @@ describe("the soroswap proxy, mounted on the sponsor", () => {
 });
 
 describe("finishing a conversion on arrival", () => {
-  const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
+  const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
   const good = {
     from: "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB",
     guid: "ab".repeat(32),

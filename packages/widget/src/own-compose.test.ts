@@ -21,7 +21,7 @@ import { finishCompose } from "./own-compose";
  * doubles, and so is the wallet at its signing boundary.
  */
 
-const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
+const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
 // the OFT the testnet contract accepts (a harness key) and a recipient wallet
 const FROM = "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB";
 const USER = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";

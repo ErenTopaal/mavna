@@ -58,7 +58,7 @@ contract does not expose it. So the payout is attempted rather than assumed:
 
 Reproducing the deployed bytes needs the exact toolchain, because the wasm records both:
 
-- Rust 1.97.1 with the `wasm32v1-none` target, pinned in `contracts/rust-toolchain.toml`;
+- Rust 1.99.1 with the `wasm32v1-none` target, pinned in `contracts/rust-toolchain.toml`;
 - stellar-cli 28.1.0 (commit `c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd`), which writes its own
   version into the wasm's `cliver` metadata, so any other version gives a different hash. Install it
   with `cargo install --locked stellar-cli --version 28.1.0`.
@@ -80,7 +80,7 @@ The same commit built from a clean `git archive` in another directory gives the 
 
 | Network | Contract                                                   | Wasm sha256                                                        | Allowlist                                                                                                  |
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| testnet | `CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X` | `66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
+| testnet | `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ` | `468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b` | test sender `GBNCXZUV...N2NB` with native XLM; converts into testnet USDC; may route through AQUA and USDT |
 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its allowlisted sender is
 a key that queues compose messages on the real testnet endpoint itself. It proves the endpoint
@@ -109,12 +109,13 @@ What the constructor is given decides what the contract will ever trust, so on m
   router upgraded by them, can change what a swap does with the funds it is given. The router's
   source was not reviewed here; check these roles again at deployment time.
 
-Earlier testnet instances hold nothing and are not used. `CD5M6IBU...P35A` (`688456b0...6155`)
-trapped when a trustline limit refused the payout, leaving the compose queued instead of delivering
-it as it came. `CACZ7BVN...65MH` (`9d76f0b4...f4a2`) swapped without estimating first, and its
-fallback failed on-chain whenever the swap reverted, because a rolled-back swap still costs ledger
-writes that simulation does not predict. `CB4B235W...JS7F` (`47921dcd...d714`) did not treat a
-trustline the issuer has not authorised as unable to hold the wanted asset. `CBSWBSEL...6252`
-(`56e2acc5...e35f`) called any wanted asset or path token the message named, which let a hostile
-token spend an executor's authorization; it had no lists of what it may convert into and route
-through.
+Earlier testnet instances hold nothing and are not used. `CDAIQ522...QN6X` (`66948b25...06ab`) is
+the same source built with Rust 1.97.1, replaced when the toolchain moved to 1.99.1, which changes
+the bytes. `CD5M6IBU...P35A` (`688456b0...6155`) trapped when a trustline limit refused the payout,
+leaving the compose queued instead of delivering it as it came. `CACZ7BVN...65MH`
+(`9d76f0b4...f4a2`) swapped without estimating first, and its fallback failed on-chain whenever the
+swap reverted, because a rolled-back swap still costs ledger writes that simulation does not
+predict. `CB4B235W...JS7F` (`47921dcd...d714`) did not treat a trustline the issuer has not
+authorised as unable to hold the wanted asset. `CBSWBSEL...6252` (`56e2acc5...e35f`) called any
+wanted asset or path token the message named, which let a hostile token spend an executor's
+authorization; it had no lists of what it may convert into and route through.

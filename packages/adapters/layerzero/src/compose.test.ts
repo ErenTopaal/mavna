@@ -22,7 +22,7 @@ import {
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const RECIPIENT = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
-const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
+const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
 // the vector below was written with the first testnet id as fee recipient
 const VECTOR_FEE_TO = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
 
@@ -200,7 +200,7 @@ describe("proof of arrival from the contract's own event", () => {
     vi.restoreAllMocks();
   });
 
-  // recorded from testnet: CDAIQ522..., the harness runs in the contract-stellar fixes
+  // recorded from testnet: CBBT5762..., the harness runs after the rust 1.99 rebuild
   const client = (events: { result: { events: unknown[]; latestLedger: number } }) => {
     const c = new RpcClient({ url: "https://rpc.invalid" });
     vi.spyOn(c.server, "getHealth").mockResolvedValue({
@@ -219,17 +219,17 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(converted),
       ARRIVAL,
-      "352de4ea9ce8951912124c0c4cb8617a4436df3f5a3c5f0461bc2b3270b8178e",
-      5_293_946,
+      "f72ac1608fd43b2bf26d1bc136d897defb82e912ef59a3e6c43c3a9a48e5d3c6",
+      5_295_406,
     );
     expect(event).toMatchObject({
       outcome: "converted",
       recipient: RECIPIENT,
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-      amount: 53_894_409n,
+      amount: 53_892_720n,
       fee: 0n,
       arrivedAmount: 100_000_000n,
-      txHash: "0bc786344aa92e4523d3a16f9f016997e9c812fc78dcc59dc4477a19cb73dab3",
+      txHash: "63d355a5380f9067373b8bb9c76776f575165e006c95eea08c7baf5e3b3e67ea",
     });
   });
 
@@ -237,8 +237,8 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(asCame),
       ARRIVAL,
-      "25193ab76099e7004d76d1e66542b67c8858b11ac6cee640c979240eb0c7aabb",
-      5_293_952,
+      "e319aa62d9c06a6af4b2069dea087a43ed04a3638f9e1955f0a38ae8249e1713",
+      5_295_413,
     );
     expect(event).toMatchObject({
       outcome: "as_came",
@@ -249,9 +249,9 @@ describe("proof of arrival from the contract's own event", () => {
 });
 
 describe("what finishing a compose would pay to renew the contract's storage", () => {
-  const CONTRACT = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
+  const CONTRACT = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
   const WASM = Buffer.from(
-    "66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab",
+    "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b",
     "hex",
   );
   const LATEST = 1_000_000;
