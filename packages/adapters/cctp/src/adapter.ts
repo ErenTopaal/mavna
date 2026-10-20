@@ -166,6 +166,21 @@ export class CctpAdapter implements BridgeAdapter {
       );
     }
 
+    const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
+    if (typeof fee !== "bigint") return fee;
+
+    const sends = BigInt(request.sends.baseUnits);
+    if (fee >= sends) {
+      return this.decline(
+        "amount-too-small",
+        "The fee for this transfer is larger than the amount being sent.",
+      );
+    }
+
+    // Six decimals on the way in, seven on the way out. Doing this with numbers
+    // instead of BigInt is how a transfer quietly loses its last digit.
+    const delivered = canonicalToLocal((sends - fee).toString());
+
     // A destination that cannot receive is ordinary user input, not an exceptional
     // condition, and the interface is explicit that a rejection carrying a reason
     // beats a throw: the reason is shown to somebody. `classifyAddress` throws on
@@ -173,7 +188,10 @@ export class CctpAdapter implements BridgeAdapter {
     // turned back into an answer.
     let destination: Awaited<ReturnType<typeof inspectDestination>>;
     try {
-      destination = await inspectDestination(this.rpc, request.destination, this.stellarUsdc);
+      // a mint above the room left under the trustline's limit fails after the burn
+      destination = await inspectDestination(this.rpc, request.destination, this.stellarUsdc, {
+        amountStroops: BigInt(delivered),
+      });
     } catch (cause) {
       // A node that is merely behind is NOT an address that cannot receive.
       //
@@ -202,9 +220,6 @@ export class CctpAdapter implements BridgeAdapter {
       return this.decline("destination-unsupported", destination.lane.reason);
     }
 
-    const fee = await this.bridgeFee(domain, BigInt(request.sends.baseUnits));
-    if (typeof fee !== "bigint") return fee;
-
     const reserve = quoteReserve({
       lane: destination.lane,
       // CCTP delivers USDC and the user asked for USDC, so there is never a
@@ -212,18 +227,6 @@ export class CctpAdapter implements BridgeAdapter {
       destinationAssetDiffers: false,
       baseReserveStroops: this.baseReserveStroops,
     });
-
-    const sends = BigInt(request.sends.baseUnits);
-    if (fee >= sends) {
-      return this.decline(
-        "amount-too-small",
-        "The fee for this transfer is larger than the amount being sent.",
-      );
-    }
-
-    // Six decimals on the way in, seven on the way out. Doing this with numbers
-    // instead of BigInt is how a transfer quietly loses its last digit.
-    const delivered = canonicalToLocal((sends - fee).toString());
 
     // Converted before comparing, because the floor is an amount of XLM and this
     // is an amount of USDC. Both are integers with seven decimals on Stellar and
