@@ -4967,3 +4967,62 @@ describe("round 3: idle channels go back to the sponsor above a floor", () => {
     expect(server.rpc.submissions.filter((s) => s.label === "channel merge")).toEqual([]);
   });
 });
+
+describe("round 3: a channel whose account is gone is dropped where it is found", () => {
+  it("drops a channel merged before a crash, and settles on another, never a 500", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const state = new MemoryDocumentStore();
+    const first = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    expect(
+      (await first.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    const written = (await state.read("channels")) as { secrets: string[] };
+    const merged = Keypair.fromSecret(written.secrets[0] ?? "").publicKey();
+    // the merge landed and the process died before the pool was rewritten
+    first.rpc.accounts.delete(merged);
+    vi.setSystemTime(Date.now() + 700_000);
+
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true, restartOf: first },
+    );
+    const next = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    logged.mockRestore();
+    expect(next.status).toBe(200);
+    expect(next.body.channel).not.toBe(merged);
+    const after = (await state.read("channels")) as { secrets: string[] };
+    expect(after.secrets.map((secret) => Keypair.fromSecret(secret).publicKey())).not.toContain(
+      merged,
+    );
+  });
+});
+
+describe("round 3: the sweep drops a free channel whose account is gone", () => {
+  it("takes it out of the pool on its first pass", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const state = new MemoryDocumentStore();
+    const server = await startServer(
+      { state, provisionalSettlements: 4, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    await server.post("/settlement", { destination: Keypair.random().publicKey() });
+    const written = (await state.read("channels")) as { secrets: string[] };
+    const gone = Keypair.fromSecret(written.secrets[0] ?? "").publicKey();
+    server.rpc.accounts.delete(gone);
+    vi.setSystemTime(Date.now() + 700_000);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+    const after = (await state.read("channels")) as { secrets: string[] };
+    expect(after.secrets).toEqual([]);
+  });
+});

@@ -43,7 +43,12 @@ import {
   signedBy,
 } from "./built.js";
 import { type CapDecision, CapLedger } from "./caps.js";
-import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
+import {
+  type Channel,
+  ChannelPool,
+  type ChannelPoolSnapshot,
+  type LeaseRecord,
+} from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
 import {
@@ -1259,7 +1264,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (running !== undefined) return running;
     const work = (async () => {
       const entry = await readAccountEntry(options.rpc, address);
-      if (entry === undefined) return;
+      if (entry === undefined) {
+        // gone (merged back before a crash, say): out of the pool while free,
+        // so no settlement is ever built on it
+        const pool = channels;
+        if (pool?.acquireThis(address, address, nowUnix() + 60, nowUnix()) !== undefined) {
+          console.error(`[sponsor] channel ${address} no longer exists; dropping it`);
+          pool.drop(address, address);
+          await persist();
+        }
+        return;
+      }
       const balance = entry.balance;
       if (balance >= CHANNEL_LOW_STROOPS) return;
       const amount = CHANNEL_TOP_UP_TO_STROOPS - balance;
@@ -2140,18 +2155,34 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // A fixed window from the first ask, lengthened only once a preparation has
     // landed. Asking again hands back the same channel and window, so asking,
     // signing and committing, all free, can never keep a slot.
-    let channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
-    while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
-      try {
-        pool = await fundOne();
-      } catch (cause) {
-        if (!(cause instanceof FundingBackoff)) throw cause;
-        await noSlot();
-        return;
-      }
+    let channel: Channel | undefined;
+    let channelAccount: Account | undefined;
+    // A channel whose account is gone (merged back, and the process stopped
+    // before the pool was rewritten) is dropped where it is found, and the
+    // next one taken, so this never answers for it with a failure.
+    while (channelAccount === undefined) {
       channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+      while (channel === undefined && options.channels === undefined && pool.size < poolLimit()) {
+        try {
+          pool = await fundOne();
+        } catch (cause) {
+          if (!(cause instanceof FundingBackoff)) throw cause;
+          await noSlot();
+          return;
+        }
+        channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+      }
+      if (channel === undefined) break;
+      try {
+        channelAccount = await options.rpc.loadAccount(channel.address);
+      } catch (cause) {
+        if (!(cause instanceof AccountNotFound)) throw cause;
+        console.error(`[sponsor] channel ${channel.address} no longer exists; dropping it`);
+        pool.drop(account, channel.address);
+        await persist();
+      }
     }
-    if (channel === undefined) {
+    if (channel === undefined || channelAccount === undefined) {
       await answer(
         res,
         503,
@@ -2172,7 +2203,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const stroopsPerUsdc = await prices.xlmStroopsPerUnit(usdc);
     const maxSpendBase = (xlmNeededStroops * 2n * 10_000_000n) / stroopsPerUsdc;
 
-    const channelAccount = await options.rpc.loadAccount(channel.address);
     const transaction = buildSettlement({
       network: options.network,
       channelAccount,
