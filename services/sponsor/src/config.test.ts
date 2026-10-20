@@ -20,7 +20,7 @@ describe("the sponsor's configuration, read from the environment", () => {
     expect(config.trustProxy).toBe(false);
     expect(config.stateDir).toBeUndefined();
     expect(config.port).toBe(8787);
-    expect(config.channelPoolSize).toBe(4);
+    expect(config.provisionalSettlements).toBe(16);
     expect(config.settlementsPerClient).toBe(2);
     expect(config.deliveryBudgetStroops).toBe(250_000_000n);
   });
@@ -39,23 +39,41 @@ describe("the sponsor's configuration, read from the environment", () => {
     }
   });
 
-  it("reads the channel pool size and the settlements one client may wait on", () => {
+  it("reads the unbacked settlements allowed at once and the share one client may hold", () => {
     const config = readSponsorConfig({
       ...base,
-      MAVNA_CHANNEL_POOL_SIZE: "10",
+      MAVNA_PROVISIONAL_SETTLEMENTS: "10",
       MAVNA_SETTLEMENTS_PER_CLIENT: "0",
     });
-    expect(config.channelPoolSize).toBe(10);
+    expect(config.provisionalSettlements).toBe(10);
     expect(config.settlementsPerClient).toBe(0);
+    expect(() => readSponsorConfig({ ...base, MAVNA_PROVISIONAL_SETTLEMENTS: "0" })).toThrow(
+      /MAVNA_PROVISIONAL_SETTLEMENTS/,
+    );
   });
 
-  it("refuses a channel pool of none", () => {
-    expect(() => readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "0" })).toThrow(
-      /MAVNA_CHANNEL_POOL_SIZE/,
+  it("says the pool size setting is gone rather than silently ignoring it", () => {
+    expect(readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "4" }).warnings).toEqual([
+      expect.stringMatching(/MAVNA_CHANNEL_POOL_SIZE is no longer read/),
+    ]);
+    // empty, as docker compose forwards an unset one, is still fine
+    expect(readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "" }).provisionalSettlements).toBe(
+      16,
     );
-    expect(() => readSponsorConfig({ ...base, MAVNA_CHANNEL_POOL_SIZE: "two" })).toThrow(
-      /MAVNA_CHANNEL_POOL_SIZE/,
-    );
+  });
+
+  it("reads the daily delivery budget in XLM, to the stroop", () => {
+    expect(
+      readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: "2.5" }).deliveryBudgetStroops,
+    ).toBe(25_000_000n);
+    expect(
+      readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: "0" }).deliveryBudgetStroops,
+    ).toBe(0n);
+    for (const bad of ["-1", "1.12345678", "lots"]) {
+      expect(() => readSponsorConfig({ ...base, MAVNA_DELIVERY_BUDGET_XLM: bad })).toThrow(
+        /MAVNA_DELIVERY_BUDGET_XLM/,
+      );
+    }
   });
 
   it("runs mainnet against the first public mainnet node by default", () => {

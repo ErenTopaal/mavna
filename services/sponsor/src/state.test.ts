@@ -105,7 +105,7 @@ describe("caps kept in a document store survive a restart", () => {
     expect((await after.usage()).stranded).toBe(1);
   });
 
-  it("skips a day that is not in the shape it writes, keeping the others", async () => {
+  it("refuses to read the caps while any day is in the wrong shape", async () => {
     const backing = new MemoryDocumentStore();
     const good = {
       day: "2026-10-19",
@@ -113,12 +113,16 @@ describe("caps kept in a document store survive a restart", () => {
       stranded: 3,
     };
     await backing.write("caps", { "2026-10-19": good, "2026-10-20": { stranded: "lots" } });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const caps = new DocumentCapStore(backing);
-    expect(await caps.load("2026-10-19")).toEqual(good);
-    expect(await caps.load("2026-10-20")).toBeUndefined();
-    expect(errors.mock.calls.flat().join(" ")).toMatch(/2026-10-20/);
-    errors.mockRestore();
+    await expect(caps.load("2026-10-19")).rejects.toThrow(/2026-10-20/);
+  });
+
+  it("refuses a caps file that is not JSON, and leaves it where it is", async () => {
+    const dir = await freshDir();
+    await new FileDocumentStore(dir).write("caps", {});
+    await writeFile(join(dir, "caps.json"), "{ half");
+    await expect(new FileDocumentStore(dir).read("caps")).rejects.toThrow(/caps/);
+    expect(await readFile(join(dir, "caps.json"), "utf8")).toBe("{ half");
   });
 
   it("keeps only the last few days", async () => {

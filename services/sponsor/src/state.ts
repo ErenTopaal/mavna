@@ -41,6 +41,20 @@ export class MemoryDocumentStore implements DocumentStore {
 const DOCUMENT_NAME = /^[a-z][a-z0-9-]*$/;
 
 /**
+ * Documents holding the day's spending limits. Damaged, they are refused rather
+ * than started over, since an empty one would hand out a fresh day's allowance.
+ */
+const FAIL_CLOSED_DOCUMENTS: ReadonlySet<string> = new Set(["caps", "delivery-spend"]);
+
+/** Stored state that cannot be read, and must not be taken as empty. */
+export class UnreadableState extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnreadableState";
+  }
+}
+
+/**
  * One JSON file per document in a directory only the process owner can read,
  * since the channel document holds secret keys.
  *
@@ -71,6 +85,11 @@ export class FileDocumentStore implements DocumentStore {
     try {
       return JSON.parse(text);
     } catch {
+      if (FAIL_CLOSED_DOCUMENTS.has(name)) {
+        // Left in place and refused: reading these as empty would reset the
+        // day's limits, so nothing they guard proceeds until it is repaired.
+        throw new UnreadableState(`The sponsor's ${name} state at ${path} is not readable JSON.`);
+      }
       // Moved aside rather than refused: one damaged file must not keep the
       // service down, and the next write would otherwise replace the only copy.
       const aside = `${path}.unreadable-${Date.now()}`;
@@ -174,28 +193,27 @@ export class DocumentCapStore implements CapStore {
   }
 
   /**
-   * The stored days, each checked: one not in the shape this version writes is
-   * logged and skipped, and the rest are read as written.
+   * The stored days, each checked. Any one not in the shape this version writes
+   * makes the whole document unreadable: skipping it would reset that day's
+   * counts, and the caps exist so that cannot happen.
    */
   private async days(): Promise<Record<string, CapUsage>> {
     const stored = await this.store.read("caps");
     if (stored === undefined) return {};
     if (typeof stored !== "object" || stored === null || Array.isArray(stored)) {
-      console.error(
-        `[sponsor] skipped the caps state: it is not in the shape this version writes: ${JSON.stringify(stored)}`,
+      throw new UnreadableState(
+        "The sponsor's caps state is not in the shape this version writes.",
       );
-      return {};
     }
     const days: Record<string, CapUsage> = {};
     for (const [day, value] of Object.entries(stored)) {
       const parsed = capUsageShape.safeParse(value);
-      if (parsed.success && parsed.data.day === day) {
-        days[day] = parsed.data;
-      } else {
-        console.error(
-          `[sponsor] skipped the caps for ${day}: not in the shape this version writes: ${JSON.stringify(value)}`,
+      if (!parsed.success || parsed.data.day !== day) {
+        throw new UnreadableState(
+          `The sponsor's caps for ${day} are not in the shape this version writes.`,
         );
       }
+      days[day] = parsed.data;
     }
     return days;
   }

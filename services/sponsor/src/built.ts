@@ -60,6 +60,8 @@ const OPEN_PER_ACCOUNT = 3;
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
   private readonly capacity: number;
+  /** Which client asked for each open record, by hash. Kept in memory only. */
+  private readonly clients = new Map<string, string>();
 
   constructor(capacity: number = DEFAULT_OPEN_RECORDS) {
     this.capacity = capacity;
@@ -87,8 +89,9 @@ export class BuiltLedger {
    * anyone and signing is not, so a ledger pruned only on take would keep
    * every abandoned build until someone next signs.
    */
-  record(record: BuiltRecord, nowUnix: number): void {
+  record(record: BuiltRecord, nowUnix: number, client?: string): void {
     this.prune(nowUnix);
+    if (client !== undefined) this.clients.set(record.hash, client);
     // A few open builds per account and kind, the latest. Asking again builds
     // afresh, and each answer would otherwise add one more record.
     const same = [...this.records.values()].filter(
@@ -96,8 +99,17 @@ export class BuiltLedger {
     );
     for (const stale of same.slice(0, Math.max(0, same.length - (OPEN_PER_ACCOUNT - 1)))) {
       this.records.delete(stale.hash);
+      this.clients.delete(stale.hash);
     }
     this.records.set(record.hash, record);
+  }
+
+  /** Open records this client asked for. */
+  openFor(client: string, nowUnix: number): number {
+    this.prune(nowUnix);
+    let count = 0;
+    for (const asker of this.clients.values()) if (asker === client) count += 1;
+    return count;
   }
 
   /** Whether as many records are open as the ledger holds, so the next build is refused. */
@@ -118,12 +130,16 @@ export class BuiltLedger {
     const found = this.records.get(hash);
     if (found === undefined || found.kind !== kind) return undefined;
     this.records.delete(hash);
+    this.clients.delete(hash);
     return found;
   }
 
   private prune(nowUnix: number): void {
     for (const [key, record] of this.records) {
-      if ((record.openUntilUnix ?? record.expiresAtUnix) <= nowUnix) this.records.delete(key);
+      if ((record.openUntilUnix ?? record.expiresAtUnix) <= nowUnix) {
+        this.records.delete(key);
+        this.clients.delete(key);
+      }
     }
   }
 
