@@ -9,6 +9,7 @@ import {
   CCTP_CONTRACTS,
   contractAddressToBytes32,
   EVM_DEPLOYMENTS,
+  NON_EVM_CHAINS,
   SOLANA_PROGRAMS,
   STARKNET_DEPLOYMENTS,
   solanaAddressToBytes32,
@@ -900,13 +901,41 @@ describe("the sponsor only asks Circle about well-formed deliveries", () => {
   });
 
   it("checks the domain against the configured network only", async () => {
-    // Arc routes on testnet and not on mainnet. Nothing here reaches any network.
+    // Worked out from the chain lists as they are, so adding a chain to one
+    // network does not quietly turn this into a test of nothing.
+    const domainsOf = (id: "testnet" | "mainnet"): Set<number> =>
+      new Set(
+        [...Object.values(EVM_DEPLOYMENTS[id]), ...Object.values(NON_EVM_CHAINS[id])].map(
+          (chain) => chain.domain,
+        ),
+      );
+    const lists = { testnet: domainsOf("testnet"), mainnet: domainsOf("mainnet") };
     const asked = stubIris(notFound);
-    const testnet = await startServer();
-    expect((await testnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(404);
-    const mainnet = await startServer({ networkId: "mainnet" });
-    expect((await mainnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(400);
-    expect(asked).toHaveLength(1);
+    const servers = {
+      testnet: await startServer(),
+      mainnet: await startServer({ networkId: "mainnet" }),
+    };
+    const post = (id: "testnet" | "mainnet", domain: number) =>
+      servers[id].post("/deliver", { txHash: EVM_HASH, domain });
+
+    let neither = 0;
+    while (lists.testnet.has(neither) || lists.mainnet.has(neither)) neither += 1;
+    expect((await post("testnet", neither)).status).toBe(400);
+    expect((await post("mainnet", neither)).status).toBe(400);
+
+    let askedExpected = 0;
+    for (const [here, there] of [
+      ["testnet", "mainnet"],
+      ["mainnet", "testnet"],
+    ] as const) {
+      const onlyHere = [...lists[here]].find((domain) => !lists[there].has(domain));
+      if (onlyHere === undefined) continue;
+      // routed where it is listed, refused where it is not, never the union
+      expect((await post(here, onlyHere)).status).toBe(404);
+      expect((await post(there, onlyHere)).status).toBe(400);
+      askedExpected += 1;
+    }
+    expect(asked).toHaveLength(askedExpected);
   });
 
   it("asks Circle for exactly the transaction it was given", async () => {
