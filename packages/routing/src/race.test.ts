@@ -173,6 +173,86 @@ describe("racing route sources", () => {
   });
 });
 
+describe("the conversion inside the rail's budget", () => {
+  const asset = { chainId: "stellar", id: "X:G", symbol: "X", decimals: 7, curatedBy: "t" };
+  const wanted = { ...asset, id: "native", symbol: "XLM" };
+
+  it("hands the swap leg what is left of the budget, and says the conversion ran out of time", async () => {
+    let abortedAfter: number | undefined;
+    const started = Date.now();
+    const waitsForDeadline: SwapQuoter = {
+      id: "venues",
+      quote: (q) =>
+        new Promise((_resolve, reject) => {
+          q.signal?.addEventListener("abort", () => {
+            abortedAfter = Date.now() - started;
+            reject(new Error("aborted"));
+          });
+        }),
+    };
+    const result = await raceAdapters(
+      [
+        adapter("rail", async () => {
+          await sleep(60);
+          return { ...route("rail"), destination: "GDEST" };
+        }),
+      ],
+      { ...request, maxSlippageBps: 50 },
+      {
+        timeoutMs: 200,
+        swap: {
+          provider: waitsForDeadline,
+          delivered: asset,
+          deliveredContract: "CA",
+          wanted,
+          wantedContract: "native",
+        },
+      },
+    );
+    // the leg is stopped at the rail's deadline, not a full budget after the rail answered
+    expect(abortedAfter).toBeGreaterThanOrEqual(180);
+    expect(abortedAfter).toBeLessThan(240);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.reason).toBe("timed-out");
+    expect(result.rejected[0]?.explanation).toMatch(/XLM/);
+    expect(result.rejected[0]?.retryable).toBe(true);
+  });
+});
+
+describe("a quoter that answers with what it has when the budget ends", () => {
+  it("keeps that answer rather than calling the conversion late", async () => {
+    const asset = { chainId: "stellar", id: "X:G", symbol: "X", decimals: 7, curatedBy: "t" };
+    // like the venue chain: on the deadline it hands back a quote that already arrived
+    const answersOnDeadline: SwapQuoter = {
+      id: "venues",
+      quote: (q) =>
+        new Promise((resolve) => {
+          q.signal?.addEventListener("abort", () => {
+            void Promise.resolve().then(() =>
+              resolve({ provider: "later-venue", amountOut: "5", amountOutMinimum: "5" }),
+            );
+          });
+        }),
+    };
+    const result = await raceAdapters(
+      [adapter("rail", async () => ({ ...route("rail"), destination: "GDEST" }))],
+      { ...request, maxSlippageBps: 50 },
+      {
+        timeoutMs: 50,
+        swap: {
+          provider: answersOnDeadline,
+          delivered: asset,
+          deliveredContract: "CA",
+          wanted: { ...asset, id: "native", symbol: "XLM" },
+          wantedContract: "native",
+        },
+      },
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.routes[0]?.steps.at(-1)?.source).toBe("later-venue");
+  });
+});
+
 describe("compose routes", () => {
   const usdt0 = { chainId: "stellar", id: "USDT0:G", symbol: "USDT0", decimals: 7, curatedBy: "t" };
   const usdc = { chainId: "stellar", id: "USDC:G", symbol: "USDC", decimals: 7, curatedBy: "t" };

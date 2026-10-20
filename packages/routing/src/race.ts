@@ -102,10 +102,15 @@ export async function raceAdapters(
     });
   };
 
-  const enrich = async (route: Route): Promise<Route | RouteRejection> => {
+  const enrich = async (route: Route, remainingMs: number): Promise<Route | RouteRejection> => {
     let out: Route | RouteRejection = route;
     if (options.swap !== undefined) {
-      out = await attachSwapLeg(out, options.swap, request.maxSlippageBps);
+      out = await attachSwapLeg(
+        out,
+        options.swap,
+        request.maxSlippageBps,
+        AbortSignal.timeout(Math.max(0, remainingMs)),
+      );
       if (isRejection(out)) return out;
     }
     if (options.integratorFee !== undefined) {
@@ -171,24 +176,21 @@ export async function raceAdapters(
         return;
       }
 
-      // withTimeout cannot cancel the quote, so a late answer is told to stop here
-      let lost = false;
       try {
-        // One bound over the quote and the swap leg together: a hung exchange
-        // must cost this rail its route, not stall the whole race.
-        const result = await withTimeout(
-          adapter.quote(railRequest).then((quoted) => {
-            if (lost || isRejection(quoted)) return quoted;
-            askCompose(adapter, quoted);
-            return enrich(quoted);
-          }),
-          timeoutMs,
-          adapter.id,
-        );
+        // One budget over the quote and the swap leg together: the leg gets
+        // what the rail left of it, and a hung exchange costs this rail its
+        // route rather than stalling the whole race. A rail that answers after
+        // its bound never reaches the lines below, so it asks for nothing more.
+        const started = Date.now();
+        const quoted = await withTimeout(adapter.quote(railRequest), timeoutMs, adapter.id);
+        let result: Route | RouteRejection = quoted;
+        if (!isRejection(quoted)) {
+          askCompose(adapter, quoted);
+          result = await enrich(quoted, timeoutMs - (Date.now() - started));
+        }
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);
       } catch (error) {
-        lost = true;
         // A source that throws is still a source that declined, and the user is
         // entitled to know which one and why. Swallowing this is how a route
         // silently goes missing.

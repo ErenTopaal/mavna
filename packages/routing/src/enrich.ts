@@ -25,6 +25,8 @@ export interface SwapQuoter {
     readonly amountIn: string;
     readonly maxSlippageBps: number;
     readonly destinationKind: "account" | "contract";
+    /** Aborted when the route race stops waiting for this conversion. */
+    readonly signal?: AbortSignal | undefined;
   }): Promise<{
     readonly provider: string;
     readonly amountOut: string;
@@ -89,16 +91,21 @@ export async function attachSwapLeg(
   route: Route,
   attachment: SwapAttachment,
   maxSlippageBps: number,
+  signal?: AbortSignal,
 ): Promise<Route | RouteRejection> {
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;
   const ask = (amountIn: bigint) =>
-    attachment.provider.quote({
-      assetIn: attachment.deliveredContract,
-      assetOut: attachment.wantedContract,
-      amountIn: amountIn.toString(),
-      maxSlippageBps,
-      destinationKind: route.destination.startsWith("C") ? "contract" : "account",
-    });
+    untilAborted(
+      attachment.provider.quote({
+        assetIn: attachment.deliveredContract,
+        assetOut: attachment.wantedContract,
+        amountIn: amountIn.toString(),
+        maxSlippageBps,
+        destinationKind: route.destination.startsWith("C") ? "contract" : "account",
+        signal,
+      }),
+      signal,
+    );
   // Priced on what the bridge guarantees lands, not its estimate: a rail that
   // settles anywhere between the two must never leave the conversion short,
   // or spending money the account already held to make up the difference.
@@ -132,6 +139,16 @@ export async function attachSwapLeg(
     }
     quote = await ask(guaranteed - setAside);
   } catch (cause) {
+    if (signal?.aborted === true) {
+      return {
+        source: route.source,
+        reason: "timed-out",
+        retryable: true,
+        explanation:
+          `This route can bring your money to Stellar, but no exchange priced converting it ` +
+          `into ${attachment.wanted.symbol} in time.`,
+      };
+    }
     return {
       source: route.source,
       reason: "no-liquidity",
@@ -180,6 +197,22 @@ export async function attachSwapLeg(
     // The conversion is its own transaction on Stellar, signed by the user.
     signaturesRequired: route.signaturesRequired + 1,
   };
+}
+
+/**
+ * Settles when the signal fires even if the quoter never looks at it, so a
+ * third-party quoter that ignores the signal still cannot hold the race open.
+ * The stop waits one task, so a quoter that answers on the signal with a quote
+ * it already holds (the venue chain does) is heard first.
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return promise;
+  return new Promise((resolve, reject) => {
+    const stop = () => setTimeout(() => reject(signal.reason), 0);
+    if (signal.aborted) stop();
+    else signal.addEventListener("abort", stop, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
 }
 
 export interface IntegratorFee {
