@@ -96,7 +96,7 @@ describe("the Arrival Contract a network converts through", () => {
 
   it("is the deployed one on testnet unless the integrator names another", () => {
     expect(resolveConfig(config).engineConfig.arrivalContract).toBe(
-      "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+      "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X",
     );
     expect(
       resolveConfig({ ...config, arrivalContract: "CAOWN" }).engineConfig.arrivalContract,

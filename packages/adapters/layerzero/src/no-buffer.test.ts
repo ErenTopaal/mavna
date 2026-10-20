@@ -28,7 +28,7 @@ const ACCOUNT_BYTES = "0x85e8c67a3bce389d24603743e1a274c504cac13a9a5e71f2d221260
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDT0_BYTES = "0x649c910ee8bea16a45db1526dee995ba6dd66d0df809b15446c3a6478953391d";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
-const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
 
 const compose: ComposeArrival = {
   contract: ARRIVAL,
@@ -101,8 +101,8 @@ describe("with no Buffer global, as in a browser", () => {
     const event = await findArrivalEvent(
       node,
       ARRIVAL,
-      "517eee98d207b5d27c37496b9d8c37eb8f6361c39926e854f9743112be763657",
-      5_283_546,
+      "352de4ea9ce8951912124c0c4cb8617a4436df3f5a3c5f0461bc2b3270b8178e",
+      5_293_946,
     );
     expect(event?.outcome).toBe("converted");
     expect(getEvents).toHaveBeenCalled();

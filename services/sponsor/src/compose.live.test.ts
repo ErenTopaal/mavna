@@ -39,7 +39,7 @@ import { Composer, KEEP_ALIVE_LEDGERS } from "./compose.js";
  * endpoint's queue, Aquarius's router, the contract, the sponsor's finish.
  */
 
-const WASM_HASH = "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155";
+const WASM_HASH = "66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab";
 const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const ROUTER = "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD";
 const network = createNetworkConfig({ id: "testnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });

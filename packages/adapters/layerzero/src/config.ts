@@ -342,15 +342,15 @@ export interface ArrivalDeployment {
 }
 
 /**
- * The Arrival Contract per network. Testnet's was deployed 2026-10-19 and its
+ * The Arrival Contract per network. Testnet's was deployed 2026-10-20 and its
  * OFT list holds a harness key and the native XLM contract, since no public
  * OFT is peered to Stellar testnet. Mainnet has none: deploying needs a
  * mainnet signature, which this project does not make yet.
  */
 export const ARRIVAL_CONTRACTS: Readonly<Record<NetworkId, ArrivalDeployment | undefined>> = {
   testnet: {
-    contract: "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
-    wasmSha256: "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+    contract: "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X",
+    wasmSha256: "66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab",
     endpoint: "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV",
     router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
     ofts: [

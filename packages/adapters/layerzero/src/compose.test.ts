@@ -22,7 +22,7 @@ import {
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const RECIPIENT = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
-const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
 // the vector below was written with the first testnet id as fee recipient
 const VECTOR_FEE_TO = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
 
@@ -219,17 +219,17 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(converted),
       ARRIVAL,
-      "517eee98d207b5d27c37496b9d8c37eb8f6361c39926e854f9743112be763657",
-      5_283_546,
+      "352de4ea9ce8951912124c0c4cb8617a4436df3f5a3c5f0461bc2b3270b8178e",
+      5_293_946,
     );
     expect(event).toMatchObject({
       outcome: "converted",
       recipient: RECIPIENT,
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-      amount: 54_073_737n,
+      amount: 53_894_409n,
       fee: 0n,
       arrivedAmount: 100_000_000n,
-      txHash: "f11ebdf24b7451d8dac44c71e0e9d9f5ed3e19597c1ca781a1f0a3ff5621f13c",
+      txHash: "0bc786344aa92e4523d3a16f9f016997e9c812fc78dcc59dc4477a19cb73dab3",
     });
   });
 
@@ -237,8 +237,8 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(asCame),
       ARRIVAL,
-      "a765d836d335bf87b9f833220c2dd432290f1417111205389223a6c7dbe357e9",
-      5_283_554,
+      "25193ab76099e7004d76d1e66542b67c8858b11ac6cee640c979240eb0c7aabb",
+      5_293_952,
     );
     expect(event).toMatchObject({
       outcome: "as_came",
@@ -249,9 +249,9 @@ describe("proof of arrival from the contract's own event", () => {
 });
 
 describe("what finishing a compose would pay to renew the contract's storage", () => {
-  const CONTRACT = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+  const CONTRACT = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
   const WASM = Buffer.from(
-    "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+    "66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab",
     "hex",
   );
   const LATEST = 1_000_000;

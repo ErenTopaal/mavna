@@ -933,7 +933,7 @@ describe("a conversion on arrival's cost to finish by hand", () => {
   it("is carried to the route view in XLM, and left out when it could not be priced", () => {
     const base = routeFor("layerzero");
     const compose = {
-      contract: "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A",
+      contract: "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X",
       venue: "aquarius",
       arriving: base.receives.asset,
       arrivingContract: "C1",

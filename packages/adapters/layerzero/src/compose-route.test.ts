@@ -21,7 +21,7 @@ import type { SendParam } from "./oft.js";
 // for an OFT, crediting native XLM. Ledger entries are recorded from testnet;
 // the EVM side (Discovery's reads) and the venue are the network boundaries
 // replaced here.
-const ARRIVAL = "CD5M6IBU25CVG42TVJ3MICJQL2R2VIUUXNVEGWRH7CDSNCS4XTQYP35A";
+const ARRIVAL = "CDAIQ522QK5AFCCVGENKVE7SDF6KRCDCAPRFGUWQ4GXO4NJZRVOHQN6X";
 const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const SENDER = "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB";
 const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
@@ -504,7 +504,7 @@ describe("the Arrival Contract each network has", () => {
   it("names the testnet deployment with the lists it was built with", () => {
     expect(ARRIVAL_CONTRACTS.testnet).toEqual({
       contract: ARRIVAL,
-      wasmSha256: "688456b0c138c84467f739f3c49a61a9c41371f3a2143dbf2db4243482de6155",
+      wasmSha256: "66948b257be56b7c7d4ba4b853ad347e730eae4da37953fc919d1cc79b4a06ab",
       endpoint: ENDPOINT,
       router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
       ofts: [[SENDER, XLM_SAC]],
