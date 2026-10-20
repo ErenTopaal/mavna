@@ -1,7 +1,18 @@
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+
+const root = fileURLToPath(new URL(".", import.meta.url));
+
+// Each package runs its own vitest (from turbo, in parallel) over this one
+// config. Sharing one module cache, they all clear it at once when the lockfile
+// changes, and one fails with ENOTEMPTY while another writes into it. So each
+// package directory gets a cache of its own.
+const cacheFor = relative(root, process.cwd()).replaceAll("/", "-") || "root";
 
 export default defineConfig({
   test: {
+    fsModuleCachePath: join(root, "node_modules", ".vitest-cache", cacheFor),
     projects: [
       {
         test: {
