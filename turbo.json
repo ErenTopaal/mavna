@@ -34,6 +34,13 @@
     "size": {
       "dependsOn": ["build"],
       "inputs": ["dist/**", "package.json"]
+    },
+    "//#test:scripts": {
+      "dependsOn": [
+        "@mavna/sponsor-service#build",
+        "@mavna/stellar#build",
+        "@mavna/adapter-cctp#build"
+      ]
     }
   }
 }

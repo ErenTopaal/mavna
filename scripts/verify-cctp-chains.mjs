@@ -15,10 +15,15 @@
  * draft of this project shipped a bridge's addresses that had been dead for
  * months, which is why deriving beats transcribing here.
  *
- * Run: pnpm --filter @mavna/adapter-cctp exec node ../../../scripts/verify-cctp-chains.mjs
+ * Run: node scripts/verify-cctp-chains.mjs
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { encodeFunctionData, pad } from "viem";
+
+// paths are the repository's, not the working directory's, so where it is run
+// from cannot send its output somewhere the adapter never reads
+const ROOT = new URL("../", import.meta.url);
+const ENV_PATH = new URL(".env", ROOT);
 
 /**
  * Endpoints that carry a credential in the URL, read from `.env` and never
@@ -26,8 +31,8 @@ import { encodeFunctionData, pad } from "viem";
  * failing the run: the rest of the registry does not depend on it.
  */
 const secrets = new Map();
-if (existsSync(".env")) {
-  for (const line of readFileSync(".env", "utf8").split("\n")) {
+if (existsSync(ENV_PATH)) {
+  for (const line of readFileSync(ENV_PATH, "utf8").split("\n")) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
     if (match?.[1] !== undefined) secrets.set(match[1], match[2]);
   }
@@ -427,7 +432,33 @@ async function verifyUsdc(rpc, address) {
   return { symbol, decimals };
 }
 
-async function inspect(network, chain) {
+/**
+ * The endpoints of a chain that serve the chain they are listed for. A wrong or
+ * repointed URL would otherwise derive another chain's messenger, minter and
+ * USDC, and the token checks would still pass, since USDC is USDC everywhere,
+ * so one that answers for another chain fails the chain. One that does not
+ * answer is left out, as the sweep already treats it.
+ */
+async function servingEndpoints(chain) {
+  const serving = [];
+  for (const url of chain.rpc) {
+    let served;
+    try {
+      served = Number.parseInt(String(await rpcCall([url], "eth_chainId", [])), 16);
+    } catch {
+      continue;
+    }
+    if (served !== chain.evmChainId) {
+      throw new Error(`${url} serves chain id ${served}, not ${chain.evmChainId}`);
+    }
+    serving.push(url);
+  }
+  if (serving.length === 0) throw new Error("no endpoint answered eth_chainId");
+  return serving;
+}
+
+async function inspect(network, listed) {
+  const chain = { ...listed, rpc: await servingEndpoints(listed) };
   // A per-chain override wins. The deterministic address is a candidate to probe,
   // never a fact: EDGE keeps its mainnet messenger somewhere else entirely.
   const messenger = chain.messenger ?? MESSENGER[network];
@@ -540,7 +571,7 @@ const failures = [];
 for (const network of ["testnet", "mainnet"]) {
   // Confirm the seed is what we think it is before deriving anything from it.
   const seedChain = CHAINS[network][0];
-  await verifyUsdc(seedChain.rpc, SEED[network].usdc);
+  await verifyUsdc(await servingEndpoints(seedChain), SEED[network].usdc);
   console.log(`  ${network}: seed USDC verified on ${seedChain.id}`);
 
   const wanted =
@@ -562,7 +593,10 @@ for (const network of ["testnet", "mainnet"]) {
   });
 }
 
-writeFileSync("cctp-chains.verified.json", `${JSON.stringify({ results, failures }, null, 2)}\n`);
+writeFileSync(
+  new URL("cctp-chains.verified.json", ROOT),
+  `${JSON.stringify({ results, failures }, null, 2)}\n`,
+);
 
 /**
  * Write the registry the adapter actually imports.
@@ -576,7 +610,7 @@ writeFileSync("cctp-chains.verified.json", `${JSON.stringify({ results, failures
  * with every other chain missing, so it refuses.
  */
 if (only === undefined) {
-  writeFileSync("packages/adapters/cctp/src/chains.ts", renderChains(results));
+  writeFileSync(new URL("packages/adapters/cctp/src/chains.ts", ROOT), renderChains(results));
   console.log("  wrote packages/adapters/cctp/src/chains.ts");
 } else {
   console.log("  skipped writing chains.ts: --only= is a partial sweep");

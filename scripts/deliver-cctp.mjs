@@ -25,9 +25,8 @@ import { existsSync, readFileSync } from "node:fs";
  * Run `pnpm build` first if these do not exist.
  */
 const { Deliverer } = await import("../services/sponsor/dist/index.mjs");
-const { createNetworkConfig, PUBLIC_TESTNET_RPC_URL, RpcClient } = await import(
-  "../packages/stellar/dist/index.mjs"
-);
+const { createNetworkConfig, PUBLIC_MAINNET_RPC_URLS, PUBLIC_TESTNET_RPC_URL, RpcClient } =
+  await import("../packages/stellar/dist/index.mjs");
 const { buildDelivery } = await import("../packages/adapters/cctp/dist/index.mjs");
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -36,9 +35,10 @@ const txHash = arg("tx");
 const domain = arg("domain") ?? "0";
 const networkId = arg("network") ?? "testnet";
 
-if (txHash === undefined) {
+if (txHash === undefined || (networkId !== "testnet" && networkId !== "mainnet")) {
   console.error(
-    "Usage: node scripts/deliver-cctp.mjs --tx=0x<hash> [--domain=0] [--network=testnet]",
+    "Usage: node scripts/deliver-cctp.mjs --tx=0x<hash> [--domain=0] [--network=testnet]\n" +
+      "--network is testnet or mainnet.",
   );
   process.exit(2);
 }
@@ -64,6 +64,10 @@ const IRIS =
 const response = await fetch(`${IRIS}/v2/messages/${domain}?transactionHash=${txHash}`, {
   signal: AbortSignal.timeout(30_000),
 });
+if (!response.ok && response.status !== 404) {
+  console.error(`Circle answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  process.exit(1);
+}
 const body = await response.json();
 const message = body?.messages?.[0];
 
@@ -80,9 +84,14 @@ if (message.attestation === "PENDING" || message.status !== "complete") {
   process.exit(3);
 }
 
+// .env's STELLAR_RPC_URL serves .env's MAVNA_NETWORK, so it is used only for
+// that network; a mainnet delivery signed for mainnet and sent to a testnet node
+// fails in a way that says nothing about why
+const ownRpc =
+  (env.get("MAVNA_NETWORK") || "testnet") === networkId ? env.get("STELLAR_RPC_URL") : undefined;
 const config = createNetworkConfig({
   id: networkId,
-  rpcUrl: env.get("STELLAR_RPC_URL") ?? PUBLIC_TESTNET_RPC_URL,
+  rpcUrl: ownRpc || (networkId === "mainnet" ? PUBLIC_MAINNET_RPC_URLS[0] : PUBLIC_TESTNET_RPC_URL),
 });
 
 const deliverer = new Deliverer({

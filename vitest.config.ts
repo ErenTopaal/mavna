@@ -14,6 +14,7 @@ export default defineConfig({
             "services/**/*.test.ts",
             "apps/**/src/**/*.test.ts",
             "apps/docs/*.test.ts",
+            "scripts/*.test.ts",
           ],
           // Live tests must never run here. They hit the network, and a testnet
           // outage is not evidence that someone's change is wrong.
