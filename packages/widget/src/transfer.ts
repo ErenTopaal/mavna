@@ -20,8 +20,8 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
-import { type ExecutionEvent, execute } from "./execute";
-import { remember } from "./history";
+import { type ExecutionEvent, execute, ReceiptTimedOut } from "./execute";
+import { forget, remember } from "./history";
 import {
   deliverOwn,
   OWN_DELIVERY_FEE_BUDGET_STROOPS,
@@ -400,6 +400,7 @@ function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void {
       patch(id, { phase: "blocked" });
       return;
     case "sent":
+    case "replaced":
       patch(id, { phase: "pending" });
       return;
     case "confirmed":
@@ -529,43 +530,54 @@ async function send(
   const transactions = await adapter.buildTransactions(route, {
     sender: deps.connection.address,
   });
-  const hashes = await execute({
-    connection: deps.connection,
-    route,
-    transactions,
-    chainName,
-    evmChainId: deps.evmChainId,
-    nativeCurrency: deps.nativeCurrency,
-    onEvent: (event) => {
-      mapEvm(event, transactions.length, patch);
-      deps.onEvmEvent(event);
-    },
-  });
-
-  const sendHash = hashes.at(-1);
-  if (sendHash !== undefined) {
-    // Written before anything waits on the rail, so a closed tab never loses
-    // the one thing that finds this transfer again.
+  const last = transactions.length - 1;
+  const startedAtUnix = Math.floor(Date.now() / 1000);
+  // Written the moment the send is out, before anything waits on it, so a slow
+  // confirmation or a closed tab never loses the one thing that finds it again.
+  const keep = (hash: string): void => {
     remember(
       {
-        sourceTxHash: sendHash,
+        sourceTxHash: hash,
         sourceChainId: chainId,
         sourceChainName: chainName,
         destination: route.destination,
         sendsBaseUnits: route.sends.baseUnits,
         symbol: route.sends.asset.symbol,
         decimals: route.sends.asset.decimals,
-        startedAtUnix: Math.floor(Date.now() / 1000),
-        explorerUrl: route.fromChain.explorerTxUrl(sendHash),
+        startedAtUnix,
+        explorerUrl: route.fromChain.explorerTxUrl(hash),
       },
       engine.historyKey,
     );
-    patch("burn", {
-      ref: shortHash(sendHash),
-      refUrl: route.fromChain.explorerTxUrl(sendHash),
+    patch("burn", { ref: shortHash(hash), refUrl: route.fromChain.explorerTxUrl(hash) });
+  };
+  let hashes: readonly string[];
+  try {
+    hashes = await execute({
+      connection: deps.connection,
+      route,
+      transactions,
+      chainName,
+      evmChainId: deps.evmChainId,
+      nativeCurrency: deps.nativeCurrency,
+      onEvent: (event) => {
+        if (event.index === last && event.kind === "sent") keep(event.hash);
+        if (event.index === last && event.kind === "replaced") {
+          // sped up in the wallet: the one that landed is what Activity can find
+          forget(event.was, engine.historyKey);
+          keep(event.hash);
+        }
+        mapEvm(event, transactions.length, patch);
+        deps.onEvmEvent(event);
+      },
     });
+  } catch (cause) {
+    if (cause instanceof ReceiptTimedOut && cause.index === last) {
+      throw new StillMoving(cause.message);
+    }
+    throw cause;
   }
-  return sendHash;
+  return hashes.at(-1);
 }
 
 /** The sponsor's terms, or a refusal before anything is sent when it cannot be asked. */

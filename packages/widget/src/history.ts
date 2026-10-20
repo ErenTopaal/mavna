@@ -107,6 +107,16 @@ export function remember(record: TransferRecord, key: string = KEY): readonly Tr
   return next;
 }
 
+/** Drop one transfer, by the source transaction it was recorded under. */
+export function forget(sourceTxHash: string, key: string = KEY): void {
+  const next = readHistory(key).filter((r) => r.sourceTxHash !== sourceTxHash);
+  try {
+    window.localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Same reasoning as in remember.
+  }
+}
+
 export function forgetHistory(key: string = KEY): void {
   try {
     window.localStorage.removeItem(key);

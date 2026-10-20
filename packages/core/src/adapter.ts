@@ -67,6 +67,12 @@ export interface AllowanceCheck {
   readonly spender: string;
   /** Skip the transaction when the existing allowance is at least this. */
   readonly atLeastBaseUnits: string;
+  /**
+   * Skip it as well when the existing allowance is exactly this. A reset to zero
+   * before a fresh approval, for a token like USDT that refuses to change one
+   * non-zero allowance into another, has nothing to do when it is already zero.
+   */
+  readonly skipAlsoWhenExactly?: string;
 }
 
 export type UnnecessaryWhen = AllowanceCheck;

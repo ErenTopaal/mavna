@@ -12,7 +12,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Address, Hash } from "viem";
+import { type Address, type Hash, WaitForTransactionReceiptTimeoutError } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DESTINATION,
@@ -226,7 +226,8 @@ beforeEach(() => {
     localStorage: {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => {
-        log.push(`history ${JSON.parse(value)[0].sourceTxHash}`);
+        const first = (JSON.parse(value) as Array<{ sourceTxHash: string }>)[0];
+        if (first !== undefined) log.push(`history ${first.sourceTxHash}`);
         stored.set(key, value);
       },
       removeItem: (key: string) => stored.delete(key),
@@ -406,7 +407,16 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
 }
 
 /** The EVM wallet, at its boundary: it signs, the node answers. */
-function connection(options: { reject?: boolean; allowance?: bigint } = {}): Connection {
+function connection(
+  options: {
+    reject?: boolean;
+    allowance?: bigint;
+    receipt?: (args: {
+      hash: Hash;
+      onReplaced?: (r: { reason: string }) => void;
+    }) => Promise<unknown>;
+  } = {},
+): Connection {
   return {
     address: SENDER,
     chainId: ARBITRUM_SEPOLIA,
@@ -423,7 +433,13 @@ function connection(options: { reject?: boolean; allowance?: bigint } = {}): Con
         log.push(`evm read ${call.functionName}`);
         return call.functionName === "allowance" ? (options.allowance ?? 0n) : 10n ** 12n;
       },
-      waitForTransactionReceipt: async () => ({ status: "success" }),
+      waitForTransactionReceipt: async (args: {
+        hash: Hash;
+        onReplaced?: (r: { reason: string }) => void;
+      }) =>
+        options.receipt === undefined
+          ? { status: "success", transactionHash: args.hash }
+          : options.receipt(args),
     },
   } as unknown as Connection;
 }
@@ -635,6 +651,42 @@ describe("runTransfer over a relayed rail", () => {
     await expect(
       run(adapter, routeFor("layerzero"), patches().patch, connection({ reject: true })),
     ).rejects.toThrow("You did not confirm the transfer, so nothing was sent.");
+  });
+});
+
+describe("the send's hash", () => {
+  const FASTER = `0x${"c3".repeat(32)}` as Hash;
+  const relayed = () =>
+    new ScriptedAdapter("layerzero", [delivered()], { transactions: [layerZeroSend("777")] });
+
+  it("is kept, and the transfer is still moving, when its confirmation outlasts the page's wait", async () => {
+    const conn = connection({
+      receipt: async ({ hash }) => {
+        throw new WaitForTransactionReceiptTimeoutError({ hash });
+      },
+    });
+    const { seen, patch } = patches();
+    const error = await run(relayed(), routeFor("layerzero"), patch, conn).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect(log).toContain(`history ${SEND_HASH}`);
+    expect(seen).toContainEqual({
+      id: "burn",
+      patch: { ref: "0xabab…abab", refUrl: `https://sepolia.arbiscan.io/tx/${SEND_HASH}` },
+    });
+  });
+
+  it("follows a send the wallet sped up, so history holds the one that landed", async () => {
+    const conn = connection({
+      receipt: async ({ onReplaced }) => {
+        onReplaced?.({ reason: "repriced" });
+        return { status: "success", transactionHash: FASTER };
+      },
+    });
+    const adapter = relayed();
+    await run(adapter, routeFor("layerzero"), patches().patch, conn);
+    const kept = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{ sourceTxHash: string }>;
+    expect(kept.map((r) => r.sourceTxHash)).toEqual([FASTER]);
+    expect(adapter.asked[0]?.sourceTxHash).toBe(FASTER);
   });
 });
 
