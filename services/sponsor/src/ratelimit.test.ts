@@ -47,3 +47,25 @@ describe("whose request it is", () => {
     expect(clientAddress("10.0.0.1", undefined, true)).toBe("10.0.0.1");
   });
 });
+
+describe("the client an IPv6 address counts as", () => {
+  it("counts one /64 as one client, since one host is given the whole of it", () => {
+    expect(clientAddress("2001:db8:1:2:aaaa::1", undefined, false)).toBe(
+      clientAddress("2001:db8:1:2:bbbb:cccc:dddd:eeee", undefined, false),
+    );
+    expect(clientAddress("2001:db8:1:2::1", undefined, false)).not.toBe(
+      clientAddress("2001:db8:1:3::1", undefined, false),
+    );
+  });
+
+  it("counts an IPv4 address the same however the socket wrote it", () => {
+    expect(clientAddress("::ffff:203.0.113.7", undefined, false)).toBe("203.0.113.7");
+    expect(clientAddress("203.0.113.7", undefined, false)).toBe("203.0.113.7");
+  });
+
+  it("does the same for the address a trusted proxy forwards", () => {
+    expect(clientAddress("127.0.0.1", "2001:db8:1:2::9", true)).toBe(
+      clientAddress("127.0.0.1", "2001:db8:1:2:ffff::1", true),
+    );
+  });
+});

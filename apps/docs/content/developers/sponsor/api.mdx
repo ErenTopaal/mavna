@@ -21,7 +21,8 @@ Every `POST` takes a JSON object of at most 64 KiB. A larger body answers `413`,
 body that is not JSON or not an object answers `400`, and a transaction field that
 does not decode as a Stellar transaction answers `400`, all with `retryable: false`.
 An unexpected failure inside the server, including a Stellar read that did not
-answer, is `500` with `retryable: true`: nothing was spent, and asking again is safe.
+answer, is `500` with `retryable: true`. It may have happened after something was
+sent, so it says only that it may not have finished; asking again is safe.
 
 Every endpoint, `/health` included, counts requests per client address over
 one-minute windows (`MAVNA_RATE_LIMIT_PER_MINUTE`). Past the limit it answers `429`
@@ -31,7 +32,8 @@ with `retryable: true`. Preflight `OPTIONS` requests are not counted.
 
 Answers `200` with the network, the sponsor's public address, who pays a new
 account's reserve, and the smallest Circle delivery it pays for, in USDC base units
-at six decimals:
+at six decimals, and how many settlement channels it has, how many are in use and
+how many it may fund:
 
 ```json
 {
@@ -39,7 +41,8 @@ at six decimals:
   "network": "testnet",
   "sponsor": "G...",
   "reserveFunding": "sponsor",
-  "minDeliveryBaseUnits": "1000000"
+  "minDeliveryBaseUnits": "1000000",
+  "channels": { "size": 1, "leased": 0, "maxSize": 4 }
 }
 ```
 
@@ -105,7 +108,9 @@ Answers:
 - `200` `{ "xdr": "...", "sponsor": "G..." }`
 - `400` when the destination is missing, is not an address a Stellar account can
   use, can already receive (nothing to prepare), names an asset outside the
-  curated list, or asks for any set of assets other than `["USDC"]`
+  curated list, asks for any set of assets other than `["USDC"]`, or already
+  holds USDC (there is no trustline for the sponsor to open). Any field of the
+  wrong type is also a `400`
 - `429` when a daily cap refuses, with the reason. The caps are checked here,
   before anyone is asked for a signature
 
@@ -140,8 +145,13 @@ Answers:
   one"), when no settlement is held for the account, when the preparation does
   not match the settlement held for it, or when another preparation has already
   been submitted against that settlement, whether it is still on its way or has
-  landed. One settlement repays one preparation
+  landed, or when the account opened the USDC trustline itself after the
+  preparation was built. One settlement repays one preparation
 - `429` when a cap refuses at submission, retryable
+- `409`, retryable, with `"prepareAgain": true`, when something else the sponsor
+  signed took the preparation's sequence while the user was signing. It can never
+  land; ask `/prepare` for a new one and sign that, against the same held
+  settlement
 - `502` when Stellar would not accept the submission. The preparation is not
   offered again; build a new one
 
@@ -153,21 +163,27 @@ path payment buys exactly the XLM the reserve needs and spends at most twice its
 value at the live orderbook rate, so the signer's exposure is a number they can
 read.
 
-Building takes a channel for five minutes. Committing the signed settlement extends
-that to the settlement's own time bound, a day; a settlement left unsigned gives its
-channel back once the five minutes are up.
+A built settlement can be committed only within those five minutes, and the
+sponsor keeps the three latest built for one account. Building takes a channel
+for five minutes, and committing the signed settlement
+holds it for five minutes more. Only submitting the preparation that the settlement
+repays holds it to the settlement's own time bound, a day. A settlement left
+unsigned, or signed and never followed by a preparation, gives its channel back
+once its five minutes are up, and the held settlement is dropped with it.
 
 Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
 
 Answers:
 
 - `200` `{ "xdr": "...", "channel": "G..." }`
-- `400` for a missing or unusable destination, or one that needs no settling
+- `400` for a missing or unusable destination, one that needs no settling, or an
+  account that already holds USDC and has no preparation from this sponsor
 - `409`, retryable, while the account's previous settlement is still being
   submitted
-- `429` on a cap refusal
-- `503` when every settlement slot is in use: one channel carries one in-flight
-  settlement
+- `429` on a cap refusal, or, retryable, when this client address already has as
+  many settlements waiting on a preparation as it may
+- `503`, retryable, when every settlement slot is in use: one channel carries one
+  in-flight settlement
 
 ## `POST /settlement/commit`
 
@@ -198,9 +214,11 @@ Answers:
 
 Submits the held settlement for an account, for rails that deliver without this
 server: LayerZero and Axelar land funds on Stellar by themselves. It submits only
-once the account's preparation has landed and the account's trustline holds the
-most the settlement may spend; until then it answers that it did not settle and
-that asking again can. A sweep does the same for every held settlement on an
+once the account's preparation has landed and the account can spend what the
+trade costs now: Horizon's quote for the settlement's own direct path plus 1%,
+never more than the ceiling the account signed, out of USDC not promised to its
+own open offers. A quote over that ceiling, or no direct path at all, waits for the
+market. Until then it answers that it did not settle and that asking again can. A sweep does the same for every held settlement on an
 interval, so a closed tab does not leave the reserve unpaid; see
 `MAVNA_SETTLE_SWEEP_SECONDS` in the [configuration](/developers/sponsor#configuration).
 
@@ -249,7 +267,9 @@ ignored. When the delivery lands, or had already landed, the settlement held for
 the recipient Circle attested is submitted in the same breath, and only for a burn
 that provably pays that recipient through Circle's forwarder on Stellar.
 
-The server fetches the attestation, simulates the delivery, and answers `200` with
+The server fetches the attestation, simulates the delivery, and signs it only when
+the simulated fee is within its inclusion bid plus 1 XLM and it asks for no
+authorization. It answers `200` with
 one of:
 
 ```json
@@ -260,7 +280,10 @@ one of:
 
 or `404` when Circle has no attested record of the transaction yet (retryable:
 nothing is wrong, ask again in a minute), `502` when Circle's attestation service
-could not be reached or did not answer usefully (retryable), or `409` with
+could not be reached or did not answer usefully (retryable), `502` (retryable) when
+the delivery reached Stellar and failed there, so its fee was paid and nothing was
+minted, `503` (retryable) once the sponsor has spent the day's delivery budget
+(`MAVNA_DELIVERY_BUDGET_XLM`), or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
 [the cue to prepare it](/developers/concepts/sponsorship). When a held settlement is

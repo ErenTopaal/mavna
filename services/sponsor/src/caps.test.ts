@@ -2,6 +2,7 @@ import { EVM_DEPLOYMENTS, NON_EVM_CHAINS } from "@mavna/adapter-cctp";
 import { describe, expect, it } from "vitest";
 import {
   CapLedger,
+  type CapUsage,
   classifySourceChain,
   DEFAULT_CHEAP_GAS_CHAINS,
   InMemoryCapStore,
@@ -137,5 +138,32 @@ describe("usage reporting", () => {
     const usage = await ledger.usage();
     expect(usage.stranded).toBe(1);
     expect(usage.started["expensive-gas"]).toBe(1);
+  });
+});
+
+describe("counts recorded at the same moment", () => {
+  /** A store whose reads and writes take a turn of the event loop, like a disk. */
+  class SlowStore extends InMemoryCapStore {
+    override async load(day: string): Promise<CapUsage | undefined> {
+      await new Promise((r) => setTimeout(r, 2));
+      return super.load(day);
+    }
+    override async save(usage: CapUsage): Promise<void> {
+      await new Promise((r) => setTimeout(r, 2));
+      return super.save(usage);
+    }
+  }
+
+  it("loses neither a start nor a stranding recorded together", async () => {
+    const ledger = new CapLedger(new SlowStore(), tinyCaps, () => "2026-10-20");
+    await Promise.all([
+      ledger.recordStarted("cheap-gas"),
+      ledger.recordStranded(),
+      ledger.recordStranded(),
+      ledger.recordStarted("expensive-gas"),
+    ]);
+    const usage = await ledger.usage();
+    expect(usage.stranded).toBe(2);
+    expect(usage.started).toEqual({ "cheap-gas": 1, "expensive-gas": 1 });
   });
 });

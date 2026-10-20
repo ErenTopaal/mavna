@@ -136,3 +136,33 @@ describe("a ledger written down and read back", () => {
     expect(BuiltLedger.fromSnapshot(ledger.snapshot(), 200).size).toBe(0);
   });
 });
+
+describe("what anonymous builds can make the ledger hold", () => {
+  it("keeps the latest few open records per account and kind", () => {
+    const ledger = new BuiltLedger();
+    const txs = ["1", "2", "3", "4"].map((sequence) => buildTx(sequence));
+    for (const tx of txs) ledger.record(recordFor(tx, { kind: "settlement" }), 0);
+    ledger.record(recordFor(buildTx("5")), 0);
+    expect(ledger.size).toBe(4);
+    expect(ledger.take(txs[0]?.hash().toString("hex") ?? "", "settlement", 0)).toBeUndefined();
+    expect(ledger.take(txs[3]?.hash().toString("hex") ?? "", "settlement", 0)).toBeDefined();
+  });
+
+  it("closes a record at its own earlier bound when it has one", () => {
+    const ledger = new BuiltLedger();
+    const tx = buildTx("1");
+    ledger.record(recordFor(tx, { expiresAtUnix: 86_400, openUntilUnix: 330 }), 0);
+    expect(ledger.size).toBe(1);
+    expect(ledger.take(tx.hash().toString("hex"), "preparation", 331)).toBeUndefined();
+  });
+
+  it("says when it holds as many open records as it may", () => {
+    const ledger = new BuiltLedger(2);
+    ledger.record(recordFor(buildTx("1"), { signer: Keypair.random().publicKey() }), 0);
+    expect(ledger.full(0)).toBe(false);
+    ledger.record(recordFor(buildTx("2"), { signer: Keypair.random().publicKey() }), 0);
+    expect(ledger.full(0)).toBe(true);
+    // expired ones do not count
+    expect(ledger.full(5_000)).toBe(false);
+  });
+});

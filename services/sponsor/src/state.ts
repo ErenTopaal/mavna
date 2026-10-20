@@ -1,5 +1,6 @@
 import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import * as z from "zod";
 import type { CapStore, CapUsage } from "./caps.js";
 
 /**
@@ -69,10 +70,16 @@ export class FileDocumentStore implements DocumentStore {
     }
     try {
       return JSON.parse(text);
-    } catch (cause) {
-      // Starting empty would forget held settlements and reset the caps, which
-      // is the failure this store exists to prevent, so it stops here instead.
-      throw new Error(`The sponsor's ${name} state at ${path} is not readable JSON.`, { cause });
+    } catch {
+      // Moved aside rather than refused: one damaged file must not keep the
+      // service down, and the next write would otherwise replace the only copy.
+      const aside = `${path}.unreadable-${Date.now()}`;
+      await rename(path, aside);
+      console.error(
+        `[sponsor] the ${name} state at ${path} is not readable JSON; it was moved to ${aside} ` +
+          "and the sponsor starts without it.",
+      );
+      return undefined;
     }
   }
 
@@ -138,6 +145,13 @@ async function syncDirectory(dir: string): Promise<void> {
   }
 }
 
+const count = z.number().int().nonnegative();
+const capUsageShape = z.object({
+  day: z.string(),
+  started: z.object({ "expensive-gas": count, "cheap-gas": count }),
+  stranded: count,
+});
+
 /** How many days of cap counts are kept. Only today's is ever read. */
 const CAP_DAYS_KEPT = 3;
 
@@ -159,7 +173,30 @@ export class DocumentCapStore implements CapStore {
     await this.store.write("caps", Object.fromEntries(kept.map((day) => [day, days[day]])));
   }
 
+  /**
+   * The stored days, each checked: one not in the shape this version writes is
+   * logged and skipped, and the rest are read as written.
+   */
   private async days(): Promise<Record<string, CapUsage>> {
-    return ((await this.store.read("caps")) as Record<string, CapUsage> | undefined) ?? {};
+    const stored = await this.store.read("caps");
+    if (stored === undefined) return {};
+    if (typeof stored !== "object" || stored === null || Array.isArray(stored)) {
+      console.error(
+        `[sponsor] skipped the caps state: it is not in the shape this version writes: ${JSON.stringify(stored)}`,
+      );
+      return {};
+    }
+    const days: Record<string, CapUsage> = {};
+    for (const [day, value] of Object.entries(stored)) {
+      const parsed = capUsageShape.safeParse(value);
+      if (parsed.success && parsed.data.day === day) {
+        days[day] = parsed.data;
+      } else {
+        console.error(
+          `[sponsor] skipped the caps for ${day}: not in the shape this version writes: ${JSON.stringify(value)}`,
+        );
+      }
+    }
+    return days;
   }
 }

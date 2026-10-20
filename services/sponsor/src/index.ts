@@ -28,7 +28,9 @@ export {
 export type { ReserveFunding, SponsorConfig } from "./config.js";
 export { readSponsorConfig, SponsorConfigError } from "./config.js";
 export type { DelivererOptions, DeliveryOutcome, DeliveryRequest } from "./deliver.js";
-export { Deliverer } from "./deliver.js";
+export { Deliverer, DeliveryBudgetSpent, DeliveryFailedOnChain } from "./deliver.js";
+export type { BudgetReservation } from "./delivery-budget.js";
+export { DeliveryBudget } from "./delivery-budget.js";
 export { env } from "./env.js";
 export { clientAddress, RequestLimiter } from "./ratelimit.js";
 export type {
@@ -46,5 +48,7 @@ export type {
   SoroswapProxyOptions,
 } from "./soroswap.js";
 export { createSoroswapProxy } from "./soroswap.js";
+export type { SpendQuoteOptions } from "./spend.js";
+export { DirectSpendQuote } from "./spend.js";
 export type { DocumentStore } from "./state.js";
 export { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";

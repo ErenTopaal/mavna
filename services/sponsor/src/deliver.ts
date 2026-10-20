@@ -1,7 +1,9 @@
 import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
-import type { NetworkConfig, RpcClient } from "@mavna/stellar";
-import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
+import { type NetworkConfig, type RpcClient, SubmitRejected } from "@mavna/stellar";
+import { Keypair, type Transaction } from "@stellar/stellar-sdk";
+import { assertFeeWithin } from "./compose.js";
+import type { DeliveryBudget } from "./delivery-budget.js";
 
 /**
  * Performing the last mile of a CCTP transfer.
@@ -66,6 +68,63 @@ export interface DelivererOptions {
     readonly messageHex: string;
     readonly attestationHex: string;
   }) => import("@stellar/stellar-sdk").Transaction;
+  /**
+   * The day's budget for what this payer spends on deliveries. Each delivery
+   * sets its largest possible fee aside before it is signed, and is refused
+   * when that would pass the budget.
+   */
+  readonly budget?: DeliveryBudget;
+}
+
+/**
+ * What a delivery may cost beyond its inclusion bid: the simulated resource
+ * fee. A real mint measured about 0.03 XLM of resources; one XLM leaves room
+ * for a busy network and stops a simulation that asks for much more.
+ */
+const DELIVERY_RESOURCE_ALLOWANCE_STROOPS = 10_000_000n;
+
+/**
+ * A delivery calls Circle's forwarder, which needs no one's authorization. One
+ * that asks for any would have it granted by the payer's envelope signature
+ * (a source-account credential), so it is refused unsigned.
+ */
+function assertAsksNoAuthorization(tx: Transaction): void {
+  for (const op of tx.operations) {
+    if (op.type !== "invokeHostFunction" || (op.auth ?? []).length > 0) {
+      throw new MavnaError(
+        "This delivery would authorize more than the delivery itself, so it was not signed.",
+        { retryable: false },
+      );
+    }
+  }
+}
+
+/**
+ * A delivery that reached Stellar and failed there. Its fee was paid and
+ * nothing was minted; delivering again is safe, since a message that did mint
+ * is refused as already delivered.
+ */
+export class DeliveryFailedOnChain extends MavnaError {
+  constructor() {
+    super("The delivery was included on Stellar and failed there; its fee was paid.", {
+      retryable: true,
+    });
+    this.name = "DeliveryFailedOnChain";
+  }
+}
+
+/** Today's delivery budget is spent, so this delivery is not paid for. */
+export class DeliveryBudgetSpent extends MavnaError {
+  constructor() {
+    super("This sponsor has spent today's budget for paying deliveries.", { retryable: true });
+    this.name = "DeliveryBudgetSpent";
+  }
+}
+
+/** What the network charged for a landed delivery, or the whole share when it does not say. */
+function chargedBy(result: Awaited<ReturnType<RpcClient["submit"]>>, reserved: bigint): bigint {
+  const charged = result.resultXdr?.feeCharged();
+  return charged === undefined ? reserved : BigInt(charged.toString());
 }
 
 /** Circle marks an unfinished attestation with this rather than omitting it. */
@@ -110,40 +169,74 @@ export class Deliverer {
       return { kind: "not-attested-yet" };
     }
 
-    const payerAccount = await this.options.rpc.loadAccount(this.#keypair.publicKey());
+    // Built from the payer's sequence as it is now, and simulated before it is
+    // signed. A transaction that will fail should never be submitted, and the
+    // simulation is also where a not-ready recipient announces itself, before
+    // any fee is spent.
+    let maxFee = 0n;
+    const build = async (): Promise<Transaction> => {
+      const payerAccount = await this.options.rpc.loadAccount(this.#keypair.publicKey());
+      const unsigned = this.options.buildDelivery({
+        network: this.options.network,
+        networkId: this.options.networkId,
+        payerAccount,
+        messageHex: request.messageHex,
+        attestationHex: request.attestationHex,
+      });
+      const prepared = await this.options.rpc.prepare(unsigned);
+      // Simulation sets the fee and the authorizations, so both are bounded
+      // here before the payer signs anything.
+      maxFee = BigInt(unsigned.fee) + DELIVERY_RESOURCE_ALLOWANCE_STROOPS;
+      assertFeeWithin(BigInt(prepared.fee), maxFee, "This delivery");
+      assertAsksNoAuthorization(prepared);
+      return prepared;
+    };
 
-    const unsigned = this.options.buildDelivery({
-      network: this.options.network,
-      networkId: this.options.networkId,
-      payerAccount,
-      messageHex: request.messageHex,
-      attestationHex: request.attestationHex,
-    });
-
-    let prepared: import("@stellar/stellar-sdk").Transaction;
+    let prepared: Transaction | undefined;
+    let sent = false;
+    let ceiling: bigint;
     try {
-      // Simulated before it is signed. A transaction that will fail should never
-      // be submitted, and the simulation is also where a not-ready recipient
-      // announces itself, before any fee is spent.
-      prepared = await this.options.rpc.prepare(unsigned);
+      prepared = await build();
+      ceiling = BigInt(prepared.fee) > maxFee ? BigInt(prepared.fee) : maxFee;
     } catch (cause) {
       return classify(cause);
     }
 
+    // Set aside before anything is signed: the most any attempt below may cost.
+    const reservation =
+      this.options.budget === undefined ? undefined : await this.options.budget.reserve(ceiling);
+    if (this.options.budget !== undefined && reservation === undefined) {
+      throw new DeliveryBudgetSpent();
+    }
+
     try {
-      // A thunk rather than a transaction, because `submit` rebuilds on each
-      // retry: a stale sequence number is one of the transient failures it
-      // recovers from, and it cannot recover if it is handed a fixed envelope.
+      // Every other transaction the payer signs moves the same sequence, so a
+      // retry after a stale sequence is built and simulated again from a fresh
+      // read. Resending the first envelope could only be refused the same way.
       const result = await this.options.rpc.submit("cctp delivery", async () => {
-        const signed = TransactionBuilder.fromXDR(
-          prepared.toXDR(),
-          this.options.network.passphrase,
-        ) as import("@stellar/stellar-sdk").Transaction;
-        signed.sign(this.#keypair);
-        return signed;
+        const next = prepared ?? (await build());
+        prepared = undefined;
+        next.sign(this.#keypair);
+        sent = true;
+        return next;
       });
+      await reservation?.settle(chargedBy(result, ceiling));
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
+      // Refused before anything was sent costs nothing. Anything sent may
+      // have been charged, so its share stays counted in full.
+      if (!sent || cause instanceof SubmitRejected) await reservation?.release();
+      // Sent, not refused, and not retryable: it was included and failed, so
+      // its fee was paid. Said as such, never as a failure that cost nothing.
+      if (
+        sent &&
+        cause instanceof MavnaError &&
+        !cause.retryable &&
+        !(cause instanceof SubmitRejected) &&
+        deliveryFailureOf(cause.message) === undefined
+      ) {
+        throw new DeliveryFailedOnChain();
+      }
       return classify(cause);
     }
   }

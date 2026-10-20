@@ -38,7 +38,7 @@ services:
   # executor and the Arrival Contract's renewal. It cannot touch user funds;
   # that is checkable by reading services/sponsor.
   sponsor:
-    image: node:24.19.0-alpine
+    image: node:24.22.0-alpine
     working_dir: /repo
     command: >
       sh -c "corepack enable pnpm 2>/dev/null || npm i -g pnpm@11.21.0;
@@ -51,7 +51,8 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     # Caps, held settlements and channel keys. It holds secret keys, so it is a
-    # named volume rather than a directory in the checkout.
+    # named volume rather than a directory in the checkout. The state records
+    # its network, and the sponsor refuses to start on another one against it.
     volumes:
       - .:/repo
       - sponsor-state:/var/lib/mavna
@@ -68,8 +69,11 @@ services:
       MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY: ${MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY:-}
       MAVNA_CAP_VOLUME_CHEAP_PER_DAY: ${MAVNA_CAP_VOLUME_CHEAP_PER_DAY:-}
       MAVNA_MIN_DELIVERY_USDC: ${MAVNA_MIN_DELIVERY_USDC:-}
+      MAVNA_DELIVERY_BUDGET_XLM: ${MAVNA_DELIVERY_BUDGET_XLM:-}
       MAVNA_RATE_LIMIT_PER_MINUTE: ${MAVNA_RATE_LIMIT_PER_MINUTE:-}
       MAVNA_TRUST_PROXY: ${MAVNA_TRUST_PROXY:-}
+      MAVNA_CHANNEL_POOL_SIZE: ${MAVNA_CHANNEL_POOL_SIZE:-}
+      MAVNA_SETTLEMENTS_PER_CLIENT: ${MAVNA_SETTLEMENTS_PER_CLIENT:-}
       # Optional. With it, the sponsor proxies Soroswap so the key stays here.
       SOROSWAP_API_KEY: ${SOROSWAP_API_KEY:-}
       MAVNA_ARRIVAL_CONTRACT: ${MAVNA_ARRIVAL_CONTRACT:-}

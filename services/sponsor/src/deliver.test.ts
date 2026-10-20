@@ -1,8 +1,20 @@
 import { MavnaError } from "@mavna/core";
-import type { NetworkConfig, RpcClient } from "@mavna/stellar";
-import { Keypair } from "@stellar/stellar-sdk";
+import { type NetworkConfig, RpcClient } from "@mavna/stellar";
+import {
+  Account,
+  Address,
+  Keypair,
+  Operation,
+  rpc,
+  StrKey,
+  type Transaction,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { Deliverer } from "./deliver.js";
+import { Deliverer, DeliveryBudgetSpent } from "./deliver.js";
+import { DeliveryBudget } from "./delivery-budget.js";
+import { MemoryDocumentStore } from "./state.js";
 
 /**
  * The delivery worker's judgement, not its plumbing.
@@ -112,5 +124,192 @@ describe("before anything is signed", () => {
 
     expect(deliverer.payerAddress).toBe(Keypair.fromSecret(payer).publicKey());
     expect(JSON.stringify(deliverer)).not.toContain(payer);
+  });
+});
+
+/**
+ * The network behind a real RpcClient, as far as delivery needs it: an account
+ * whose sequence moves when anything lands, and a submission that is refused
+ * with txBadSeq unless it carries the next one.
+ */
+class SequencedRpc extends RpcClient {
+  sequence = 100n;
+  readonly sent: bigint[] = [];
+  /** Something else the payer signed lands before this many sends. */
+  landsFirst = new Set<number>();
+  /** A refusal every send gets, the way the network refuses a bad envelope. */
+  refuseWith: "txBadAuth" | undefined = undefined;
+  /** What simulation adds to the transaction, the way prepareTransaction does. */
+  simulate: (tx: Transaction) => Transaction = (tx) => tx;
+  private readonly landed = new Set<string>();
+
+  constructor() {
+    super({ url: "https://127.0.0.1:9", baseDelayMs: 0, sleep: () => Promise.resolve() });
+    this.server.sendTransaction = async (tx) => {
+      if (this.landsFirst.delete(this.sent.length)) this.sequence += 1n;
+      const inner = tx as Transaction;
+      this.sent.push(BigInt(inner.sequence));
+      const hash = tx.hash().toString("hex");
+      const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
+      if (this.refuseWith !== undefined || BigInt(inner.sequence) !== this.sequence + 1n) {
+        return {
+          ...base,
+          status: "ERROR",
+          errorResult: new xdr.TransactionResult({
+            feeCharged: xdr.Int64.fromString("100"),
+            result:
+              this.refuseWith === undefined
+                ? xdr.TransactionResultResult.txBadSeq()
+                : xdr.TransactionResultResult.txBadAuth(),
+            ext: new xdr.TransactionResultExt(0),
+          }),
+        };
+      }
+      this.sequence += 1n;
+      this.landed.add(hash);
+      return { ...base, status: "PENDING" };
+    };
+    this.server.getTransaction = async (hash) =>
+      (this.landed.has(hash)
+        ? { status: rpc.Api.GetTransactionStatus.SUCCESS, txHash: hash, ledger: 2, latestLedger: 2 }
+        : {
+            status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+            txHash: hash,
+            latestLedger: 2,
+          }) as never;
+  }
+
+  override async loadAccount(address: string): Promise<Account> {
+    return new Account(address, this.sequence.toString());
+  }
+
+  override async prepare(tx: Transaction): Promise<Transaction> {
+    return this.simulate(tx);
+  }
+}
+
+function deliveryOn(rpcClient: SequencedRpc, budget?: DeliveryBudget): Deliverer {
+  return new Deliverer({
+    ...(budget === undefined ? {} : { budget }),
+    network,
+    networkId: "testnet",
+    payerSecret: payer,
+    rpc: rpcClient,
+    buildDelivery: ({ payerAccount }) =>
+      // the inclusion bid the CCTP adapter's builder sets
+      new TransactionBuilder(payerAccount, {
+        fee: "10000000",
+        networkPassphrase: network.passphrase,
+      })
+        .addOperation(
+          Operation.invokeContractFunction({
+            contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+            function: "receive_message",
+            args: [],
+          }),
+        )
+        .setTimeout(300)
+        .build(),
+  });
+}
+
+describe("a delivery whose sequence something else spent", () => {
+  it("is rebuilt on the payer's fresh sequence rather than resent as it was", async () => {
+    const network = new SequencedRpc();
+    // another sponsor transaction lands between building and the first send
+    network.landsFirst.add(0);
+    const outcome = await deliveryOn(network).deliver({
+      messageHex: "0xabcd",
+      attestationHex: "0x1234",
+    });
+    expect(outcome.kind).toBe("delivered");
+    expect(network.sent).toEqual([101n, 102n]);
+  });
+});
+
+/** The delivery as simulation hands it back, with what simulation set. */
+function simulated(
+  tx: Transaction,
+  { fee, auth = [] }: { fee: string; auth?: xdr.SorobanAuthorizationEntry[] },
+): Transaction {
+  return new TransactionBuilder(new Account(tx.source, (BigInt(tx.sequence) - 1n).toString()), {
+    fee,
+    networkPassphrase: network.passphrase,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+        function: "receive_message",
+        args: [],
+        auth,
+      }),
+    )
+    .setTimeout(300)
+    .build();
+}
+
+describe("what the sponsor will pay and authorize for a delivery", () => {
+  it("does not sign a delivery whose simulated fee is past its ceiling", async () => {
+    const rpc = new SequencedRpc();
+    rpc.simulate = (tx) => simulated(tx, { fee: "20000001" });
+    await expect(
+      deliveryOn(rpc).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow(/more than the .* XLM this sponsor pays/);
+    expect(rpc.sent).toEqual([]);
+  });
+
+  it("signs one within it", async () => {
+    const rpc = new SequencedRpc();
+    rpc.simulate = (tx) => simulated(tx, { fee: "10200000" });
+    const outcome = await deliveryOn(rpc).deliver({
+      messageHex: "0xabcd",
+      attestationHex: "0x1234",
+    });
+    expect(outcome.kind).toBe("delivered");
+  });
+
+  it("does not sign a delivery that asks for any authorization", async () => {
+    const rpc = new SequencedRpc();
+    const entry = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(
+              StrKey.encodeContract(Buffer.alloc(32, 9)),
+            ).toScAddress(),
+            functionName: "transfer",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
+    rpc.simulate = (tx) => simulated(tx, { fee: "10200000", auth: [entry] });
+    await expect(
+      deliveryOn(rpc).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow(/authorize/);
+    expect(rpc.sent).toEqual([]);
+  });
+});
+
+describe("a delivery against the day's budget", () => {
+  it("is refused unsigned once the day's budget cannot cover its worst case", async () => {
+    const rpcClient = new SequencedRpc();
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 15_000_000n, () => "2026-10-20");
+    await expect(
+      deliveryOn(rpcClient, budget).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toBeInstanceOf(DeliveryBudgetSpent);
+    expect(rpcClient.sent).toEqual([]);
+  });
+
+  it("gives its share back when the network refused it outright", async () => {
+    const rpcClient = new SequencedRpc();
+    rpcClient.refuseWith = "txBadAuth";
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 50_000_000n, () => "2026-10-20");
+    await expect(
+      deliveryOn(rpcClient, budget).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow();
+    expect(await budget.spentToday()).toBe(0n);
   });
 });

@@ -18,7 +18,6 @@ import {
   buildPreparation,
   buildSettlement,
   classifyAddress,
-  inspectDestination,
   readAccountEntry,
   SubmitRejected,
   spareStroops,
@@ -27,21 +26,37 @@ import {
 } from "@mavna/stellar";
 import {
   Account,
-  type Asset,
+  Address,
+  Asset,
   Keypair,
   Operation,
+  StrKey,
   type Transaction,
   TransactionBuilder,
+  xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
-import { CapLedger, classifySourceChain, DEFAULT_CHEAP_GAS_CHAINS } from "./caps.js";
-import { ChannelPool, type ChannelPoolSnapshot } from "./channels.js";
+import { CapLedger } from "./caps.js";
+import { ChannelPool, type ChannelPoolSnapshot, type LeaseRecord } from "./channels.js";
 import { ComposeRefused, Composer, parseComposeRequest } from "./compose.js";
 import type { ReserveFunding } from "./config.js";
-import { Deliverer, type DeliveryOutcome } from "./deliver.js";
+import {
+  Deliverer,
+  DeliveryBudgetSpent,
+  DeliveryFailedOnChain,
+  type DeliveryOutcome,
+} from "./deliver.js";
+import { DeliveryBudget } from "./delivery-budget.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
+import {
+  type ChainSponsorshipView,
+  HorizonSponsorshipView,
+  reconcile,
+  type SponsoredRecord,
+} from "./reconcile.js";
 import type { SoroswapProxy } from "./soroswap.js";
+import { DirectSpendQuote } from "./spend.js";
 import { DocumentCapStore, type DocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -88,8 +103,26 @@ export interface SponsorServerOptions {
    * and the pool is the knob when it is not.
    */
   readonly channels?: ChannelPool;
+  /**
+   * How many channels the server funds for itself when no pool is given, each
+   * on first need. One by default. Each is 2 XLM of the sponsor's, and each is
+   * one settlement in flight at a time.
+   */
+  readonly channelPoolSize?: number;
+  /**
+   * Settlements one client address may have waiting on a channel at once,
+   * before anything backs them. Zero turns the limit off. Two by default.
+   */
+  readonly settlementsPerClient?: number;
   /** Prices the reserve in the arriving asset, for the settlement's ceiling. */
   readonly prices?: XlmPriceSource;
+  /**
+   * The chain's view of what the sponsor carries, for the hourly cross-check
+   * against its own records. Horizon's, for this network, when not given.
+   */
+  readonly sponsorshipView?: ChainSponsorshipView;
+  /** Quotes what a settlement's direct path spends now, for the balance check. */
+  readonly spendQuote?: DirectSpendQuote;
   /**
    * Origins allowed to call this from a browser. The app's own origin in
    * production; localhost while developing. Never `*`: this server spends
@@ -118,6 +151,11 @@ export interface SponsorServerOptions {
    * so without a floor a stream of dust burns spends the sponsor's XLM.
    */
   readonly minDeliveryBaseUnits?: bigint;
+  /**
+   * What the sponsor may spend on delivery fees in one UTC day, in stroops,
+   * counted in the state store. 25 XLM by default; zero pays for none.
+   */
+  readonly deliveryBudgetStroops?: bigint;
   /** Requests per client address per minute. Zero or omitted means no limit. */
   readonly rateLimitPerMinute?: number;
   /** Take the client address from the last X-Forwarded-For entry. */
@@ -169,30 +207,53 @@ const SELF_FUNDED_FEE_STROOPS = 1_000;
  */
 const SWEEP_ACCOUNT_DEADLINE_MS = 60_000;
 
-interface PrepareBody {
-  readonly destination?: string;
-  readonly assets?: readonly string[];
-  readonly sourceChainId?: string;
-}
+/**
+ * A source chain id as the widget sends it, such as "base" or "1". It is written
+ * into stored state and read back on every start, so anything else is refused
+ * here rather than trusted to be a string later.
+ */
+const chainIdField = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+/** Long enough for a muxed address; the address checks themselves come later. */
+const addressField = z.string().min(1).max(128);
+/** Every route takes a few hundred bytes; the body limit bounds this anyway. */
+const xdrField = z.string().min(1).max(60_000);
 
-interface SubmitBody {
-  readonly signedXdr?: string;
-}
-
-interface DeliverBody {
-  readonly txHash?: unknown;
-  readonly domain?: unknown;
+/**
+ * What each route accepts, checked before anything is read from it. A field of
+ * the wrong type is the caller's mistake and answered with 400; nothing it
+ * carries reaches stored state unchecked.
+ */
+const prepareBody = z.object({
+  destination: addressField.optional(),
+  assets: z.array(z.string().min(1).max(12)).max(8).optional(),
+  sourceChainId: chainIdField.optional(),
+});
+const submitBody = z.object({ signedXdr: xdrField.optional() });
+const settlementBody = z.object({
+  destination: addressField.optional(),
+  sourceChainId: chainIdField.optional(),
+});
+const settlementCommitBody = z.object({
+  destination: addressField.optional(),
+  signedXdr: xdrField.optional(),
+});
+const settleBody = z.object({ destination: addressField.optional() });
+const deliverBody = z.object({
+  txHash: z.string().max(200).optional(),
+  domain: z.number().int().nonnegative().optional(),
   /**
    * Accepted from older clients and never acted on. Who the transfer is for is
    * read from Circle's attested message, the one source a caller cannot choose.
    */
-  readonly destination?: unknown;
-}
+  destination: z.unknown().optional(),
+});
 
-interface SettlementBody {
-  readonly destination?: string;
-  readonly sourceChainId?: string;
-}
+type PrepareBody = z.infer<typeof prepareBody>;
+type SubmitBody = z.infer<typeof submitBody>;
+type SettlementBody = z.infer<typeof settlementBody>;
+type SettlementCommitBody = z.infer<typeof settlementCommitBody>;
+type SettleBody = z.infer<typeof settleBody>;
+type DeliverBody = z.infer<typeof deliverBody>;
 
 interface ComposeBody {
   readonly from?: unknown;
@@ -201,13 +262,17 @@ interface ComposeBody {
   readonly message?: unknown;
 }
 
-interface SettleBody {
-  readonly destination?: unknown;
-}
-
-interface SettlementCommitBody {
-  readonly destination?: string;
-  readonly signedXdr?: string;
+/** A body in the route's shape, or a 400 naming the first field that is not. */
+function bodyOf<T>(schema: z.ZodType<T>, body: Record<string, unknown>): T {
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const field = parsed.error.issues[0]?.path.join(".") ?? "";
+  throw new RequestError(
+    field === ""
+      ? "The request is not in the shape this endpoint reads."
+      : `The field "${field}" is not in the shape this endpoint reads.`,
+    400,
+  );
 }
 
 /** A settlement the user signed, held until their money lands. */
@@ -237,6 +302,13 @@ interface HeldSettlement {
    * by hash before anything else is prepared or settled for the account.
    */
   preparation: { hash: string; expiresAtUnix: number } | undefined;
+  /**
+   * When this settlement was first sent, written down before it went. Once
+   * sent it may land unseen, after the wait or across a restart, and spend
+   * what the balance check reads, so from then on it is looked up by hash
+   * before anything else is decided about it.
+   */
+  sentAtUnix?: number | undefined;
 }
 
 /** Held settlements and recent repayments, as written to the state store. */
@@ -251,56 +323,62 @@ interface ChannelDocument extends ChannelPoolSnapshot {
 }
 
 /**
- * The shapes this version writes, checked on load. A file in another shape,
- * from another version or edited by hand, stops the process with its name
- * rather than failing later on some field it lacked.
+ * The shapes this version writes, checked entry by entry on load. An entry in
+ * another shape, from another version or edited by hand, is logged, set aside
+ * in the "rejected" document and skipped, so one bad record cannot keep the
+ * service from starting; the rest load as written.
  */
-const repaymentShape = z.object({ createdAccount: z.boolean(), assets: z.array(z.string()) });
-const storedShapes = {
-  built: z.array(
-    z.looseObject({
-      hash: z.string(),
-      kind: z.string(),
-      destination: z.string(),
-      signer: z.string(),
-      sourceChainId: z.string(),
-      expiresAtUnix: z.number(),
-      repays: repaymentShape.optional(),
-    }),
-  ),
+const repaymentShape = z.object({
+  createdAccount: z.boolean(),
+  assets: z.array(z.string()),
+});
+const builtShape = z.object({
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  kind: z.enum(["preparation", "settlement"]),
+  destination: z.string(),
+  signer: z.string(),
+  sourceChainId: chainIdField,
+  expiresAtUnix: z.number().int(),
+  openUntilUnix: z.number().int().optional(),
+  channel: z.string().optional(),
+  repays: repaymentShape.optional(),
+  selfFunded: z.boolean().optional(),
+});
+const heldShape = z.object({
+  xdr: z.string(),
+  createdAtUnix: z.number().int(),
+  sourceChainId: chainIdField,
+  channel: z.string().optional(),
+  maxTimeUnix: z.number().int(),
+  repays: repaymentShape,
+  prepared: z.boolean(),
+  preparation: z.object({ hash: z.string(), expiresAtUnix: z.number().int() }).optional(),
+  sentAtUnix: z.number().int().optional(),
+});
+const settledShape = z.object({ txHash: z.string(), untilUnix: z.number().int() });
+const secretShape = z.string().refine((value) => StrKey.isValidEd25519SecretSeed(value));
+const leaseShape = z.object({
+  owner: z.string(),
+  channel: z.string(),
+  untilUnix: z.number().int(),
+});
+const documentShapes = {
+  built: z.array(z.unknown()),
   held: z.object({
-    held: z.record(
-      z.string(),
-      z.looseObject({
-        xdr: z.string(),
-        createdAtUnix: z.number(),
-        sourceChainId: z.string(),
-        maxTimeUnix: z.number(),
-        repays: repaymentShape,
-        prepared: z.boolean(),
-        preparation: z.object({ hash: z.string(), expiresAtUnix: z.number() }).optional(),
-      }),
-    ),
-    settled: z.record(z.string(), z.object({ txHash: z.string(), untilUnix: z.number() })),
+    held: z.record(z.string(), z.unknown()),
+    settled: z.record(z.string(), z.unknown()),
   }),
   channels: z.object({
-    secrets: z.array(z.string()),
-    leases: z.array(z.object({ owner: z.string(), channel: z.string(), untilUnix: z.number() })),
-    pending: z.string().optional(),
+    secrets: z.array(z.unknown()),
+    leases: z.array(z.unknown()),
+    pending: z.unknown().optional(),
   }),
 } as const;
 
-async function readStored<K extends keyof typeof storedShapes>(
-  state: DocumentStore,
-  name: K,
-): Promise<unknown> {
-  const value = await state.read(name);
-  if (value === undefined) return undefined;
-  if (!storedShapes[name].safeParse(value).success) {
-    throw new Error(`The sponsor's ${name} state is not in the shape this version writes.`);
-  }
-  return value;
-}
+const networkShape = z.object({ passphrase: z.string() });
+
+/** What load set aside, by document, written once so nothing is lost. */
+type Rejected = Record<string, { atUnix: number; entry?: string; value: unknown }[]>;
 
 /**
  * How long past a preparation's time bound before it is taken as never
@@ -340,8 +418,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     throw new Error(`The minimum delivery cannot be negative; got ${minDelivery}.`);
   }
   const limiter = new RequestLimiter(options.rateLimitPerMinute ?? 0);
+  const poolSize = options.channelPoolSize ?? 1;
+  const perClient = options.settlementsPerClient ?? DEFAULT_SETTLEMENTS_PER_CLIENT;
+  for (const [name, value, least] of [
+    ["channel pool size", poolSize, 1],
+    ["settlements per client", perClient, 0],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < least) {
+      throw new Error(`The ${name} must be a whole number of at least ${least}; got ${value}.`);
+    }
+  }
+  /**
+   * The client address that asked for each account's lease. A settlement costs
+   * its caller nothing until a preparation backs it, so the leases one address
+   * may hold that way are counted against it. Pruned to live leases on every use.
+   */
+  const leaseClients = new Map<string, string>();
   const composesPerClient = new RequestLimiter(COMPOSES_PER_CLIENT_PER_MINUTE);
   const deliverer = new Deliverer({
+    budget: new DeliveryBudget(
+      state,
+      options.deliveryBudgetStroops ?? DEFAULT_DELIVERY_BUDGET_STROOPS,
+    ),
     rpc: options.rpc,
     network: options.network,
     networkId: options.networkId,
@@ -440,7 +538,49 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await resolvePreparation(destination, held);
     }
     if (heldSettlements.get(destination) !== held) return heldSettlements.get(destination);
+    // Nothing backs a settlement before its preparation, so its lease stays
+    // short; once that lapses the channel is someone else's and so is the
+    // sequence this one was built on. Dropped, and no stranding: nothing went out.
+    if (
+      !held.prepared &&
+      !held.preparing &&
+      held.preparation === undefined &&
+      held.channel !== undefined &&
+      channels !== undefined &&
+      !channels.holds(destination, held.channel, nowUnix())
+    ) {
+      heldSettlements.delete(destination);
+      await persist();
+      return undefined;
+    }
     if (held.maxTimeUnix <= nowUnix()) {
+      // Sent before its bound, so it may have landed unseen: that is a
+      // repayment, not a stranding, and only the ledger can say which.
+      if (held.prepared && held.sentAtUnix !== undefined) {
+        let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+        try {
+          found = await options.rpc.findTransaction(settlementHash(held));
+        } catch (cause) {
+          // kept, unusable, for the next touch to ask again
+          console.error(
+            `[sponsor] could not look up the expired settlement sent for ${destination}:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          return undefined;
+        }
+        if (heldSettlements.get(destination) !== held) return heldSettlements.get(destination);
+        if (found.status === "SUCCESS") {
+          heldSettlements.delete(destination);
+          if (held.channel !== undefined) channels?.release(destination, held.channel);
+          pruneSettled();
+          recentlySettled.set(destination, {
+            txHash: settlementHash(held),
+            untilUnix: nowUnix() + LATE_REPAYMENT_REPORTED_SECONDS,
+          });
+          await persist();
+          return undefined;
+        }
+      }
       heldSettlements.delete(destination);
       await persist();
       if (held.prepared) await caps.recordStranded();
@@ -478,33 +618,203 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     if (found.status === "FAILED" || sent.expiresAtUnix + PREPARATION_GRACE_SECONDS < nowUnix()) {
       held.preparation = undefined;
+      shortenLease(destination, held);
       await persist();
     }
+  }
+
+  /**
+   * Refuse to build while the ledger of open builds is full. Every build is
+   * written down until it closes, so this is the ceiling on what anonymous
+   * requests can make the sponsor carry, and it clears as builds close.
+   */
+  async function busyBuilding(res: ServerResponse, origin: string | undefined): Promise<boolean> {
+    if (!built.full(nowUnix())) return false;
+    console.error("[sponsor] the ledger of open builds is full; refusing to build more for now");
+    await answer(
+      res,
+      503,
+      { error: "This sponsor is building too much at once. Try again shortly.", retryable: true },
+      origin,
+    );
+    return true;
+  }
+
+  /** The hash a held settlement lands under; its signatures do not change it. */
+  function settlementHash(held: { readonly xdr: string }): string {
+    return TransactionBuilder.fromXDR(held.xdr, options.network.passphrase).hash().toString("hex");
+  }
+
+  /** Whether a preparation backs the account's held settlement, landed or on its way. */
+  function backed(account: string): boolean {
+    const held = heldSettlements.get(account);
+    return (
+      held !== undefined && (held.prepared || held.preparing || held.preparation !== undefined)
+    );
+  }
+
+  /**
+   * A preparation refused on its sequence, looked up by hash: the landed result
+   * if it is what spent the sequence, undefined if it is not. A lookup that
+   * fails throws, which leaves the preparation marked for the next touch to
+   * look up again.
+   */
+  async function preparationLanded(
+    hash: string,
+  ): Promise<Awaited<ReturnType<RpcClient["submit"]>> | undefined> {
+    const found = await options.rpc.findTransaction(hash);
+    return found.status === "SUCCESS" ? found : undefined;
+  }
+
+  /**
+   * Back to the short lease, for a settlement whose preparation definitely did
+   * not land: the account may try once more, but the slot is not kept for it.
+   */
+  function shortenLease(destination: string, held: HeldSettlement): void {
+    if (held.channel === undefined || channels === undefined) return;
+    channels.limit(destination, held.channel, nowUnix() + PROVISIONAL_LEASE_SECONDS);
+  }
+
+  /**
+   * State is one network's: channel keys, leases, held settlements and cap
+   * counts mean nothing on another, and acted on there they fail every
+   * settlement. So the network is written down with them, and a sponsor started
+   * on another network against the same directory refuses to start.
+   */
+  async function checkNetwork(
+    reject: (name: string, value: unknown, entry?: string) => void,
+  ): Promise<void> {
+    const passphrase = options.network.passphrase;
+    const recorded = await state.read("network");
+    const parsed = networkShape.safeParse(recorded);
+    if (parsed.success) {
+      if (parsed.data.passphrase === passphrase) return;
+      throw new Error(
+        `The sponsor's stored state was written for ${parsed.data.passphrase}, and this ` +
+          `sponsor runs on ${passphrase} (MAVNA_NETWORK). Give each network its own ` +
+          "MAVNA_STATE_DIR.",
+      );
+    }
+    if (recorded !== undefined) {
+      reject("network", recorded);
+    } else {
+      const names = ["built", "held", "channels", "caps"] as const;
+      const existing = await Promise.all(names.map((name) => state.read(name)));
+      if (existing.some((value) => value !== undefined)) {
+        // written by a version that did not record its network; the deployment
+        // that wrote it is the one starting now, on the network it was set up for
+        console.error(
+          `[sponsor] the stored state has no network recorded; taking it as ${passphrase}'s.`,
+        );
+      }
+    }
+    await state.write("network", { passphrase });
   }
 
   /** What is written down, read back. Runs once, before the first request. */
   async function load(): Promise<void> {
     const now = nowUnix();
-    const builtDocument = (await readStored(state, "built")) as readonly BuiltRecord[] | undefined;
-    if (builtDocument !== undefined) built = BuiltLedger.fromSnapshot(builtDocument, now);
+    const rejected: Rejected = {};
+    const reject = (name: string, value: unknown, entry?: string): void => {
+      console.error(
+        `[sponsor] skipped ${entry === undefined ? "the whole" : `an entry (${entry}) of the`} ` +
+          `${name} state: it is not in the shape this version writes. It is kept in rejected.json.`,
+      );
+      const list = rejected[name] ?? [];
+      rejected[name] = list;
+      list.push({
+        atUnix: now,
+        ...(entry === undefined ? {} : { entry }),
+        value,
+      });
+    };
+    const documentOf = async <K extends keyof typeof documentShapes>(
+      name: K,
+    ): Promise<z.infer<(typeof documentShapes)[K]> | undefined> => {
+      const value = await state.read(name);
+      if (value === undefined) return undefined;
+      const parsed = documentShapes[name].safeParse(value);
+      if (parsed.success) return parsed.data as z.infer<(typeof documentShapes)[K]>;
+      reject(name, value);
+      return undefined;
+    };
 
-    const heldDocument = (await readStored(state, "held")) as HeldDocument | undefined;
-    for (const [destination, held] of Object.entries(heldDocument?.held ?? {})) {
-      heldSettlements.set(destination, { ...held, preparing: false });
-    }
-    for (const [destination, record] of Object.entries(heldDocument?.settled ?? {})) {
-      recentlySettled.set(destination, record);
+    await checkNetwork(reject);
+
+    const builtDocument = await documentOf("built");
+    if (builtDocument !== undefined) {
+      const records: BuiltRecord[] = [];
+      builtDocument.forEach((value, index) => {
+        const parsed = builtShape.safeParse(value);
+        if (parsed.success) records.push(stripUndefined(parsed.data) as BuiltRecord);
+        else reject("built", value, String(index));
+      });
+      built = BuiltLedger.fromSnapshot(records, now);
     }
 
-    const channelDocument = (await readStored(state, "channels")) as ChannelDocument | undefined;
-    if (channelDocument === undefined) return;
-    if (channels !== undefined) {
-      channels.restoreLeases(channelDocument.leases, now);
-    } else if (channelDocument.secrets.length > 0) {
-      channels = ChannelPool.fromSnapshot(channelDocument, now);
+    const heldDocument = await documentOf("held");
+    for (const [destination, value] of Object.entries(heldDocument?.held ?? {})) {
+      const parsed = heldShape.safeParse(value);
+      if (!parsed.success || !settlesOnStellar(destination)) {
+        reject("held", value, destination);
+        continue;
+      }
+      const { channel, preparation, ...rest } = parsed.data;
+      // written by the address as sent before held settlements were keyed by
+      // account; the account is the key now
+      heldSettlements.set(signerFor(destination), {
+        ...rest,
+        channel,
+        preparation,
+        preparing: false,
+      });
     }
-    if (channels === undefined && channelDocument.pending !== undefined) {
-      pendingChannel = Keypair.fromSecret(channelDocument.pending);
+    for (const [destination, value] of Object.entries(heldDocument?.settled ?? {})) {
+      const parsed = settledShape.safeParse(value);
+      if (parsed.success) recentlySettled.set(destination, parsed.data);
+      else reject("held", value, `settled ${destination}`);
+    }
+
+    const channelDocument = await documentOf("channels");
+    if (channelDocument !== undefined) {
+      const secrets: string[] = [];
+      channelDocument.secrets.forEach((value, index) => {
+        if (secretShape.safeParse(value).success) secrets.push(value as string);
+        else reject("channels", value, `secret ${index}`);
+      });
+      const leases: LeaseRecord[] = [];
+      channelDocument.leases.forEach((value, index) => {
+        const parsed = leaseShape.safeParse(value);
+        if (parsed.success && settlesOnStellar(parsed.data.owner)) {
+          // by account, as the held settlements are
+          leases.push({ ...parsed.data, owner: signerFor(parsed.data.owner) });
+        } else {
+          reject("channels", value, `lease ${index}`);
+        }
+      });
+      if (channels !== undefined) {
+        channels.restoreLeases(leases, now);
+      } else if (secrets.length > 0) {
+        channels = ChannelPool.fromSnapshot({ secrets, leases }, now);
+      }
+      const pending = channelDocument.pending;
+      if (pending !== undefined && !secretShape.safeParse(pending).success) {
+        reject("channels", pending, "pending");
+      } else if (pending !== undefined && options.channels === undefined) {
+        // a channel whose funding was under way when the process stopped,
+        // finished on the next need for one
+        pendingChannel = Keypair.fromSecret(pending as string);
+      }
+    }
+
+    if (Object.keys(rejected).length > 0) {
+      // added to what earlier starts set aside, never written over it
+      const before = ((await state.read("rejected")) ?? {}) as Rejected;
+      const merged: Rejected = { ...before };
+      for (const [name, entries] of Object.entries(rejected)) {
+        merged[name] = [...(Array.isArray(before[name]) ? before[name] : []), ...entries];
+      }
+      await state.write("rejected", merged);
     }
   }
 
@@ -576,37 +886,35 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   let channels = options.channels;
   /** A channel key written down whose funding has not been seen to land. */
   let pendingChannel: Keypair | undefined;
-  const prices =
-    options.prices ??
-    new XlmPriceSource({
-      horizonUrl:
-        options.networkId === "mainnet"
-          ? "https://horizon.stellar.org"
-          : "https://horizon-testnet.stellar.org",
-    });
+  const horizonUrl =
+    options.networkId === "mainnet"
+      ? "https://horizon.stellar.org"
+      : "https://horizon-testnet.stellar.org";
+  const sponsorshipView = options.sponsorshipView ?? new HorizonSponsorshipView(horizonUrl);
+  const spendQuote = options.spendQuote ?? new DirectSpendQuote({ horizonUrl });
+  /** When the last cross-check ran, in milliseconds; it runs at most hourly. */
+  let reconciledAtMs: number | undefined;
+  const prices = options.prices ?? new XlmPriceSource({ horizonUrl });
 
   /**
-   * The one channel this deployment runs on, created and funded on first use.
+   * The channels this deployment runs on, created and funded as they are
+   * needed, up to `poolSize`.
    *
-   * 2 XLM: the account's own 1 XLM minimum plus fee headroom for the
-   * settlements it will carry. Reused serially; the pool is the upgrade path.
-   * The funding is shared by every request that arrives while it runs, so two
-   * first settlements fund one channel, and forgotten if it fails so the next
-   * request tries again.
+   * 2 XLM each: the account's own 1 XLM minimum plus fee headroom for the
+   * settlements it will carry. A funding is shared by every request that
+   * arrives while it runs, so two first settlements fund one channel, and
+   * forgotten if it fails so the next request tries again.
    */
   let funding: Promise<ChannelPool> | undefined;
   function ensureChannels(): Promise<ChannelPool> {
-    if (channels !== undefined) return Promise.resolve(channels);
-    funding ??= fundChannel().then(
-      (pool) => {
-        channels = pool;
-        return pool;
-      },
-      (cause: unknown) => {
-        funding = undefined;
-        throw cause;
-      },
-    );
+    if (channels !== undefined && pendingChannel === undefined) return Promise.resolve(channels);
+    return fundOne();
+  }
+
+  function fundOne(): Promise<ChannelPool> {
+    funding ??= fundChannel().finally(() => {
+      funding = undefined;
+    });
     return funding;
   }
 
@@ -620,26 +928,83 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (!(await accountExists(options.rpc, channel.publicKey()))) {
       await submitChannelFunding(channel);
     }
-    const pool = new ChannelPool({ channels: [channel] });
-    channels = pool;
+    if (channels === undefined) channels = new ChannelPool({ channels: [channel] });
+    else channels.add(channel);
     pendingChannel = undefined;
     await persist();
-    return pool;
+    return channels;
+  }
+
+  /** Channels being topped up right now, so two asks send one payment. */
+  const toppingUp = new Map<string, Promise<void>>();
+
+  /**
+   * Bring a channel back to its starting 2 XLM once it falls below 1.5. Each
+   * settlement's fee comes out of its channel, and one that cannot pay it is
+   * refused before anything else happens, so this keeps every settlement
+   * landable. Said in the log each time, which is where the operator sees it.
+   */
+  function topUpChannel(address: string): Promise<void> {
+    const running = toppingUp.get(address);
+    if (running !== undefined) return running;
+    const work = (async () => {
+      const entry = await readAccountEntry(options.rpc, address);
+      if (entry === undefined) return;
+      const balance = BigInt(entry.balance().toString());
+      if (balance >= CHANNEL_LOW_STROOPS) return;
+      const amount = CHANNEL_TOP_UP_TO_STROOPS - balance;
+      console.error(
+        `[sponsor] channel ${address} is short of XLM (${stroopsToXlm(balance)} XLM); ` +
+          `sending it ${stroopsToXlm(amount)} XLM from the sponsor`,
+      );
+      await options.rpc.submit("channel top-up", async () => {
+        const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
+        const payment = new TransactionBuilder(sponsorAccount, {
+          fee: "1000000",
+          networkPassphrase: options.network.passphrase,
+        })
+          .addOperation(
+            Operation.payment({
+              destination: address,
+              asset: Asset.native(),
+              amount: stroopsToDecimal(amount),
+            }),
+          )
+          .setTimeout(120)
+          .build();
+        payment.sign(keypair);
+        return payment;
+      });
+    })().finally(() => toppingUp.delete(address));
+    toppingUp.set(address, work);
+    return work;
+  }
+
+  function logTopUpFailure(address: string): (cause: unknown) => void {
+    return (cause) =>
+      console.error(
+        `[sponsor] could not top up channel ${address}:`,
+        cause instanceof Error ? cause.message : cause,
+      );
   }
 
   async function submitChannelFunding(channel: Keypair): Promise<void> {
-    const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
-    const create = new TransactionBuilder(sponsorAccount, {
-      fee: "1000000",
-      networkPassphrase: options.network.passphrase,
-    })
-      .addOperation(
-        Operation.createAccount({ destination: channel.publicKey(), startingBalance: "2" }),
-      )
-      .setTimeout(120)
-      .build();
-    create.sign(keypair);
-    await options.rpc.submit("channel funding", async () => create);
+    // Built inside the thunk, so a retry after a stale sequence (anything else
+    // the sponsor signs moves it) is built on the sequence as it is now.
+    await options.rpc.submit("channel funding", async () => {
+      const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
+      const create = new TransactionBuilder(sponsorAccount, {
+        fee: "1000000",
+        networkPassphrase: options.network.passphrase,
+      })
+        .addOperation(
+          Operation.createAccount({ destination: channel.publicKey(), startingBalance: "2" }),
+        )
+        .setTimeout(120)
+        .build();
+      create.sign(keypair);
+      return create;
+    });
   }
 
   /**
@@ -695,6 +1060,28 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * failing is logged and does not stop the rest.
    */
   async function sweepHeld(): Promise<void> {
+    // in self mode nothing is settled, and the sponsor spends nothing
+    for (const address of reserveFunding === "sponsor" ? (channels?.addresses() ?? []) : []) {
+      try {
+        await topUpChannel(address);
+      } catch (cause) {
+        logTopUpFailure(address)(cause);
+      }
+    }
+    if (
+      reserveFunding === "sponsor" &&
+      (reconciledAtMs === undefined || Date.now() - reconciledAtMs >= RECONCILE_EVERY_MS)
+    ) {
+      reconciledAtMs = Date.now();
+      try {
+        await reconcileCarried();
+      } catch (cause) {
+        console.error(
+          "[sponsor] could not run the reconciliation:",
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     for (const destination of [...heldSettlements.keys()]) {
       try {
         // Inside the try: dropping an expired settlement writes to the cap
@@ -712,6 +1099,31 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         );
       }
     }
+  }
+
+  /**
+   * What the chain says the sponsor carries, against its own records of what
+   * it lent and is still owed, as one log line. A difference is capital it may
+   * have lost track of, and strandings stay on the chain's side for good, so
+   * the operator reads the numbers rather than a verdict.
+   */
+  async function reconcileCarried(): Promise<void> {
+    const records: SponsoredRecord[] = [];
+    for (const [account, held] of heldSettlements) {
+      if (!held.prepared) continue;
+      records.push({
+        userAddress: account,
+        slots: (held.repays.createdAccount ? 2 : 0) + held.repays.assets.length,
+        state: "awaiting-arrival",
+      });
+    }
+    const report = await reconcile(keypair.publicKey(), records, sponsorshipView);
+    console.error(
+      `[sponsor] reconciliation: the sponsor carries ${report.actualSlots} reserve slots ` +
+        `on-chain and ${report.expectedSlots} by its records; ` +
+        `untracked: ${report.untracked.join(", ") || "none"}; ` +
+        `stale: ${report.stale.join(", ") || "none"}`,
+    );
   }
 
   function sweepTick(): void {
@@ -816,7 +1228,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       reply(
         res,
         500,
-        { error: "That did not work. Nothing was spent.", retryable: true },
+        // it may have failed after something was sent, so it says no more than that
+        {
+          error: "That did not work, and it may not have finished. Asking again is safe.",
+          retryable: true,
+        },
         corsOrigin(req),
       );
     });
@@ -873,6 +1289,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           // be served at all, and the smallest Circle transfer delivered.
           reserveFunding,
           minDeliveryBaseUnits: minDelivery.toString(),
+          // how close the settlement capacity is to full; addresses stay private
+          channels: {
+            size: channels?.size ?? 0,
+            leased: channels?.owners(nowUnix()).length ?? 0,
+            maxSize: options.channels === undefined ? poolSize : options.channels.size,
+          },
         },
         origin,
       );
@@ -880,27 +1302,27 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     if (req.method === "POST" && url.pathname === "/prepare") {
-      await prepare((await readJson(req)) as PrepareBody, res, origin);
+      await prepare(bodyOf(prepareBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/submit") {
-      await submit((await readJson(req)) as SubmitBody, res, origin);
+      await submit(bodyOf(submitBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement") {
-      await settlement((await readJson(req)) as SettlementBody, res, origin);
+      await settlement(bodyOf(settlementBody, await readJson(req)), res, origin, client);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settlement/commit") {
-      await settlementCommit((await readJson(req)) as SettlementCommitBody, res, origin);
+      await settlementCommit(bodyOf(settlementCommitBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/settle") {
-      await settle((await readJson(req)) as SettleBody, res, origin);
+      await settle(bodyOf(settleBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/deliver") {
-      await deliver((await readJson(req)) as DeliverBody, res, origin);
+      await deliver(bodyOf(deliverBody, await readJson(req)), res, origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/compose") {
@@ -941,13 +1363,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await answer(res, 400, { error: "Say which account to prepare.", retryable: false }, origin);
       return;
     }
+    if (await busyBuilding(res, origin)) return;
 
     // The caps bound the sponsor's money, and an account paying for itself
     // spends none of it.
     if (reserveFunding === "sponsor") {
-      const decision = await caps.check(
-        classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
-      );
+      const decision = await caps.check(caps.unprovenClass());
       if (!decision.allowed) {
         await answer(res, 429, { error: decision.reason, retryable: true }, origin);
         return;
@@ -955,7 +1376,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     const names = body.assets ?? ["USDC"];
-    const assets = names.map((name) => options.curatedAssets[name]);
+    // own keys only: a plain object answers "constructor" and "toString" too
+    const assets = names.map((name) =>
+      Object.hasOwn(options.curatedAssets, name) ? options.curatedAssets[name] : undefined,
+    );
     if (assets.some((asset) => asset === undefined)) {
       // By name from the curated list, never by issuer from the wire: sponsoring
       // a trustline to an imitation asset is paying to phish our own users.
@@ -1018,10 +1442,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await prepareSelfFunded(body.destination, body.sourceChainId, assets as Asset[], res, origin);
       return;
     }
-    const created = !(await accountExists(
-      options.rpc,
-      classified.trustlineHolder ?? body.destination,
-    ));
+    const holder = classified.trustlineHolder ?? body.destination;
+    const created = !(await accountExists(options.rpc, holder));
+    const usdcLine = assets[0];
+    if (
+      !created &&
+      usdcLine !== undefined &&
+      (await readTrustline(options.rpc, holder, usdcLine)) !== undefined
+    ) {
+      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      return;
+    }
 
     const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
     const transaction = buildPreparation({
@@ -1212,6 +1643,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     body: SettlementBody,
     res: ServerResponse,
     origin: string | undefined,
+    client: string,
   ): Promise<void> {
     if (body.destination === undefined) {
       await answer(res, 400, { error: "Say which account will settle.", retryable: false }, origin);
@@ -1221,40 +1653,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await noLoans(res, origin);
       return;
     }
-    // A settlement being submitted may already have spent its channel's
-    // sequence. Building now would put this one on the next sequence, which is
-    // the next user's once the channel is released.
-    if (settling.has(body.destination)) {
-      await answer(
-        res,
-        409,
-        {
-          error: "This account's last settlement is still landing. Ask again shortly.",
-          retryable: true,
-        },
-        origin,
-      );
-      return;
-    }
-    const decision = await caps.check(
-      classifySourceChain(body.sourceChainId ?? "unknown", DEFAULT_CHEAP_GAS_CHAINS),
-    );
-    if (!decision.allowed) {
-      await answer(res, 429, { error: decision.reason, retryable: true }, origin);
-      return;
-    }
-
-    const usdc = options.curatedAssets.USDC;
-    if (usdc === undefined) {
-      await answer(
-        res,
-        500,
-        { error: "This sponsor curates no settling asset.", retryable: false },
-        origin,
-      );
-      return;
-    }
-
     let classified: ReturnType<typeof classifyAddress>;
     try {
       classified = classifyAddress(body.destination);
@@ -1276,17 +1674,90 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    const createdAccount = !(await accountExists(
-      options.rpc,
-      classified.trustlineHolder ?? body.destination,
-    ));
+    // Keyed by the account, not by how its address was written: a muxed address
+    // and its account are one sequence and one reserve.
+    const account = classified.trustlineHolder ?? body.destination;
+    // A settlement being submitted may already have spent its channel's
+    // sequence. Building now would put this one on the next sequence, which is
+    // the next user's once the channel is released.
+    if (settling.has(account)) {
+      await answer(
+        res,
+        409,
+        {
+          error: "This account's last settlement is still landing. Ask again shortly.",
+          retryable: true,
+        },
+        origin,
+      );
+      return;
+    }
+    const decision = await caps.check(caps.unprovenClass());
+    if (!decision.allowed) {
+      await answer(res, 429, { error: decision.reason, retryable: true }, origin);
+      return;
+    }
 
-    const pool = await ensureChannels();
+    const usdc = options.curatedAssets.USDC;
+    if (usdc === undefined) {
+      await answer(
+        res,
+        500,
+        { error: "This sponsor curates no settling asset.", retryable: false },
+        origin,
+      );
+      return;
+    }
+
+    const createdAccount = !(await accountExists(options.rpc, account));
+    // An account this sponsor already prepared holds the line it sponsored;
+    // building again for it is harmless, since nothing can replace a prepared
+    // settlement. Anyone else holding USDC has nothing for the sponsor to open.
+    if (
+      !createdAccount &&
+      !backed(account) &&
+      (await readTrustline(options.rpc, account, usdc)) !== undefined
+    ) {
+      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      return;
+    }
+
+    if (await busyBuilding(res, origin)) return;
+    let pool = await ensureChannels();
     const now = nowUnix();
-    // Short until the settlement comes back signed, which settlementCommit
-    // extends to the settlement's own bound. Anyone can ask for a settlement,
-    // and a day-long lease per request would let one caller take every slot.
-    const channel = pool.acquire(body.destination, now + PROVISIONAL_LEASE_SECONDS, now);
+    const live = pool.owners(now);
+    for (const owner of leaseClients.keys()) {
+      if (!live.includes(owner)) leaseClients.delete(owner);
+    }
+    // Asking again for an account already leased takes nothing new. Otherwise
+    // a client may wait on only so many settlements nothing backs yet.
+    if (perClient > 0 && !live.includes(account)) {
+      const waiting = live.filter(
+        (owner) => leaseClients.get(owner) === client && !backed(owner),
+      ).length;
+      if (waiting >= perClient) {
+        await answer(
+          res,
+          429,
+          {
+            error:
+              "This address already has settlements waiting on a preparation. Finish or " +
+              "abandon one, then try again.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+    }
+    // Short until a preparation backs it, which only /submit extends to the
+    // settlement's own bound. Anyone can ask for a settlement, and a day-long
+    // lease that nothing paid for would let one caller take every slot.
+    let channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, now);
+    while (channel === undefined && options.channels === undefined && pool.size < poolSize) {
+      pool = await fundOne();
+      channel = pool.acquire(account, now + PROVISIONAL_LEASE_SECONDS, nowUnix());
+    }
     if (channel === undefined) {
       await answer(
         res,
@@ -1296,6 +1767,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    if (!leaseClients.has(account)) leaseClients.set(account, client);
 
     // Account 2 slots + one trustline = 3, or 1 when the account already exists.
     const slots = createdAccount ? 3 : 1;
@@ -1324,9 +1796,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         hash: transaction.hash().toString("hex"),
         kind: "settlement",
         destination: body.destination,
-        signer: signerFor(body.destination),
+        signer: account,
         sourceChainId: body.sourceChainId ?? "unknown",
         expiresAtUnix: expiryOf(transaction),
+        // only holdable while the short lease lasts, so not kept past it
+        openUntilUnix: now + PROVISIONAL_LEASE_SECONDS + LEASE_RECLAIM_GRACE_SECONDS,
         channel: channel.address,
         repays: { createdAccount, assets: [usdc.toString()] },
       },
@@ -1397,7 +1871,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    if (body.destination !== undefined && body.destination !== record.destination) {
+    // the same account under another spelling is the same account
+    if (
+      body.destination !== undefined &&
+      (!settlesOnStellar(body.destination) || signerFor(body.destination) !== record.signer)
+    ) {
       await refuse(record, res, origin, 400, "That settlement was built for a different account.");
       return;
     }
@@ -1414,7 +1892,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     // Replacing a settlement whose preparation has landed would let the loan be
     // repaid by a cheaper settlement than the one it was made against.
-    const current = await liveSettlement(record.destination);
+    const current = await liveSettlement(record.signer);
     if (current?.prepared === true) {
       await refuse(
         record,
@@ -1442,12 +1920,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The settlement sits on its channel's next sequence, which is only this
     // account's while it holds the lease. A lease that lapsed or moved on means
     // that sequence now belongs to someone else's settlement, and holding this
-    // one would let it spend theirs. Held, the lease runs to the settlement's
-    // own bound.
+    // one would let it spend theirs. Held, the lease is still the short one:
+    // a signature from a key the caller made up backs nothing, and only the
+    // preparation going out lengthens it to the settlement's own bound.
     const pool = await ensureChannels();
     if (
       record.channel === undefined ||
-      !pool.extend(record.destination, record.channel, record.expiresAtUnix, nowUnix())
+      !pool.extend(
+        record.signer,
+        record.channel,
+        Math.min(record.expiresAtUnix, nowUnix() + PROVISIONAL_LEASE_SECONDS),
+        nowUnix(),
+      )
     ) {
       await answer(
         res,
@@ -1461,7 +1945,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    heldSettlements.set(record.destination, {
+    heldSettlements.set(record.signer, {
       xdr: body.signedXdr,
       createdAtUnix: nowUnix(),
       sourceChainId: record.sourceChainId,
@@ -1471,6 +1955,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       prepared: false,
       preparing: false,
       preparation: undefined,
+      sentAtUnix: undefined,
     });
     await answer(res, 200, { held: true }, origin);
   }
@@ -1568,22 +2053,6 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return { settled: false };
     }
 
-    // A delivery landing proves Circle minted something, not that it was this
-    // user's transfer or enough of it. Submitting before the money is there
-    // fails on-chain, burns the channel's sequence, and counts as a stranding,
-    // so a dust burn naming someone would spend their settlement for them.
-    let covered: boolean;
-    try {
-      covered = await holdsEnoughToSettle(destination, transaction);
-    } catch (cause) {
-      console.error(
-        "[sponsor] could not read the recipient's balance before settling:",
-        cause instanceof Error ? cause.message : cause,
-      );
-      return { settled: false, settlementRetryable: true };
-    }
-    if (!covered) return { settled: false, settlementRetryable: true };
-
     // The answer can arrive after this settlement was dropped as expired and
     // a newer one held for the account. That one, and its lease, are not this
     // call's to clear.
@@ -1611,6 +2080,43 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return { settled: false, settlementRetryable: false };
     };
 
+    // Sent before and not seen to land: it may have, after the wait or before
+    // a restart, and then the balance below no longer covers it though the
+    // loan is repaid. Asked by hash first.
+    if (held.sentAtUnix !== undefined) {
+      let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
+      try {
+        found = await options.rpc.findTransaction(transaction.hash().toString("hex"));
+      } catch (cause) {
+        console.error(
+          `[sponsor] could not look up the settlement sent for ${destination}:`,
+          cause instanceof Error ? cause.message : cause,
+        );
+        return { settled: false, settlementRetryable: true };
+      }
+      if (found.status === "SUCCESS") return settled(transaction.hash().toString("hex"));
+      if (found.status === "FAILED") return await stranded();
+    }
+
+    // A delivery landing proves Circle minted something, not that it was this
+    // user's transfer or enough of it. Submitting before the money is there
+    // fails on-chain, burns the channel's sequence, and counts as a stranding,
+    // so a dust burn naming someone would spend their settlement for them.
+    let covered: boolean;
+    try {
+      covered = await holdsEnoughToSettle(destination, transaction);
+    } catch (cause) {
+      console.error(
+        "[sponsor] could not read the recipient's balance before settling:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      return { settled: false, settlementRetryable: true };
+    }
+    if (!covered) return { settled: false, settlementRetryable: true };
+
+    held.sentAtUnix ??= nowUnix();
+    await persist();
+
     try {
       transaction.sign(channelKeypair);
       transaction.sign(keypair);
@@ -1622,6 +2128,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     } catch (cause) {
       if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
         return await spentSequence(transaction.hash().toString("hex"), settled, stranded);
+      }
+      // The channel cannot pay the fee: the sponsor's own shortfall, and nothing
+      // was spent on-chain, so the settlement stays held while the channel is
+      // topped up, rather than being given up as a stranding.
+      if (cause instanceof SubmitRejected && cause.code === "txInsufficientBalance") {
+        void topUpChannel(transaction.source).catch(logTopUpFailure(transaction.source));
+        return { settled: false, settlementRetryable: true };
       }
       const retryable = cause instanceof MavnaError ? cause.retryable : true;
       if (!retryable) return await stranded();
@@ -1668,9 +2181,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     );
     const payment = payments[0];
     if (payments.length !== 1 || payment === undefined) return false;
-    const state = await inspectDestination(options.rpc, destination, payment.sendAsset);
-    if (state.trustline === undefined || !state.trustline.authorized) return false;
-    return BigInt(state.trustline.balanceStroops) >= decimalToStroops(payment.sendMax);
+    const line = await readTrustline(options.rpc, signerFor(destination), payment.sendAsset);
+    if (line === undefined || !line.authorized) return false;
+    // what the owner's own offers have promised away cannot pay the settlement
+    const spendable = line.balanceStroops - line.sellingStroops;
+    // What the trade costs now on the settlement's own direct path, not the
+    // ceiling it was signed with: an arrival between the two would otherwise
+    // never settle. A quote over the ceiling would fail on-chain and burn the
+    // channel's sequence, so it waits for the market instead.
+    const cost = await spendQuote.directSpendStroops(payment.sendAsset, payment.destAmount);
+    if (cost === undefined) return false;
+    const ceiling = decimalToStroops(payment.sendMax);
+    const withMargin = (cost * (10_000n + SPEND_MARGIN_BASIS_POINTS)) / 10_000n;
+    if (cost > ceiling) return false;
+    return spendable >= (withMargin < ceiling ? withMargin : ceiling);
   }
 
   /** Countersign what the user signed, and submit it. This is where money moves. */
@@ -1762,7 +2286,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // The governing order: no capital commits until the settlement that releases
     // it is already signed and held. Without this the deposit is a gift, which is
     // the model the cost decision explicitly rejected.
-    const held = await liveSettlement(record.destination);
+    const held = await liveSettlement(record.signer);
     if (held === undefined) {
       await refuse(
         record,
@@ -1803,15 +2327,44 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     // Marked before the first await, so the settlement just matched cannot be
     // swapped for a cheaper one while this preparation is on its way.
     held.preparing = true;
-    const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);
+    // the source chain is still only the caller's claim, so it does not pick the class
+    const source = caps.unprovenClass();
     let result: Awaited<ReturnType<RpcClient["submit"]>>;
     try {
+      // The account may have opened the line itself since it was prepared. The
+      // preparation would then sponsor nothing, and the settlement fail on a
+      // line the sponsor never sponsored, counted as a stranding.
+      const usdc = options.curatedAssets.USDC;
+      if (
+        usdc !== undefined &&
+        !held.repays.createdAccount &&
+        (await readTrustline(options.rpc, record.signer, usdc)) !== undefined
+      ) {
+        await refuse(record, res, origin, 409, ALREADY_HOLDS_USDC);
+        return;
+      }
       const decision = await caps.check(source);
       if (!decision.allowed) {
         await refuse(record, res, origin, 429, decision.reason, true);
         return;
       }
 
+      // From here the reserve may go out, so the settlement that repays it
+      // keeps its channel to its own bound, whatever becomes of this request.
+      const pool = await ensureChannels();
+      if (
+        held.channel === undefined ||
+        !pool.extend(record.signer, held.channel, held.maxTimeUnix, nowUnix())
+      ) {
+        await refuse(
+          record,
+          res,
+          origin,
+          409,
+          "The settlement held for this account has lost its slot. Ask for a new one.",
+        );
+        return;
+      }
       transaction.sign(keypair);
       // Written down before it is sent, so a restart mid-flight looks this
       // preparation up by hash instead of letting another in beside it.
@@ -1821,27 +2374,64 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         await persist();
       } catch (cause) {
         held.preparation = undefined;
+        shortenLease(record.signer, held);
         throw cause;
       }
       try {
-        result = await options.rpc.submit("sponsored preparation", async () => transaction);
+        // Presigned: the user signed this sequence, so it cannot be rebuilt here,
+        // and resending it after a stale sequence can only be refused again.
+        result = await options.rpc.submit("sponsored preparation", async () => transaction, {
+          presigned: true,
+        });
       } catch (cause) {
-        const retryable = cause instanceof MavnaError ? cause.retryable : true;
-        // A refusal is final. Anything else (a timeout, an answer that never
-        // came) may still land, so the mark stays and the next touch looks it up.
-        if (!retryable && held.preparation === sent) held.preparation = undefined;
-        await answer(
-          res,
-          502,
-          { error: "The preparation could not be submitted.", retryable },
-          origin,
-        );
-        return;
+        if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
+          // Something else the sponsor signed took this sequence while the user
+          // was signing. Asked by hash in case this very preparation is what
+          // took it; otherwise it can never land, and the account may prepare
+          // again at once.
+          const landed = await preparationLanded(record.hash);
+          if (landed !== undefined) {
+            result = landed;
+          } else {
+            if (held.preparation === sent) {
+              held.preparation = undefined;
+              shortenLease(record.signer, held);
+            }
+            await answer(
+              res,
+              409,
+              {
+                error:
+                  "The sponsor's account moved on before this preparation went out, so it " +
+                  "can never land. Ask for a new preparation and sign that one.",
+                retryable: true,
+                prepareAgain: true,
+              },
+              origin,
+            );
+            return;
+          }
+        } else {
+          const retryable = cause instanceof MavnaError ? cause.retryable : true;
+          // A refusal is final. Anything else (a timeout, an answer that never
+          // came) may still land, so the mark stays and the next touch looks it up.
+          if (!retryable && held.preparation === sent) {
+            held.preparation = undefined;
+            shortenLease(record.signer, held);
+          }
+          await answer(
+            res,
+            502,
+            { error: "The preparation could not be submitted.", retryable },
+            origin,
+          );
+          return;
+        }
       }
     } finally {
       held.preparing = false;
     }
-    if (heldSettlements.get(record.destination) === held) {
+    if (heldSettlements.get(record.signer) === held) {
       held.prepared = true;
       held.preparation = undefined;
     } else {
@@ -1887,8 +2477,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     res: ServerResponse,
     origin: string | undefined,
   ): Promise<void> {
-    const destination = body.destination;
-    if (typeof destination !== "string" || !settlesOnStellar(destination)) {
+    const asked = body.destination;
+    if (typeof asked !== "string" || !settlesOnStellar(asked)) {
       await answer(
         res,
         400,
@@ -1897,6 +2487,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
+    const destination = signerFor(asked);
 
     // Answered before the limit: with nothing to submit the answer costs a map
     // lookup, and a page asking right after a repayment should hear about it.
@@ -2185,10 +2776,43 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
     }
 
-    const outcome: DeliveryOutcome = await deliverer.deliver({
-      messageHex: message.message,
-      attestationHex: message.attestation,
-    });
+    let outcome: DeliveryOutcome;
+    try {
+      outcome = await deliverer.deliver({
+        messageHex: message.message,
+        attestationHex: message.attestation,
+      });
+    } catch (cause) {
+      if (cause instanceof DeliveryBudgetSpent) {
+        console.error("[sponsor] today's delivery budget is spent; a delivery was turned away");
+        await answer(
+          res,
+          503,
+          {
+            error:
+              "This sponsor has spent today's budget for paying deliveries. Try again after " +
+              "midnight UTC, or deliver the transfer from the receiving account.",
+            retryable: true,
+          },
+          origin,
+        );
+        return;
+      }
+      if (!(cause instanceof DeliveryFailedOnChain)) throw cause;
+      console.error("[sponsor]", cause.message);
+      await answer(
+        res,
+        502,
+        {
+          error:
+            "The delivery reached Stellar and failed there, so its fee was paid and nothing " +
+            "was minted. Asking again is safe.",
+          retryable: true,
+        },
+        origin,
+      );
+      return;
+    }
 
     // The lateness rule's payoff: the settlement was signed before anything
     // moved, and the moment the delivery lands it is submitted, releasing the
@@ -2198,8 +2822,9 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const recipient = attestedRecipient(message.message, domain, expected);
     const settled =
       (outcome.kind === "delivered" || outcome.kind === "already-delivered") &&
-      recipient !== undefined
-        ? await settleIfHeld(recipient)
+      recipient !== undefined &&
+      settlesOnStellar(recipient)
+        ? await settleIfHeld(signerFor(recipient))
         : {};
 
     await answer(
@@ -2459,6 +3084,35 @@ const SETTLEMENT_VALIDITY_SECONDS = 86_400;
 const PROVISIONAL_LEASE_SECONDS = 300;
 
 /**
+ * 25 XLM a day for delivery fees. A real delivery measured about 0.013 XLM, so
+ * this is well over a thousand a day, and what a day of abuse can cost.
+ */
+const DEFAULT_DELIVERY_BUDGET_STROOPS = 250_000_000n;
+
+/** How often the sweep cross-checks what the sponsor carries against the chain. */
+const RECONCILE_EVERY_MS = 60 * 60 * 1000;
+
+/**
+ * Room over the quoted cost, in basis points, for the market moving in the
+ * seconds between the quote and the trade.
+ */
+const SPEND_MARGIN_BASIS_POINTS = 100n;
+
+/** Below this a channel is topped up: its 1 XLM minimum plus a few surge fees. */
+const CHANNEL_LOW_STROOPS = 15_000_000n;
+/** What a channel is topped up to, the 2 XLM it was funded with. */
+const CHANNEL_TOP_UP_TO_STROOPS = 20_000_000n;
+
+/** The channel pool's own grace past a lease's end, before it reuses the channel. */
+const LEASE_RECLAIM_GRACE_SECONDS = 30;
+
+/** How long a repayment found only after its time bound is still reported to a page. */
+const LATE_REPAYMENT_REPORTED_SECONDS = 3_600;
+
+/** Settlements one client may have waiting on a preparation, unless configured. */
+const DEFAULT_SETTLEMENTS_PER_CLIENT = 2;
+
+/**
  * Whether an address is one a settlement can be held for: an account or muxed
  * account, which holds its balance on a trustline. Anything else, including a
  * secret key sent by mistake, is not.
@@ -2538,3 +3192,52 @@ async function accountExists(rpc: RpcClient, address: string): Promise<boolean> 
     throw cause;
   }
 }
+
+/** A parsed record without the keys zod filled with undefined, as it was written. */
+function stripUndefined<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(Object.entries(record).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** An account's trustline as the settlement and the preparation need to see it. */
+interface TrustlineState {
+  readonly balanceStroops: bigint;
+  /** Promised to the account's own open offers, so not spendable. */
+  readonly sellingStroops: bigint;
+  readonly authorized: boolean;
+}
+
+/** Trustline flag bit meaning the issuer authorised this account to hold the asset. */
+const AUTHORIZED_FLAG = 1;
+
+/** The account's trustline for an asset, or undefined when it has none. */
+async function readTrustline(
+  rpc: RpcClient,
+  holder: string,
+  asset: Asset,
+): Promise<TrustlineState | undefined> {
+  const accountId = Address.fromString(holder).toScAddress().accountId();
+  const key = xdr.LedgerKey.trustline(
+    new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXDRObject() }),
+  );
+  const entries = await rpc.read(`trustline ${holder}`, async () => {
+    const response = await rpc.server.getLedgerEntries(key);
+    return { value: response.entries, ledger: response.latestLedger };
+  });
+  const found = entries.find((entry) => entry.val.switch().name === "trustline");
+  if (found === undefined) return undefined;
+  const line = found.val.trustLine();
+  const ext = line.ext();
+  return {
+    balanceStroops: BigInt(line.balance().toString()),
+    sellingStroops: ext.switch() === 1 ? BigInt(ext.v1().liabilities().selling().toString()) : 0n,
+    authorized: (line.flags() & AUTHORIZED_FLAG) !== 0,
+  };
+}
+
+/**
+ * Said when the account already has the line the sponsor would open. Fronting
+ * it would sponsor nothing, and the settlement's revoke would then fail on a
+ * line the sponsor never sponsored, which reads as a stranding for free.
+ */
+const ALREADY_HOLDS_USDC =
+  "That account already holds USDC, so there is no trustline for this sponsor to open.";

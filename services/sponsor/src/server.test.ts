@@ -1,11 +1,15 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildBurn,
   buildDelivery,
   CCTP_CONTRACTS,
   contractAddressToBytes32,
   EVM_DEPLOYMENTS,
+  NON_EVM_CHAINS,
   SOLANA_PROGRAMS,
   STARKNET_DEPLOYMENTS,
   solanaAddressToBytes32,
@@ -18,6 +22,7 @@ import {
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
   type SubmitOptions,
+  SubmitRejected,
   XlmPriceSource,
 } from "@mavna/stellar";
 import {
@@ -25,6 +30,7 @@ import {
   Asset,
   type FeeBumpTransaction,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   rpc,
@@ -40,9 +46,11 @@ import arrivalEntries from "../../../packages/adapters/layerzero/src/__fixtures_
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
+import type { ChainSponsorshipView } from "./reconcile.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
-import { DocumentCapStore, MemoryDocumentStore } from "./state.js";
+import { DirectSpendQuote } from "./spend.js";
+import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
  * The sponsor's endpoints, driven over real HTTP against a real server.
@@ -95,6 +103,8 @@ class RecordingRpc extends RpcClient {
 
   /** USDC trustline balances in stroops, by account. */
   readonly trustlines = new Map<string, bigint>();
+  /** USDC promised to the account's own open offers, in stroops, by account. */
+  readonly sellingLiabilities = new Map<string, bigint>();
   /** XLM balances in stroops, by account; ten XLM when not set. */
   readonly nativeBalances = new Map<string, bigint>();
 
@@ -197,6 +207,9 @@ class RecordingRpc extends RpcClient {
         StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
       );
       if (balance === undefined) return undefined;
+      const selling = this.sellingLiabilities.get(
+        StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
+      );
       return xdr.LedgerEntryData.trustline(
         new xdr.TrustLineEntry({
           accountId: line.accountId(),
@@ -204,7 +217,19 @@ class RecordingRpc extends RpcClient {
           balance: xdr.Int64.fromString(balance.toString()),
           limit: xdr.Int64.fromString("9223372036854775807"),
           flags: 1,
-          ext: new xdr.TrustLineEntryExt(0),
+          ext:
+            selling === undefined
+              ? new xdr.TrustLineEntryExt(0)
+              : new xdr.TrustLineEntryExt(
+                  1,
+                  new xdr.TrustLineEntryV1({
+                    liabilities: new xdr.Liabilities({
+                      buying: xdr.Int64.fromString("0"),
+                      selling: xdr.Int64.fromString(selling.toString()),
+                    }),
+                    ext: new xdr.TrustLineEntryV1Ext(0),
+                  }),
+                ),
         }),
       );
     }
@@ -346,6 +371,37 @@ class FixedPrice extends XlmPriceSource {
   }
 }
 
+/**
+ * Horizon's quote for the settlement's direct path, answered here: by default
+ * the fixed price above (five XLM a USDC), or `quote` when a test sets it,
+ * null for a market with no direct path.
+ */
+class FixedSpend extends DirectSpendQuote {
+  quote: bigint | null | undefined = undefined;
+  constructor() {
+    super({ horizonUrl: "https://127.0.0.1:9" });
+  }
+
+  override async directSpendStroops(_asset: Asset, destXlm: string): Promise<bigint | undefined> {
+    if (this.quote === null) return undefined;
+    if (this.quote !== undefined) return this.quote;
+    const [whole = "0", fraction = ""] = destXlm.split(".");
+    return (BigInt(whole) * 10_000_000n + BigInt(fraction.padEnd(7, "0"))) / 5n;
+  }
+}
+
+/** Horizon's view of what the sponsor carries, answered here. */
+class FixedSponsorshipView implements ChainSponsorshipView {
+  slots = 0;
+  accounts: string[] = [];
+  async totalSlotsCarried(): Promise<number> {
+    return this.slots;
+  }
+  async sponsoredAccounts(): Promise<readonly string[]> {
+    return this.accounts;
+  }
+}
+
 interface TestServer {
   readonly server: SponsorServer;
   readonly url: string;
@@ -425,6 +481,8 @@ async function startServer(
     irisUrl: IRIS,
     channels: new ChannelPool({ channels: [channel] }),
     prices: new FixedPrice(),
+    spendQuote: new FixedSpend(),
+    sponsorshipView: new FixedSponsorshipView(),
     allowedOrigins: [],
     ...overrides,
   };
@@ -706,9 +764,10 @@ describe("the sponsor only countersigns what it built", () => {
 
     await holdSettlementFor(server, user);
     const prepared = await preparedAndSigned(server, user);
-    // Another transfer from the same class of chain takes today's last slot
+    // Another sponsorship takes today's last slot in the tighter allocation, the
+    // one every claim counts against
     // between this user's preparation and their signature coming back.
-    await caps.recordStarted("expensive-gas");
+    await caps.recordStarted("cheap-gas");
 
     const refused = await server.post("/submit", { signedXdr: prepared });
     expect(refused.status).toBe(429);
@@ -843,13 +902,41 @@ describe("the sponsor only asks Circle about well-formed deliveries", () => {
   });
 
   it("checks the domain against the configured network only", async () => {
-    // Arc routes on testnet and not on mainnet. Nothing here reaches any network.
+    // Worked out from the chain lists as they are, so adding a chain to one
+    // network does not quietly turn this into a test of nothing.
+    const domainsOf = (id: "testnet" | "mainnet"): Set<number> =>
+      new Set(
+        [...Object.values(EVM_DEPLOYMENTS[id]), ...Object.values(NON_EVM_CHAINS[id])].map(
+          (chain) => chain.domain,
+        ),
+      );
+    const lists = { testnet: domainsOf("testnet"), mainnet: domainsOf("mainnet") };
     const asked = stubIris(notFound);
-    const testnet = await startServer();
-    expect((await testnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(404);
-    const mainnet = await startServer({ networkId: "mainnet" });
-    expect((await mainnet.post("/deliver", { txHash: EVM_HASH, domain: 26 })).status).toBe(400);
-    expect(asked).toHaveLength(1);
+    const servers = {
+      testnet: await startServer(),
+      mainnet: await startServer({ networkId: "mainnet" }),
+    };
+    const post = (id: "testnet" | "mainnet", domain: number) =>
+      servers[id].post("/deliver", { txHash: EVM_HASH, domain });
+
+    let neither = 0;
+    while (lists.testnet.has(neither) || lists.mainnet.has(neither)) neither += 1;
+    expect((await post("testnet", neither)).status).toBe(400);
+    expect((await post("mainnet", neither)).status).toBe(400);
+
+    let askedExpected = 0;
+    for (const [here, there] of [
+      ["testnet", "mainnet"],
+      ["mainnet", "testnet"],
+    ] as const) {
+      const onlyHere = [...lists[here]].find((domain) => !lists[there].has(domain));
+      if (onlyHere === undefined) continue;
+      // routed where it is listed, refused where it is not, never the union
+      expect((await post(here, onlyHere)).status).toBe(404);
+      expect((await post(there, onlyHere)).status).toBe(400);
+      askedExpected += 1;
+    }
+    expect(asked).toHaveLength(askedExpected);
   });
 
   it("asks Circle for exactly the transaction it was given", async () => {
@@ -989,6 +1076,40 @@ describe("the sponsor settles only for the recipient Circle attested", () => {
     expect(response.body.kind).toBe("delivered");
     expect(response.body.settled).toBe(true);
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
+  });
+
+  it("says a delivery that failed on Stellar may have cost its fee, not that nothing was spent", async () => {
+    const server = await startServer({ buildDelivery });
+    irisReturns(cctpMessage(Keypair.random().publicKey()));
+    server.rpc.server.getTransaction = async (hash) =>
+      ({ status: rpc.Api.GetTransactionStatus.FAILED, txHash: hash, latestLedger: 2 }) as never;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    logged.mockRestore();
+    expect(response.status).toBe(502);
+    expect(response.body.error).toMatch(/reached Stellar and failed there/);
+    expect(response.body.error).not.toMatch(/Nothing was spent/);
+  });
+
+  it("pays for no delivery past its daily budget, and says to try again later", async () => {
+    // room for one delivery's worst case (its 1 XLM bid plus 1 XLM of resources), not two
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state, deliveryBudgetStroops: 25_000_000n });
+    irisReturns(cctpMessage(Keypair.random().publicKey()));
+
+    const first = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(first.status).toBe(200);
+    expect(first.body.kind).toBe("delivered");
+    // what it was charged is what counts, here its whole 1 XLM bid
+    const spent = (await state.read("delivery-spend")) as Record<string, string>;
+    expect(Object.values(spent)).toEqual(["10000000"]);
+
+    const second = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(second.status).toBe(503);
+    expect(second.body.retryable).toBe(true);
+    expect(second.body.error).toMatch(/today's budget/);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
   });
 
   it("delivers but settles nothing for a destination the message does not name", async () => {
@@ -1386,8 +1507,10 @@ describe("any rail can trigger a held settlement", () => {
     });
     const server = await startServer({ caps });
     const victim = Keypair.random();
-    server.rpc.holding(victim, PLENTY);
     await holdSettlementFor(server, victim);
+    // a balance a stranger could point at: the line shows only for this probe,
+    // since a line that existed before the preparation would not be sponsored
+    server.rpc.holding(victim, PLENTY);
     // How the network would answer a settlement whose revokes have nothing to revoke.
     const onChainFailure = new MavnaError("settlement was rejected: opNoSponsorship", {
       retryable: false,
@@ -1401,6 +1524,8 @@ describe("any rail can trigger a held settlement", () => {
     expect(server.rpc.rejectNext).toBe(onChainFailure);
     expect((await caps.check("expensive-gas")).allowed).toBe(true);
     server.rpc.rejectNext = undefined;
+    server.rpc.trustlines.delete(victim.publicKey());
+    server.rpc.accounts.delete(victim.publicKey());
 
     // Still held: the victim's own preparation goes through and the settlement
     // fires once it has landed.
@@ -1408,6 +1533,7 @@ describe("any rail can trigger a held settlement", () => {
       signedXdr: await preparedAndSigned(server, victim),
     });
     expect(submitted.status).toBe(200);
+    server.rpc.holding(victim, PLENTY);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 31_000);
     const later = await server.post("/settle", { destination: victim.publicKey() });
@@ -1955,6 +2081,418 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
   });
 });
 
+describe("an arrival below the signed ceiling that still covers the trade", () => {
+  // 1.5 XLM at five XLM a USDC: 0.3 USDC, against a ceiling of 0.6
+  it("settles when the account holds what the direct path spends now, with a margin", async () => {
+    const spend = new FixedSpend();
+    spend.quote = 3_000_000n;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+
+    server.rpc.holding(user, 3_010_000n);
+    const short = await server.post("/settle", { destination: user.publicKey() });
+    expect(short.body.settled).toBe(false);
+    expect(server.rpc.submissions).toEqual([]);
+
+    server.rpc.holding(user, 3_100_000n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+
+  it("does not settle when the market has no direct path, whatever the balance", async () => {
+    const spend = new FixedSpend();
+    spend.quote = null;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("does not settle on a quote above the ceiling the account signed", async () => {
+    const spend = new FixedSpend();
+    spend.quote = 7_000_000n;
+    const server = await startServer({ spendQuote: spend });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, 6_500_000n);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      false,
+    );
+    expect(server.rpc.submissions).toEqual([]);
+  });
+});
+
+describe("the sponsor cross-checks what it carries", () => {
+  it("logs what the chain says it carries against its own records, from the sweep", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const view = new FixedSponsorshipView();
+    view.slots = 7;
+    const untracked = Keypair.random().publicKey();
+    const server = await startServer({ sponsorshipView: view });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    view.accounts = [user.publicKey(), untracked];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    const lines = logged.mock.calls.map((call) => call.join(" "));
+    logged.mockRestore();
+    const line = lines.find((text) => text.includes("reconciliation"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/7 reserve slots on-chain/);
+    expect(line).toMatch(/3 by its records/);
+    expect(line).toMatch(new RegExp(`untracked: ${untracked}`));
+  });
+});
+
+describe("a channel that runs short of XLM for fees", () => {
+  it("keeps the settlement held and tops the channel up, rather than counting a stranding", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 10_100_000n);
+    server.rpc.rejectNext = new SubmitRejected(
+      "settlement was rejected: txInsufficientBalance",
+      "txInsufficientBalance",
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect((await caps.usage()).stranded).toBe(0);
+    await vi.waitFor(() =>
+      expect(server.rpc.submissions.map((s) => s.label)).toEqual(["channel top-up"]),
+    );
+    const topUp = server.rpc.submissions[0]?.tx as Transaction;
+    expect(topUp.source).toBe(server.sponsor.publicKey());
+    const payment = topUp.operations[0] as Operation.Payment;
+    expect(payment.type).toBe("payment");
+    expect(payment.destination).toBe(server.channel.publicKey());
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/channel .* is short of XLM/);
+    logged.mockRestore();
+
+    // still held, and settles once the channel can pay
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 30_000_000n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+
+  it("is topped up by the sweep before it runs short", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const server = await startServer();
+    server.rpc.nativeBalances.set(server.channel.publicKey(), 12_000_000n);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    logged.mockRestore();
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["channel top-up"]);
+  });
+
+  it("says how many channels it has and how many are in use at /health", async () => {
+    const server = await startServer();
+    await holdSettlementFor(server, Keypair.random());
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    expect(health.channels).toEqual({ size: 1, leased: 1, maxSize: 1 });
+  });
+});
+
+describe("the cap class is not the caller's to choose", () => {
+  it("counts a claimed expensive-gas chain against the tighter allocation", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 300, "cheap-gas": 1 },
+    });
+    const server = await startServer({ caps });
+    await preparedWithSettlementHeld(server, Keypair.random());
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 0, "cheap-gas": 1 });
+
+    // the tighter allocation is spent; claiming another chain does not reach the larger one
+    for (const sourceChainId of ["ethereum", "ethereum-sepolia", "1"]) {
+      for (const path of ["/prepare", "/settlement"]) {
+        const answered = await server.post(path, {
+          destination: Keypair.random().publicKey(),
+          assets: ["USDC"],
+          sourceChainId,
+        });
+        expect(answered.status, `${path} ${sourceChainId}`).toBe(429);
+      }
+    }
+  });
+
+  it("uses whichever allocation the operator made tighter", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 5, "cheap-gas": 50 },
+    });
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const built = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "base",
+    });
+    const signed = signXdr(built.body.xdr as string, user);
+    expect((await server.post("/submit", { signedXdr: signed })).status).toBe(200);
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 1, "cheap-gas": 0 });
+  });
+});
+
+describe("the sponsor fronts only a trustline that does not exist yet", () => {
+  it("declines to build for an account that already holds USDC", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    server.rpc.holding(user, 0n);
+    for (const path of ["/settlement", "/prepare"]) {
+      const answered = await server.post(path, {
+        destination: user.publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(answered.status, path).toBe(400);
+      expect(answered.body.error, path).toMatch(/already holds USDC/);
+    }
+  });
+
+  it("will not countersign once the account opened the trustline itself, and counts nothing", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    await holdSettlementFor(server, user);
+    const signed = await preparedAndSigned(server, user);
+    // opened from the account's own XLM between building and submitting
+    server.rpc.holding(user, 600_000_000n);
+
+    const submitted = await server.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(409);
+    expect(server.rpc.submissions).toEqual([]);
+
+    // so no settlement can fail against a line the sponsor never sponsored
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      false,
+    );
+    skipPastSettlementWindow();
+    await server.post("/settle", { destination: user.publicKey() });
+    expect(await caps.usage()).toMatchObject({ stranded: 0 });
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 0, "cheap-gas": 0 });
+  });
+});
+
+describe("the sponsor counts only USDC the account can spend", () => {
+  it("does not settle while the USDC that would cover it is promised to the owner's offers", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.sellingLiabilities.set(user.publicKey(), PLENTY);
+
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions).toEqual([]);
+
+    server.rpc.sellingLiabilities.set(user.publicKey(), 0n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
+  });
+});
+
+describe("what anonymous builds can make the sponsor write down", () => {
+  it("keeps a few settlements per account, and none past its short lease", async () => {
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ state });
+    const user = Keypair.random();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 20; i += 1) {
+      // a second apart, so each build is a different transaction
+      vi.setSystemTime(Date.now() + 1_000);
+      const built = await server.post("/settlement", {
+        destination: user.publicKey(),
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+    }
+    const settlements = () =>
+      (state.read("built") as Promise<{ kind: string }[]>).then((records) =>
+        records.filter((record) => record.kind === "settlement"),
+      );
+    expect((await settlements()).length).toBe(3);
+
+    vi.setSystemTime(Date.now() + PROVISIONAL_AND_GRACE_SECONDS * 1_000);
+    await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect((await settlements()).length).toBe(1);
+  });
+});
+
+describe("a settlement that lands after the sponsor stopped waiting", () => {
+  /** Sends the settlement, sees no inclusion in two minutes, then lets it land. */
+  async function landsUnseen(server: TestServer, user: Keypair): Promise<void> {
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.holdInclusion = true;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const lookup = server.rpc.server.getTransaction.bind(server.rpc.server);
+    server.rpc.server.getTransaction = async (hash) => {
+      vi.setSystemTime(Date.now() + 10_000);
+      return lookup(hash);
+    };
+    const waited = await server.post("/settle", { destination: user.publicKey() });
+    expect(waited.body.settled).toBe(false);
+    server.rpc.server.getTransaction = lookup;
+    server.rpc.includePending();
+    server.rpc.holdInclusion = false;
+    // what it spent is gone, so the trustline no longer holds the ceiling
+    server.rpc.holding(user, 1n);
+  }
+
+  it("is found by hash on the next call, though the balance no longer covers it", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await landsUnseen(server, user);
+
+    vi.setSystemTime(Date.now() + 31_000);
+    const later = await server.post("/settle", { destination: user.publicKey() });
+    expect(later.body.settled).toBe(true);
+    const landed = server.rpc.submissions[0]?.tx as Transaction;
+    expect(later.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+
+    // and its channel is free for the next account
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("is looked up again before its time bound counts it as stranded", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    await landsUnseen(server, user);
+
+    vi.setSystemTime(Date.now() + 86_400_000 + 60_000);
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect((await caps.usage()).stranded).toBe(0);
+    expect(asked.body.settled).toBe(true);
+  });
+});
+
+describe("a preparation whose sponsor sequence something else spent", () => {
+  it("is sent once, frees the account to prepare again, and says so", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const stale = await preparedAndSigned(server, user);
+    // a delivery or another account's preparation lands first
+    server.rpc.accounts.set(server.sponsor.publicKey(), 101n);
+    let sends = 0;
+    const send = server.rpc.server.sendTransaction.bind(server.rpc.server);
+    server.rpc.server.sendTransaction = async (tx) => {
+      sends += 1;
+      return send(tx);
+    };
+
+    const failed = await server.post("/submit", { signedXdr: stale });
+    expect(failed.status).toBe(409);
+    expect(failed.body.retryable).toBe(true);
+    expect(sends).toBe(1);
+
+    const fresh = await preparedAndSigned(server, user);
+    const landed = await server.post("/submit", { signedXdr: fresh });
+    expect(landed.status).toBe(200);
+  });
+
+  it("funds a channel on the sponsor's fresh sequence when something else landed first", async () => {
+    const server = await startServer({}, { fundsOwnChannel: true });
+    const sends: string[] = [];
+    const send = server.rpc.server.sendTransaction.bind(server.rpc.server);
+    server.rpc.server.sendTransaction = async (tx) => {
+      // the first time, another sponsor transaction lands just ahead of this one
+      if (sends.length === 0) {
+        const sponsor = server.sponsor.publicKey();
+        server.rpc.accounts.set(sponsor, (server.rpc.accounts.get(sponsor) ?? 0n) + 1n);
+      }
+      sends.push((tx as Transaction).sequence);
+      return send(tx);
+    };
+    const built = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+    expect(sends).toEqual(["101", "102"]);
+  });
+});
+
+describe("one account is one account however its address is written", () => {
+  function muxedOf(user: Keypair): string {
+    return new MuxedAccount(new Account(user.publicKey(), "0"), "7").accountId();
+  }
+
+  it("leases one channel and holds one settlement for an account and its muxed address", async () => {
+    const channels = [Keypair.random(), Keypair.random()];
+    const server = await startServer({ channels: new ChannelPool({ channels }) });
+    for (const channel of channels) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const user = Keypair.random();
+    const muxed = muxedOf(user);
+
+    const forMuxed = await server.post("/settlement", { destination: muxed, sourceChainId: "1" });
+    const forAccount = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    expect(forMuxed.status).toBe(200);
+    expect(forAccount.status).toBe(200);
+    expect(forAccount.body.channel).toBe(forMuxed.body.channel);
+
+    // one account, one channel, one sequence: the second is the same settlement
+    const committed = await server.post("/settlement/commit", {
+      destination: muxed,
+      signedXdr: signXdr(forAccount.body.xdr as string, user),
+    });
+    expect(committed.status).toBe(200);
+
+    const prepared: number[] = [];
+    for (const destination of [muxed, user.publicKey()]) {
+      const built = await server.post("/prepare", {
+        destination,
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+      const submitted = await server.post("/submit", {
+        signedXdr: signXdr(built.body.xdr as string, user),
+      });
+      prepared.push(submitted.status);
+    }
+    expect(prepared).toEqual([200, 409]);
+  });
+});
+
 describe("the sponsor prepares only what the held settlement repays", () => {
   const MISMATCH = "That preparation does not match the settlement held for this account.";
 
@@ -2120,7 +2658,7 @@ describe("the held settlement stays put while a preparation lands against it", (
       sourceChainId: "1",
     });
     expect(replacement.status).toBe(200);
-    await caps.recordStarted("expensive-gas");
+    await caps.recordStarted("cheap-gas");
 
     // Refused while the submission is still checking the cap...
     const stall = store.stallNext();
@@ -2244,7 +2782,9 @@ describe("the held settlement stays put while a preparation lands against it", (
 
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
-    vi.setSystemTime(start + 1_000_000);
+    // built shortly before the first one's bound, within the short window a
+    // built settlement may still be committed in
+    vi.setSystemTime(start + 86_400_000 - 60_000);
     const newer = await server.post("/settlement", {
       destination: user.publicKey(),
       sourceChainId: "1",
@@ -2266,6 +2806,7 @@ describe("the held settlement stays put while a preparation lands against it", (
     // The stranded settlement and its channel are already given up, so the
     // newer one is turned away now rather than accepted and then dropped.
     expect(committed.status).toBe(409);
+    expect(committed.body.error).toMatch(/slot has lapsed or passed/);
     expect((await stranding).body.settlementRetryable).toBe(false);
     expect((await caps.usage()).stranded).toBe(1);
     expect((await server.post("/settle", { destination: user.publicKey() })).status).toBe(404);
@@ -2284,7 +2825,7 @@ describe("the held settlement stays put while a preparation lands against it", (
 
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
-    vi.setSystemTime(start + 1_000_000);
+    vi.setSystemTime(start + 86_400_000 - 60_000);
     const newer = await server.post("/settlement", {
       destination: user.publicKey(),
       sourceChainId: "1",
@@ -2319,10 +2860,25 @@ describe("the held settlement stays put while a preparation lands against it", (
   });
 });
 
-describe("a settlement slot is held for a day only once the settlement is signed", () => {
+describe("a settlement slot is held for a day only once something backs it", () => {
   function skip(seconds: number): void {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + seconds * 1000);
+  }
+
+  /** A POST as one client behind the trusted proxy. */
+  async function postAs(
+    server: TestServer,
+    client: string,
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Body }> {
+    const response = await fetch(`${server.url}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as Body };
   }
 
   it("gives the channel to the next caller once an unsigned settlement's short lease lapses", async () => {
@@ -2341,6 +2897,7 @@ describe("a settlement slot is held for a day only once the settlement is signed
       sourceChainId: "1",
     });
     expect(early.status).toBe(503);
+    expect(early.body.retryable).toBe(true);
 
     // Five minutes and the clock-drift grace later, it is free again.
     skip(300);
@@ -2358,9 +2915,35 @@ describe("a settlement slot is held for a day only once the settlement is signed
     expect(late.status).toBe(409);
   });
 
-  it("keeps a signed settlement's channel until the settlement's own time bound", async () => {
+  it("gives the channel back when a signed settlement is never followed by a preparation", async () => {
     const server = await startServer();
-    await holdSettlementFor(server, Keypair.random());
+    // a key the caller made up: the account need not exist and nothing is spent
+    const attacker = Keypair.random();
+    await holdSettlementFor(server, attacker);
+
+    skip(60);
+    const blocked = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(blocked.status).toBe(503);
+
+    skip(PROVISIONAL_AND_GRACE_SECONDS);
+    const victim = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(victim.status).toBe(200);
+
+    // the lapsed hold backs nothing any more, so no preparation goes out on it
+    const signed = await preparedAndSigned(server, attacker);
+    expect((await server.post("/submit", { signedXdr: signed })).status).toBe(409);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("keeps a prepared settlement's channel until the settlement's own time bound", async () => {
+    const server = await startServer();
+    await preparedWithSettlementHeld(server, Keypair.random());
 
     skip(3_600);
     const later = await server.post("/settlement", {
@@ -2368,8 +2951,83 @@ describe("a settlement slot is held for a day only once the settlement is signed
       sourceChainId: "1",
     });
     expect(later.status).toBe(503);
+    expect(later.body.retryable).toBe(true);
+  });
+
+  it("gives the slot back soon after the network refused the preparation outright", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    const prepared = await preparedAndSigned(server, user);
+    server.rpc.rejectNext = new MavnaError("sponsored preparation was rejected: txMalformed", {
+      retryable: false,
+    });
+    expect((await server.post("/submit", { signedXdr: prepared })).status).toBe(502);
+
+    skip(PROVISIONAL_AND_GRACE_SECONDS);
+    const next = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("lets one client wait on only a few settlements at once", async () => {
+    const channels = [Keypair.random(), Keypair.random(), Keypair.random(), Keypair.random()];
+    const server = await startServer({
+      channels: new ChannelPool({ channels }),
+      trustProxy: true,
+      settlementsPerClient: 2,
+    });
+    for (const channel of channels) server.rpc.accounts.set(channel.publicKey(), 300n);
+
+    const ask = (client: string, user: Keypair) =>
+      postAs(server, client, "/settlement", { destination: user.publicKey(), sourceChainId: "1" });
+    const repeated = Keypair.random();
+    expect((await ask("203.0.113.1", repeated)).status).toBe(200);
+    expect((await ask("203.0.113.1", Keypair.random())).status).toBe(200);
+    // asking again for an account it already waits on takes nothing new
+    expect((await ask("203.0.113.1", repeated)).status).toBe(200);
+    const third = await ask("203.0.113.1", Keypair.random());
+    expect(third.status).toBe(429);
+    expect(third.body.retryable).toBe(true);
+    expect((await ask("203.0.113.2", Keypair.random())).status).toBe(200);
+  });
+
+  it("grows its own pool to the size it is given, one funded channel per slot in use", async () => {
+    const server = await startServer(
+      { channelPoolSize: 2, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    const funded = () => server.rpc.submissions.filter((s) => s.label === "channel funding");
+
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    expect(funded()).toHaveLength(1);
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(200);
+    expect(funded()).toHaveLength(2);
+    const full = await server.post("/settlement", { destination: Keypair.random().publicKey() });
+    expect(full.status).toBe(503);
+    expect(full.body.retryable).toBe(true);
+    expect(funded()).toHaveLength(2);
+  });
+
+  it("keeps every channel it funded across a restart", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ channelPoolSize: 2, state }, { fundsOwnChannel: true });
+    for (let i = 0; i < 2; i += 1) {
+      await first.post("/settlement", { destination: Keypair.random().publicKey() });
+    }
+    const channels = (await state.read("channels")) as { secrets: string[] };
+    expect(channels.secrets).toHaveLength(2);
   });
 });
+
+/** The provisional lease and the reclaim grace, plus a second. */
+const PROVISIONAL_AND_GRACE_SECONDS = 300 + 30 + 1;
 
 describe("the sponsor does not take a failed read for a missing account", () => {
   function failAccountReads(server: TestServer, user: Keypair): void {
@@ -2400,6 +3058,8 @@ describe("the sponsor does not take a failed read for a missing account", () => 
       });
       expect(response.status, path).toBe(500);
       expect(response.body.retryable, path).toBe(true);
+      // a failure can come after something was sent, so it never claims otherwise
+      expect(response.body.error, path).not.toMatch(/Nothing was spent/);
     }
     logged.mockRestore();
   });
@@ -2474,6 +3134,40 @@ describe("the sponsor funds its own channel once", () => {
   });
 });
 
+describe("the sponsor's state belongs to one network", () => {
+  const mainnet = createNetworkConfig({ id: "mainnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });
+
+  it("will not start on mainnet with state a testnet run wrote", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    await first.server.ready();
+    await holdSettlementFor(first, Keypair.random());
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rpcOnMainnet = new RecordingRpc();
+    rpcOnMainnet.networkPassphrase = Networks.PUBLIC;
+    const second = await startServer({
+      state,
+      rpc: rpcOnMainnet,
+      network: mainnet,
+      networkId: "mainnet",
+    });
+    await expect(second.server.ready()).rejects.toThrow(/written for Test SDF Network/);
+    errors.mockRestore();
+  });
+
+  it("takes state written before it said its network as this network's, and says so", async () => {
+    const state = new MemoryDocumentStore();
+    await state.write("held", { held: {}, settled: {} });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { server } = await startServer({ state });
+    await expect(server.ready()).resolves.toBeUndefined();
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/no network recorded/);
+    errors.mockRestore();
+    expect(await state.read("network")).toEqual({ passphrase: Networks.TESTNET });
+  });
+});
+
 describe("the sponsor and its node agree on the network", () => {
   it("will not start against a node that serves another network", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2486,18 +3180,134 @@ describe("the sponsor and its node agree on the network", () => {
   });
 });
 
-describe("the sponsor refuses state it did not write", () => {
+describe("the sponsor skips stored state it did not write, and still starts", () => {
   it.each([
     ["held", { held: 5 }],
     ["built", { not: "a list" }],
     ["channels", { secrets: "S...", leases: [] }],
-  ])("stops with a named error when %s is not in the shape it writes", async (name, value) => {
+  ])(
+    "starts without a %s document that is not in the shape it writes, and keeps it aside",
+    async (name, value) => {
+      const state = new MemoryDocumentStore();
+      await state.write(name, value);
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { server } = await startServer({ state });
+      await expect(server.ready()).resolves.toBeUndefined();
+      expect(errors.mock.calls.some((call) => String(call.join(" ")).includes(name))).toBe(true);
+      const rejected = (await state.read("rejected")) as Record<string, { value: unknown }[]>;
+      expect(rejected[name]?.[0]?.value).toEqual(value);
+      errors.mockRestore();
+    },
+  );
+
+  it("drops only the built record that is not in the shape it writes", async () => {
     const state = new MemoryDocumentStore();
-    await state.write(name, value);
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    const built = (await state.read("built")) as Record<string, unknown>[];
+    await state.write("built", [
+      ...built,
+      { ...built[0], hash: "ff".repeat(32), sourceChainId: 7 },
+    ]);
+
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { server } = await startServer({ state });
-    await expect(server.ready()).rejects.toThrow(new RegExp(`${name} state .*not in the shape`));
+    const second = await startServer({ state }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
     errors.mockRestore();
+    const submitted = await second.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(200);
+  });
+
+  it("drops only the held settlement that is not in the shape it writes", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const document = (await state.read("held")) as { held: Record<string, unknown> };
+    const stray = Keypair.random().publicKey();
+    await state.write("held", {
+      ...document,
+      held: { ...document.held, [stray]: { xdr: 5 } },
+    });
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
+    errors.mockRestore();
+    const signed = await preparedAndSigned(second, user);
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(200);
+  });
+});
+
+describe("the sponsor reads every request field as the type it must be", () => {
+  it.each(["constructor", "toString", "__proto__"])(
+    "refuses %s as an asset name, which no curated list holds",
+    async (name) => {
+      const server = await startServer({ reserveFunding: "self" });
+      const user = Keypair.random();
+      server.rpc.accounts.set(user.publicKey(), 1n);
+      const answered = await server.post("/prepare", {
+        destination: user.publicKey(),
+        assets: [name],
+      });
+      expect(answered.status).toBe(400);
+      expect(answered.body.error).toBe(
+        "This sponsor only prepares accounts for assets it curates.",
+      );
+    },
+  );
+
+  it("refuses a source chain that is not a chain id, and still starts after a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mavna-sponsor-"));
+    const state = new FileDocumentStore(dir);
+    const first = await startServer({ state });
+    for (const sourceChainId of [7, { a: 1 }, ["base"], "", "x".repeat(200)]) {
+      for (const path of ["/prepare", "/settlement"]) {
+        const answered = await first.post(path, {
+          destination: Keypair.random().publicKey(),
+          sourceChainId,
+        });
+        expect(answered.status, `${path} ${JSON.stringify(sourceChainId)}`).toBe(400);
+      }
+    }
+    first.server.close();
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state: new FileDocumentStore(dir) }, { restartOf: first });
+    await expect(second.server.ready()).resolves.toBeUndefined();
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("refuses the same in self-funded mode", async () => {
+    const server = await startServer({ reserveFunding: "self" });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    const answered = await server.post("/prepare", {
+      destination: user.publicKey(),
+      sourceChainId: 7,
+    });
+    expect(answered.status).toBe(400);
+  });
+
+  it.each([
+    ["/prepare", { destination: 5 }],
+    ["/prepare", { destination: Keypair.random().publicKey(), assets: "USDC" }],
+    ["/prepare", { destination: Keypair.random().publicKey(), assets: [5] }],
+    ["/settlement", { destination: ["G"] }],
+    ["/settlement/commit", { signedXdr: "AAAA", destination: 5 }],
+    ["/submit", { signedXdr: 5 }],
+    ["/settle", { destination: { a: 1 } }],
+    ["/deliver", { txHash: `0x${"ab".repeat(32)}`, domain: "0" }],
+  ])("answers %s with 400 for a field of the wrong type", async (path, body) => {
+    const server = await startServer();
+    const answered = await server.post(path, body);
+    expect(answered.status).toBe(400);
+    expect(answered.body.retryable).toBe(false);
+    expect(server.rpc.submissions).toEqual([]);
   });
 });
 
@@ -2573,6 +3383,9 @@ describe("the sponsor writes its state only when it changed", () => {
       sourceChainId: "1",
     });
     order.length = 0;
+    // a minute on, so holding it moves the lease's end and the lease is rewritten
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 60_000);
     await server.post("/settlement/commit", {
       destination: user.publicKey(),
       signedXdr: signXdr(built.body.xdr as string, user),
@@ -2677,7 +3490,7 @@ describe("what the sponsor holds survives a restart", () => {
     const server = await startServer({ state });
     await preparedWithSettlementHeld(server, Keypair.random());
     const counted = (await state.read("caps")) as Record<string, CapUsage>;
-    expect(Object.values(counted)[0]?.started["expensive-gas"]).toBe(1);
+    expect(Object.values(counted)[0]?.started["cheap-gas"]).toBe(1);
   });
 
   it("keeps the channel it funded itself, rather than funding another", async () => {
