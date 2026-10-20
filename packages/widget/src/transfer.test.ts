@@ -2186,6 +2186,23 @@ describe("whether closing the page is safe while Circle attests", () => {
     expect(safe).toBeGreaterThan(paused);
   });
 
+  it("goes from paused to safe on the answers the sponsor really sends: unknown to Circle, then pending", async () => {
+    // since round 4 the sponsor watches only burns Circle knows: a plain 404 says
+    // nothing of watching, and Circle's pending answer comes back watched
+    deliverReplies = [
+      [404, { error: "Not attested yet.", retryable: true }],
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    const notes = attestNotes(seen).map(String);
+    const paused = notes.findIndex((n) => /Closing this page pauses the delivery/.test(n));
+    const safe = notes.findIndex((n) => /Safe to close this page/.test(n));
+    expect(paused).toBe(0);
+    expect(safe).toBeGreaterThan(paused);
+  });
+
   it("is not said for a new account, which its own wallet still has to set up", async () => {
     deliverReplies = [
       [404, { error: "Not attested yet.", retryable: true, watching: true }],
