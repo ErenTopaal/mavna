@@ -51,7 +51,8 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     # Caps, held settlements and channel keys. It holds secret keys, so it is a
-    # named volume rather than a directory in the checkout.
+    # named volume rather than a directory in the checkout. The state records
+    # its network, and the sponsor refuses to start on another one against it.
     volumes:
       - .:/repo
       - sponsor-state:/var/lib/mavna

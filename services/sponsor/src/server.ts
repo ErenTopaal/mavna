@@ -353,6 +353,8 @@ const documentShapes = {
   }),
 } as const;
 
+const networkShape = z.object({ passphrase: z.string() });
+
 /** What load set aside, by document, written once so nothing is lost. */
 type Rejected = Record<string, { atUnix: number; entry?: string; value: unknown }[]>;
 
@@ -647,6 +649,42 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     channels.limit(destination, held.channel, nowUnix() + PROVISIONAL_LEASE_SECONDS);
   }
 
+  /**
+   * State is one network's: channel keys, leases, held settlements and cap
+   * counts mean nothing on another, and acted on there they fail every
+   * settlement. So the network is written down with them, and a sponsor started
+   * on another network against the same directory refuses to start.
+   */
+  async function checkNetwork(
+    reject: (name: string, value: unknown, entry?: string) => void,
+  ): Promise<void> {
+    const passphrase = options.network.passphrase;
+    const recorded = await state.read("network");
+    const parsed = networkShape.safeParse(recorded);
+    if (parsed.success) {
+      if (parsed.data.passphrase === passphrase) return;
+      throw new Error(
+        `The sponsor's stored state was written for ${parsed.data.passphrase}, and this ` +
+          `sponsor runs on ${passphrase} (MAVNA_NETWORK). Give each network its own ` +
+          "MAVNA_STATE_DIR.",
+      );
+    }
+    if (recorded !== undefined) {
+      reject("network", recorded);
+    } else {
+      const names = ["built", "held", "channels", "caps"] as const;
+      const existing = await Promise.all(names.map((name) => state.read(name)));
+      if (existing.some((value) => value !== undefined)) {
+        // written by a version that did not record its network; the deployment
+        // that wrote it is the one starting now, on the network it was set up for
+        console.error(
+          `[sponsor] the stored state has no network recorded; taking it as ${passphrase}'s.`,
+        );
+      }
+    }
+    await state.write("network", { passphrase });
+  }
+
   /** What is written down, read back. Runs once, before the first request. */
   async function load(): Promise<void> {
     const now = nowUnix();
@@ -674,6 +712,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       reject(name, value);
       return undefined;
     };
+
+    await checkNetwork(reject);
 
     const builtDocument = await documentOf("built");
     if (builtDocument !== undefined) {

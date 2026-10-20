@@ -2987,6 +2987,40 @@ describe("the sponsor funds its own channel once", () => {
   });
 });
 
+describe("the sponsor's state belongs to one network", () => {
+  const mainnet = createNetworkConfig({ id: "mainnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });
+
+  it("will not start on mainnet with state a testnet run wrote", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    await first.server.ready();
+    await holdSettlementFor(first, Keypair.random());
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rpcOnMainnet = new RecordingRpc();
+    rpcOnMainnet.networkPassphrase = Networks.PUBLIC;
+    const second = await startServer({
+      state,
+      rpc: rpcOnMainnet,
+      network: mainnet,
+      networkId: "mainnet",
+    });
+    await expect(second.server.ready()).rejects.toThrow(/written for Test SDF Network/);
+    errors.mockRestore();
+  });
+
+  it("takes state written before it said its network as this network's, and says so", async () => {
+    const state = new MemoryDocumentStore();
+    await state.write("held", { held: {}, settled: {} });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { server } = await startServer({ state });
+    await expect(server.ready()).resolves.toBeUndefined();
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/no network recorded/);
+    errors.mockRestore();
+    expect(await state.read("network")).toEqual({ passphrase: Networks.TESTNET });
+  });
+});
+
 describe("the sponsor and its node agree on the network", () => {
   it("will not start against a node that serves another network", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
