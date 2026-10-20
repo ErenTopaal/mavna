@@ -4733,3 +4733,84 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
     expect(await watched(state)).toHaveLength(1);
   });
 });
+
+describe("round 3: every /deliver answer says whether the burn is being watched", () => {
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const burn = (n: number) => `0x${(1000 + n).toString(16).padStart(64, "0")}`;
+
+  function irisAnswers(message: string | undefined): void {
+    stubIris(() =>
+      message === undefined
+        ? new Response("{}", { status: 404 })
+        : new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+            status: 200,
+          }),
+    );
+  }
+
+  async function watched(state: MemoryDocumentStore): Promise<string[]> {
+    const document = (await state.read("delivery-watch")) as
+      | { entries: { txHash: string }[] }
+      | undefined;
+    return (document?.entries ?? []).map((entry) => entry.txHash);
+  }
+
+  it("says watching on a 404, and the list is on disk when the answer arrives", async () => {
+    irisAnswers(undefined);
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const answered = await server.post("/deliver", { txHash: burn(1), domain: 0 });
+    expect(answered.status).toBe(404);
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(1)]);
+  });
+
+  it("says watching on a 409 for a recipient that cannot hold USDC yet", async () => {
+    irisAnswers(cctpMessage(Keypair.random().publicKey()));
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    server.rpc.prepare = async () => {
+      throw new Error("HostError: Error(Contract, #13) trustline entry is missing for account");
+    };
+    const answered = await server.post("/deliver", { txHash: burn(2), domain: 0 });
+    expect(answered.status).toBe(409);
+    expect(answered.body.kind).toBe("recipient-not-ready");
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(2)]);
+  });
+
+  it("says nothing of watching once delivered, and stops watching it", async () => {
+    const state = new MemoryDocumentStore();
+    irisAnswers(undefined);
+    const server = await startServer({ buildDelivery, state });
+    expect((await server.post("/deliver", { txHash: burn(3), domain: 0 })).body.watching).toBe(
+      true,
+    );
+    irisAnswers(cctpMessage(Keypair.random().publicKey()));
+    const delivered = await server.post("/deliver", { txHash: burn(3), domain: 0 });
+    expect(delivered.status).toBe(200);
+    expect(delivered.body.kind).toBe("delivered");
+    expect(delivered.body.watching ?? false).toBe(false);
+    expect(await watched(state)).toEqual([]);
+  });
+
+  it("says nothing of watching when the burn could not be put on the list", async () => {
+    irisAnswers(undefined);
+    const state = new MemoryDocumentStore();
+    const full = await startServer({
+      buildDelivery,
+      state,
+      watchLimits: { perClient: 1, total: 1 },
+    });
+    expect((await full.post("/deliver", { txHash: burn(4), domain: 0 })).body.watching).toBe(true);
+    const past = await full.post("/deliver", { txHash: burn(5), domain: 0 });
+    expect(past.status).toBe(404);
+    expect(past.body.watching ?? false).toBe(false);
+    const malformed = await full.post("/deliver", { txHash: "nope", domain: 0 });
+    expect(malformed.body.watching ?? false).toBe(false);
+    const self = await startServer({ buildDelivery, reserveFunding: "self" });
+    expect(
+      (await self.post("/deliver", { txHash: burn(6), domain: 0 })).body.watching ?? false,
+    ).toBe(false);
+  });
+});

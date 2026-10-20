@@ -2996,7 +2996,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const key = watchKey(txHash, domain);
     if (result.next === "watch") watchBurn(txHash, domain, client);
     if (result.next === "done" || result.next === "never") forgetBurn(key);
-    await answer(res, result.status, result.body, origin);
+    // Said only when it is true: the widget leaves the burn to the sponsor on
+    // it, and answer() writes the list down before this goes out.
+    await answer(
+      res,
+      result.status,
+      watch.has(key) ? { ...result.body, watching: true } : result.body,
+      origin,
+    );
   }
 
   /** Start watching a burn Circle has not attested yet, within the limits. */
@@ -3208,7 +3215,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     return {
       status: outcome.kind === "recipient-not-ready" ? 409 : 200,
       body: { ...outcome, ...settled },
-      next: outcome.kind === "recipient-not-ready" ? "later" : "done",
+      // not ready yet is a wait, so the sweep delivers it once the account is
+      next: outcome.kind === "recipient-not-ready" ? "watch" : "done",
     };
   }
 }
