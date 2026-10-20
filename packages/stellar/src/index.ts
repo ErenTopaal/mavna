@@ -28,6 +28,7 @@ export type { FreshRead, LedgerFloor, RpcClientOptions, SubmitOptions } from "./
 export {
   AccountNotFound,
   createLedgerFloor,
+  InclusionUnknown,
   RpcClient,
   SubmitExhausted,
   SubmitRejected,
