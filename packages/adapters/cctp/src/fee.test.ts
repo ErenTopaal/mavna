@@ -113,6 +113,17 @@ describe("a pair Circle does not route", () => {
     expect("reason" in result && result.reason).toBe("temporarily-unavailable");
   });
 
+  it("declines rather than throws on a rate it cannot read exactly", async () => {
+    for (const minimumFee of [-1, 1e-7]) {
+      const result = await quoteWithFeeReply(() =>
+        Response.json([{ finalityThreshold: 2000, minimumFee }]),
+      );
+      expect("reason" in result && result.reason, String(minimumFee)).toBe(
+        "temporarily-unavailable",
+      );
+    }
+  });
+
   it("carries a fractional rate into the quoted fee", async () => {
     const result = await quoteWithFeeReply(() =>
       Response.json([

@@ -651,7 +651,18 @@ export class CctpAdapter implements BridgeAdapter {
         "Circle is not quoting the standard path for this route right now.",
       );
     }
-    return circleFee(amount, standard.minimumFee);
+    try {
+      return circleFee(amount, standard.minimumFee);
+    } catch (cause) {
+      // A rate that cannot be read exactly is not priced in a guess, and a
+      // quote answers with a reason rather than throwing.
+      return this.decline(
+        "temporarily-unavailable",
+        cause instanceof MavnaError
+          ? cause.message
+          : "Circle quoted a fee that could not be read. It is worth trying again shortly.",
+      );
+    }
   }
 
   private stellarUsdcAsset(): Asset {
