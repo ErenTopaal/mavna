@@ -76,10 +76,16 @@ export class ChannelPool {
   }
 
   /** Rebuild a pool from what `snapshot` wrote, keys and live leases both. */
-  static fromSnapshot(snapshot: ChannelPoolSnapshot, nowUnix: number): ChannelPool {
+  static fromSnapshot(
+    snapshot: ChannelPoolSnapshot,
+    nowUnix: number,
+    keep?: (owner: string) => boolean,
+  ): ChannelPool {
     const pool = new ChannelPool({
       channels: snapshot.secrets.map((secret) => Keypair.fromSecret(secret)),
     });
+    // before the leases, so one past its bound that must be kept is kept
+    if (keep !== undefined) pool.holdWhile(keep);
     pool.restoreLeases(snapshot.leases, nowUnix);
     return pool;
   }
@@ -106,7 +112,7 @@ export class ChannelPool {
    */
   restoreLeases(leases: readonly LeaseRecord[], nowUnix: number): void {
     for (const lease of leases) {
-      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix) continue;
+      if (lease.untilUnix + RECLAIM_GRACE_SECONDS < nowUnix && !this.keep(lease.owner)) continue;
       const index = this.available.findIndex((channel) => channel.address === lease.channel);
       const channel = this.available[index];
       if (channel === undefined) continue;

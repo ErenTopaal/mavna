@@ -4814,3 +4814,66 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
     ).toBe(false);
   });
 });
+
+describe("round 3: a preparation that lands after its window keeps its settlement's channel", () => {
+  it("keeps the lease when the preparation lands late, so the loan still settles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const at = (seconds: number) => vi.setSystemTime(t0 + seconds * 1000);
+    const server = await startServer();
+    const user = Keypair.random();
+    await holdSettlementFor(server, user);
+    at(400);
+    const signed = await preparedAndSigned(server, user);
+    at(625);
+    const stall = server.rpc.stallNext("sponsored preparation");
+    const submitting = server.post("/submit", { signedXdr: signed });
+    await stall.reached;
+    // included only once the window and its grace are over
+    at(640);
+    stall.release();
+    expect((await submitting).status).toBe(200);
+
+    const other = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+  });
+
+  it("keeps it across a restart while the preparation is still on its way", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const at = (seconds: number) => vi.setSystemTime(t0 + seconds * 1000);
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    at(400);
+    const signed = await preparedAndSigned(first, user);
+    at(625);
+    const stall = first.rpc.stallNext("sponsored preparation");
+    const submitting = first.post("/submit", { signedXdr: signed });
+    await stall.reached;
+
+    at(700);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await second.server.ready();
+    const other = await second.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(other.status).toBe(503);
+
+    stall.release();
+    await submitting;
+    second.rpc.holding(user, PLENTY);
+    const settled = await second.post("/settle", { destination: user.publicKey() });
+    logged.mockRestore();
+    expect(settled.body.settled).toBe(true);
+  });
+});

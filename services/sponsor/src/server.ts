@@ -726,8 +726,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    */
   function backedByLanding(account: string, held: HeldSettlement): void {
     provisionalSince.delete(account);
-    if (held.channel !== undefined) {
-      channels?.extend(account, held.channel, held.maxTimeUnix, nowUnix());
+    if (held.channel === undefined || channels === undefined) return;
+    if (!channels.extend(account, held.channel, held.maxTimeUnix, nowUnix())) {
+      // the lease is kept while anything is in flight or landed on it, so this
+      // means it was lost some other way; said, since the loan now rides on it
+      console.error(
+        `[sponsor] a preparation landed for ${account}, and its settlement's channel ` +
+          `${held.channel} is no longer leased to it`,
+      );
     }
   }
 
@@ -924,7 +930,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       if (channels !== undefined) {
         adopt(channels).restoreLeases(leases, now);
       } else if (secrets.length > 0) {
-        channels = adopt(ChannelPool.fromSnapshot({ secrets, leases }, now));
+        channels = adopt(ChannelPool.fromSnapshot({ secrets, leases }, now, keptLease));
       }
       const pending = channelDocument.pending;
       if (pending !== undefined && !secretShape.safeParse(pending).success) {
@@ -1091,8 +1097,16 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * reused, its sequence would go to someone else while the reserve is out.
    */
   function adopt(pool: ChannelPool): ChannelPool {
-    pool.holdWhile(inFlight);
+    pool.holdWhile(keptLease);
     return pool;
+  }
+
+  /**
+   * A lease the pool must not reclaim at its bound: a preparation may still
+   * land on it, or one has and the settlement that repays it rides on it.
+   */
+  function keptLease(owner: string): boolean {
+    return inFlight(owner) || landed(owner);
   }
 
   /** Failed fundings in a row, and when the next may be tried. */
