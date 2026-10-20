@@ -740,6 +740,15 @@ export class Flow extends React.Component<FlowProps, State> {
     );
   }
 
+  /** The logo: the form, quoting afresh when a transfer has just ended. */
+  home(): void {
+    if (this.state.phase === "ended" || this.state.phase === "arrived") {
+      this.sendAnother();
+      return;
+    }
+    this.go("send", "pop");
+  }
+
   back(): void {
     // an ended transfer's review is its spent quote: back is the form, quoting afresh
     if (this.state.phase === "ended" || this.state.phase === "arrived") {
@@ -1341,7 +1350,10 @@ export class Flow extends React.Component<FlowProps, State> {
   } {
     const steps = this.state.steps;
     if (steps.length === 0) return { stepRows: [], stepEyebrow: "", stepCount: "" };
-    let i = steps.findIndex((step) => step.phase === "pending" || step.phase === "blocked");
+    // a failed ending's step is where it stopped, so it counts as the current one
+    let i = steps.findIndex(
+      (step) => step.phase === "pending" || step.phase === "blocked" || step.phase === "failed",
+    );
     if (i < 0)
       i = arrived
         ? steps.length - 1
@@ -1624,7 +1636,7 @@ function renderApp(c: Flow): ReactNode {
       >
         <button
           type="button"
-          onClick={() => c.go("send", "pop")}
+          onClick={() => c.home()}
           aria-label="Mavna home"
           className={pseudo({ hover: "opacity:0.75", active: "transform:translateY(1px)" })}
           style={s(
@@ -1753,7 +1765,7 @@ function renderApp(c: Flow): ReactNode {
               </div>
             ) : null}
 
-            {arrived || ended ? (
+            {(arrived || ended) && st.screen === "flight" ? (
               <div style={s("flex:0 0 auto;padding-top:12px")}>
                 <button
                   type="button"
@@ -2230,7 +2242,7 @@ function renderCompact(c: Flow): ReactNode {
         </div>
       ) : null}
 
-      {arrived || ended ? (
+      {(arrived || ended) && st.screen === "flight" ? (
         <div style={s("flex:0 0 auto;padding:10px 16px 16px")}>
           <button
             type="button"
