@@ -285,6 +285,12 @@ describe("deliver-cctp", () => {
     const root = layout({ link: ["packages", "services"], env: "SPONSOR_SECRET_KEY=S\n" });
     const result = run(root, "deliver-cctp.mjs", ["--tx=0xabc"], {
       answers: {
+        // the node is asked which network it serves before Circle is
+        "https://soroban-testnet.stellar.org#getNetwork": {
+          body: {
+            result: { passphrase: "Test SDF Network ; September 2015", protocolVersion: 23 },
+          },
+        },
         "https://iris-api-sandbox.circle.com": { status: 429, body: "<html>slow down</html>" },
       },
     });
