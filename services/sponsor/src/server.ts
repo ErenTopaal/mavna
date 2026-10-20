@@ -18,7 +18,6 @@ import {
   buildPreparation,
   buildSettlement,
   classifyAddress,
-  inspectDestination,
   readAccountEntry,
   SubmitRejected,
   spareStroops,
@@ -27,12 +26,14 @@ import {
 } from "@mavna/stellar";
 import {
   Account,
+  Address,
   type Asset,
   Keypair,
   Operation,
   StrKey,
   type Transaction,
   TransactionBuilder,
+  xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
 import { BuiltLedger, type BuiltRecord, type Repayment, signedBy } from "./built.js";
@@ -1263,10 +1264,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       await prepareSelfFunded(body.destination, body.sourceChainId, assets as Asset[], res, origin);
       return;
     }
-    const created = !(await accountExists(
-      options.rpc,
-      classified.trustlineHolder ?? body.destination,
-    ));
+    const holder = classified.trustlineHolder ?? body.destination;
+    const created = !(await accountExists(options.rpc, holder));
+    const usdcLine = assets[0];
+    if (
+      !created &&
+      usdcLine !== undefined &&
+      (await readTrustline(options.rpc, holder, usdcLine)) !== undefined
+    ) {
+      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      return;
+    }
 
     const sponsorAccount = await options.rpc.loadAccount(keypair.publicKey());
     const transaction = buildPreparation({
@@ -1526,6 +1534,17 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
 
     const createdAccount = !(await accountExists(options.rpc, account));
+    // An account this sponsor already prepared holds the line it sponsored;
+    // building again for it is harmless, since nothing can replace a prepared
+    // settlement. Anyone else holding USDC has nothing for the sponsor to open.
+    if (
+      !createdAccount &&
+      !backed(account) &&
+      (await readTrustline(options.rpc, account, usdc)) !== undefined
+    ) {
+      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      return;
+    }
 
     if (await busyBuilding(res, origin)) return;
     let pool = await ensureChannels();
@@ -1979,9 +1998,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     );
     const payment = payments[0];
     if (payments.length !== 1 || payment === undefined) return false;
-    const state = await inspectDestination(options.rpc, destination, payment.sendAsset);
-    if (state.trustline === undefined || !state.trustline.authorized) return false;
-    return BigInt(state.trustline.balanceStroops) >= decimalToStroops(payment.sendMax);
+    const line = await readTrustline(options.rpc, signerFor(destination), payment.sendAsset);
+    if (line === undefined || !line.authorized) return false;
+    // what the owner's own offers have promised away cannot pay the settlement
+    return line.balanceStroops - line.sellingStroops >= decimalToStroops(payment.sendMax);
   }
 
   /** Countersign what the user signed, and submit it. This is where money moves. */
@@ -2117,6 +2137,18 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const source = classifySourceChain(record.sourceChainId, DEFAULT_CHEAP_GAS_CHAINS);
     let result: Awaited<ReturnType<RpcClient["submit"]>>;
     try {
+      // The account may have opened the line itself since it was prepared. The
+      // preparation would then sponsor nothing, and the settlement fail on a
+      // line the sponsor never sponsored, counted as a stranding.
+      const usdc = options.curatedAssets.USDC;
+      if (
+        usdc !== undefined &&
+        !held.repays.createdAccount &&
+        (await readTrustline(options.rpc, record.signer, usdc)) !== undefined
+      ) {
+        await refuse(record, res, origin, 409, ALREADY_HOLDS_USDC);
+        return;
+      }
       const decision = await caps.check(source);
       if (!decision.allowed) {
         await refuse(record, res, origin, 429, decision.reason, true);
@@ -2918,3 +2950,47 @@ async function accountExists(rpc: RpcClient, address: string): Promise<boolean> 
 function stripUndefined<T extends Record<string, unknown>>(record: T): T {
   return Object.fromEntries(Object.entries(record).filter(([, v]) => v !== undefined)) as T;
 }
+
+/** An account's trustline as the settlement and the preparation need to see it. */
+interface TrustlineState {
+  readonly balanceStroops: bigint;
+  /** Promised to the account's own open offers, so not spendable. */
+  readonly sellingStroops: bigint;
+  readonly authorized: boolean;
+}
+
+/** Trustline flag bit meaning the issuer authorised this account to hold the asset. */
+const AUTHORIZED_FLAG = 1;
+
+/** The account's trustline for an asset, or undefined when it has none. */
+async function readTrustline(
+  rpc: RpcClient,
+  holder: string,
+  asset: Asset,
+): Promise<TrustlineState | undefined> {
+  const accountId = Address.fromString(holder).toScAddress().accountId();
+  const key = xdr.LedgerKey.trustline(
+    new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXDRObject() }),
+  );
+  const entries = await rpc.read(`trustline ${holder}`, async () => {
+    const response = await rpc.server.getLedgerEntries(key);
+    return { value: response.entries, ledger: response.latestLedger };
+  });
+  const found = entries.find((entry) => entry.val.switch().name === "trustline");
+  if (found === undefined) return undefined;
+  const line = found.val.trustLine();
+  const ext = line.ext();
+  return {
+    balanceStroops: BigInt(line.balance().toString()),
+    sellingStroops: ext.switch() === 1 ? BigInt(ext.v1().liabilities().selling().toString()) : 0n,
+    authorized: (line.flags() & AUTHORIZED_FLAG) !== 0,
+  };
+}
+
+/**
+ * Said when the account already has the line the sponsor would open. Fronting
+ * it would sponsor nothing, and the settlement's revoke would then fail on a
+ * line the sponsor never sponsored, which reads as a stranding for free.
+ */
+const ALREADY_HOLDS_USDC =
+  "That account already holds USDC, so there is no trustline for this sponsor to open.";

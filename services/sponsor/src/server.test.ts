@@ -99,6 +99,8 @@ class RecordingRpc extends RpcClient {
 
   /** USDC trustline balances in stroops, by account. */
   readonly trustlines = new Map<string, bigint>();
+  /** USDC promised to the account's own open offers, in stroops, by account. */
+  readonly sellingLiabilities = new Map<string, bigint>();
   /** XLM balances in stroops, by account; ten XLM when not set. */
   readonly nativeBalances = new Map<string, bigint>();
 
@@ -201,6 +203,9 @@ class RecordingRpc extends RpcClient {
         StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
       );
       if (balance === undefined) return undefined;
+      const selling = this.sellingLiabilities.get(
+        StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
+      );
       return xdr.LedgerEntryData.trustline(
         new xdr.TrustLineEntry({
           accountId: line.accountId(),
@@ -208,7 +213,19 @@ class RecordingRpc extends RpcClient {
           balance: xdr.Int64.fromString(balance.toString()),
           limit: xdr.Int64.fromString("9223372036854775807"),
           flags: 1,
-          ext: new xdr.TrustLineEntryExt(0),
+          ext:
+            selling === undefined
+              ? new xdr.TrustLineEntryExt(0)
+              : new xdr.TrustLineEntryExt(
+                  1,
+                  new xdr.TrustLineEntryV1({
+                    liabilities: new xdr.Liabilities({
+                      buying: xdr.Int64.fromString("0"),
+                      selling: xdr.Int64.fromString(selling.toString()),
+                    }),
+                    ext: new xdr.TrustLineEntryV1Ext(0),
+                  }),
+                ),
         }),
       );
     }
@@ -1390,8 +1407,10 @@ describe("any rail can trigger a held settlement", () => {
     });
     const server = await startServer({ caps });
     const victim = Keypair.random();
-    server.rpc.holding(victim, PLENTY);
     await holdSettlementFor(server, victim);
+    // a balance a stranger could point at: the line shows only for this probe,
+    // since a line that existed before the preparation would not be sponsored
+    server.rpc.holding(victim, PLENTY);
     // How the network would answer a settlement whose revokes have nothing to revoke.
     const onChainFailure = new MavnaError("settlement was rejected: opNoSponsorship", {
       retryable: false,
@@ -1405,6 +1424,8 @@ describe("any rail can trigger a held settlement", () => {
     expect(server.rpc.rejectNext).toBe(onChainFailure);
     expect((await caps.check("expensive-gas")).allowed).toBe(true);
     server.rpc.rejectNext = undefined;
+    server.rpc.trustlines.delete(victim.publicKey());
+    server.rpc.accounts.delete(victim.publicKey());
 
     // Still held: the victim's own preparation goes through and the settlement
     // fires once it has landed.
@@ -1412,6 +1433,7 @@ describe("any rail can trigger a held settlement", () => {
       signedXdr: await preparedAndSigned(server, victim),
     });
     expect(submitted.status).toBe(200);
+    server.rpc.holding(victim, PLENTY);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 31_000);
     const later = await server.post("/settle", { destination: victim.publicKey() });
@@ -1956,6 +1978,69 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(server.rpc.submissions).toHaveLength(1);
     expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
     expect((await caps.usage()).stranded).toBe(0);
+  });
+});
+
+describe("the sponsor fronts only a trustline that does not exist yet", () => {
+  it("declines to build for an account that already holds USDC", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    server.rpc.holding(user, 0n);
+    for (const path of ["/settlement", "/prepare"]) {
+      const answered = await server.post(path, {
+        destination: user.publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(answered.status, path).toBe(400);
+      expect(answered.body.error, path).toMatch(/already holds USDC/);
+    }
+  });
+
+  it("will not countersign once the account opened the trustline itself, and counts nothing", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startServer({ caps });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    await holdSettlementFor(server, user);
+    const signed = await preparedAndSigned(server, user);
+    // opened from the account's own XLM between building and submitting
+    server.rpc.holding(user, 600_000_000n);
+
+    const submitted = await server.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(409);
+    expect(server.rpc.submissions).toEqual([]);
+
+    // so no settlement can fail against a line the sponsor never sponsored
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      false,
+    );
+    skipPastSettlementWindow();
+    await server.post("/settle", { destination: user.publicKey() });
+    expect(await caps.usage()).toMatchObject({ stranded: 0 });
+    expect((await caps.usage()).started).toEqual({ "expensive-gas": 0, "cheap-gas": 0 });
+  });
+});
+
+describe("the sponsor counts only USDC the account can spend", () => {
+  it("does not settle while the USDC that would cover it is promised to the owner's offers", async () => {
+    const server = await startServer();
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    server.rpc.sellingLiabilities.set(user.publicKey(), PLENTY);
+
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(asked.body.settlementRetryable).toBe(true);
+    expect(server.rpc.submissions).toEqual([]);
+
+    server.rpc.sellingLiabilities.set(user.publicKey(), 0n);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 31_000);
+    expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
+      true,
+    );
   });
 });
 

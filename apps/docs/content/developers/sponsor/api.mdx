@@ -105,7 +105,9 @@ Answers:
 - `200` `{ "xdr": "...", "sponsor": "G..." }`
 - `400` when the destination is missing, is not an address a Stellar account can
   use, can already receive (nothing to prepare), names an asset outside the
-  curated list, or asks for any set of assets other than `["USDC"]`
+  curated list, asks for any set of assets other than `["USDC"]`, or already
+  holds USDC (there is no trustline for the sponsor to open). Any field of the
+  wrong type is also a `400`
 - `429` when a daily cap refuses, with the reason. The caps are checked here,
   before anyone is asked for a signature
 
@@ -140,7 +142,8 @@ Answers:
   one"), when no settlement is held for the account, when the preparation does
   not match the settlement held for it, or when another preparation has already
   been submitted against that settlement, whether it is still on its way or has
-  landed. One settlement repays one preparation
+  landed, or when the account opened the USDC trustline itself after the
+  preparation was built. One settlement repays one preparation
 - `429` when a cap refuses at submission, retryable
 - `409`, retryable, with `"prepareAgain": true`, when something else the sponsor
   signed took the preparation's sequence while the user was signing. It can never
@@ -170,7 +173,8 @@ Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
 Answers:
 
 - `200` `{ "xdr": "...", "channel": "G..." }`
-- `400` for a missing or unusable destination, or one that needs no settling
+- `400` for a missing or unusable destination, one that needs no settling, or an
+  account that already holds USDC and has no preparation from this sponsor
 - `409`, retryable, while the account's previous settlement is still being
   submitted
 - `429` on a cap refusal, or, retryable, when this client address already has as
