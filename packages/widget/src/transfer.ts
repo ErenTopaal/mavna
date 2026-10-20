@@ -595,10 +595,12 @@ async function deliverToStellar(
   // The sponsor's first answer says whether it keeps delivering by itself once
   // this page is gone; only then is closing it safe. A new account still needs
   // its own wallet to be set up, which no sponsor can do for it.
-  let told = ownDelivery;
+  // said once, and said again only to upgrade: a later answer that the sponsor is
+  // watching makes closing safe after all, while nothing ever downgrades it
+  let told: "nothing" | "paused" | "settled" = ownDelivery ? "settled" : "nothing";
   const tellClosing = (watching: boolean): void => {
-    if (told) return;
-    told = true;
+    if (told === "settled" || (told === "paused" && !watching)) return;
+    told = watching ? "settled" : "paused";
     patch("attest", {
       phase: "pending",
       note: !watching
