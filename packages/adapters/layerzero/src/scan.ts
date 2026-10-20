@@ -104,9 +104,9 @@ export class ScanService {
  * What a status name means for someone waiting on their money.
  *
  * Split into three rather than two on purpose. "Still going" and "stopped and
- * needs you" are different states with different copy, and a transfer whose
- * payload was stored is stopped in a way that is recoverable by anyone, which is
- * worth saying rather than burying under a generic failure.
+ * needs you" are different states with different copy, and a stopped message
+ * is often recoverable, which is worth saying rather than burying under a
+ * generic failure.
  */
 export function classifyScanStatus(
   name: ScanStatusName | undefined,
@@ -139,8 +139,9 @@ export function classifyScanStatus(
  *
  * Never a message with no action beside it, which is what the execution model
  * requires and what the prior art gets wrong: its failure-message map is empty.
- * The three cases here are genuinely different. A stored payload is held rather
- * than lost and anyone at all can push it through. A blocked message is somebody
+ * The cases here are genuinely different. A failed execution can be run again
+ * by anyone once its cause clears. A stored payload is held rather than lost,
+ * though how it clears is not documented. A blocked message is somebody
  * else's problem clearing in front of it, so waiting is the whole remedy. A
  * burned or malformed one is over, and saying so plainly beats letting someone
  * retry forever hoping.
@@ -152,12 +153,14 @@ export function remedyForStatus(
 ): Remedy {
   switch (name) {
     case "PAYLOAD_STORED":
+      // LayerZero's V2 docs say nothing about clearing a stored payload, so no
+      // action is promised: the scan page and the reference are what is known
       return {
-        kind: "claim",
-        at: scanUrl,
+        kind: "contact",
+        reference: scanUrl,
         because:
-          "Delivery ran out of gas or reverted on Stellar, and the message is being held " +
-          "rather than lost. Anyone can push it through from here.",
+          "Delivery reverted on Stellar and LayerZero is holding the message rather than " +
+          "losing it. The scan page shows its state; quote it to support to have it delivered.",
       };
     case "BLOCKED":
       return {
@@ -183,10 +186,14 @@ export function remedyForStatus(
         because: "LayerZero could not read the message that was sent, so it cannot be delivered.",
       };
     case "FAILED":
+      // LayerZero's debugging docs: Scan shows the execution error and can run
+      // the message again, and the endpoint's lzReceive behind it is open to anyone
       return {
         kind: "claim",
         at: scanUrl,
-        because: "Delivery failed. The verifiers' and executor's own record of why is here.",
+        because:
+          "The message reached Stellar but running it there failed. The scan page shows why, " +
+          "and once that cause has cleared anyone can run it again from there.",
       };
     default:
       return {
