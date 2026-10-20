@@ -28,7 +28,7 @@ import {
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
-import { Address, Asset as StellarAsset, xdr } from "@stellar/stellar-sdk";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import {
   OneClickApi,
   type OneClickOptions,
@@ -176,9 +176,6 @@ export class NearIntentsAdapter implements BridgeAdapter {
     if ("source" in pair) return pair;
     const { origin, delivery } = pair;
 
-    const lane = await this.laneFor(request.destination, delivery);
-    if ("source" in lane) return lane;
-
     let reply: QuoteReply;
     try {
       reply = await this.api.quote(
@@ -207,6 +204,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
     const delivered = stellarAsset(this.network, delivery);
     const arriving = BigInt(reply.quote.amountOut);
     const floor = BigInt(reply.quote.minAmountOut);
+
+    // read once the solvers have said how much lands, so a trustline is held to it
+    const lane = await this.laneFor(request.destination, delivery, arriving);
+    if ("source" in lane) return lane;
 
     const reserve = quoteReserve({
       lane,
@@ -581,42 +582,31 @@ export class NearIntentsAdapter implements BridgeAdapter {
   private async laneFor(
     destination: string,
     delivery: StellarDelivery,
+    arriving: bigint,
   ): Promise<DestinationLane | RouteRejection> {
-    if (delivery.id === "native") {
-      let exists: boolean;
-      try {
-        exists = await this.accountExists(destination);
-      } catch (cause) {
-        return this.unreadDestination(cause);
-      }
-      if (!exists) {
-        return this.decline(
-          "destination-unsupported",
-          "That Stellar account does not exist yet, and NEAR Intents cannot be relied on to " +
-            "create it. Send to an account that already has some XLM in it, or ask for USDC.",
-        );
-      }
-      return { kind: "ready", slotsNeeded: 0 };
-    }
-
+    const native = delivery.id === "native";
     let lane: DestinationLane;
     try {
-      lane = (await inspectDestination(this.rpc, destination, classicAsset(delivery.id))).lane;
+      lane = (
+        await inspectDestination(
+          this.rpc,
+          destination,
+          native ? StellarAsset.native() : classicAsset(delivery.id),
+          native ? {} : { amountStroops: arriving },
+        )
+      ).lane;
     } catch (cause) {
       return this.unreadDestination(cause);
     }
     if (lane.kind === "unusable") return this.decline("destination-unsupported", lane.reason);
+    if (native && lane.kind === "needs-account") {
+      return this.decline(
+        "destination-unsupported",
+        "That Stellar account does not exist yet, and NEAR Intents cannot be relied on to " +
+          "create it. Send to an account that already has some XLM in it, or ask for USDC.",
+      );
+    }
     return lane;
-  }
-
-  private async accountExists(address: string): Promise<boolean> {
-    const accountId = Address.fromString(address).toScAddress().accountId();
-    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }));
-    const entry = await this.rpc.read(`account ${address}`, async () => {
-      const response = await this.rpc.server.getLedgerEntries(key);
-      return { value: response.entries[0], ledger: response.latestLedger };
-    });
-    return entry !== undefined;
   }
 
   private unreadDestination(cause: unknown): RouteRejection {

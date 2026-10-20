@@ -85,6 +85,8 @@ const BASE_RESERVE = 5_000_000;
 interface Ledger {
   account: boolean;
   trustline: boolean;
+  /** The trustline's limit, when a test makes it tight. */
+  trustlineLimit?: bigint;
 }
 
 interface OneClick {
@@ -180,7 +182,7 @@ function stellarNode(): RpcClient {
             switch: () => ({ name: "trustline" }),
             trustLine: () => ({
               balance: () => 0n,
-              limit: () => 10n ** 15n,
+              limit: () => ledger.trustlineLimit ?? 10n ** 15n,
               flags: () => 1,
               ext: () => ({ switch: () => 0 }),
             }),
@@ -490,6 +492,14 @@ describe("quoting", () => {
       total: { baseUnits: "5000000" },
       includedInQuote: true,
     });
+  });
+
+  it("declines an account whose trustline has no room for what the solvers deliver", async () => {
+    // the solvers quote 9.95 USDC; the limit leaves room for 5
+    ledger = { account: true, trustline: true, trustlineLimit: 50_000_000n };
+    const result = rejectionOf(await adapter().quote(ask()));
+    expect(result.reason).toBe("destination-unsupported");
+    expect(result.explanation).toMatch(/room for only 5 USDC/);
   });
 
   it("refuses to set up an account for less than the reserve it borrows", async () => {
