@@ -93,10 +93,13 @@ describe("the delivery without Node's Buffer, as in a browser", () => {
       messageHex: "0x00000001deadbeef",
       attestationHex: "0xcafe01",
     });
-    const withNode = buildDelivery(inputs()).toXDR();
+    // the operation, not the envelope: the envelope's time bounds follow the clock
+    const call = (tx: ReturnType<typeof buildDelivery>) =>
+      tx.toEnvelope().v1().tx().operations()[0]?.toXDR("base64");
+    const withNode = call(buildDelivery(inputs()));
     const restore = hideBufferFrom(fileURLToPath(new URL(".", import.meta.url)));
     try {
-      expect(buildDelivery(inputs()).toXDR()).toBe(withNode);
+      expect(call(buildDelivery(inputs()))).toBe(withNode);
     } finally {
       restore();
     }
