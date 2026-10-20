@@ -33,19 +33,23 @@ export default defineConfig(({ command, mode }) => {
   }
   // the browser tests' harness page, never part of a build that gets hosted
   const harness = process.env.MAVNA_BROWSER_HARNESS === "1";
+  // dist/ is what a host is given; the browser tests build elsewhere
+  // (MAVNA_BUILD_OUT_DIR), so their test-sponsor build never replaces it
+  const outDir = process.env.MAVNA_BUILD_OUT_DIR || "dist";
   return {
     plugins: [react()],
-    ...(harness
-      ? {
-          build: {
+    build: {
+      outDir,
+      ...(harness
+        ? {
             rolldownOptions: {
               input: {
                 main: fileURLToPath(new URL("./index.html", import.meta.url)),
                 harness: fileURLToPath(new URL("./harness/buffer-free.html", import.meta.url)),
               },
             },
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
   };
 });

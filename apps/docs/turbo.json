@@ -5,8 +5,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["NEXT_PUBLIC_MAVNA_*"],
-      "outputs": [".next/**", "!.next/cache/**", "public/_pagefind/**"]
+      "env": ["MAVNA_NEXT_DIST_DIR", "NEXT_PUBLIC_MAVNA_*"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        ".next-test/**",
+        "!.next-test/cache/**",
+        "public/_pagefind/**"
+      ]
     }
   }
 }

@@ -392,6 +392,8 @@ packages/widget/tsdown.config.ts
 pnpm-lock.yaml
 pnpm-workspace.yaml
 scripts/browser-test-build.mjs
+scripts/browser-test-guard.mjs
+scripts/browser-test-guard.test.ts
 scripts/browser-test-servers.mjs
 scripts/browser-types.test.ts
 scripts/check-arrival-wasm.sh

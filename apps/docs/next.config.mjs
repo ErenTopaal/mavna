@@ -34,6 +34,9 @@ export default function config(phase) {
     );
   }
   return withNextra({
+    // .next is what a host serves; the browser tests build into their own
+    // directory, so their test-sponsor build never replaces it
+    ...(process.env.MAVNA_NEXT_DIST_DIR ? { distDir: process.env.MAVNA_NEXT_DIST_DIR } : {}),
     reactStrictMode: true,
     // Do not write CLAUDE.md / AGENTS.md into this app on every dev run.
     agentRules: false,
