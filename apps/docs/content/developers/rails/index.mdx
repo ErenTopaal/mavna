@@ -52,6 +52,15 @@ mainnet is a configuration change (`VITE_MAVNA_NETWORK=mainnet` plus your own
 Stellar RPC provider), which the project requires of itself: no component may be
 meaningful on only one network.
 
+## The Arrival Contract is never a destination
+
+The Mavna Arrival Contract only acts on what LayerZero hands it with conversion
+instructions. A plain transfer to it would land in a contract with no way to send it
+on, so every rail declines it as a destination, at quote time and again at build,
+with a reason that says to send to your own address. Pass the contract to each
+adapter as `arrivalContract` (the widget does this for you); the LayerZero adapter
+also always refuses the one deployed on its network.
+
 ## Turning a rail off
 
 A dependency on a rail is a dependency on its incidents. Every deployment can take

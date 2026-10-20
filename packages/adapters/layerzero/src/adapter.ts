@@ -16,7 +16,12 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable, SENDER_ADDRESS } from "@mavna/core";
+import {
+  arrivalContractRefusal,
+  MavnaError,
+  rejectionIsRetryable,
+  SENDER_ADDRESS,
+} from "@mavna/core";
 import {
   optionalSignatureCount,
   type PlannedStep,
@@ -47,6 +52,7 @@ import {
   quoteComposeRoute,
 } from "./compose-route.js";
 import {
+  ARRIVAL_CONTRACTS,
   chainIdForLayerZeroKey,
   type EvmSource,
   explorerTxUrl,
@@ -275,6 +281,8 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, this.arrivalContracts());
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     const stellarChainId = STELLAR_SIDE[this.network].chainId;
     const slippage = badSlippage(request.maxSlippageBps);
     if (slippage !== undefined) {
@@ -643,6 +651,12 @@ export class LayerZeroAdapter implements BridgeAdapter {
   }
 
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+    // a plain route is data the caller hands back, so this is checked again; a
+    // compose route sends to the contract on purpose and is checked in compose-route
+    if (route.compose === undefined) {
+      const stuck = arrivalContractRefusal(route.destination, this.arrivalContracts());
+      if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
+    }
     const resolved = await this.discovery.routeFrom(route.fromChain.id);
     const sends = BigInt(route.sends.baseUnits);
     const minAmount = minAmountFor(route, resolved);
@@ -1063,6 +1077,15 @@ export class LayerZeroAdapter implements BridgeAdapter {
       name: source?.name ?? chainId,
       explorerTxUrl: (hash) => explorerTxUrl(this.network, chainId, hash),
     };
+  }
+
+  /**
+   * The Arrival Contracts a plain transfer must never be sent to: the one this
+   * adapter converts through, and the one deployed on this network even when
+   * conversions are not set up here.
+   */
+  private arrivalContracts(): readonly (string | undefined)[] {
+    return [this.composing?.arrival.contract, ARRIVAL_CONTRACTS[this.network]?.contract];
   }
 
   /** `detail` is for whoever runs the integration and is never shown to the user. */

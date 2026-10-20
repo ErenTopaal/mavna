@@ -13,7 +13,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable } from "@mavna/core";
+import { arrivalContractRefusal, MavnaError, rejectionIsRetryable } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -91,6 +91,11 @@ export interface CctpAdapterOptions {
   readonly horizonUrl?: string;
   /** Circle's attestation service. Overridable to an integrator's own proxy. */
   readonly irisUrl?: string;
+  /**
+   * The Mavna Arrival Contract on this network, when one is in use. A plain
+   * transfer to it would be stuck there, so it is refused as a destination.
+   */
+  readonly arrivalContract?: string;
 }
 
 export class CctpAdapter implements BridgeAdapter {
@@ -99,6 +104,7 @@ export class CctpAdapter implements BridgeAdapter {
   readonly trustModel: TrustModel = "native-mint";
 
   private readonly network: NetworkId;
+  private readonly arrivalContract: string | undefined;
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
   private readonly attestations: AttestationService;
@@ -108,6 +114,7 @@ export class CctpAdapter implements BridgeAdapter {
   private readonly proof: DeliveryProof;
 
   constructor(options: CctpAdapterOptions) {
+    this.arrivalContract = options.arrivalContract;
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
@@ -140,6 +147,8 @@ export class CctpAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, [this.arrivalContract]);
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     // Circle's domain is all quoting needs; how the burn is built is a question
     // for later and differs per family.
     const domain = this.domainOf(request.from.chainId);
@@ -327,6 +336,9 @@ export class CctpAdapter implements BridgeAdapter {
     route: Route,
     options: BuildOptions = {},
   ): Promise<readonly UnsignedTransaction[]> {
+    // a route is data the caller hands back, so this is checked again
+    const stuck = arrivalContractRefusal(route.destination, [this.arrivalContract]);
+    if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     // A rail builds its own routes and nobody else's. Without this, handing a
     // route quoted by another adapter to this one produces a Circle burn priced
     // against a fee that rail never charged, while the interface tells the user

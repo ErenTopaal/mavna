@@ -12,7 +12,7 @@ import type {
   TrustModel,
   UnsignedTransaction,
 } from "@mavna/core";
-import { MavnaError, rejectionIsRetryable } from "@mavna/core";
+import { arrivalContractRefusal, MavnaError, rejectionIsRetryable } from "@mavna/core";
 import { type PlannedStep, planTransfer, signatureCount } from "@mavna/routing";
 import {
   type ArrivingValue,
@@ -82,6 +82,11 @@ export interface AxelarAdapterOptions {
   readonly ethCall?: EthCall;
   /** How a node is asked which chain it serves. Injectable for the same reason. */
   readonly ethChainId?: EthChainId;
+  /**
+   * The Mavna Arrival Contract on this network, when one is in use. A plain
+   * transfer to it would be stuck there, so it is refused as a destination.
+   */
+  readonly arrivalContract?: string;
 }
 
 /** What recovery needs that a handle cannot carry on its own. */
@@ -99,6 +104,7 @@ export class AxelarAdapter implements BridgeAdapter {
   readonly trustModel: TrustModel = "validator-set";
 
   private readonly network: NetworkId;
+  private readonly arrivalContract: string | undefined;
   private readonly rpc: RpcClient;
   private readonly baseReserveStroops: number;
   private readonly prices: XlmPriceSource;
@@ -109,6 +115,7 @@ export class AxelarAdapter implements BridgeAdapter {
   private readonly registry: ChainRegistry;
 
   constructor(options: AxelarAdapterOptions) {
+    this.arrivalContract = options.arrivalContract;
     this.network = options.network;
     this.rpc = options.rpc;
     this.baseReserveStroops = options.baseReserveStroops;
@@ -150,6 +157,8 @@ export class AxelarAdapter implements BridgeAdapter {
   }
 
   async quote(request: QuoteRequest): Promise<Route | RouteRejection> {
+    const stuck = arrivalContractRefusal(request.destination, [this.arrivalContract]);
+    if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
     }
@@ -478,6 +487,9 @@ export class AxelarAdapter implements BridgeAdapter {
    * a failed transaction but a stuck one.
    */
   async buildTransactions(route: Route): Promise<readonly UnsignedTransaction[]> {
+    // a route is data the caller hands back, so this is checked again
+    const stuck = arrivalContractRefusal(route.destination, [this.arrivalContract]);
+    if (stuck !== undefined) throw new MavnaError(stuck, { retryable: false });
     if (route.source !== this.id) {
       throw new MavnaError(
         `Refusing to build a route quoted by another rail (${route.source}) as an Axelar ` +
