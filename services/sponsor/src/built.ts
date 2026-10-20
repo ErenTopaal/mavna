@@ -91,17 +91,22 @@ export class BuiltLedger {
    */
   record(record: BuiltRecord, nowUnix: number, client?: string): void {
     this.prune(nowUnix);
-    if (client !== undefined) this.clients.set(record.hash, client);
-    // A few open builds per account and kind, the latest. Asking again builds
-    // afresh, and each answer would otherwise add one more record.
+    // A few open builds per account and kind for each client, the latest.
+    // Asking again builds afresh, and each answer would otherwise add one more
+    // record. Counted per client, because anyone may build for any account,
+    // and pushing out the owner's own build would void what they just signed.
     const same = [...this.records.values()].filter(
-      (open) => open.signer === record.signer && open.kind === record.kind,
+      (open) =>
+        open.signer === record.signer &&
+        open.kind === record.kind &&
+        this.clients.get(open.hash) === client,
     );
     for (const stale of same.slice(0, Math.max(0, same.length - (OPEN_PER_ACCOUNT - 1)))) {
       this.records.delete(stale.hash);
       this.clients.delete(stale.hash);
     }
     this.records.set(record.hash, record);
+    if (client !== undefined) this.clients.set(record.hash, client);
   }
 
   /** Open records this client asked for. */
