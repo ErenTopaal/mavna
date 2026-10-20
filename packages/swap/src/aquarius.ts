@@ -8,9 +8,17 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
 import { buildContractCall, readContract } from "./soroban.js";
-import { fetchOrThrow, readValidated, toContractId, validated } from "./wire.js";
+import {
+  boundedBy,
+  causeOf,
+  fetchOrThrow,
+  readValidated,
+  toContractId,
+  validated,
+} from "./wire.js";
 
 /**
  * Aquarius. The fallback venue, on both networks.
@@ -126,16 +134,23 @@ export class AquariusProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    const url = `${this.baseUrl}/api/external/v1/pools/?size=1`;
     try {
-      const response = await fetch(`${this.baseUrl}/api/external/v1/pools/?size=1`, {
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-      if (!response.ok) return false;
+      const response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      if (!response.ok)
+        return { usable: false, because: `${url} answered HTTP ${response.status}` };
       const parsed = poolsPage.safeParse(await response.json());
-      return parsed.success && parsed.data.count > 0;
-    } catch {
+      if (!parsed.success) return { usable: false, because: `${url} answered in another shape` };
+      return parsed.data.count > 0
+        ? { usable: true }
+        : { usable: false, because: "Aquarius lists no pools on this network" };
+    } catch (cause) {
       // isUsable answers a question; an unreachable service is the answer "no".
-      return false;
+      return { usable: false, because: `${url} did not answer (${causeOf(cause)})` };
     }
   }
 
@@ -143,7 +158,7 @@ export class AquariusProvider implements SwapProvider {
     const tokenIn = toContractId(request.assetIn, this.network);
     const tokenOut = toContractId(request.assetOut, this.network);
     const response = await fetchOrThrow("Aquarius", `${this.baseUrl}/api/external/v1/find-path/`, {
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: boundedBy(this.timeoutMs, request.signal),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -257,23 +272,28 @@ export class AquariusProvider implements SwapProvider {
     // the router keys a pool by its tokens in address byte order, not string order
     const ordered = (tokens: readonly string[]): string[] =>
       [...tokens].sort((a, b) =>
-        Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+        compareBytes(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
       );
     const vecOf = (tokens: readonly string[]) =>
       xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal()));
 
-    const pools = new Map<string, readonly Buffer[]>();
-    const poolsOf = async (tokens: readonly string[]): Promise<readonly Buffer[]> => {
+    // pool keys stay the sdk's own byte objects, which scvBytes takes back as is
+    type PoolKey = ReturnType<xdr.ScVal["bytes"]>;
+    const pools = new Map<string, readonly PoolKey[]>();
+    // the router's refusals, kept for the answer when nothing connects
+    const refusals: string[] = [];
+    const poolsOf = async (tokens: readonly string[]): Promise<readonly PoolKey[]> => {
       const key = tokens.join(",");
       const known = pools.get(key);
       if (known !== undefined) return known;
-      let found: Buffer[] = [];
+      let found: PoolKey[] = [];
       try {
         const answer = await read("get_pools", [vecOf(tokens)]);
-        found = (answer.map() ?? []).map((entry) => Buffer.from(entry.key().bytes()));
+        found = (answer.map() ?? []).map((entry) => entry.key().bytes());
       } catch (cause) {
         // a node that did not answer is not a pair with no pools
         if (cause instanceof MavnaError && cause.retryable) throw cause;
+        refusals.push(`get_pools: ${causeOf(cause)}`);
         found = [];
       }
       pools.set(key, found);
@@ -300,10 +320,11 @@ export class AquariusProvider implements SwapProvider {
           out = BigInt(scValToNative(estimate) as bigint);
         } catch (cause) {
           if (cause instanceof MavnaError && cause.retryable) throw cause;
+          refusals.push(`estimate_swap: ${causeOf(cause)}`);
           continue;
         }
         if (best === undefined || out > best.out) {
-          best = { out, hop: { tokens, poolIndex: index.toString("hex"), tokenOut: to } };
+          best = { out, hop: { tokens, poolIndex: hexOf(index), tokenOut: to } };
         }
       }
       return best;
@@ -333,8 +354,10 @@ export class AquariusProvider implements SwapProvider {
       }
     }
     if (best === undefined) {
+      const why = [...new Set(refusals)].join("; ");
       throw new MavnaError(
-        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses.",
+        "Aquarius has no pools that connect these assets through tokens the Arrival Contract uses" +
+          (why === "" ? "." : `. The router refused: ${why}.`),
         { retryable: false },
       );
     }
@@ -445,10 +468,26 @@ export function decodeSwapChain(swapChainXdr: string): readonly ComposeHop[] {
     if (indexBytes.length !== 32) bad();
     return {
       tokens: vec(tokens).map(address),
-      poolIndex: Buffer.from(indexBytes).toString("hex"),
+      poolIndex: hexOf(indexBytes),
       tokenOut: address(out),
     };
   });
   if (hops.length === 0) bad();
   return hops;
+}
+
+// the browser has no Buffer global, so bytes are handled as plain Uint8Array
+
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const d = (a[i] as number) - (b[i] as number);
+    if (d !== 0) return d;
+  }
+  return a.length - b.length;
+}
+
+function hexOf(bytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
+  return hex;
 }

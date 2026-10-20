@@ -86,7 +86,12 @@ export async function raceAdapters(
   const railRequest: QuoteRequest =
     options.swap === undefined ? request : { ...request, to: options.swap.delivered };
 
+  // set once the race has returned: a rail that answers after its timeout must
+  // not reach a caller that was already told the set is complete
+  let closed = false;
+
   const publish = (): void => {
+    if (closed) return;
     options.onUpdate?.({
       // Ranked every time, not only at the end: the first route on screen is the
       // default selection, and the default must be the best net outcome even
@@ -97,10 +102,15 @@ export async function raceAdapters(
     });
   };
 
-  const enrich = async (route: Route): Promise<Route | RouteRejection> => {
+  const enrich = async (route: Route, remainingMs: number): Promise<Route | RouteRejection> => {
     let out: Route | RouteRejection = route;
     if (options.swap !== undefined) {
-      out = await attachSwapLeg(out, options.swap, request.maxSlippageBps);
+      out = await attachSwapLeg(
+        out,
+        options.swap,
+        request.maxSlippageBps,
+        AbortSignal.timeout(Math.max(0, remainingMs)),
+      );
       if (isRejection(out)) return out;
     }
     if (options.integratorFee !== undefined) {
@@ -117,7 +127,7 @@ export async function raceAdapters(
   // conversion quote never holds back the plain route beside it.
   const askCompose = (adapter: BridgeAdapter, plain: Route): void => {
     const swap = options.swap;
-    if (swap === undefined || adapter.quoteCompose === undefined) return;
+    if (closed || swap === undefined || adapter.quoteCompose === undefined) return;
     const quoteCompose = adapter.quoteCompose.bind(adapter);
     const fee = options.integratorFee;
     expected += 1;
@@ -167,17 +177,17 @@ export async function raceAdapters(
       }
 
       try {
-        // One bound over the quote and the swap leg together: a hung exchange
-        // must cost this rail its route, not stall the whole race.
-        const result = await withTimeout(
-          adapter.quote(railRequest).then((quoted) => {
-            if (isRejection(quoted)) return quoted;
-            askCompose(adapter, quoted);
-            return enrich(quoted);
-          }),
-          timeoutMs,
-          adapter.id,
-        );
+        // One budget over the quote and the swap leg together: the leg gets
+        // what the rail left of it, and a hung exchange costs this rail its
+        // route rather than stalling the whole race. A rail that answers after
+        // its bound never reaches the lines below, so it asks for nothing more.
+        const started = Date.now();
+        const quoted = await withTimeout(adapter.quote(railRequest), timeoutMs, adapter.id);
+        let result: Route | RouteRejection = quoted;
+        if (!isRejection(quoted)) {
+          askCompose(adapter, quoted);
+          result = await enrich(quoted, timeoutMs - (Date.now() - started));
+        }
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);
       } catch (error) {
@@ -193,6 +203,7 @@ export async function raceAdapters(
   );
 
   await Promise.all(composes);
+  closed = true;
 
   return {
     routes: rankRoutes(routes, options.ranking ?? "best-received"),

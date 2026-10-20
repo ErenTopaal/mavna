@@ -42,6 +42,14 @@ export function parseLookupKey(input: string): LookupKey {
   if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
     return { kind: "deposit-address", value: trimmed };
   }
+  // Starknet explorers print a hash without its leading zeros, and Solana
+  // signatures are base58. CCTP finds a burn from either.
+  if (/^0x[0-9a-fA-F]{1,64}$/.test(trimmed)) {
+    return { kind: "source-tx", value: trimmed };
+  }
+  if (/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(trimmed)) {
+    return { kind: "source-tx", value: trimmed };
+  }
 
   throw new MavnaError(
     "That does not look like a transaction or an address. Paste the transaction " +

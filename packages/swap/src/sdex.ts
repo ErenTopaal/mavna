@@ -8,8 +8,9 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
-import { fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
+import { boundedBy, causeOf, fetchOrThrow, PASSPHRASE, readValidated, validated } from "./wire.js";
 
 /**
  * Stellar's own exchange, as a swap provider.
@@ -51,7 +52,7 @@ const pathsResponse = z.object({
 
 /** `CODE:ISSUER`, or `native` for XLM. The identity form, never a bare code. */
 function parseAsset(id: string): Asset {
-  if (id === "native" || id === "XLM") return Asset.native();
+  if (id === "native") return Asset.native();
   const [code, issuer] = id.split(":");
   if (code === undefined || issuer === undefined || issuer === "") {
     throw new MavnaError(
@@ -95,13 +96,18 @@ export class SdexProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    const url = `${this.horizonUrl}/`;
     try {
-      const response = await fetch(`${this.horizonUrl}/`, {
-        signal: AbortSignal.timeout(8_000),
-      });
-      return response.ok;
-    } catch {
-      return false;
+      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+      return response.ok
+        ? { usable: true }
+        : { usable: false, because: `${url} answered HTTP ${response.status}` };
+    } catch (cause) {
+      return { usable: false, because: `${url} did not answer (${causeOf(cause)})` };
     }
   }
 
@@ -138,11 +144,11 @@ export class SdexProvider implements SwapProvider {
     const response = await fetchOrThrow(
       "Stellar's exchange",
       `${this.horizonUrl}/paths/strict-send?${params.toString()}`,
-      { signal: AbortSignal.timeout(15_000) },
+      { signal: boundedBy(15_000, request.signal) },
     );
     if (!response.ok) {
       throw new MavnaError(`Stellar's exchange could not be read (HTTP ${response.status}).`, {
-        retryable: response.status >= 500,
+        retryable: response.status === 429 || response.status >= 500,
       });
     }
 

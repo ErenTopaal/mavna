@@ -14,6 +14,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bodyOf, json, routedFetch } from "./__fixtures__/network.js";
 import { SoroswapProvider } from "./soroswap.js";
+import { toContractId } from "./wire.js";
 
 const PROXY = "https://sponsor.example";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
@@ -468,5 +469,38 @@ describe("what Soroswap built, checked before the user signs it", () => {
     const error = await built(pricey);
     expect(error).toBeInstanceOf(MavnaError);
     expect((error as MavnaError).message).toMatch(/fee of 1\.0000001 XLM/);
+  });
+});
+
+describe("a quote on a network with no contract for its platform", () => {
+  it("is refused at quote time, so the chain can fall through to the next venue", async () => {
+    const assetIn = toContractId(
+      "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "testnet",
+    );
+    const assetOut = toContractId("native", "testnet");
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${PROXY}/swap/soroswap/quote`]: () =>
+          json({
+            ...quoteBody,
+            assetIn,
+            assetOut,
+            routePlan: [
+              { swapInfo: { protocol: "soroswap", path: [assetIn, assetOut] }, percent: "100" },
+            ],
+          }),
+      }).fetch,
+    );
+    const error = await new SoroswapProvider({ network: "testnet", proxyUrl: PROXY })
+      .quote({
+        ...request,
+        assetIn: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+    expect((error as MavnaError).retryable).toBe(false);
+    expect((error as MavnaError).message).toMatch(/aggregator/);
   });
 });

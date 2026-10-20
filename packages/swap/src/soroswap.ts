@@ -20,8 +20,16 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
-import { fetchOrThrow, PASSPHRASE, readValidated, toContractId } from "./wire.js";
+import {
+  boundedBy,
+  causeOf,
+  fetchOrThrow,
+  PASSPHRASE,
+  readValidated,
+  toContractId,
+} from "./wire.js";
 
 /**
  * Soroswap. The preferred venue, reached through a proxy that holds the key.
@@ -223,16 +231,29 @@ export class SoroswapProvider implements SwapProvider {
    * answer is then simply no.
    */
   async isUsable(): Promise<boolean> {
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    const url = `${this.proxyUrl}/swap/soroswap/health`;
     try {
-      const response = await fetch(`${this.proxyUrl}/swap/soroswap/health`, {
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-      if (!response.ok) return false;
+      const response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      if (!response.ok)
+        return { usable: false, because: `${url} answered HTTP ${response.status}` };
       const parsed = soroswapHealth.safeParse(await response.json());
-      return parsed.success && parsed.data.network === this.network && parsed.data.usable;
-    } catch {
+      if (!parsed.success) return { usable: false, because: `${url} answered in another shape` };
+      if (parsed.data.network !== this.network) {
+        return {
+          usable: false,
+          because: `the proxy serves ${parsed.data.network}, not ${this.network}`,
+        };
+      }
+      return parsed.data.usable
+        ? { usable: true }
+        : { usable: false, because: "the proxy reports Soroswap unusable" };
+    } catch (cause) {
       // isUsable answers a question; an unreachable proxy is the answer "no".
-      return false;
+      return { usable: false, because: `${url} did not answer (${causeOf(cause)})` };
     }
   }
 
@@ -252,7 +273,7 @@ export class SoroswapProvider implements SwapProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: boundedBy(this.timeoutMs, request.signal),
     });
     if (!response.ok) throw await refusal(response, "price this swap");
 
@@ -265,6 +286,17 @@ export class SoroswapProvider implements SwapProvider {
       throw new MavnaError("Soroswap answered a different question than the one asked.", {
         retryable: false,
       });
+    }
+    // build refuses a platform this network has no contract for, and finding
+    // that out after the bridge leg has landed is too late to pick another venue
+    if (
+      quote.platform === "aggregator" &&
+      SOROSWAP_CONTRACTS[this.network].aggregator === undefined
+    ) {
+      throw new MavnaError(
+        `Soroswap priced this through its aggregator, which has no contract on ${this.network}.`,
+        { retryable: false },
+      );
     }
     const isClassic = quote.platform === "sdex";
 

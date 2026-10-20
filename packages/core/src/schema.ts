@@ -21,9 +21,58 @@ export const positiveBaseUnits: z.ZodType<string> = baseUnits.refine(
   "must be greater than zero",
 );
 
+/**
+ * An account, muxed account or contract address, checked the way Stellar's own
+ * StrKey checks one: its exact length, its version byte, and its CRC16 checksum.
+ * A shape-only check let a mistyped address through to a payment.
+ */
 export const stellarAddress: z.ZodType<string> = z
   .string()
-  .regex(/^[GMC][A-Z2-7]{55,}$/, "not a Stellar account, muxed or contract address");
+  .refine(isStellarAddress, "not a Stellar account, muxed or contract address");
+
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+// version byte and payload length by leading character
+const STRKEY_FORMS: Readonly<Record<string, { version: number; payload: number }>> = {
+  G: { version: 6 << 3, payload: 32 },
+  M: { version: 12 << 3, payload: 40 },
+  C: { version: 2 << 3, payload: 32 },
+};
+
+function isStellarAddress(text: string): boolean {
+  const form = STRKEY_FORMS[text[0] ?? ""];
+  if (form === undefined) return false;
+  const size = 1 + form.payload + 2;
+  if (text.length !== Math.ceil((size * 8) / 5)) return false;
+  const bytes = new Uint8Array(size);
+  let bits = 0;
+  let value = 0;
+  let at = 0;
+  for (const char of text) {
+    const digit = BASE32.indexOf(char);
+    if (digit < 0) return false;
+    value = (value << 5) | digit;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      if (at < size) bytes[at++] = (value >> bits) & 0xff;
+    }
+  }
+  // leftover bits must be zero, or two strings would name the same key
+  if ((value & ((1 << bits) - 1)) !== 0) return false;
+  if (bytes[0] !== form.version) return false;
+  const crc = crc16xmodem(bytes.subarray(0, size - 2));
+  return bytes[size - 2] === (crc & 0xff) && bytes[size - 1] === crc >> 8;
+}
+
+function crc16xmodem(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte << 8;
+    for (let i = 0; i < 8; i++)
+      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc;
+}
 
 export const evmAddress: z.ZodType<string> = z
   .string()

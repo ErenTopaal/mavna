@@ -36,6 +36,17 @@ export interface SwapQuoteRequest {
    * before choosing venues rather than after.
    */
   readonly destinationKind: "account" | "contract";
+  /**
+   * When the caller stops waiting. The route race hands down what is left of
+   * its budget, so a venue that is still asking by then gives up rather than
+   * answering a question nobody is listening to.
+   */
+  readonly signal?: AbortSignal | undefined;
+}
+
+export interface Usability {
+  readonly usable: boolean;
+  readonly because?: string | undefined;
 }
 
 export interface SwapQuote {
@@ -78,6 +89,12 @@ export interface SwapProvider {
    * production would be far worse than being told here.
    */
   isUsable(): Promise<boolean>;
+
+  /**
+   * The same answer with the reason when it is no, so whoever runs this can
+   * tell a TLS failure from a wrong URL from a venue that is simply down.
+   */
+  usability?(): Promise<Usability>;
 
   quote(request: SwapQuoteRequest): Promise<SwapQuote>;
 

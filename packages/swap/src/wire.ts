@@ -22,6 +22,21 @@ export async function fetchOrThrow(
   }
 }
 
+/** A short, plain account of why a request failed, for an operator. */
+export function causeOf(cause: unknown): string {
+  if (cause instanceof Error) {
+    const inner = cause.cause instanceof Error ? `: ${cause.cause.message}` : "";
+    return `${cause.name}: ${cause.message}${inner}`.slice(0, 200);
+  }
+  return String(cause).slice(0, 200);
+}
+
+/** A venue's own bound, cut short when the caller stops waiting first. */
+export function boundedBy(timeoutMs: number, caller: AbortSignal | undefined): AbortSignal {
+  const own = AbortSignal.timeout(timeoutMs);
+  return caller === undefined ? own : AbortSignal.any([own, caller]);
+}
+
 /**
  * Read and validate a JSON answer.
  *
@@ -71,7 +86,7 @@ export const PASSPHRASE: Readonly<Record<NetworkId, string>> = {
  */
 export function toContractId(id: string, network: NetworkId): string {
   if (/^C[A-Z2-7]{55}$/.test(id)) return id;
-  if (id === "native" || id === "XLM") return Asset.native().contractId(PASSPHRASE[network]);
+  if (id === "native") return Asset.native().contractId(PASSPHRASE[network]);
   const [code, issuer] = id.split(":");
   if (code === undefined || issuer === undefined || issuer === "") {
     throw new MavnaError(

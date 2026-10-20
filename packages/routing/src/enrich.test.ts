@@ -293,3 +293,62 @@ describe("a conversion beside a reserve the arrival repays", () => {
     expect("reason" in out && out.explanation).toMatch(/stays in USDC/);
   });
 });
+
+describe("what the conversion is handed", () => {
+  it("refuses a rail that delivered some other asset than the one the conversion sells", async () => {
+    const asked: string[] = [];
+    const watching: SwapQuoter = {
+      id: "aquarius",
+      quote: (request) => {
+        asked.push(request.assetIn);
+        return Promise.resolve({ provider: "aquarius", amountOut: "1", amountOutMinimum: "1" });
+      },
+    };
+    const other: Asset = { ...usdc, id: "EURC:GISSUER", symbol: "EURC" };
+    const delivering = {
+      ...route,
+      deliveredAtLeast: { asset: other, baseUnits: "49000000" },
+    };
+    const out = await attachSwapLeg(delivering, attachment(watching), 50);
+    expect("reason" in out && out.reason).toBe("asset-unsupported");
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses to price a reserve repayment for a conversion into anything but XLM", async () => {
+    const eurc: Asset = { ...usdc, id: "EURC:GISSUER", symbol: "EURC" };
+    const repaying = {
+      ...route,
+      steps: [
+        ...route.steps,
+        {
+          id: "settle",
+          kind: "settle-account" as const,
+          source: "cctp",
+          from: route.receives,
+          to: route.receives,
+          estimatedSeconds: 30,
+          execution: undefined,
+        },
+      ],
+      fees: [
+        {
+          kind: "account-reserve" as const,
+          total: { asset: xlm, baseUnits: "15000000" },
+          recipients: [],
+          includedInQuote: true,
+        },
+      ],
+    };
+    const out = await attachSwapLeg(
+      repaying,
+      {
+        ...attachment(quoter("1", "1")),
+        wanted: eurc,
+        wantedContract: "CEURC",
+        repaysReserve: true,
+      },
+      50,
+    );
+    expect("reason" in out && out.reason).toBe("asset-unsupported");
+  });
+});

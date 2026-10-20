@@ -58,6 +58,25 @@ describe("addresses", () => {
     ).toBe(true);
   });
 
+  it("accepts a muxed account and refuses an address whose checksum or length is wrong", () => {
+    expect(
+      stellarAddress.safeParse(
+        "MDSZMCDO6MT4WOHOCFNWLSIZZ7FVFZEDAOOTAKAUXKT6XZICPJ3YUAAAAAAETFQC2LMBS",
+      ).success,
+    ).toBe(true);
+    for (const bad of [
+      // the last character changed, so the checksum no longer holds
+      "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA6",
+      // one character too many
+      "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5A",
+      // a G body under a C prefix
+      "CBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      `G${"A".repeat(60)}`,
+    ]) {
+      expect(stellarAddress.safeParse(bad).success).toBe(false);
+    }
+  });
+
   it("rejects a secret key outright", () => {
     // An S-address reaching a schema means something upstream is handling keys.
     expect(

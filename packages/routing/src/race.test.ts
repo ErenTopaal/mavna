@@ -1,12 +1,13 @@
-import type {
-  BridgeAdapter,
-  ComposeQuoteRequest,
-  QuoteRequest,
-  Route,
-  RouteRejection,
-  RouteSet,
+import {
+  ADAPTER_QUOTE_TIMEOUT_MS,
+  type BridgeAdapter,
+  type ComposeQuoteRequest,
+  type QuoteRequest,
+  type Route,
+  type RouteRejection,
+  type RouteSet,
 } from "@mavna/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SwapQuoter } from "./enrich.js";
 import { raceAdapters } from "./race.js";
 
@@ -56,6 +57,26 @@ describe("racing route sources", () => {
     expect(result.routes.map((r) => r.source)).toEqual(["fast"]);
     expect(result.rejected.map((r) => r.source)).toEqual(["slow"]);
     expect(result.complete).toBe(true);
+  });
+
+  it("bounds every rail by the shared deadline when the caller sets none", async () => {
+    vi.useFakeTimers();
+    try {
+      let finished = false;
+      const racing = raceAdapters([adapter("hung", () => new Promise(() => {}))], request).then(
+        (set) => {
+          finished = true;
+          return set;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(ADAPTER_QUOTE_TIMEOUT_MS - 1);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await racing;
+      expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says WHY a source produced nothing rather than omitting it", async () => {
@@ -146,7 +167,11 @@ describe("racing route sources", () => {
     const asset = { chainId: "stellar-testnet", id: "x", symbol: "X", decimals: 7, curatedBy: "t" };
     const result = await raceAdapters(
       [
-        adapter("stuck", async () => ({ ...route("stuck"), destination: "GDEST" })),
+        adapter("stuck", async () => ({
+          ...route("stuck"),
+          destination: "GDEST",
+          deliveredAtLeast: { asset, baseUnits: "1" },
+        })),
         adapter("declines", async () => ({
           source: "declines",
           reason: "no-liquidity",
@@ -170,6 +195,96 @@ describe("racing route sources", () => {
     expect(result.rejected.find((r) => r.source === "stuck")?.reason).toBe("timed-out");
     expect(result.rejected.find((r) => r.source === "declines")?.reason).toBe("no-liquidity");
     expect(result.complete).toBe(true);
+  });
+});
+
+describe("the conversion inside the rail's budget", () => {
+  const asset = { chainId: "stellar", id: "X:G", symbol: "X", decimals: 7, curatedBy: "t" };
+  const wanted = { ...asset, id: "native", symbol: "XLM" };
+
+  it("hands the swap leg what is left of the budget, and says the conversion ran out of time", async () => {
+    let abortedAfter: number | undefined;
+    const started = Date.now();
+    const waitsForDeadline: SwapQuoter = {
+      id: "venues",
+      quote: (q) =>
+        new Promise((_resolve, reject) => {
+          q.signal?.addEventListener("abort", () => {
+            abortedAfter = Date.now() - started;
+            reject(new Error("aborted"));
+          });
+        }),
+    };
+    const result = await raceAdapters(
+      [
+        adapter("rail", async () => {
+          await sleep(60);
+          return {
+            ...route("rail"),
+            destination: "GDEST",
+            deliveredAtLeast: { asset, baseUnits: "1" },
+          };
+        }),
+      ],
+      { ...request, maxSlippageBps: 50 },
+      {
+        timeoutMs: 200,
+        swap: {
+          provider: waitsForDeadline,
+          delivered: asset,
+          deliveredContract: "CA",
+          wanted,
+          wantedContract: "native",
+        },
+      },
+    );
+    // the leg is stopped at the rail's deadline, not a full budget after the rail answered
+    expect(abortedAfter).toBeGreaterThanOrEqual(180);
+    expect(abortedAfter).toBeLessThan(240);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.reason).toBe("timed-out");
+    expect(result.rejected[0]?.explanation).toMatch(/XLM/);
+    expect(result.rejected[0]?.retryable).toBe(true);
+  });
+});
+
+describe("a quoter that answers with what it has when the budget ends", () => {
+  it("keeps that answer rather than calling the conversion late", async () => {
+    const asset = { chainId: "stellar", id: "X:G", symbol: "X", decimals: 7, curatedBy: "t" };
+    // like the venue chain: on the deadline it hands back a quote that already arrived
+    const answersOnDeadline: SwapQuoter = {
+      id: "venues",
+      quote: (q) =>
+        new Promise((resolve) => {
+          q.signal?.addEventListener("abort", () => {
+            void Promise.resolve().then(() =>
+              resolve({ provider: "later-venue", amountOut: "5", amountOutMinimum: "5" }),
+            );
+          });
+        }),
+    };
+    const result = await raceAdapters(
+      [
+        adapter("rail", async () => ({
+          ...route("rail"),
+          destination: "GDEST",
+          deliveredAtLeast: { asset, baseUnits: "1" },
+        })),
+      ],
+      { ...request, maxSlippageBps: 50 },
+      {
+        timeoutMs: 50,
+        swap: {
+          provider: answersOnDeadline,
+          delivered: asset,
+          deliveredContract: "CA",
+          wanted: { ...asset, id: "native", symbol: "XLM" },
+          wantedContract: "native",
+        },
+      },
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.routes[0]?.steps.at(-1)?.source).toBe("later-venue");
   });
 });
 
@@ -287,6 +402,48 @@ describe("compose routes", () => {
     expect(updates.at(-1)?.complete).toBe(true);
     expect(result.routes.map((r) => r.id)).toEqual(["lz-plain"]);
     expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+  });
+
+  it("never adds a route or reopens the set after it reported complete, when a plain quote answers late", async () => {
+    const updates: RouteSet[] = [];
+    const asked: ComposeQuoteRequest[] = [];
+    let swapAsked = 0;
+    const late: BridgeAdapter = {
+      ...adapter("lz", async () => {
+        await sleep(60);
+        return plainRoute("lz");
+      }),
+      quoteCompose: async (r) => {
+        asked.push(r);
+        return { ...r.plain, id: "lz-compose" };
+      },
+    };
+    const counting: SwapQuoter = {
+      id: "venue",
+      quote: async (q) => {
+        swapAsked += 1;
+        return { provider: "venue", amountOut: q.amountIn, amountOutMinimum: q.amountIn };
+      },
+    };
+    const result = await raceAdapters(
+      [late],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      {
+        swap: { ...swap, provider: counting },
+        timeoutMs: 20,
+        onUpdate: (u) => updates.push(u),
+      },
+    );
+    const afterReturn = updates.length;
+    await sleep(120);
+    expect(result.routes).toEqual([]);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["timed-out"]);
+    // nothing reaches the caller once the race has said it is done
+    expect(updates.length).toBe(afterReturn);
+    expect(updates.every((u) => u.routes.length === 0)).toBe(true);
+    // and a rail that already lost its slot is not asked for anything more
+    expect(asked).toHaveLength(0);
+    expect(swapAsked).toBe(0);
   });
 
   it("hands the integrator fee to the contract that collects it, and does not take it twice", async () => {

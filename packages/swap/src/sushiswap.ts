@@ -15,8 +15,9 @@ import {
   type SwapProvider,
   type SwapQuote,
   type SwapQuoteRequest,
+  type Usability,
 } from "./provider.js";
-import { buildContractCall, readContract, rpcHealthy } from "./soroban.js";
+import { buildContractCall, readContract, rpcHealth } from "./soroban.js";
 import { toContractId, validated } from "./wire.js";
 
 /**
@@ -94,8 +95,14 @@ export class SushiSwapProvider implements SwapProvider {
   }
 
   async isUsable(): Promise<boolean> {
-    if (this.network !== "mainnet") return false;
-    return rpcHealthy(this.rpcUrl, this.timeoutMs);
+    return (await this.usability()).usable;
+  }
+
+  async usability(): Promise<Usability> {
+    if (this.network !== "mainnet") {
+      return { usable: false, because: "SushiSwap has no deployment on this network" };
+    }
+    return rpcHealth(this.rpcUrl, this.timeoutMs);
   }
 
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
@@ -106,7 +113,7 @@ export class SushiSwapProvider implements SwapProvider {
     }
     const tokenIn = toContractId(request.assetIn, this.network);
     const tokenOut = toContractId(request.assetOut, this.network);
-    const candidates = await this.routesBetween(tokenIn, tokenOut);
+    const candidates = await this.routesBetween(tokenIn, tokenOut, request.signal);
     if (candidates.length === 0) {
       throw new MavnaError("SushiSwap has no pool path between these assets.", {
         retryable: false,
@@ -116,7 +123,7 @@ export class SushiSwapProvider implements SwapProvider {
     const priced = await Promise.allSettled(
       candidates.map(async (route) => ({
         route,
-        amount: await this.price(route, request.amountIn),
+        amount: await this.price(route, request.amountIn, request.signal),
       })),
     );
     let best: { route: SushiRoute; amount: bigint } | undefined;
@@ -162,6 +169,20 @@ export class SushiSwapProvider implements SwapProvider {
       });
     }
     const route = validated("SushiSwap", sushiRaw, request.quote.raw);
+    // the quote travelled through the caller, so what executes is checked again
+    if (
+      route.path[0] !== toContractId(request.quote.assetIn, this.network) ||
+      route.path.at(-1) !== toContractId(request.quote.assetOut, this.network)
+    ) {
+      throw new MavnaError("SushiSwap was handed a swap path for other tokens.", {
+        retryable: false,
+      });
+    }
+    if (route.fees.length !== route.path.length - 1 || route.pools.length !== route.fees.length) {
+      throw new MavnaError("SushiSwap was handed a swap path that does not hold together.", {
+        retryable: false,
+      });
+    }
     const hints = await Promise.all(route.pools.map((pool) => this.hintsFor(pool)));
     const owner = request.account.accountId();
     return buildContractCall(
@@ -180,13 +201,20 @@ export class SushiSwapProvider implements SwapProvider {
   }
 
   /** Every direct and one-hub path whose every hop has a pool. */
-  private async routesBetween(tokenIn: string, tokenOut: string): Promise<SushiRoute[]> {
+  private async routesBetween(
+    tokenIn: string,
+    tokenOut: string,
+    caller: AbortSignal | undefined,
+  ): Promise<SushiRoute[]> {
     const hubs = HUBS.map((hub) => toContractId(hub, this.network)).filter(
       (hub) => hub !== tokenIn && hub !== tokenOut,
     );
     const [direct, ...viaHubs] = await Promise.all([
-      this.poolsFor(tokenIn, tokenOut),
-      ...hubs.flatMap((hub) => [this.poolsFor(tokenIn, hub), this.poolsFor(hub, tokenOut)]),
+      this.poolsFor(tokenIn, tokenOut, caller),
+      ...hubs.flatMap((hub) => [
+        this.poolsFor(tokenIn, hub, caller),
+        this.poolsFor(hub, tokenOut, caller),
+      ]),
     ]);
     const routes: SushiRoute[] = (direct ?? []).map(({ fee, pool }) => ({
       path: [tokenIn, tokenOut],
@@ -209,15 +237,24 @@ export class SushiSwapProvider implements SwapProvider {
     return routes;
   }
 
-  private async poolsFor(a: string, b: string): Promise<{ fee: number; pool: string }[]> {
+  private async poolsFor(
+    a: string,
+    b: string,
+    caller: AbortSignal | undefined,
+  ): Promise<{ fee: number; pool: string }[]> {
     const found = await Promise.all(
-      FEE_TIERS.map(async (fee) => ({ fee, pool: await this.poolAt(a, b, fee) })),
+      FEE_TIERS.map(async (fee) => ({ fee, pool: await this.poolAt(a, b, fee, caller) })),
     );
     return found.flatMap(({ fee, pool }) => (pool === undefined ? [] : [{ fee, pool }]));
   }
 
   /** The factory orders a pair by the raw bytes of the addresses, not their text. */
-  private async poolAt(a: string, b: string, fee: number): Promise<string | undefined> {
+  private async poolAt(
+    a: string,
+    b: string,
+    fee: number,
+    caller: AbortSignal | undefined,
+  ): Promise<string | undefined> {
     const [token0, token1] =
       StrKey.decodeContract(a).compare(StrKey.decodeContract(b)) < 0 ? [a, b] : [b, a];
     const key = `${token0}:${token1}:${fee}`;
@@ -231,6 +268,7 @@ export class SushiSwapProvider implements SwapProvider {
       [address(token0), address(token1), nativeToScVal(fee, { type: "u32" })],
       this.timeoutMs,
       "SushiSwap",
+      caller,
     );
     const pool = validated(
       "SushiSwap",
@@ -241,7 +279,11 @@ export class SushiSwapProvider implements SwapProvider {
     return pool ?? undefined;
   }
 
-  private async price(route: SushiRoute, amountIn: string): Promise<bigint> {
+  private async price(
+    route: SushiRoute,
+    amountIn: string,
+    caller: AbortSignal | undefined,
+  ): Promise<bigint> {
     const value = await readContract(
       this.rpcUrl,
       this.network,
@@ -250,6 +292,7 @@ export class SushiSwapProvider implements SwapProvider {
       [exactInputParams(route, amountIn, "0", ZERO_ACCOUNT)],
       this.timeoutMs,
       "SushiSwap",
+      caller,
     );
     return validated("SushiSwap", quoteResult, scValToNative(value)).amount;
   }

@@ -24,9 +24,11 @@ a `TransferHandle`. Being able to resume from the destination address is the poi
 prior art misses: most bridges can resume from a transaction hash or a task id and
 cannot answer "here is the address I sent to."
 
-`parseLookupKey` takes a pasted string and classifies it: a 64-character hex value
-is a source transaction, a Stellar address is a destination, an EVM address is a
-deposit address. `toHandle` turns the key into a `TransferHandle`, leaving
+`parseLookupKey` takes a pasted string and classifies it. A Stellar address is a
+destination and an EVM address (`0x` and exactly 40 hex digits) is a deposit
+address. A source transaction is 64 hex digits with or without `0x`, any other
+`0x` hex value of up to 64 digits (a Starknet hash shown without its leading
+zeros), or a base58 Solana signature of 64 to 88 characters. `toHandle` turns the key into a `TransferHandle`, leaving
 `sourceChainId` absent so an adapter that spans many chains searches rather than
 declines.
 
@@ -44,7 +46,10 @@ type StepPhase =
   | { readonly phase: "done"; readonly ref: OnChainRef; readonly received: Amount }
   | { readonly phase: "refunded"; readonly ref: OnChainRef; readonly to: string; readonly returned: Amount }
   | { readonly phase: "partial"; readonly ref: OnChainRef; readonly received: Amount; readonly expected: Amount; readonly remedy: Remedy }
-  | { readonly phase: "failed"; readonly cause: string; readonly remedy: Remedy; readonly ref: OnChainRef | undefined };
+  | { readonly phase: "failed"; readonly cause: string; readonly remedy: Remedy; readonly ref: OnChainRef | undefined }
+  | { readonly phase: "delivered-conversion-pending"; readonly ref: OnChainRef; readonly deliveredAtUnix: number; readonly finish: ComposeFinish | undefined }
+  | { readonly phase: "delivered-and-converted"; readonly ref: OnChainRef; readonly received: Amount; readonly fee: Amount | undefined }
+  | { readonly phase: "delivered-as-came"; readonly ref: OnChainRef; readonly received: Amount; readonly because: string };
 ```
 
 `pending` and `stalled` both carry an on-chain reference, but they are separate
@@ -58,12 +63,23 @@ carries a `because`, so a failure is never a message with nothing to do beside i
 because a returned transfer rendered as a plain success is a lie about someone's
 money.
 
+The last three belong to a conversion on arrival. `delivered-conversion-pending`
+means the money reached the converting contract and the conversion has not run;
+it is not terminal, and `finish` carries what completing it takes.
+`delivered-and-converted` is a success. `delivered-as-came` is an ending but not
+a success: the conversion could not meet the user's minimum, so the arriving
+asset was delivered unchanged.
+
 ## The state machine
 
-`applyUpdate` advances a step and refuses to move a finished transfer backwards, so
-a late poll cannot walk a delivered payment back to pending: retrying is how one
-payment becomes two. `progressOf` reports how far along a transfer is and whether
-it needs the user, and `outcomeOf` collapses the steps to one word, with `failed`,
-`refunded`, and `partial` taking precedence over `succeeded`. There is no single
+`applyUpdate` advances a step and refuses to move it backwards, so a late poll
+cannot walk a delivered payment back to pending: retrying is how one payment
+becomes two. A finished step never changes again, and an unfinished one never
+moves to an earlier phase, with one exception: a `stalled` step goes back to
+`pending` when the update carries a new transaction, which is what acting on its
+remedy looks like. `progressOf` reports how far along a transfer is and whether
+it needs the user, and `outcomeOf` collapses the steps to one word, with
+`failed`, `refunded`, `partial` and then `delivered-as-came` taking precedence
+over `succeeded`. A transfer with no steps is `in-flight`, never `succeeded`. There is no single
 "track this" call to make; you assemble tracking from these functions and a store,
 which is what lets the same machine drive a live transfer and a resumed one.

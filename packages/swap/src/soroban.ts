@@ -8,7 +8,8 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
-import { PASSPHRASE, readValidated } from "./wire.js";
+import type { Usability } from "./provider.js";
+import { boundedBy, causeOf, PASSPHRASE, readValidated } from "./wire.js";
 
 /**
  * Soroban reads and builds for the contract venues, over plain JSON-RPC.
@@ -64,6 +65,7 @@ export async function simulate(
   tx: Transaction,
   timeoutMs: number,
   venue: string,
+  caller?: AbortSignal,
 ): Promise<Simulated> {
   let response: Response;
   try {
@@ -76,7 +78,7 @@ export async function simulate(
         method: "simulateTransaction",
         params: { transaction: tx.toXDR() },
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: boundedBy(timeoutMs, caller),
     });
   } catch (cause) {
     throw new MavnaError(`The Stellar RPC did not answer for ${venue}.`, {
@@ -137,6 +139,7 @@ export async function readContract(
   args: readonly xdr.ScVal[],
   timeoutMs: number,
   venue: string,
+  caller?: AbortSignal,
 ): Promise<xdr.ScVal> {
   const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, "0"), {
     fee: "100",
@@ -145,7 +148,7 @@ export async function readContract(
     .addOperation(new Contract(contract).call(method, ...args))
     .setTimeout(60)
     .build();
-  return (await simulate(rpcUrl, tx, timeoutMs, venue)).retval;
+  return (await simulate(rpcUrl, tx, timeoutMs, venue, caller)).retval;
 }
 
 /**
@@ -176,6 +179,11 @@ export async function buildContractCall(
 
 /** Whether the RPC answers getHealth with "healthy". */
 export async function rpcHealthy(rpcUrl: string, timeoutMs: number): Promise<boolean> {
+  return (await rpcHealth(rpcUrl, timeoutMs)).usable;
+}
+
+/** The same, with why when it is not. */
+export async function rpcHealth(rpcUrl: string, timeoutMs: number): Promise<Usability> {
   try {
     const response = await fetch(rpcUrl, {
       method: "POST",
@@ -183,12 +191,16 @@ export async function rpcHealthy(rpcUrl: string, timeoutMs: number): Promise<boo
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) return false;
+    if (!response.ok)
+      return { usable: false, because: `${rpcUrl} answered HTTP ${response.status}` };
     const parsed = healthEnvelope.safeParse(await response.json());
-    return parsed.success && parsed.data.result.status === "healthy";
-  } catch {
+    if (!parsed.success) return { usable: false, because: `${rpcUrl} answered in another shape` };
+    return parsed.data.result.status === "healthy"
+      ? { usable: true }
+      : { usable: false, because: `${rpcUrl} reports ${parsed.data.result.status}` };
+  } catch (cause) {
     // isUsable answers a question; an unreachable node is the answer "no".
-    return false;
+    return { usable: false, because: `${rpcUrl} did not answer (${causeOf(cause)})` };
   }
 }
 
