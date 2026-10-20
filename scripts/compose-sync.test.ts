@@ -76,15 +76,79 @@ describe("syncing the checkout into compose's volume", () => {
     }
   });
 
-  it("never writes into the source", () => {
-    const src = tree({ "a.ts": "a" });
-    const dest = tree({ "b.ts": "b" });
+  it("copies only what the build needs, never secrets or what git ignores", () => {
+    const src = tree({
+      ".gitignore": "resources/\n.superpowers/\napps/docs/generated/\n*.zip\n",
+      "package.json": "{}",
+      "pnpm-lock.yaml": "lock",
+      "pnpm-workspace.yaml": "packages: []",
+      "turbo.json": "{}",
+      "tsconfig.base.json": "{}",
+      "packages/core/src/a.ts": "a",
+      "apps/docs/content/index.mdx": "docs",
+      "services/sponsor/src/main.ts": "sponsor",
+      ".env.example": "SPONSOR_SECRET_KEY=",
+      // what must never travel into the volume
+      "resources/plans/notes.md": "internal",
+      ".superpowers/x": "internal",
+      ".claude/worktrees/x/a.ts": "a worktree",
+      "apps/docs/generated/exports.mdx": "generated",
+      "sponsor.env": "SPONSOR_SECRET_KEY=S",
+      "services/sponsor/prod.env": "SPONSOR_SECRET_KEY=S",
+      ".env.production": "SPONSOR_SECRET_KEY=S",
+      "services/sponsor/tls.pem": "key",
+      "services/sponsor/signer.key": "key",
+      "backup.zip": "zip",
+      "notes.txt": "a file at the root nobody listed",
+    });
+    const dest = tree({});
     sync(src, dest);
-    expect(existsSync(join(src, "b.ts"))).toBe(false);
+    for (const copied of [
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "turbo.json",
+      "tsconfig.base.json",
+      "packages/core/src/a.ts",
+      "apps/docs/content/index.mdx",
+      "services/sponsor/src/main.ts",
+    ]) {
+      expect(existsSync(join(dest, copied)), copied).toBe(true);
+    }
+    for (const left of [
+      "resources",
+      ".superpowers",
+      ".claude",
+      "apps/docs/generated",
+      "sponsor.env",
+      "services/sponsor/prod.env",
+      ".env.production",
+      "services/sponsor/tls.pem",
+      "services/sponsor/signer.key",
+      "backup.zip",
+      "notes.txt",
+    ]) {
+      expect(existsSync(join(dest, left)), left).toBe(false);
+    }
+  });
+
+  it("removes from the volume a secret an earlier sync copied", () => {
+    const src = tree({ "package.json": "{}" });
+    const dest = tree({ "sponsor.env": "SPONSOR_SECRET_KEY=S", "resources/x": "internal" });
+    sync(src, dest);
+    expect(existsSync(join(dest, "sponsor.env"))).toBe(false);
+    expect(existsSync(join(dest, "resources"))).toBe(false);
+  });
+
+  it("never writes into the source", () => {
+    const src = tree({ "packages/core/a.ts": "a" });
+    const dest = tree({ "packages/core/b.ts": "b" });
+    sync(src, dest);
+    expect(existsSync(join(src, "packages/core/b.ts"))).toBe(false);
   });
 
   it("runs as a command even when reached through a symlinked path", () => {
-    const src = tree({ "a.ts": "a" });
+    const src = tree({ "packages/core/a.ts": "a" });
     const dest = join(tree({}), "workspace");
     // /tmp on macOS is a symlink, as a mount path can be anywhere
     const linked = join(tree({}), "scripts");
@@ -93,7 +157,7 @@ describe("syncing the checkout into compose's volume", () => {
       encoding: "utf8",
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(dest, "a.ts"), "utf8")).toBe("a");
+    expect(readFileSync(join(dest, "packages/core/a.ts"), "utf8")).toBe("a");
   });
 
   it("refuses to run without both paths", () => {
