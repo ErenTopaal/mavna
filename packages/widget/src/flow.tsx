@@ -639,6 +639,9 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   go(screen: Screen, dir?: "push" | "pop"): void {
+    // The running transfer owns the flight: the form behind it would re-quote and
+    // wipe its progress while the transfer keeps asking for signatures.
+    if (this.transferring && screen !== "flight" && screen !== "activity") return;
     const way = dir ?? "push";
     const wantPanel = screen === "send";
     const node = this.routesRef.current;
@@ -760,6 +763,7 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   runQuote(): void {
+    if (this.transferring) return;
     this.currentQuote?.cancel();
     this.rows = [];
     const cap = this.lockHeight();

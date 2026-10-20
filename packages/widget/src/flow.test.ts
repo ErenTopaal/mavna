@@ -244,3 +244,25 @@ describe("Flow.setAmount", () => {
     expect(asked.terms).toBe(1);
   });
 });
+
+describe("while a transfer runs", () => {
+  it("does not leave the flight for the form, and does not quote over it", () => {
+    vi.useFakeTimers();
+    try {
+      const asked = { terms: 0 };
+      const flow = quotedFlow(asked);
+      flow.start();
+      vi.advanceTimersByTime(1);
+      expect(flow.state.screen).toBe("flight");
+      const steps = flow.state.steps;
+      flow.go("send", "pop");
+      flow.runQuote();
+      expect(flow.state.screen).toBe("flight");
+      expect(flow.state.steps).toBe(steps);
+      expect(flow.state.phase).toBe("sending");
+      expect(asked.terms).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
