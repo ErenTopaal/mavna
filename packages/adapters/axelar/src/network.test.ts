@@ -69,6 +69,7 @@ const GAS_FEE_ETH = {
   baseFee: "5661583247892",
   executionFee: "0",
   totalFee: "5661583247892",
+  apiResponse: { result: { source_token: { symbol: "ETH", decimals: 18 } } },
 };
 const ITS_FEE_ETH = 10543325497105;
 

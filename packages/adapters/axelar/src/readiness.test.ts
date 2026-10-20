@@ -89,6 +89,10 @@ interface SendingChain {
 }
 let sending: SendingChain;
 
+/** The sending chain's gas decimals as Axelar's config states them, and as its estimator prices. */
+let configDecimals: number;
+let estimatorDecimals: number;
+
 /** Axelar's message search: the leg found by hash, and the leg found from it. */
 let gmp: { first: unknown[]; second: unknown[] };
 
@@ -149,7 +153,7 @@ function remoteServices(): void {
             chainType: "evm",
             rpc: "https://sepolia.base.org",
             tokenSymbol: "ETH",
-            decimals: 18,
+            decimals: configDecimals,
             contracts: {
               InterchainTokenService: { address: SOURCE_SERVICE },
               AxelarGasService: { address: "0xbE406F0189A0B4cf3A05C286473D23791Dd44Cc6" },
@@ -167,7 +171,15 @@ function remoteServices(): void {
       });
     }
     if (url === `${GMP}/estimateGasFee`) {
-      return json({ baseFee: "5661583247892", executionFee: "0", totalFee: "5661583247892" });
+      return json({
+        baseFee: "5661583247892",
+        executionFee: "0",
+        totalFee: "5661583247892",
+        // as the live estimator answers with showDetailedFees: what it priced in
+        apiResponse: {
+          result: { source_token: { symbol: "ETH", decimals: estimatorDecimals } },
+        },
+      });
     }
     if (url === `${GMP}/estimateITSFee`) return json(10543325497105);
     if (url === `${GMP}/searchGMP`) {
@@ -354,6 +366,8 @@ beforeEach(() => {
     busy: false,
   };
   gmp = { first: [], second: [] };
+  configDecimals = 18;
+  estimatorDecimals = 18;
   remoteServices();
 });
 
@@ -801,5 +815,26 @@ describe("what the sending chain says about the token", () => {
     sending.busy = true;
     const result = await adapter().quote(ask());
     expect((result as RouteRejection).reason).toBe("temporarily-unavailable");
+  });
+});
+
+describe("the delivery fee's unit", () => {
+  it("is the unit Axelar priced it in, not the one its config states", async () => {
+    // Hedera on mainnet: the config says HBAR has 8 decimals, the estimator
+    // prices in 18 (source_token HBAR/18, 208620852046237300 for 0.21 HBAR)
+    classicUsdc();
+    configDecimals = 8;
+    estimatorDecimals = 18;
+    const route = routeOf(await adapter().quote(ask()));
+    const gas = route.fees.find((fee) => fee.kind === "gas");
+    expect(gas?.total.asset.decimals).toBe(18);
+    expect(gas?.total.asset.symbol).toBe("ETH");
+  });
+
+  it("declines when the estimator does not say what it priced in", async () => {
+    classicUsdc();
+    estimatorDecimals = Number.NaN;
+    const result = await adapter().quote(ask());
+    expect(isRoute(result)).toBe(false);
   });
 });

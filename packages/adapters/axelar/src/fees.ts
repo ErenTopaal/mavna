@@ -19,6 +19,19 @@ export interface GasEstimate {
   readonly totalFee: string;
   readonly baseFee: string;
   readonly executionFee: string;
+  /** The token every figure above is counted in, as the estimator states it. */
+  readonly pricedIn: PricedIn;
+}
+
+export interface PricedIn {
+  readonly symbol: string;
+  readonly decimals: number;
+}
+
+/** What to pay for a transfer, and the unit it is counted in. */
+export interface TransferPrice {
+  readonly baseUnits: string;
+  readonly pricedIn: PricedIn;
 }
 
 /**
@@ -80,7 +93,37 @@ export async function estimateGasFee(
     totalFee,
     baseFee: readFeeField(body.baseFee, "baseFee"),
     executionFee: readFeeField(body.executionFee, "executionFee"),
+    pricedIn: readPricedIn(body, sourceTokenSymbol),
   };
+}
+
+/**
+ * The unit of the answer, from the estimator rather than the chain config.
+ *
+ * They disagree in practice: Axelar's config gives Hedera's HBAR eight decimals
+ * while the estimator prices it in eighteen (208620852046237300 for 0.21 HBAR),
+ * so a fee labelled from the config reads as two billion HBAR. An answer that
+ * does not say its unit, or names another token, is refused.
+ */
+function readPricedIn(body: Record<string, unknown>, asked: string): PricedIn {
+  const result = (body.apiResponse as { result?: { source_token?: unknown } } | undefined)?.result;
+  const token = result?.source_token as { symbol?: unknown; decimals?: unknown } | undefined;
+  const symbol = token?.symbol;
+  const decimals = token?.decimals;
+  if (typeof symbol !== "string" || typeof decimals !== "number" || !Number.isInteger(decimals)) {
+    throw new MavnaError(
+      "Axelar's fee estimator did not say which token its price is counted in. " +
+        "Refusing to label a fee with a guessed unit.",
+      { retryable: false },
+    );
+  }
+  if (symbol.toUpperCase() !== asked.toUpperCase()) {
+    throw new MavnaError(
+      `Axelar's fee estimator priced in ${symbol} where ${asked} was asked for.`,
+      { retryable: false },
+    );
+  }
+  return { symbol, decimals };
 }
 
 /**
@@ -114,7 +157,7 @@ export async function priceTransfer(
   sourceChain: string,
   destinationChain: string,
   sourceTokenSymbol: string,
-): Promise<string> {
+): Promise<TransferPrice> {
   // Runs first and on its own. Its zero is the only thing either endpoint offers
   // that catches a stale or misspelled chain name.
   const single = await estimateGasFee(network, sourceChain, destinationChain, sourceTokenSymbol);
@@ -125,7 +168,8 @@ export async function priceTransfer(
   // the two are not symmetric and the choice is not close.
   const highest = BigInt(both) > BigInt(single.totalFee) ? both : single.totalFee;
   assertFeeIsPlausible(highest, destinationChain);
-  return highest;
+  // Both are asked in the same symbol, so one unit covers the pair.
+  return { baseUnits: highest, pricedIn: single.pricedIn };
 }
 
 /**

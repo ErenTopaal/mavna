@@ -30,7 +30,7 @@ import { Address, xdr } from "@stellar/stellar-sdk";
 import { type AxelarChain, chainConfig, evmTokenService, loadChains } from "./deployments.js";
 import { type AxelarStellarChain, ChainRegistry } from "./discovery.js";
 import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
-import { priceTransfer } from "./fees.js";
+import { type PricedIn, priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
@@ -247,13 +247,15 @@ export class AxelarAdapter implements BridgeAdapter {
     if ("source" in lane) return lane;
 
     let deliveryFee: bigint;
+    let feeAsset: Asset;
     let stellarDecimals: number;
     try {
       const [fee, decimals] = await Promise.all([
         priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
         stellarIts.tokenDecimals(token.stellarToken),
       ]);
-      deliveryFee = BigInt(fee);
+      deliveryFee = BigInt(fee.baseUnits);
+      feeAsset = nativeAsset(source.chain, fee.pricedIn);
       stellarDecimals = decimals;
     } catch (cause) {
       return this.declineFrom(
@@ -345,14 +347,14 @@ export class AxelarAdapter implements BridgeAdapter {
           // here and not a bridge fee deducted from the quote.
           kind: "gas",
           total: {
-            asset: nativeAsset(source.chain),
+            asset: feeAsset,
             baseUnits: deliveryFee.toString(),
           },
           recipients: [
             {
               name: "Axelar",
               amount: {
-                asset: nativeAsset(source.chain),
+                asset: feeAsset,
                 baseUnits: deliveryFee.toString(),
               },
               address: source.chain.gasService,
@@ -530,7 +532,8 @@ export class AxelarAdapter implements BridgeAdapter {
     // Priced now, not at quote time, and asserted positive on the way through.
     // Zero here would be accepted by the contract and the message emitted anyway.
     const gasValue = BigInt(
-      await priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)),
+      (await priceTransfer(this.network, source.chain.id, stellar.id, gasToken(source.chain)))
+        .baseUnits,
     );
 
     const amount = BigInt(route.sends.baseUnits);
@@ -803,12 +806,14 @@ export class AxelarAdapter implements BridgeAdapter {
     // payment is the one thing this codebase never does with money. Paying the
     // full price cannot underpay, and the gas service returns what is not spent.
     const amount = BigInt(
-      await priceTransfer(
-        this.network,
-        chainId,
-        first.finalDestinationChain ?? stellar.id,
-        gasToken(chain),
-      ),
+      (
+        await priceTransfer(
+          this.network,
+          chainId,
+          first.finalDestinationChain ?? stellar.id,
+          gasToken(chain),
+        )
+      ).baseUnits,
     );
 
     const call = buildAddGas({
@@ -1067,12 +1072,13 @@ function gasToken(chain: AxelarChain): string {
   return symbol;
 }
 
-function nativeAsset(chain: AxelarChain): Asset {
+/** The sending chain's own token, in the unit Axelar priced the fee in. */
+function nativeAsset(chain: AxelarChain, pricedIn: PricedIn): Asset {
   return {
     chainId: chain.id,
     id: "native",
-    symbol: chain.nativeCurrency?.symbol ?? "",
-    decimals: chain.nativeCurrency?.decimals ?? 18,
+    symbol: pricedIn.symbol,
+    decimals: pricedIn.decimals,
     curatedBy: undefined,
   };
 }
