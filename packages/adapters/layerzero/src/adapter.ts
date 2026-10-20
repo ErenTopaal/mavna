@@ -1,4 +1,5 @@
 import type {
+  AllowanceCheck,
   Amount,
   Asset,
   BridgeAdapter,
@@ -634,28 +635,44 @@ export class LayerZeroAdapter implements BridgeAdapter {
       symbol: resolved.tokenSymbol,
     });
 
-    // Two transactions, in this order. The adapter pulls the funds with
-    // transferFrom, so the allowance has to exist before the send goes out.
+    const approveTx = (amount: bigint, describes: string, skip: AllowanceCheck) => ({
+      chainId: route.fromChain.id,
+      payload: JSON.stringify({
+        to: approval.contract,
+        abi: ERC20_ABI,
+        functionName: approval.functionName,
+        args: [approval.args[0], amount.toString()],
+      }),
+      format: "evm-tx" as const,
+      describes,
+      ephemeralSigners: [],
+      unnecessaryWhen: skip,
+    });
+    // A wallet that has approved this much already should not be asked again.
+    const covered: AllowanceCheck = {
+      kind: "erc20-allowance",
+      token: approval.contract,
+      spender: approval.args[0],
+      atLeastBaseUnits: sends.toString(),
+    };
+
+    // In this order. The adapter pulls the funds with transferFrom, so the
+    // allowance has to exist before the send goes out. Ahead of it, a reset to
+    // zero: Tether's USDT, which the Ethereum adapter locks, reverts an approve
+    // when both the old and the new allowance are non-zero, so someone who
+    // approved a smaller amount earlier and never sent could not approve again.
+    // The token's behaviour cannot be asked without the sender's address, so
+    // the reset is always built and skipped unless an allowance sits between
+    // zero and the amount, which is the only case it changes anything.
     return [
-      {
-        chainId: route.fromChain.id,
-        payload: JSON.stringify({
-          to: approval.contract,
-          abi: ERC20_ABI,
-          functionName: approval.functionName,
-          args: [approval.args[0], approval.args[1].toString()],
-        }),
-        format: "evm-tx",
-        describes: approval.describes,
-        ephemeralSigners: [],
-        // A wallet that has approved this much already should not be asked again.
-        unnecessaryWhen: {
-          kind: "erc20-allowance",
-          token: approval.contract,
-          spender: approval.args[0],
-          atLeastBaseUnits: sends.toString(),
-        },
-      },
+      approveTx(
+        0n,
+        `Clear the ${resolved.tokenSymbol} allowance you gave the LayerZero transfer contract ` +
+          `earlier, so it can be set to this transfer's amount. ${resolved.tokenSymbol} does not ` +
+          "allow an allowance to be changed without clearing it first. This moves no funds.",
+        { ...covered, skipAlsoWhenExactly: "0" },
+      ),
+      approveTx(sends, approval.describes, covered),
       send,
     ];
   }

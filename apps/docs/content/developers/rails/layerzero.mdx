@@ -57,6 +57,17 @@ on and refuses to send if that differs from the registry's current endpoint, whi
 is what stops a transfer routing into a deployment that is no longer the advertised
 one. The delivered decimals are required to be seven.
 
+## Approvals where the OFT locks the token
+
+Where the source OFT locks the token rather than burning it (USDT0 on Ethereum,
+whose `approvalRequired()` answers true), the build returns three transactions: an
+approve of zero, an approve of exactly the amount, then the send. Tether's USDT
+reverts an `approve` that changes one non-zero allowance to another, so a wallet
+left with a smaller allowance from an earlier attempt has to clear it first. The
+reset carries `skipAlsoWhenExactly: "0"` and the approval carries the amount as
+`atLeastBaseUnits`, so a caller that honours both sends the reset only when an
+allowance sits between zero and the amount, and neither when it already covers it.
+
 ## The floor is enforced on-chain
 
 Unlike a native mint, the amount received is not equal to the amount sent, because

@@ -1,4 +1,4 @@
-import type { QuoteRequest, Route, RouteRejection } from "@mavna/core";
+import type { AllowanceCheck, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import {
   Address,
@@ -69,6 +69,8 @@ interface World {
   messages: unknown[];
   /** Whether the OFT's verifier set is its own choice or inherited from the network. */
   dvnInherited: boolean;
+  /** True for an adapter that locks the token, as USDT0 does on Ethereum. */
+  approvalRequired: boolean;
 }
 
 let world: World;
@@ -97,7 +99,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
       case "token":
         return reply(TOKEN);
       case "approvalRequired":
-        return reply(false);
+        return reply(world.approvalRequired);
       case "sharedDecimals":
         return reply(6);
       case "endpoint":
@@ -374,6 +376,7 @@ beforeEach(() => {
     trustline: true,
     messages: [delivered()],
     dvnInherited: false,
+    approvalRequired: false,
   };
   remoteServices();
 });
@@ -493,6 +496,109 @@ describe("quoting USDT0 into Stellar", () => {
     );
     expect(payload.args[0].minAmountLD).toBe("24875000");
     expect(payload.args[0].to).toBe(`0x${StrKey.decodeEd25519PublicKey(READY).toString("hex")}`);
+  });
+});
+
+describe("the approval, where the OFT locks the token", () => {
+  /**
+   * How a caller reads a transaction's condition, written from the documented
+   * fields: skipped when the allowance is at least `atLeastBaseUnits`, or
+   * exactly `skipAlsoWhenExactly` when that is set.
+   */
+  function skipped(condition: AllowanceCheck | undefined, allowance: bigint): boolean {
+    if (condition === undefined) return false;
+    if (allowance >= BigInt(condition.atLeastBaseUnits)) return true;
+    return (
+      condition.skipAlsoWhenExactly !== undefined &&
+      allowance === BigInt(condition.skipAlsoWhenExactly)
+    );
+  }
+
+  /**
+   * Tether's USDT `approve`, as mainnet answered it on 20 October 2026 for an
+   * eth_call with the allowance slot overridden: a non-zero value over a
+   * non-zero allowance reverts, anything else is accepted.
+   */
+  function usdtApprove(allowance: bigint, value: bigint): bigint {
+    if (allowance !== 0n && value !== 0n) throw new Error("execution reverted");
+    return value;
+  }
+
+  /** What the caller's loop does: skip what it may, send the rest in order. */
+  async function runApprovals(allowance: bigint): Promise<{ sent: string[]; allowance: bigint }> {
+    world.approvalRequired = true;
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    const route = routeOf(
+      await adapter.quote({
+        from,
+        to,
+        sends: { asset: from, baseUnits: "150000000" },
+        destination: READY,
+        maxSlippageBps: 50,
+      }),
+    );
+    const txs = await adapter.buildTransactions(route);
+    const sent: string[] = [];
+    let current = allowance;
+    for (const tx of txs) {
+      if (skipped(tx.unnecessaryWhen, current)) continue;
+      const call = JSON.parse(tx.payload) as { functionName: string; args: string[] };
+      if (call.functionName !== "approve") {
+        sent.push(`${call.functionName}()`);
+        continue;
+      }
+      sent.push(`approve(${call.args[1]})`);
+      current = usdtApprove(current, BigInt(call.args[1] ?? ""));
+    }
+    return { sent, allowance: current };
+  }
+
+  it("clears a smaller allowance first, since USDT refuses to change one in place", async () => {
+    // approved 100 earlier, declined the send, now sending 150
+    const { sent, allowance } = await runApprovals(100_000_000n);
+    expect(sent.slice(0, 2)).toEqual(["approve(0)", "approve(150000000)"]);
+    expect(allowance).toBe(150_000_000n);
+  });
+
+  it("asks for no reset when there is no allowance to clear", async () => {
+    const { sent } = await runApprovals(0n);
+    expect(sent.slice(0, 1)).toEqual(["approve(150000000)"]);
+  });
+
+  it("asks for neither when the allowance already covers the send", async () => {
+    const { sent } = await runApprovals(150_000_000n);
+    expect(sent).toEqual(["send()"]);
+  });
+
+  it("says what the reset is for, and names the same token and spender", async () => {
+    world.approvalRequired = true;
+    const adapter = mainnet();
+    const { from, to } = await adapter.sendableAssets("arbitrum");
+    const route = routeOf(
+      await adapter.quote({
+        from,
+        to,
+        sends: { asset: from, baseUnits: "150000000" },
+        destination: READY,
+        maxSlippageBps: 50,
+      }),
+    );
+    const [reset, approve] = await adapter.buildTransactions(route);
+    expect(reset?.describes).toMatch(/clear/i);
+    expect(reset?.unnecessaryWhen).toEqual({
+      kind: "erc20-allowance",
+      token: TOKEN,
+      spender: OFT.toLowerCase(),
+      atLeastBaseUnits: "150000000",
+      skipAlsoWhenExactly: "0",
+    });
+    expect(approve?.unnecessaryWhen).toEqual({
+      kind: "erc20-allowance",
+      token: TOKEN,
+      spender: OFT.toLowerCase(),
+      atLeastBaseUnits: "150000000",
+    });
   });
 });
 

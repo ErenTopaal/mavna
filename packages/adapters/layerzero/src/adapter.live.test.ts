@@ -373,9 +373,15 @@ describe("building the transactions", () => {
     if (!isRoute(quoted)) throw new Error(quoted.explanation);
 
     const transactions = await mainnet.buildTransactions(quoted);
-    expect(transactions).toHaveLength(2);
+    // a reset that clears an earlier smaller allowance, which USDT needs, then the approval
+    expect(transactions).toHaveLength(3);
 
-    const [approval, send] = transactions;
+    const [reset, approval, send] = transactions;
+    expect(JSON.parse(reset?.payload ?? "{}")).toMatchObject({
+      functionName: "approve",
+      args: [ethereum.oft, "0"],
+    });
+    expect(reset?.unnecessaryWhen?.skipAlsoWhenExactly).toBe("0");
     expect(approval?.format).toBe("evm-tx");
     const approvalPayload = JSON.parse(approval?.payload ?? "{}") as {
       functionName: string;
