@@ -19,6 +19,7 @@ import { composeMessageHash } from "@mavna/adapter-layerzero";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
+  InclusionUnknown,
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
   type SubmitOptions,
@@ -4875,5 +4876,36 @@ describe("round 3: a preparation that lands after its window keeps its settlemen
     const settled = await second.post("/settle", { destination: user.publicKey() });
     logged.mockRestore();
     expect(settled.body.settled).toBe(true);
+  });
+});
+
+describe("round 3: /deliver says a delivery of unknown outcome is unknown", () => {
+  it("answers that it may have landed, with the hash, and keeps watching the burn", async () => {
+    const ATTESTATION = `0x${"ef".repeat(65)}`;
+    const message = cctpMessage(Keypair.random().publicKey());
+    stubIris(
+      () =>
+        new Response(JSON.stringify({ messages: [{ message, attestation: ATTESTATION }] }), {
+          status: 200,
+        }),
+    );
+    const server = await startServer({ buildDelivery });
+    server.rpc.submit = async (_label, build) => {
+      await build();
+      throw new InclusionUnknown(
+        "cctp delivery (feed) was not seen included; it may still land.",
+        "feed",
+        false,
+      );
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const answered = await server.post("/deliver", { txHash: `0x${"9a".repeat(32)}`, domain: 0 });
+    logged.mockRestore();
+    expect(answered.status).toBe(502);
+    expect(answered.body.retryable).toBe(true);
+    expect(answered.body.error).toMatch(/may have landed/);
+    expect(answered.body.error).not.toMatch(/failed/);
+    expect(answered.body.deliveryTxHash).toBe("feed");
+    expect(answered.body.watching).toBe(true);
   });
 });

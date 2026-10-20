@@ -51,6 +51,7 @@ import {
   DeliveryBudgetSpent,
   DeliveryFailedOnChain,
   type DeliveryOutcome,
+  DeliveryOutcomeUnknown,
 } from "./deliver.js";
 import { DeliveryBudget } from "./delivery-budget.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
@@ -3194,6 +3195,21 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
             retryable: true,
           },
           next: "later",
+        };
+      }
+      if (cause instanceof DeliveryOutcomeUnknown) {
+        console.error("[sponsor]", cause.message);
+        return {
+          status: 502,
+          body: {
+            error:
+              "The delivery was sent and has not been seen to land; it may have landed. " +
+              "Asking again is safe.",
+            retryable: true,
+            deliveryTxHash: cause.txHash,
+          },
+          // looked up again by the sweep, which finds it delivered if it landed
+          next: "watch",
         };
       }
       if (!(cause instanceof DeliveryFailedOnChain)) throw cause;

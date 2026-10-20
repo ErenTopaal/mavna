@@ -288,7 +288,9 @@ nothing is wrong, ask again in a minute; the sponsor also keeps asking by itself
 see below), `502` when Circle's attestation service
 could not be reached or did not answer usefully (retryable), `502` (retryable) when
 the delivery reached Stellar and failed there, so its fee was paid and nothing was
-minted, `503` (retryable) once the sponsor has spent the day's delivery budget
+minted, `502` (retryable) with `deliveryTxHash` when the delivery was sent and no
+node has said whether it landed (it may have; the sponsor watches the burn and a
+retry answers `already-delivered` if it did), `503` (retryable) once the sponsor has spent the day's delivery budget
 (`MAVNA_DELIVERY_BUDGET_XLM`), or `409` with
 `{ "kind": "recipient-not-ready", "detail": "..." }` when the destination cannot
 receive yet, which in the designed flow is
