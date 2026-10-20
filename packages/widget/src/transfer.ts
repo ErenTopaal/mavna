@@ -982,8 +982,16 @@ async function runRelayed(
   if (tracked.phase.phase === "delivered-unverified") {
     // the rail says it executed and nothing says otherwise, so this is not a
     // failure; Activity shows the transaction for the user to check
+    // what arrived cannot be told apart from other funds without the rail's
+    // word, so a conversion is not asked for, and that is said
+    const swap = route.steps.find((step) => step.kind === "swap");
+    const unconverted =
+      swap === undefined
+        ? ""
+        : ` It was not converted: whatever arrived stays in ${swap.from.asset.symbol}; convert it ` +
+          `to ${swap.to.asset.symbol} in your wallet if you still want it.`;
     throw new StillMoving(
-      `${endedNote(tracked.phase)} Activity shows it with the transaction to check.`,
+      `${endedNote(tracked.phase)}${unconverted} Activity shows it with the transaction to check.`,
     );
   }
   if (!isSuccess(tracked.phase)) throw new Error(endedNote(tracked.phase));

@@ -1997,6 +1997,43 @@ describe("a Stellar wallet connected to another account", () => {
   });
 });
 
+describe("a delivery the rail can no longer prove", () => {
+  it("says the arrival was not converted when the route converts, and asks for no conversion", async () => {
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "50000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const unverified = {
+      phase: "delivered-unverified" as const,
+      ref: {
+        chainId: "stellar-testnet",
+        txHash: "f00d",
+        explorerUrl: "https://stellar.expert/explorer/testnet/tx/f00d",
+      },
+      because: "The rail's record no longer says what arrived.",
+    };
+    const adapter = new ScriptedAdapter("layerzero", [unverified], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 50_000_000n;
+      },
+    });
+    const error = await run(adapter, route, patches().patch).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StillMoving);
+    expect((error as Error).message).toMatch(/not converted.*USDC.*XLM/);
+    expect(conversionAmounts).toEqual([]);
+  });
+});
+
 describe("holdBlocker", () => {
   it("lets a ready trustline through, opens a missing one, and refuses an unusable one", () => {
     expect(holdBlocker({ kind: "ready", slotsNeeded: 0 }, "USDC")).toBeUndefined();
