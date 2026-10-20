@@ -38,7 +38,12 @@ export const DEFAULT_CAPS: CapConfig = {
 
 export type CapDecision =
   | { readonly allowed: true }
-  | { readonly allowed: false; readonly reason: string; readonly cap: "volume" | "stranding" };
+  | {
+      readonly allowed: false;
+      readonly reason: string;
+      /** `state` is the counts themselves being unreadable, not a cap reached. */
+      readonly cap: "volume" | "stranding" | "state";
+    };
 
 export interface CapUsage {
   readonly day: string;
@@ -97,7 +102,24 @@ export class CapLedger {
    * explanation is worse than being refused.
    */
   async check(source: SourceChainClass): Promise<CapDecision> {
-    const usage = (await this.store.load(this.today())) ?? emptyUsage(this.today());
+    let usage: CapUsage;
+    try {
+      usage = (await this.store.load(this.today())) ?? emptyUsage(this.today());
+    } catch (cause) {
+      // Closed, not open: without today's counts nothing says the caps allow it.
+      console.error(
+        "[sponsor] SPONSORSHIP PAUSED: the cap counts cannot be read, and nothing is " +
+          "sponsored until the caps state is repaired:",
+        cause instanceof Error ? cause.message : cause,
+      );
+      return {
+        allowed: false,
+        cap: "state",
+        reason:
+          "Account setup is paused while the sponsor's records are repaired. Transfers to " +
+          "accounts that already exist are unaffected.",
+      };
+    }
 
     if (usage.stranded >= this.config.strandingCapPerDay) {
       return {
@@ -161,6 +183,11 @@ export class CapLedger {
    * has not started yet, and taking that word would let anyone pick the larger
    * allocation by naming the right chain.
    */
+  /** The most sponsorships a day can start: the allocation every one counts against. */
+  dailyStartLimit(): number {
+    return this.config.volumeCapPerDay[this.unprovenClass()];
+  }
+
   unprovenClass(): SourceChainClass {
     const { volumeCapPerDay } = this.config;
     return volumeCapPerDay["expensive-gas"] < volumeCapPerDay["cheap-gas"]

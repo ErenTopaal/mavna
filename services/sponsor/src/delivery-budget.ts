@@ -1,5 +1,5 @@
 import * as z from "zod";
-import type { DocumentStore } from "./state.js";
+import { type DocumentStore, UnreadableState } from "./state.js";
 
 /**
  * What the sponsor may spend on delivery fees in one UTC day.
@@ -88,17 +88,11 @@ export class DeliveryBudget {
     if (value === undefined) return {};
     const parsed = stored.safeParse(value);
     if (!parsed.success) {
-      // Today counts as spent in full rather than as nothing spent, since a
-      // budget that forgets on a bad file is no budget. The bad copy is kept
-      // aside and replaced, so tomorrow starts afresh.
-      console.error(
-        "[sponsor] the delivery spend state is not in the shape this version writes; " +
-          `today counts as spent, and the file is kept as ${DOCUMENT}-rejected`,
+      // Refused, not reset: a budget that forgets on a bad file is no budget,
+      // so no delivery is paid for until the file is repaired.
+      throw new UnreadableState(
+        "The sponsor's delivery spend state is not in the shape this version writes.",
       );
-      await this.store.write(`${DOCUMENT}-rejected`, value);
-      const reset = { [this.today()]: this.dailyStroops };
-      await this.save(reset);
-      return reset;
     }
     return Object.fromEntries(
       Object.entries(parsed.data).map(([day, stroops]) => [day, BigInt(stroops)]),

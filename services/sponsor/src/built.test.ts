@@ -179,3 +179,27 @@ describe("what anonymous builds can make the ledger hold", () => {
     expect(ledger.full(5_000)).toBe(false);
   });
 });
+
+describe("round 2: whose builds a new build may push out", () => {
+  it("never drops one client's open build because another asked for the same account", () => {
+    const ledger = new BuiltLedger();
+    const owners = buildTx("1");
+    ledger.record(recordFor(owners), 0, "203.0.113.1");
+    for (const sequence of ["2", "3", "4", "5"]) {
+      ledger.record(recordFor(buildTx(sequence)), 0, "198.51.100.9");
+    }
+    expect(ledger.take(xdr.encodeBytes(owners.hash(), "hex"), "preparation", 0)).toBeDefined();
+  });
+
+  it("still keeps only the latest few that one client asked for", () => {
+    const ledger = new BuiltLedger();
+    const txs = ["1", "2", "3", "4"].map((sequence) => buildTx(sequence));
+    for (const tx of txs) ledger.record(recordFor(tx), 0, "203.0.113.1");
+    expect(
+      ledger.take(xdr.encodeBytes((txs[0] as Transaction).hash(), "hex"), "preparation", 0),
+    ).toBeUndefined();
+    expect(
+      ledger.take(xdr.encodeBytes((txs[3] as Transaction).hash(), "hex"), "preparation", 0),
+    ).toBeDefined();
+  });
+});

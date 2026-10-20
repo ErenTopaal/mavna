@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DeliveryBudget } from "./delivery-budget.js";
 import { MemoryDocumentStore } from "./state.js";
 
@@ -41,17 +41,15 @@ describe("the daily budget for deliveries the sponsor pays", () => {
     expect(granted.filter((r) => r !== undefined)).toHaveLength(2);
   });
 
-  it("counts today as spent when its record is unreadable, and starts afresh tomorrow", async () => {
+  it("refuses every delivery while its record is unreadable, today and after", async () => {
     const store = new MemoryDocumentStore();
     await store.write("delivery-spend", { "2026-10-20": "lots" });
     let day = "2026-10-20";
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const budget = new DeliveryBudget(store, 5n * XLM, () => day);
-    expect(await budget.reserve(1n)).toBeUndefined();
-    errors.mockRestore();
-    expect(await store.read("delivery-spend-rejected")).toEqual({ "2026-10-20": "lots" });
+    await expect(budget.reserve(1n)).rejects.toThrow(/delivery spend/);
     day = "2026-10-21";
-    expect(await budget.reserve(1n)).toBeDefined();
+    await expect(budget.reserve(1n)).rejects.toThrow(/delivery spend/);
+    expect(await store.read("delivery-spend")).toEqual({ "2026-10-20": "lots" });
   });
 
   it("pays for nothing with a budget of zero", async () => {

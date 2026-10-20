@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as z from "zod";
 import type { CapStore, CapUsage } from "./caps.js";
@@ -20,6 +20,16 @@ export interface DocumentStore {
   read(name: string): Promise<unknown>;
   /** Replace the document. Resolves once it would survive a crash. */
   write(name: string, value: unknown): Promise<void>;
+  /**
+   * Add one entry to the end of a log. Resolves once it would survive a crash.
+   * For state with many small records, where rewriting the whole of it on
+   * every change would cost more than the change.
+   */
+  append(name: string, entry: unknown): Promise<void>;
+  /** Replace a log with these entries at once, to compact it. */
+  writeLog(name: string, entries: readonly unknown[]): Promise<void>;
+  /** A log's entries in the order they were added, or undefined if it never was written. */
+  readLog(name: string): Promise<unknown[] | undefined>;
 }
 
 /** For tests and for running without a state directory. Dies with the process. */
@@ -36,9 +46,42 @@ export class MemoryDocumentStore implements DocumentStore {
     // change what was stored, the same as with the file store.
     this.documents.set(name, JSON.stringify(value));
   }
+
+  private readonly logs = new Map<string, string[]>();
+
+  async append(name: string, entry: unknown): Promise<void> {
+    const lines = this.logs.get(name) ?? [];
+    lines.push(JSON.stringify(entry));
+    this.logs.set(name, lines);
+  }
+
+  async writeLog(name: string, entries: readonly unknown[]): Promise<void> {
+    this.logs.set(
+      name,
+      entries.map((entry) => JSON.stringify(entry)),
+    );
+  }
+
+  async readLog(name: string): Promise<unknown[] | undefined> {
+    return this.logs.get(name)?.map((line) => JSON.parse(line) as unknown);
+  }
 }
 
 const DOCUMENT_NAME = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Documents holding the day's spending limits. Damaged, they are refused rather
+ * than started over, since an empty one would hand out a fresh day's allowance.
+ */
+const FAIL_CLOSED_DOCUMENTS: ReadonlySet<string> = new Set(["caps", "delivery-spend"]);
+
+/** Stored state that cannot be read, and must not be taken as empty. */
+export class UnreadableState extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnreadableState";
+  }
+}
 
 /**
  * One JSON file per document in a directory only the process owner can read,
@@ -71,6 +114,11 @@ export class FileDocumentStore implements DocumentStore {
     try {
       return JSON.parse(text);
     } catch {
+      if (FAIL_CLOSED_DOCUMENTS.has(name)) {
+        // Left in place and refused: reading these as empty would reset the
+        // day's limits, so nothing they guard proceeds until it is repaired.
+        throw new UnreadableState(`The sponsor's ${name} state at ${path} is not readable JSON.`);
+      }
       // Moved aside rather than refused: one damaged file must not keep the
       // service down, and the next write would otherwise replace the only copy.
       const aside = `${path}.unreadable-${Date.now()}`;
@@ -91,38 +139,104 @@ export class FileDocumentStore implements DocumentStore {
       return Promise.reject(cause);
     }
     const text = `${JSON.stringify(value, null, 2)}\n`;
-    const previous = this.queues.get(name) ?? Promise.resolve();
-    const next = previous
-      .catch(() => {})
-      .then(async () => {
-        await this.ensureDir();
-        this.sequence += 1;
-        const temporary = `${path}.${process.pid}.${this.sequence}.tmp`;
-        try {
-          await writeFile(temporary, text, { mode: 0o600, flush: true });
-          await rename(temporary, path);
-        } catch (cause) {
-          // the temporary file may hold secrets, so it does not stay behind
-          await rm(temporary, { force: true });
-          throw cause;
-        }
-        // the rename is only durable once the directory entry is
+    return this.inTurn(path, () => this.replace(path, text));
+  }
+
+  append(name: string, entry: unknown): Promise<void> {
+    let path: string;
+    try {
+      path = this.pathFor(name, "log");
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const line = `${JSON.stringify(entry)}\n`;
+    return this.inTurn(path, async () => {
+      await this.ensureDir();
+      const created = !this.logsSeen.has(path);
+      await appendFile(path, line, { mode: 0o600, flush: true });
+      // a new file is only durable once its directory entry is
+      if (created) {
         await syncDirectory(this.dir);
-      });
-    this.queues.set(name, next);
+        this.logsSeen.add(path);
+      }
+    });
+  }
+
+  writeLog(name: string, entries: readonly unknown[]): Promise<void> {
+    let path: string;
+    try {
+      path = this.pathFor(name, "log");
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const text = entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
+    return this.inTurn(path, async () => {
+      await this.replace(path, text);
+      this.logsSeen.add(path);
+    });
+  }
+
+  async readLog(name: string): Promise<unknown[] | undefined> {
+    const path = this.pathFor(name, "log");
+    let text: string;
+    try {
+      text = await readFile(path, "utf8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw cause;
+    }
+    this.logsSeen.add(path);
+    const entries: unknown[] = [];
+    for (const [index, line] of text.split("\n").entries()) {
+      if (line.trim() === "") continue;
+      try {
+        entries.push(JSON.parse(line));
+      } catch {
+        // a crash mid-append leaves at most a cut-short last line
+        console.error(`[sponsor] skipped line ${index + 1} of ${path}: it is not readable JSON`);
+      }
+    }
+    return entries;
+  }
+
+  /** Logs this process has seen on disk, so a new one's directory entry is synced once. */
+  private readonly logsSeen = new Set<string>();
+
+  /** Write to a temporary file and rename it over the old one, durably. */
+  private async replace(path: string, text: string): Promise<void> {
+    await this.ensureDir();
+    this.sequence += 1;
+    const temporary = `${path}.${process.pid}.${this.sequence}.tmp`;
+    try {
+      await writeFile(temporary, text, { mode: 0o600, flush: true });
+      await rename(temporary, path);
+    } catch (cause) {
+      // the temporary file may hold secrets, so it does not stay behind
+      await rm(temporary, { force: true });
+      throw cause;
+    }
+    // the rename is only durable once the directory entry is
+    await syncDirectory(this.dir);
+  }
+
+  /** Changes to one file go one after another, so the last one asked for lands last. */
+  private inTurn(path: string, work: () => Promise<void>): Promise<void> {
+    const previous = this.queues.get(path) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(work);
+    this.queues.set(path, next);
     // the caller is handed `next` and hears about a failure there; this branch
     // only tidies the queue
     next
       .finally(() => {
-        if (this.queues.get(name) === next) this.queues.delete(name);
+        if (this.queues.get(path) === next) this.queues.delete(path);
       })
       .catch(() => {});
     return next;
   }
 
-  private pathFor(name: string): string {
+  private pathFor(name: string, kind: "json" | "log" = "json"): string {
     if (!DOCUMENT_NAME.test(name)) throw new Error(`Not a usable document name: "${name}".`);
-    return join(this.dir, `${name}.json`);
+    return join(this.dir, `${name}.${kind}`);
   }
 
   private ensureDir(): Promise<void> {
@@ -174,28 +288,27 @@ export class DocumentCapStore implements CapStore {
   }
 
   /**
-   * The stored days, each checked: one not in the shape this version writes is
-   * logged and skipped, and the rest are read as written.
+   * The stored days, each checked. Any one not in the shape this version writes
+   * makes the whole document unreadable: skipping it would reset that day's
+   * counts, and the caps exist so that cannot happen.
    */
   private async days(): Promise<Record<string, CapUsage>> {
     const stored = await this.store.read("caps");
     if (stored === undefined) return {};
     if (typeof stored !== "object" || stored === null || Array.isArray(stored)) {
-      console.error(
-        `[sponsor] skipped the caps state: it is not in the shape this version writes: ${JSON.stringify(stored)}`,
+      throw new UnreadableState(
+        "The sponsor's caps state is not in the shape this version writes.",
       );
-      return {};
     }
     const days: Record<string, CapUsage> = {};
     for (const [day, value] of Object.entries(stored)) {
       const parsed = capUsageShape.safeParse(value);
-      if (parsed.success && parsed.data.day === day) {
-        days[day] = parsed.data;
-      } else {
-        console.error(
-          `[sponsor] skipped the caps for ${day}: not in the shape this version writes: ${JSON.stringify(value)}`,
+      if (!parsed.success || parsed.data.day !== day) {
+        throw new UnreadableState(
+          `The sponsor's caps for ${day} are not in the shape this version writes.`,
         );
       }
+      days[day] = parsed.data;
     }
     return days;
   }

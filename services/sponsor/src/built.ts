@@ -57,9 +57,16 @@ export const DEFAULT_OPEN_RECORDS = 10_000;
 /** Open records kept per account and kind; the oldest goes first. */
 const OPEN_PER_ACCOUNT = 3;
 
+/** One change to the open records, as it is appended to the built log. */
+export type BuiltChange = { readonly add: BuiltRecord } | { readonly drop: string };
+
 export class BuiltLedger {
   private readonly records = new Map<string, BuiltRecord>();
+  /** Told of every record added, pushed out or handed out. Expiry needs no telling. */
+  private listener: (change: BuiltChange) => void = () => {};
   private readonly capacity: number;
+  /** Which client asked for each open record, by hash. Kept in memory only. */
+  private readonly clients = new Map<string, string>();
 
   constructor(capacity: number = DEFAULT_OPEN_RECORDS) {
     this.capacity = capacity;
@@ -77,6 +84,11 @@ export class BuiltLedger {
     return ledger;
   }
 
+  /** Hear every change from now on, to write it down as it happens. */
+  watch(listener: (change: BuiltChange) => void): void {
+    this.listener = listener;
+  }
+
   /** Every record still open, for writing down. */
   snapshot(): readonly BuiltRecord[] {
     return [...this.records.values()];
@@ -87,17 +99,34 @@ export class BuiltLedger {
    * anyone and signing is not, so a ledger pruned only on take would keep
    * every abandoned build until someone next signs.
    */
-  record(record: BuiltRecord, nowUnix: number): void {
+  record(record: BuiltRecord, nowUnix: number, client?: string): void {
     this.prune(nowUnix);
-    // A few open builds per account and kind, the latest. Asking again builds
-    // afresh, and each answer would otherwise add one more record.
+    // A few open builds per account and kind for each client, the latest.
+    // Asking again builds afresh, and each answer would otherwise add one more
+    // record. Counted per client, because anyone may build for any account,
+    // and pushing out the owner's own build would void what they just signed.
     const same = [...this.records.values()].filter(
-      (open) => open.signer === record.signer && open.kind === record.kind,
+      (open) =>
+        open.signer === record.signer &&
+        open.kind === record.kind &&
+        this.clients.get(open.hash) === client,
     );
     for (const stale of same.slice(0, Math.max(0, same.length - (OPEN_PER_ACCOUNT - 1)))) {
       this.records.delete(stale.hash);
+      this.clients.delete(stale.hash);
+      this.listener({ drop: stale.hash });
     }
     this.records.set(record.hash, record);
+    this.listener({ add: record });
+    if (client !== undefined) this.clients.set(record.hash, client);
+  }
+
+  /** Open records this client asked for. */
+  openFor(client: string, nowUnix: number): number {
+    this.prune(nowUnix);
+    let count = 0;
+    for (const asker of this.clients.values()) if (asker === client) count += 1;
+    return count;
   }
 
   /** Whether as many records are open as the ledger holds, so the next build is refused. */
@@ -118,12 +147,17 @@ export class BuiltLedger {
     const found = this.records.get(hash);
     if (found === undefined || found.kind !== kind) return undefined;
     this.records.delete(hash);
+    this.clients.delete(hash);
+    this.listener({ drop: hash });
     return found;
   }
 
   private prune(nowUnix: number): void {
     for (const [key, record] of this.records) {
-      if ((record.openUntilUnix ?? record.expiresAtUnix) <= nowUnix) this.records.delete(key);
+      if ((record.openUntilUnix ?? record.expiresAtUnix) <= nowUnix) {
+        this.records.delete(key);
+        this.clients.delete(key);
+      }
     }
   }
 

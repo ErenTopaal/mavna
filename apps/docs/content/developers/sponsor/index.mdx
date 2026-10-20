@@ -56,7 +56,7 @@ Everything is environment variables, read once at start.
 | `MAVNA_SETTLE_SWEEP_SECONDS` | no | `120` | How often held settlements are retried without a page asking, for LayerZero and Axelar deliveries whose tab closed. One account at a time, never overlapping. `0` turns it off |
 | `MAVNA_RESERVE_FUNDING` | no | `sponsor` | `sponsor`: the sponsor fronts a new account's reserve and is repaid from the arrival. `self`: a temporary switch for running without a funded key; an existing account pays its own trustline reserve, its own Circle delivery on Stellar and any overdue conversion on arrival it finishes, `/deliver` and `/compose` answer `409`, and an address that does not exist yet is declined at quote time. Anything else stops the process at start |
 | `MAVNA_PRODUCTION` | no | `false` | `true` marks a production sponsor on any network; mainnet always is one. A production sponsor refuses to start without `MAVNA_STATE_DIR`. Anything but `true` or `false` stops the process at start |
-| `MAVNA_STATE_DIR` | in production (mainnet, or `MAVNA_PRODUCTION=true`) | none: state in memory, lost on restart, with a warning at start; a production sponsor refuses to start instead | Directory for the caps, held settlements, built transactions, and channel keys and leases, one JSON file each, written atomically. Holds secret channel keys: the process creates it `0700` and its files `0600`; keep it on a private volume. The state records the network it was written for, and the process refuses to start on another network against it: give each network its own directory |
+| `MAVNA_STATE_DIR` | in production (mainnet, or `MAVNA_PRODUCTION=true`) | none: state in memory, lost on restart, with a warning at start; a production sponsor refuses to start instead | Directory for the caps, held settlements, built transactions, and channel keys and leases: one JSON file each, written atomically, except the built transactions, which are a log appended one line per build and compacted at start. A damaged caps or delivery-spend file is left in place and pauses sponsorship (or paid deliveries) until it is repaired. Holds secret channel keys: the process creates it `0700` and its files `0600`; keep it on a private volume. The state records the network it was written for, and the process refuses to start on another network against it: give each network its own directory |
 | `MAVNA_CAP_STRANDING_PER_DAY` | no | `75` | Sponsorships that may strand in a day before sponsorship pauses |
 | `MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY` | no | `300` | Sponsorships a day from chains where gas is expensive |
 | `MAVNA_CAP_VOLUME_CHEAP_PER_DAY` | no | `200` | Sponsorships a day from chains where gas costs cents |
@@ -64,7 +64,7 @@ Everything is environment variables, read once at start.
 | `MAVNA_DELIVERY_BUDGET_XLM` | no | `25` | Delivery fees, in XLM, the sponsor may pay in one UTC day, counted in the state directory. Each delivery sets its largest possible fee aside before it is signed, and the count comes down to what it was charged. Past it, `/deliver` answers `503`, retryable, until the next day. `0` pays for none |
 | `MAVNA_RATE_LIMIT_PER_MINUTE` | no | `120` | Requests per client address per minute, on every endpoint. An IPv6 client is counted by its /64, since one host is usually given the whole of it. `0` turns it off |
 | `MAVNA_TRUST_PROXY` | no | `false` | `true` behind a reverse proxy: the client address is the last `X-Forwarded-For` entry, the one the proxy appended. This also counts clients for the Soroswap proxy's limits. Set it only when the sponsor's port is reachable from the proxy alone (the compose file binds it to `127.0.0.1`); a port open to the world lets anyone send their own `X-Forwarded-For`. Leave `false` when clients reach the sponsor directly, or anyone can claim any address |
-| `MAVNA_CHANNEL_POOL_SIZE` | no | `4` | Settlement channels the sponsor funds for itself, 2 XLM each. One channel carries one settlement in flight; the next is funded only when every one before it is busy. Kept in the state directory with their keys |
+| `MAVNA_PROVISIONAL_SETTLEMENTS` | no | `16` | Settlements nothing has backed yet that may hold a channel at once, across every client, each for ten minutes at most. With the daily caps it sizes the channel pool; see [Capacity and caps](#capacity-and-caps). `MAVNA_CHANNEL_POOL_SIZE` is no longer read, and start-up says so if it is set |
 | `MAVNA_SETTLEMENTS_PER_CLIENT` | no | `2` | Settlements one client address (counted as the rate limit counts it) may have waiting on a preparation at once. `0` turns it off |
 | `SOROSWAP_API_KEY` | no | none; no Soroswap proxy | Soroswap's API key. With it the server proxies Soroswap at `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key |
 | `MAVNA_ARRIVAL_CONTRACT` | no | none; `/compose` answers that it finishes nothing | The Mavna Arrival Contract whose overdue conversions this sponsor finishes. Also kept alive daily (instance and code TTL), paid by the sponsor key. In self mode neither happens, so the sponsor spends nothing, and start-up says so |
@@ -110,17 +110,29 @@ the account you fund.
 ## Capacity and caps
 
 Settlements ride on channel accounts, one in-flight settlement per channel. The
-server creates and funds its own channels from the sponsor, one at a time and only
-when every channel before it is busy, up to `MAVNA_CHANNEL_POOL_SIZE` (4 by
-default). A full pool answers `503`, retryable.
+server creates and funds its own channels from the sponsor, 2 XLM each, one at a
+time and only when every channel before it is busy.
 
-A settlement costs its caller nothing until a preparation backs it, so until then
-its channel is held only briefly: five minutes from building it, and five minutes
-again from committing it signed. Only the preparation going out holds the channel
-to the settlement's own time bound, a day; a preparation the network refuses
-outright gives it back to the short hold. One client address may have at most
-`MAVNA_SETTLEMENTS_PER_CLIENT` settlements (2 by default) waiting on a preparation
-at once, and further asks answer `429`, retryable.
+Asking for a settlement, signing it and committing it cost the caller nothing, so
+none of them can hold a channel for long. A settlement's channel is held for one
+fixed window of ten minutes from the first ask; asking again or committing again
+returns the same channel and window and never lengthens it. Only a preparation
+that has landed on-chain, which puts the sponsor's reserve out and counts against
+the day's caps, holds the channel to the settlement's own time bound, a day. While
+a preparation may still land, its channel is kept for it. An account whose window
+lapsed without a landed preparation waits one more window before it gets another.
+
+Two limits bound the unbacked settlements: at most `MAVNA_PROVISIONAL_SETTLEMENTS`
+(16 by default) at once across every client, and at most
+`MAVNA_SETTLEMENTS_PER_CLIENT` (2 by default) per client address. Past either,
+`/settlement` answers `503` or `429`, retryable.
+
+The pool cannot run out within the caps. The caps let at most C sponsorships
+start in a UTC day, C being the smaller daily volume cap, and each holds its
+channel for at most a day, so at most 2C are held at once (a day spans two UTC
+days). With P unbacked at most, the server funds up to 2C + P channels: 416 at
+the defaults (C = 200, P = 16), 832 XLM if every one is ever needed, funded only
+as they are. `/health` reports this bound as `channels.maxSize`.
 
 Each settlement's fee is paid by its channel. The sweep tops a channel back up to
 2 XLM from the sponsor once it falls below 1.5 XLM, and logs each top-up; a

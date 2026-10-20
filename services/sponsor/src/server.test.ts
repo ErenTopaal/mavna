@@ -2315,6 +2315,23 @@ describe("the sponsor counts only USDC the account can spend", () => {
   });
 });
 
+/** The open records the built log says remain, of one kind, replayed as a restart would. */
+async function openBuilt(state: MemoryDocumentStore, kind: string): Promise<unknown[]> {
+  type Line = {
+    add?: { hash: string; kind: string; openUntilUnix?: number; expiresAtUnix: number };
+    drop?: string;
+  };
+  const open = new Map<string, NonNullable<Line["add"]>>();
+  for (const line of ((await state.readLog("built")) ?? []) as Line[]) {
+    if (line.add !== undefined) open.set(line.add.hash, line.add);
+    if (line.drop !== undefined) open.delete(line.drop);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  return [...open.values()].filter(
+    (record) => record.kind === kind && (record.openUntilUnix ?? record.expiresAtUnix) > now,
+  );
+}
+
 describe("what anonymous builds can make the sponsor write down", () => {
   it("keeps a few settlements per account, and none past its short lease", async () => {
     const state = new MemoryDocumentStore();
@@ -2330,10 +2347,7 @@ describe("what anonymous builds can make the sponsor write down", () => {
       });
       expect(built.status).toBe(200);
     }
-    const settlements = () =>
-      (state.read("built") as Promise<{ kind: string }[]>).then((records) =>
-        records.filter((record) => record.kind === "settlement"),
-      );
+    const settlements = () => openBuilt(state, "settlement");
     expect((await settlements()).length).toBe(3);
 
     vi.setSystemTime(Date.now() + PROVISIONAL_AND_GRACE_SECONDS * 1_000);
@@ -2896,8 +2910,8 @@ describe("a settlement slot is held for a day only once something backs it", () 
     expect(early.status).toBe(503);
     expect(early.body.retryable).toBe(true);
 
-    // Five minutes and the clock-drift grace later, it is free again.
-    skip(300);
+    // Ten minutes from the first ask and the clock-drift grace later, it is free again.
+    skip(600);
     const next = await server.post("/settlement", {
       destination: Keypair.random().publicKey(),
       sourceChainId: "1",
@@ -2991,9 +3005,9 @@ describe("a settlement slot is held for a day only once something backs it", () 
     expect((await ask("203.0.113.2", Keypair.random())).status).toBe(200);
   });
 
-  it("grows its own pool to the size it is given, one funded channel per slot in use", async () => {
+  it("funds one channel per slot in use, up to what it lets out", async () => {
     const server = await startServer(
-      { channelPoolSize: 2, settlementsPerClient: 0 },
+      { provisionalSettlements: 2, settlementsPerClient: 0 },
       { fundsOwnChannel: true },
     );
     const funded = () => server.rpc.submissions.filter((s) => s.label === "channel funding");
@@ -3006,6 +3020,7 @@ describe("a settlement slot is held for a day only once something backs it", () 
       (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
     ).toBe(200);
     expect(funded()).toHaveLength(2);
+    // two unbacked at once is all it lets out, so nothing more is funded for a third
     const full = await server.post("/settlement", { destination: Keypair.random().publicKey() });
     expect(full.status).toBe(503);
     expect(full.body.retryable).toBe(true);
@@ -3014,7 +3029,10 @@ describe("a settlement slot is held for a day only once something backs it", () 
 
   it("keeps every channel it funded across a restart", async () => {
     const state = new MemoryDocumentStore();
-    const first = await startServer({ channelPoolSize: 2, state }, { fundsOwnChannel: true });
+    const first = await startServer(
+      { provisionalSettlements: 2, settlementsPerClient: 0, state },
+      { fundsOwnChannel: true },
+    );
     for (let i = 0; i < 2; i += 1) {
       await first.post("/settlement", { destination: Keypair.random().publicKey() });
     }
@@ -3024,7 +3042,7 @@ describe("a settlement slot is held for a day only once something backs it", () 
 });
 
 /** The provisional lease and the reclaim grace, plus a second. */
-const PROVISIONAL_AND_GRACE_SECONDS = 300 + 30 + 1;
+const PROVISIONAL_AND_GRACE_SECONDS = 600 + 30 + 1;
 
 describe("the sponsor does not take a failed read for a missing account", () => {
   function failAccountReads(server: TestServer, user: Keypair): void {
@@ -3074,7 +3092,7 @@ describe("the sponsor funds its own channel once", () => {
     return () => funded;
   }
 
-  it("funds one channel when the first two settlements are asked for at once", async () => {
+  it("funds one channel per settlement, never two, when the first two arrive at once", async () => {
     // The funding waits until both requests are past the cap check, so the
     // second reaches the channel step while the first is still funding.
     let checked = 0;
@@ -3105,8 +3123,9 @@ describe("the sponsor funds its own channel once", () => {
         server.post("/settlement", { destination: user.publicKey(), sourceChainId: "1" }),
       ),
     );
-    expect(funded()).toBe(1);
-    expect(answers.map((a) => a.status).sort((a, b) => a - b)).toEqual([200, 503]);
+    // one funding each at most, never two for the same need
+    expect(funded()).toBe(2);
+    expect(answers.map((a) => a.status)).toEqual([200, 200]);
   });
 
   it("tries the funding again after it failed", async () => {
@@ -3121,7 +3140,11 @@ describe("the sponsor funds its own channel once", () => {
       destination: Keypair.random().publicKey(),
       sourceChainId: "1",
     });
-    expect(failed.status).toBe(500);
+    expect(failed.status).toBe(503);
+    expect(failed.body.retryable).toBe(true);
+    // once its backoff is over
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
     const retried = await server.post("/settlement", {
       destination: Keypair.random().publicKey(),
       sourceChainId: "1",
@@ -3204,10 +3227,12 @@ describe("the sponsor skips stored state it did not write, and still starts", ()
     const user = Keypair.random();
     await holdSettlementFor(first, user);
     const signed = await preparedAndSigned(first, user);
-    const built = (await state.read("built")) as Record<string, unknown>[];
-    await state.write("built", [
-      ...built,
-      { ...built[0], hash: "ff".repeat(32), sourceChainId: 7 },
+    const log = (await state.readLog("built")) as { add?: Record<string, unknown> }[];
+    const good = log.find((line) => line.add !== undefined)?.add;
+    await state.writeLog("built", [
+      ...log,
+      { add: { ...good, hash: "ff".repeat(32), sourceChainId: 7 } },
+      { neither: true },
     ]);
 
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -3337,9 +3362,9 @@ describe("the sponsor writes its state only when it changed", () => {
       release = resolve;
     });
     class GatedStore extends MemoryDocumentStore {
-      override async write(name: string, value: unknown): Promise<void> {
+      override async append(name: string, entry: unknown): Promise<void> {
         if (name === "built") await gate;
-        await super.write(name, value);
+        await super.append(name, entry);
       }
     }
     const server = await startServer({ state: new GatedStore() });
@@ -3376,21 +3401,23 @@ describe("the sponsor writes its state only when it changed", () => {
     }
     const server = await startServer({ state: new OrderedStore() });
     const user = Keypair.random();
+    // the lease is written when the slot is taken, before any settlement is held on it
     const built = await server.post("/settlement", {
       destination: user.publicKey(),
       sourceChainId: "1",
     });
-    order.length = 0;
-    // a minute on, so holding it moves the lease's end and the lease is rewritten
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 60_000);
+    expect(order.indexOf("done channels")).toBeGreaterThanOrEqual(0);
     await server.post("/settlement/commit", {
       destination: user.publicKey(),
       signedXdr: signXdr(built.body.xdr as string, user),
     });
+    const signed = await preparedAndSigned(server, user);
+    order.length = 0;
+    // and its landing lengthens the lease, written before the settlement it backs
+    await server.post("/submit", { signedXdr: signed });
     expect(order).toContain("start held");
     expect(order).toContain("done channels");
-    expect(order.indexOf("done channels")).toBeLessThan(order.indexOf("start held"));
+    expect(order.lastIndexOf("done channels")).toBeLessThan(order.lastIndexOf("start held"));
   });
 
   it("writes only the document a request changed", async () => {
@@ -3405,7 +3432,8 @@ describe("the sponsor writes its state only when it changed", () => {
       sourceChainId: "1",
     });
     expect(built.status).toBe(200);
-    expect(state.writes).toEqual(["built"]);
+    // a build is one line appended to the built log, and no document is rewritten
+    expect(state.writes).toEqual([]);
   });
 });
 
@@ -3520,7 +3548,7 @@ describe("what the sponsor holds survives a restart", () => {
       destination: user.publicKey(),
       sourceChainId: "1",
     });
-    expect(failed.status).toBe(500);
+    expect(failed.status).toBe(503);
     const written = (await state.read("channels")) as { pending?: string };
     expect(written.pending).toBeDefined();
 
@@ -4145,5 +4173,397 @@ describe("finishing a conversion on arrival", () => {
       expect(response.status, JSON.stringify(body).slice(0, 80)).toBe(400);
       expect(response.body.retryable).toBe(false);
     }
+  });
+});
+
+describe("round 2: a channel is held long only once a landed preparation backs it", () => {
+  function skip(seconds: number): void {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + seconds * 1000);
+  }
+
+  async function postAs(
+    server: TestServer,
+    client: string,
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Body }> {
+    const response = await fetch(`${server.url}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as Body };
+  }
+
+  /** The whole honest flow for one account, from one client, to a landed preparation. */
+  async function prepareAs(server: TestServer, client: string, user: Keypair): Promise<number> {
+    const built = await postAs(server, client, "/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "1",
+    });
+    if (built.status !== 200) return built.status;
+    const committed = await postAs(server, client, "/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(built.body.xdr as string, user),
+    });
+    if (committed.status !== 200) return committed.status;
+    const prepared = await postAs(server, client, "/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    if (prepared.status !== 200) return prepared.status;
+    return (
+      await postAs(server, client, "/submit", {
+        signedXdr: signXdr(prepared.body.xdr as string, user),
+      })
+    ).status;
+  }
+
+  it("(a) one address preparing account after account does not exhaust the pool", async () => {
+    // a daily cap of eight sponsorships, and two provisional slots
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 8, "cheap-gas": 8 },
+    });
+    const server = await startServer(
+      { caps, trustProxy: true, provisionalSettlements: 2 },
+      { fundsOwnChannel: true },
+    );
+    // the four submits the re-audit used to take every channel
+    for (let i = 0; i < 4; i += 1) {
+      expect(await prepareAs(server, "203.0.113.1", Keypair.random())).toBe(200);
+    }
+    // a new caller still gets a slot to settle on
+    const next = await postAs(server, "198.51.100.9", "/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it("(b) asking again or committing again never lengthens an unbacked slot", async () => {
+    const server = await startServer({ trustProxy: true });
+    const holder = Keypair.random();
+    const ask = () =>
+      postAs(server, "203.0.113.1", "/settlement", {
+        destination: holder.publicKey(),
+        sourceChainId: "1",
+      });
+    const first = await ask();
+    expect(first.status).toBe(200);
+    // renewed every few minutes, signed and committed each time
+    for (let minute = 3; minute <= 9; minute += 3) {
+      skip(180);
+      const renewed = await ask();
+      if (renewed.status === 200) {
+        await postAs(server, "203.0.113.1", "/settlement/commit", {
+          destination: holder.publicKey(),
+          signedXdr: signXdr(renewed.body.xdr as string, holder),
+        });
+      }
+    }
+    skip(91);
+    // ten minutes from the first ask, the one channel is free for someone else
+    const victim = await postAs(server, "198.51.100.9", "/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(victim.status).toBe(200);
+  });
+
+  it("(b) an account whose slot lapsed unbacked waits before it gets another", async () => {
+    const pool = [Keypair.random(), Keypair.random()];
+    const server = await startServer({
+      channels: new ChannelPool({ channels: pool }),
+      trustProxy: true,
+    });
+    for (const channel of pool) server.rpc.accounts.set(channel.publicKey(), 300n);
+    const holder = Keypair.random();
+    const ask = (client: string) =>
+      postAs(server, client, "/settlement", {
+        destination: holder.publicKey(),
+        sourceChainId: "1",
+      });
+    expect((await ask("203.0.113.1")).status).toBe(200);
+    skip(PROVISIONAL_WINDOW_AND_GRACE_SECONDS);
+    // straight back, even from another address, is refused for a while
+    const again = await ask("198.51.100.9");
+    expect(again.status).toBe(429);
+    expect(again.body.retryable).toBe(true);
+  });
+
+  it("caps how many unbacked slots are out at once, across every client", async () => {
+    const server = await startServer(
+      { trustProxy: true, provisionalSettlements: 2 },
+      { fundsOwnChannel: true },
+    );
+    const ask = (client: string) =>
+      postAs(server, client, "/settlement", {
+        destination: Keypair.random().publicKey(),
+        sourceChainId: "1",
+      });
+    expect((await ask("203.0.113.1")).status).toBe(200);
+    expect((await ask("203.0.113.2")).status).toBe(200);
+    const third = await ask("203.0.113.3");
+    expect(third.status).toBe(503);
+    expect(third.body.retryable).toBe(true);
+  });
+
+  it("grows its pool to twice the daily cap plus the unbacked slots, and no further", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 9, "cheap-gas": 1 },
+    });
+    const server = await startServer(
+      { caps, provisionalSettlements: 1, settlementsPerClient: 0 },
+      { fundsOwnChannel: true },
+    );
+    const health = (await (await fetch(`${server.url}/health`)).json()) as Body;
+    // the tighter cap is 1 a day, so at most 2 prepared at once, plus 1 unbacked
+    expect((health.channels as Body).maxSize).toBe(3);
+  });
+
+  it("settles a held settlement though funding a new channel keeps failing", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 4, "cheap-gas": 4 },
+    });
+    const server = await startServer({ caps, settlementsPerClient: 0 }, { fundsOwnChannel: true });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    // from now on every channel funding fails
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, opts) => {
+      if (label === "channel funding") throw new MavnaError("funding failed", { retryable: true });
+      return submit(label, build, opts);
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    // a second account needs a second channel, whose funding fails
+    expect(
+      (await server.post("/settlement", { destination: Keypair.random().publicKey() })).status,
+    ).toBe(503);
+    logged.mockRestore();
+
+    server.rpc.holding(user, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.status).toBe(200);
+    expect(settled.body.settled).toBe(true);
+  });
+
+  it("caps how many open builds one client can leave, so a few cannot fill the ledger", async () => {
+    const server = await startServer({ reserveFunding: "self", trustProxy: true });
+    const statuses: number[] = [];
+    for (let i = 0; i < OPEN_BUILDS_PER_CLIENT + 1; i += 1) {
+      const user = Keypair.random();
+      server.rpc.accounts.set(user.publicKey(), 1n);
+      statuses.push(
+        (
+          await postAs(server, "203.0.113.1", "/prepare", {
+            destination: user.publicKey(),
+            assets: ["USDC"],
+          })
+        ).status,
+      );
+    }
+    expect(statuses.slice(0, -1).every((status) => status === 200)).toBe(true);
+    expect(statuses.at(-1)).toBe(429);
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    expect(
+      (
+        await postAs(server, "203.0.113.2", "/prepare", {
+          destination: user.publicKey(),
+          assets: ["USDC"],
+        })
+      ).status,
+    ).toBe(200);
+  });
+});
+
+/** The unrenewable provisional window and the reclaim grace, plus a second. */
+const PROVISIONAL_WINDOW_AND_GRACE_SECONDS = 600 + 30 + 1;
+/** Open builds one client may leave at once. */
+const OPEN_BUILDS_PER_CLIENT = 16;
+
+describe("round 2: unreadable cap counts close sponsorship until repaired", () => {
+  it("refuses sponsorship, loudly, while the caps file cannot be read", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mavna-sponsor-"));
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(dir, "caps.json"), "{ not json");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startServer({ state: new FileDocumentStore(dir) });
+    await server.server.ready();
+    for (const path of ["/prepare", "/settlement"]) {
+      const answered = await server.post(path, {
+        destination: Keypair.random().publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(answered.status, path).toBe(503);
+      expect(answered.body.retryable, path).toBe(true);
+    }
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/caps/);
+    errors.mockRestore();
+    // left where it is, so it stays refused until someone repairs it
+    const { readFile } = await import("node:fs/promises");
+    expect(await readFile(join(dir, "caps.json"), "utf8")).toBe("{ not json");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("refuses sponsorship while a stored cap day is in the wrong shape", async () => {
+    const state = new MemoryDocumentStore();
+    const today = new Date().toISOString().slice(0, 10);
+    await state.write("caps", { [today]: { stranded: "lots" } });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startServer({ state });
+    const answered = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    errors.mockRestore();
+    expect(answered.status).toBe(503);
+  });
+});
+
+describe("round 2: a channel funding that failed is retried later, not on every request", () => {
+  it("backs off after a failed funding, answering a retryable 503 meanwhile, then tries again", async () => {
+    const caps = new CapLedger(new InMemoryCapStore(), {
+      strandingCapPerDay: 75,
+      volumeCapPerDay: { "expensive-gas": 4, "cheap-gas": 4 },
+    });
+    const server = await startServer({ caps, settlementsPerClient: 0 }, { fundsOwnChannel: true });
+    let attempts = 0;
+    let failing = true;
+    const submit = server.rpc.submit.bind(server.rpc);
+    server.rpc.submit = async (label, build, opts) => {
+      if (label === "channel funding") {
+        attempts += 1;
+        if (failing) throw new MavnaError("channel funding failed on-chain.", { retryable: false });
+      }
+      return submit(label, build, opts);
+    };
+    const ask = () => server.post("/settlement", { destination: Keypair.random().publicKey() });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect((await ask()).status).toBe(503);
+    expect(attempts).toBe(1);
+    // within the backoff nothing is resent
+    const meanwhile = await ask();
+    expect(meanwhile.status).toBe(503);
+    expect(meanwhile.body.retryable).toBe(true);
+    expect(attempts).toBe(1);
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/channel funding/);
+    logged.mockRestore();
+
+    failing = false;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    expect((await ask()).status).toBe(200);
+    expect(attempts).toBe(2);
+  });
+});
+
+describe("round 2: two stored settlements for one account", () => {
+  it("keeps one and sets the other aside, saying so", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const document = (await state.read("held")) as { held: Record<string, unknown> };
+    const entry = document.held[user.publicKey()];
+    const muxed = new MuxedAccount(new Account(user.publicKey(), "0"), "9").accountId();
+    await state.write("held", { ...document, held: { [user.publicKey()]: entry, [muxed]: entry } });
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const second = await startServer({ state }, { restartOf: first });
+    await second.server.ready();
+    expect(errors.mock.calls.flat().join(" ")).toMatch(/held/);
+    errors.mockRestore();
+    const rejected = (await state.read("rejected")) as Record<string, { entry?: string }[]>;
+    expect(rejected.held?.some((item) => item.entry === muxed)).toBe(true);
+  });
+});
+
+describe("round 2: the built ledger is written a record at a time", () => {
+  class AppendCountingStore extends MemoryDocumentStore {
+    readonly writes: string[] = [];
+    readonly appends: string[] = [];
+    override async write(name: string, value: unknown): Promise<void> {
+      this.writes.push(name);
+      await super.write(name, value);
+    }
+    override async append(name: string, entry: unknown): Promise<void> {
+      this.appends.push(name);
+      await super.append(name, entry);
+    }
+  }
+
+  it("appends each build instead of rewriting every open one", async () => {
+    const state = new AppendCountingStore();
+    const server = await startServer({ state });
+    await server.server.ready();
+    state.writes.length = 0;
+    state.appends.length = 0;
+    for (let i = 0; i < 5; i += 1) {
+      const built = await server.post("/prepare", {
+        destination: Keypair.random().publicKey(),
+        assets: ["USDC"],
+        sourceChainId: "1",
+      });
+      expect(built.status).toBe(200);
+    }
+    expect(state.writes.filter((name) => name === "built")).toEqual([]);
+    expect(state.appends.filter((name) => name === "built")).toHaveLength(5);
+  });
+
+  it("remembers across a restart what was built, and what was already handed out", async () => {
+    const state = new MemoryDocumentStore();
+    const pool = [Keypair.random(), Keypair.random()];
+    const first = await startServer({ state, channels: new ChannelPool({ channels: pool }) });
+    for (const channel of pool) first.rpc.accounts.set(channel.publicKey(), 300n);
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    expect((await first.post("/submit", { signedXdr: signed })).status).toBe(200);
+    // built on the sponsor's sequence after that one landed
+    const other = Keypair.random();
+    await holdSettlementFor(first, other);
+    const otherSigned = await preparedAndSigned(first, other);
+
+    const second = await startServer(
+      { state, channels: new ChannelPool({ channels: pool }) },
+      { restartOf: first },
+    );
+    // the log was rewritten at start to just what is open, history dropped
+    const log = (await state.readLog("built")) as { add?: unknown; drop?: unknown }[];
+    expect(log.some((line) => line.drop !== undefined)).toBe(false);
+    // handed out before the restart, so never again
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(409);
+    // built and not yet used, so still good
+    expect((await second.post("/submit", { signedXdr: otherSigned })).status).toBe(200);
+  });
+});
+
+describe("round 2: a built ledger written by the earlier version", () => {
+  it("is read from its old document when there is no log yet, and kept from then on", async () => {
+    const state = new MemoryDocumentStore();
+    const first = await startServer({ state });
+    const user = Keypair.random();
+    await holdSettlementFor(first, user);
+    const signed = await preparedAndSigned(first, user);
+    // as the earlier version left it: one document, no log
+    const open = await openBuilt(state, "preparation");
+    const legacy = new MemoryDocumentStore();
+    for (const name of ["held", "channels", "network", "caps"]) {
+      const value = await state.read(name);
+      if (value !== undefined) await legacy.write(name, value);
+    }
+    await legacy.write("built", open);
+
+    const second = await startServer({ state: legacy }, { restartOf: first });
+    expect((await second.post("/submit", { signedXdr: signed })).status).toBe(200);
+    expect(await legacy.readLog("built")).toBeDefined();
   });
 });

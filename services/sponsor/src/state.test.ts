@@ -105,7 +105,7 @@ describe("caps kept in a document store survive a restart", () => {
     expect((await after.usage()).stranded).toBe(1);
   });
 
-  it("skips a day that is not in the shape it writes, keeping the others", async () => {
+  it("refuses to read the caps while any day is in the wrong shape", async () => {
     const backing = new MemoryDocumentStore();
     const good = {
       day: "2026-10-19",
@@ -113,12 +113,16 @@ describe("caps kept in a document store survive a restart", () => {
       stranded: 3,
     };
     await backing.write("caps", { "2026-10-19": good, "2026-10-20": { stranded: "lots" } });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const caps = new DocumentCapStore(backing);
-    expect(await caps.load("2026-10-19")).toEqual(good);
-    expect(await caps.load("2026-10-20")).toBeUndefined();
-    expect(errors.mock.calls.flat().join(" ")).toMatch(/2026-10-20/);
-    errors.mockRestore();
+    await expect(caps.load("2026-10-19")).rejects.toThrow(/2026-10-20/);
+  });
+
+  it("refuses a caps file that is not JSON, and leaves it where it is", async () => {
+    const dir = await freshDir();
+    await new FileDocumentStore(dir).write("caps", {});
+    await writeFile(join(dir, "caps.json"), "{ half");
+    await expect(new FileDocumentStore(dir).read("caps")).rejects.toThrow(/caps/);
+    expect(await readFile(join(dir, "caps.json"), "utf8")).toBe("{ half");
   });
 
   it("keeps only the last few days", async () => {
@@ -134,5 +138,44 @@ describe("caps kept in a document store survive a restart", () => {
     const kept = (await backing.read("caps")) as Record<string, unknown>;
     expect(Object.keys(kept).sort()).toEqual(["2026-10-08", "2026-10-09", "2026-10-10"]);
     expect((await caps.load("2026-10-10"))?.stranded).toBe(10);
+  });
+});
+
+describe("round 2: logs appended one entry at a time", () => {
+  it("reads back appended entries in order, from another instance", async () => {
+    const dir = await freshDir();
+    const store = new FileDocumentStore(dir);
+    await store.append("built", { n: 1 });
+    await store.append("built", { n: 2 });
+    expect(await new FileDocumentStore(dir).readLog("built")).toEqual([{ n: 1 }, { n: 2 }]);
+    expect((await stat(join(dir, "built.log"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("skips a last line cut short by a crash, and says so", async () => {
+    const dir = await freshDir();
+    const store = new FileDocumentStore(dir);
+    await store.append("built", { n: 1 });
+    await writeFile(join(dir, "built.log"), `${JSON.stringify({ n: 1 })}\n{"n": 2`);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await new FileDocumentStore(dir).readLog("built")).toEqual([{ n: 1 }]);
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("replaces the whole log at once when it is compacted", async () => {
+    const dir = await freshDir();
+    const store = new FileDocumentStore(dir);
+    for (let n = 0; n < 5; n += 1) await store.append("built", { n });
+    await store.writeLog("built", [{ n: 9 }]);
+    await store.append("built", { n: 10 });
+    expect(await new FileDocumentStore(dir).readLog("built")).toEqual([{ n: 9 }, { n: 10 }]);
+  });
+
+  it("answers undefined for a log never written, in memory too", async () => {
+    expect(await new FileDocumentStore(await freshDir()).readLog("built")).toBeUndefined();
+    const memory = new MemoryDocumentStore();
+    expect(await memory.readLog("built")).toBeUndefined();
+    await memory.append("built", { n: 1 });
+    expect(await memory.readLog("built")).toEqual([{ n: 1 }]);
   });
 });

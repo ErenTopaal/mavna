@@ -58,7 +58,7 @@ One sponsor per network, each its own process, key, state directory and hostname
 | `MAVNA_TRUST_PROXY` | `true` | `true` |
 | `MAVNA_ALLOWED_ORIGINS` | `https://mavna.app,https://www.mavna.app,https://web.mavna.app,https://playground.mavna.app,https://docs.mavna.app` | the app's origins only |
 | `SOROSWAP_API_KEY` | set | set |
-| `MAVNA_CHANNEL_POOL_SIZE` | sized to concurrent new-account transfers | not used in `self` mode |
+| `MAVNA_PROVISIONAL_SETTLEMENTS` | the default, 16, unless many users start at once | not used in `self` mode |
 | `MAVNA_ARRIVAL_CONTRACT` | `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ` | none: no mainnet deployment yet |
 | `MAVNA_ARRIVAL_EXECUTOR_SECRET` | a separate executor key | none |
 
@@ -86,10 +86,11 @@ Why each one matters:
   unreachable.
 - **`SOROSWAP_API_KEY`** keeps the Soroswap venue in the conversion leg. The key
   stays on the server; without it, conversions use SushiSwap and Aquarius only.
-- **`MAVNA_CHANNEL_POOL_SIZE`.** One channel carries one new-account settlement in
-  flight, and a signed settlement can hold its channel for up to a day. With one
-  channel, a second new-account transfer during that time is turned away with
-  `503`. Each channel costs 2 XLM of the sponsor's.
+- **`MAVNA_PROVISIONAL_SETTLEMENTS`.** One channel carries one new-account
+  settlement in flight. The sponsor funds channels as they are needed, 2 XLM each,
+  up to twice the smaller daily volume cap plus this many, so the pool cannot run
+  out within the caps. `MAVNA_CHANNEL_POOL_SIZE` is no longer read; the sponsor
+  says so at start if it is still set.
 - **The Arrival Contract** pair lets the testnet sponsor finish overdue
   conversions on arrival and keep the contract alive. Mainnet has no contract
   until it is independently audited.

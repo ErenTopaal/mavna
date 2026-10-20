@@ -27,6 +27,8 @@ try {
   process.exit(2);
 }
 
+for (const warning of config.warnings) console.error(`[sponsor] ${warning}`);
+
 if (config.stateDir === undefined) {
   // Said at every start, because running this way loses the caps, held
   // settlements and channel keys on a restart.
@@ -87,7 +89,7 @@ const server = createSponsorServer({
   minDeliveryBaseUnits: config.minDeliveryBaseUnits,
   rateLimitPerMinute: config.rateLimitPerMinute,
   trustProxy: config.trustProxy,
-  channelPoolSize: config.channelPoolSize,
+  provisionalSettlements: config.provisionalSettlements,
   settlementsPerClient: config.settlementsPerClient,
   deliveryBudgetStroops: config.deliveryBudgetStroops,
   ...(config.settleSweepSeconds === undefined

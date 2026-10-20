@@ -27,8 +27,10 @@ export interface SponsorConfig {
   /** Requests per address per minute; zero turns the limit off. */
   readonly rateLimitPerMinute: number;
   readonly trustProxy: boolean;
-  /** Channels the sponsor funds for itself, each on first need. */
-  readonly channelPoolSize: number;
+  /** Settlements nothing has backed yet that may hold a channel at once. */
+  readonly provisionalSettlements: number;
+  /** Settings that were read and are not acted on, said at start. */
+  readonly warnings: readonly string[];
   /** Settlements one client address may have waiting on a preparation; zero for no limit. */
   readonly settlementsPerClient: number;
   /** Delivery fees the sponsor may pay in one UTC day, in stroops. */
@@ -43,11 +45,10 @@ export interface SponsorConfig {
 }
 
 /**
- * Four settlements in flight at once by default. A channel is funded only when
- * every one before it is busy, 2 XLM of the sponsor's each, so an idle sponsor
- * spends no more than one.
+ * Sixteen settlements nothing has backed yet may hold a channel at once, across
+ * every client. Each holds it for ten minutes at most, unrenewed.
  */
-export const DEFAULT_CHANNEL_POOL_SIZE = 4;
+export const DEFAULT_PROVISIONAL_SETTLEMENTS = 16;
 
 /** A configuration mistake, worded for the operator who made it. */
 export class SponsorConfigError extends Error {
@@ -118,9 +119,21 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
   };
 
   const sweep = get("MAVNA_SETTLE_SWEEP_SECONDS");
-  const channelPoolSize = whole("MAVNA_CHANNEL_POOL_SIZE", DEFAULT_CHANNEL_POOL_SIZE);
-  if (channelPoolSize < 1) {
-    throw new SponsorConfigError("MAVNA_CHANNEL_POOL_SIZE must be at least 1; got 0.");
+  const warnings: string[] = [];
+  if (get("MAVNA_CHANNEL_POOL_SIZE") !== undefined) {
+    // Said at start rather than refused: deployments set it, and stopping the
+    // sponsor over a setting that no longer matters would be the worse outcome.
+    warnings.push(
+      "MAVNA_CHANNEL_POOL_SIZE is no longer read. The sponsor sizes its channel pool from the " +
+        "daily caps and MAVNA_PROVISIONAL_SETTLEMENTS so it cannot run out within them; remove it.",
+    );
+  }
+  const provisionalSettlements = whole(
+    "MAVNA_PROVISIONAL_SETTLEMENTS",
+    DEFAULT_PROVISIONAL_SETTLEMENTS,
+  );
+  if (provisionalSettlements < 1) {
+    throw new SponsorConfigError("MAVNA_PROVISIONAL_SETTLEMENTS must be at least 1; got 0.");
   }
 
   const productionFlag = get("MAVNA_PRODUCTION") ?? "false";
@@ -174,7 +187,8 @@ export function readSponsorConfig(source: Environment): SponsorConfig {
     ),
     rateLimitPerMinute: whole("MAVNA_RATE_LIMIT_PER_MINUTE", 120),
     trustProxy: trust === "true",
-    channelPoolSize,
+    provisionalSettlements,
+    warnings,
     settlementsPerClient: whole("MAVNA_SETTLEMENTS_PER_CLIENT", 2),
     deliveryBudgetStroops: xlmStroops(
       "MAVNA_DELIVERY_BUDGET_XLM",

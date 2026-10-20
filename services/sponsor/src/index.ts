@@ -1,5 +1,5 @@
 export { curatedAssetsFor } from "./assets.js";
-export type { BuiltKind, BuiltRecord } from "./built.js";
+export type { BuiltChange, BuiltKind, BuiltRecord } from "./built.js";
 export { BuiltLedger, signedBy } from "./built.js";
 export type { CapConfig, CapDecision, CapStore, CapUsage, SourceChainClass } from "./caps.js";
 export {
@@ -51,4 +51,9 @@ export { createSoroswapProxy } from "./soroswap.js";
 export type { SpendQuoteOptions } from "./spend.js";
 export { DirectSpendQuote } from "./spend.js";
 export type { DocumentStore } from "./state.js";
-export { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
+export {
+  DocumentCapStore,
+  FileDocumentStore,
+  MemoryDocumentStore,
+  UnreadableState,
+} from "./state.js";

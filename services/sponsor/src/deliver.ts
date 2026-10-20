@@ -148,6 +148,8 @@ export class Deliverer {
   #keypair: Keypair;
   /** Everything except the secret, which is deliberately not kept. */
   private readonly options: Omit<DelivererOptions, "payerSecret">;
+  /** Deliveries on their way, by message and attestation. */
+  private readonly inFlight = new Map<string, Promise<DeliveryOutcome>>();
 
   constructor(options: DelivererOptions) {
     // Fail at construction rather than at the moment a user's funds are waiting.
@@ -169,7 +171,19 @@ export class Deliverer {
    * twice. That is the property that makes retrying safe, and retrying has to be
    * safe here because the alternative to retrying is a stuck transfer.
    */
-  async deliver(request: DeliveryRequest): Promise<DeliveryOutcome> {
+  deliver(request: DeliveryRequest): Promise<DeliveryOutcome> {
+    // One delivery of one message at a time: a second ask while the first is
+    // on its way waits for it and hears what it heard, rather than holding a
+    // second budget share and racing it to the same sequence.
+    const key = `${request.messageHex}:${request.attestationHex}`;
+    const running = this.inFlight.get(key);
+    if (running !== undefined) return running;
+    const work = this.deliverOnce(request).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, work);
+    return work;
+  }
+
+  private async deliverOnce(request: DeliveryRequest): Promise<DeliveryOutcome> {
     if (request.attestationHex === NOT_YET_SIGNED || request.attestationHex.length === 0) {
       return { kind: "not-attested-yet" };
     }
@@ -219,6 +233,10 @@ export class Deliverer {
       // retry after a stale sequence is built and simulated again from a fresh
       // read. Resending the first envelope could only be refused the same way.
       const result = await this.options.rpc.submit("cctp delivery", async () => {
+        // Asked again only after the last send was refused at submission or
+        // turned away as busy, neither of which charges a fee; whatever the
+        // rebuild finds (already delivered, say) has cost nothing yet.
+        if (prepared === undefined) sent = false;
         const next = prepared ?? (await build());
         prepared = undefined;
         next.sign(this.#keypair);
