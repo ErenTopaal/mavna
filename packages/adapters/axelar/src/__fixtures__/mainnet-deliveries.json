@@ -1,0 +1,1694 @@
+{
+  "source": "Read-only from api.gmp.axelarscan.io and https://mainnet.sorobanrpc.com on 2026-10-20. Mainnet, both delivered. itsAssets from api.axelarscan.io/api/getITSAssets the same day. Neither token id is in api.axelarscan.io/api/getITSAssets (152 entries) the same day, so itsAssets is empty.",
+  "transfers": {
+    "weth": {
+      "sourceTxHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+      "first": [
+        {
+          "call": {
+            "chain": "ethereum",
+            "contract_address": "0x4F4495243837681061C4743b74B3eEdf548D56A5",
+            "address": "0x4F4495243837681061C4743b74B3eEdf548D56A5",
+            "topics": [
+              "0x30ae6cc78c27e651745bf2ad08a11de83910ac1e347a52f7ac898c0fbef94dae",
+              "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c"
+            ],
+            "blockNumber": 26220778,
+            "transactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+            "transactionIndex": 92,
+            "blockHash": "0x7fc441645ff5421dba7cc7fef587ef44aad9461d0c2ddea8a4bac2ac39863e1b",
+            "blockTimestamp": 1792342535,
+            "logIndex": 259,
+            "id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc_92_259",
+            "event": "ContractCall",
+            "eventSignature": "ContractCall(address,string,string,bytes32,bytes)",
+            "returnValues": {
+              "sender": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "destinationChain": "axelar",
+              "destinationContractAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "payloadHash": "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000077374656c6c61720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a400000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000213217539ebc00000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014d64893c26e41946bdae7f9b41a787e74b2888bb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e4100000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "chain_type": "evm",
+            "destination_chain_type": "cosmos",
+            "created_at": {
+              "ms": 1792342535000,
+              "hour": 1792339200000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "eventIndex": 5,
+            "block_timestamp": 1792342535,
+            "receipt": {
+              "gasUsed": "160543",
+              "blockNumber": 26220778,
+              "cumulativeGasUsed": "9950426",
+              "from": "0x717f4d77b76504909dc04db46d82af20fb8230f5",
+              "transactionIndex": 92,
+              "effectiveGasPrice": "393569570",
+              "confirmations": 2,
+              "logs": [
+                {
+                  "logIndex": 254,
+                  "data": "0x0000000000000000000000000000000000000000000000000213217539ebc000",
+                  "topics": [
+                    "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+                    "0x000000000000000000000000d64893c26e41946bdae7f9b41a787e74b2888bb7"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 255,
+                  "data": "0x0000000000000000000000000000000000000000000000000213217539ebc000",
+                  "topics": [
+                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+                    "0x000000000000000000000000d64893c26e41946bdae7f9b41a787e74b2888bb7",
+                    "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 256,
+                  "data": "0x0000000000000000000000000000000000000000000000000213217539ebc000",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x000000000000000000000000d64893c26e41946bdae7f9b41a787e74b2888bb7",
+                    "0x0000000000000000000000007e2181547b290bd4a02960bca60dd1726c5ecea7"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 257,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000213217539ebc00000000000000000000000000000000000000000000000000000000000000000077374656c6c617200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e410000000000000000",
+                  "topics": [
+                    "0xcd05f5b9dc4bb03babf40f5da98f5f46819846207d916f89b67d36fd1f7fd74f",
+                    "0x962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a4",
+                    "0x000000000000000000000000d64893c26e41946bdae7f9b41a787e74b2888bb7",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 258,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000008c4b0aa246b000000000000000000000000717f4d77b76504909dc04db46d82af20fb8230f500000000000000000000000000000000000000000000000000000000000000066178656c6172000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000416178656c6172316171636a35346c7a7a30726b323267767167636e38667235747834727a776476357776356a39646d6e6163676566766437777a7379326a326d7200000000000000000000000000000000000000000000000000000000000000",
+                  "topics": [
+                    "0x617332c1832058df6ee45fcbdf471251474c9945a8e5d229287a21a5f67ccf0a",
+                    "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+                    "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 259,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000066178656c6172000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000416178656c6172316171636a35346c7a7a30726b323267767167636e38667235747834727a776476357776356a39646d6e6163676566766437777a7379326a326d720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000077374656c6c61720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a400000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000213217539ebc00000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014d64893c26e41946bdae7f9b41a787e74b2888bb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e4100000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                  "topics": [
+                    "0x30ae6cc78c27e651745bf2ad08a11de83910ac1e347a52f7ac898c0fbef94dae",
+                    "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+                    "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                },
+                {
+                  "logIndex": 260,
+                  "data": "0x0000000000000000000000000000000000000000000000000213217539ebc000000000000000000000000000000000000000000000000000000008c4b0aa246b",
+                  "topics": [
+                    "0x73a19dd210f1a7f902193214c0ee91dd35ee5b4d920cba8d519eca65a7b488ca",
+                    "0x000000000000000000000000717f4d77b76504909dc04db46d82af20fb8230f5"
+                  ],
+                  "blockNumber": 26220778,
+                  "transactionIndex": 92
+                }
+              ],
+              "transactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+              "status": 1
+            },
+            "transaction": {
+              "chainId": 1,
+              "blockNumber": 26220778,
+              "gas": "203026",
+              "maxPriorityFeePerGas": "334719253",
+              "from": "0x717f4d77b76504909dc04db46d82af20fb8230f5",
+              "transactionIndex": 92,
+              "to": "0xd64893c26e41946bdae7f9b41a787e74b2888bb7",
+              "maxFeePerGas": "418875206",
+              "nonce": 5,
+              "hash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+              "gasPrice": "0x17756522"
+            },
+            "_logIndex": 5
+          },
+          "is_invalid_payload_hash": false,
+          "is_invalid_source_address": false,
+          "is_invalid_contract_address": false,
+          "is_invalid_destination_chain": false,
+          "message_id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+          "is_call_from_relayer": false,
+          "is_insufficient_fee": false,
+          "is_invalid_symbol": false,
+          "is_invalid_amount": false,
+          "is_invalid_call": false,
+          "time_spent": {
+            "call_approved": 1135,
+            "call_confirm": 1133,
+            "total": 1138,
+            "approved_executed": 3
+          },
+          "interchain_transfer": {
+            "symbol": "WETH",
+            "rawDestinationAddress": "0x47415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e41",
+            "amount": "149500000000000000",
+            "sourceAddress": "0xD64893C26E41946BdaE7f9b41a787E74b2888Bb7",
+            "destinationAddress": "GAY4QJXQ43JXXTUX3KKARXJS7ARPTK5KF5IK4R2B5CYKIEFY2Q4RCVNA",
+            "tokenId": "0x962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a4",
+            "dataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "contract_address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "decimals": 18,
+            "name": "Wrapped Ether",
+            "destinationChain": "stellar",
+            "id": "Ethereum_WETH",
+            "event": "InterchainTransfer"
+          },
+          "amount": 0.1495,
+          "gas_paid": {
+            "blockHash": "0x7fc441645ff5421dba7cc7fef587ef44aad9461d0c2ddea8a4bac2ac39863e1b",
+            "chain": "ethereum",
+            "chain_type": "evm",
+            "address": "0x2d5d7d31F671F86C782533cc367F14109a082712",
+            "logIndex": 258,
+            "topics": [
+              "0x617332c1832058df6ee45fcbdf471251474c9945a8e5d229287a21a5f67ccf0a",
+              "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c"
+            ],
+            "eventSignature": "NativeGasPaidForContractCall(address,string,string,bytes32,uint256,address)",
+            "created_at": {
+              "ms": 1792342535000,
+              "hour": 1792339200000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "transactionIndex": 92,
+            "eventIndex": 4,
+            "contract_address": "0x2d5d7d31F671F86C782533cc367F14109a082712",
+            "transactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+            "returnValues": {
+              "refundAddress": "0x717F4d77B76504909DC04DB46d82AF20Fb8230f5",
+              "sourceAddress": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "destinationAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "gasFeeAmount": "9640870552683",
+              "payloadHash": "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c",
+              "destinationChain": "axelar"
+            },
+            "blockNumber": 26220778,
+            "block_timestamp": 1792342535,
+            "blockTimestamp": 1792342535,
+            "receipt": {
+              "gasUsed": "160543",
+              "blockNumber": 26220778,
+              "cumulativeGasUsed": "9950426",
+              "from": "0x717f4d77b76504909dc04db46d82af20fb8230f5",
+              "transactionIndex": 92,
+              "effectiveGasPrice": "393569570",
+              "confirmations": 2,
+              "transactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+              "status": 1
+            },
+            "id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc_92_258",
+            "event": "NativeGasPaidForContractCall",
+            "destination_chain_type": "cosmos",
+            "transaction": {
+              "chainId": 1,
+              "blockNumber": 26220778,
+              "gas": "203026",
+              "maxPriorityFeePerGas": "334719253",
+              "from": "0x717f4d77b76504909dc04db46d82af20fb8230f5",
+              "transactionIndex": 92,
+              "to": "0xd64893c26e41946bdae7f9b41a787e74b2888bb7",
+              "maxFeePerGas": "418875206",
+              "nonce": 5,
+              "hash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+              "gasPrice": "0x17756522"
+            },
+            "_logIndex": 4
+          },
+          "symbol": "WETH",
+          "fees": {
+            "source_base_fee_usd": 0.013175683440000963,
+            "destination_base_fee_usd": 0.013175683439999999,
+            "express_fee_string": "0.000000000000000000",
+            "express_fee": 0,
+            "destination_base_fee_string": "0.242160",
+            "source_token": {
+              "token_price": {
+                "usd": 2364.69
+              },
+              "gas_price": "0.000000000000230089",
+              "symbol": "ETH",
+              "gas_price_gwei": "0.000230089",
+              "decimals": 18,
+              "name": "Ethereum",
+              "gas_price_in_units": {
+                "decimals": 18,
+                "value": "230089"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "express_supported": false,
+            "ethereum_token": {
+              "token_price": {
+                "usd": 2364.69
+              },
+              "symbol": "ETH",
+              "decimals": 18,
+              "name": "Ethereum"
+            },
+            "execute_min_gas_price": "0",
+            "source_base_fee": 0.000005571843852683,
+            "axelar_token": {
+              "token_price": {
+                "usd": 0.054409
+              },
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar"
+            },
+            "destination_express_fee": {
+              "total": 18.379312,
+              "relayer_fee_usd": 0.9999999866079999,
+              "relayer_fee": 18.379312,
+              "total_usd": 0.9999999866079999,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee": 0.000005571843852683,
+            "express_execute_gas_multiplier": 1.54,
+            "destination_base_fee": 0.24216,
+            "express_fee_usd": 0,
+            "destination_native_token": {
+              "token_price": {
+                "usd": 0.054409
+              },
+              "gas_price": "0.00000001",
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar",
+              "gas_price_in_units": {
+                "decimals": 18,
+                "value": "10000000000"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "execute_gas_multiplier": 1.32,
+            "destination_confirm_fee": 0.24,
+            "source_base_fee_string": "0.000005571843852683",
+            "source_express_fee": {
+              "total": 0.000422943633794611,
+              "relayer_fee_usd": 1.0000000000000002,
+              "relayer_fee": 0.000422888412434611,
+              "total_usd": 1.0001305813977788,
+              "express_gas_overhead_fee": 5.522136e-8,
+              "express_gas_overhead_fee_usd": 0.0001305813977784
+            },
+            "base_fee_usd": 0.013175683440000963,
+            "source_confirm_fee": 0.000005522144551717
+          },
+          "is_invalid_gas_paid_mismatch_source_address": false,
+          "callback_destination_address": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+          "price": 2364.47,
+          "gas": {
+            "gas_execute_amount": 8.379854357230851e-8,
+            "gas_approve_amount": 0.000005522144551717,
+            "gas_callback_amount": 2.0452194e-7,
+            "gas_callback_approve_amount": 0.0000035630418600000002,
+            "gas_express_fee_amount": 0,
+            "gas_used_amount": 0.000005810465035289308,
+            "gas_remain_amount": 0.000003830405517393692,
+            "gas_paid_amount": 0.000009640870552683,
+            "gas_base_fee_amount": 0.000005571843852683,
+            "gas_express_amount": 0,
+            "gas_callback_base_fee_amount": 0,
+            "gas_used_value": 0.013739948564298275
+          },
+          "value": 353.48826499999996,
+          "no_gas_remain": true,
+          "is_invalid_gas_paid": false,
+          "callback_chain": "stellar",
+          "approved": {
+            "returnValues": {
+              "sourceEventIndex": 5,
+              "sourceChain": "Ethereum",
+              "sourceAddress": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "sourceTxHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+              "contractAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "messageId": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+              "payloadHash": "0x73e7e3183ac24f0b2a154290e07bb5d6b052e8694e3b7894837d00218aa7907c"
+            },
+            "chain": "axelar",
+            "chain_type": "cosmos",
+            "blockNumber": 36431003,
+            "block_timestamp": 1792343670,
+            "created_at": {
+              "ms": 1792343670000,
+              "hour": 1792342800000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "receipt": {
+              "gasLimit": "0",
+              "gasUsed": "0",
+              "blockNumber": 36431003,
+              "status": 1
+            },
+            "_id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+            "eventIndex": 23,
+            "id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+            "event": "ContractCallApproved",
+            "transaction": {
+              "gasLimit": "0",
+              "blockNumber": 36431003,
+              "gasPrice": "1"
+            }
+          },
+          "confirm": {
+            "sourceChain": "ethereum",
+            "blockNumber": 36431003,
+            "block_timestamp": 1792343668,
+            "transactionIndex": 0,
+            "sourceTransactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+            "event": "confirm",
+            "transactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+            "poll_id": "3266659",
+            "confirmation_txhash": "054B82970F466BE6FEE0B98A9CB77EE06C9347AD0691EE46711B410D1B35EDFD"
+          },
+          "is_not_enough_gas": false,
+          "executed": {
+            "chain": "axelar",
+            "sourceTransactionIndex": 92,
+            "sourceChain": "Ethereum",
+            "chain_type": "cosmos",
+            "childMessageIDs": [
+              "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579"
+            ],
+            "created_at": {
+              "ms": 1792343673000,
+              "hour": 1792342800000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "sourceTransactionLogIndex": 259,
+            "contract_address": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+            "sourceTransactionEventIndex": 5,
+            "relayerAddress": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+            "transactionHash": "2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9",
+            "returnValues": {
+              "messageId": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5"
+            },
+            "blockNumber": "36431004",
+            "block_timestamp": 1792343673,
+            "receipt": {
+              "gasLimit": "520258",
+              "gasUsed": "3642",
+              "blockNumber": "36431004",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+              "transactionHash": "2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9",
+              "status": 1
+            },
+            "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+            "_id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc_92_259",
+            "sourceTransactionHash": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+            "id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc_92_259",
+            "event": "execute",
+            "transaction": {
+              "gasLimit": "520258",
+              "blockNumber": "36431004",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+              "hash": "2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9",
+              "timestamp": 1792343669000,
+              "gasPrice": "1",
+              "status": "success"
+            }
+          },
+          "not_enough_gas_to_execute": false,
+          "execute_nonce": null,
+          "to_refund": false,
+          "is_execute_from_relayer": true,
+          "callback": {
+            "chain": "axelar",
+            "chain_type": "cosmos",
+            "created_at": {
+              "week": 1792281600000,
+              "hour": 1792342800000,
+              "month": 1790812800000,
+              "year": 1767225600000,
+              "ms": 1792343673000,
+              "day": 1792281600000,
+              "quarter": 1790812800000
+            },
+            "eventIndex": 17,
+            "transactionHash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+            "returnValues": {
+              "sourceChain": "axelar",
+              "destinationContractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "sender": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000008457468657265756d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a400000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000213217539ebc00000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014d64893c26e41946bdae7f9b41a787e74b2888bb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e4100000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "messageId": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+              "payloadHash": "0x38c0bddfc4de06aa11c0f3ab889c10097b484871df224ef3c8852fae7d5bb47f",
+              "destinationChain": "stellar"
+            },
+            "messageIdIndex": 7519579,
+            "blockNumber": "36431004",
+            "block_timestamp": 1792343673,
+            "parentMessageID": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+            "receipt": {
+              "gasLimit": "520258",
+              "gasUsed": "401819",
+              "blockNumber": "36431004",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+              "transactionHash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+              "status": 1
+            },
+            "_id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "messageIdHash": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9",
+            "event": "ContractCall",
+            "transaction": {
+              "gasLimit": "520258",
+              "blockNumber": "36431004",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6",
+              "hash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+              "timestamp": 1792343669000,
+              "gasPrice": "1",
+              "status": "success"
+            },
+            "destination_chain_type": "vm"
+          },
+          "not_to_refund": true,
+          "id": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc_92_259",
+          "status": "executed",
+          "simplified_status": "received"
+        }
+      ],
+      "second": [
+        {
+          "call": {
+            "chain": "axelar",
+            "_id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "blockNumber": "36431004",
+            "transactionHash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+            "parentMessageID": "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc-5",
+            "eventIndex": 17,
+            "event": "ContractCall",
+            "returnValues": {
+              "destinationContractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "messageId": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+              "payloadHash": "0x38c0bddfc4de06aa11c0f3ab889c10097b484871df224ef3c8852fae7d5bb47f",
+              "sender": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "sourceChain": "axelar",
+              "destinationChain": "stellar",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000008457468657265756d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000962c0088f0e14f5a47e91c8924f2d59866cb0237c135ecbcd0126ce9ee3b01a400000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000213217539ebc00000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014d64893c26e41946bdae7f9b41a787e74b2888bb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847415934514a585134334a5858545558334b4b4152584a5337415250544b354b4635494b345232423543594b494546593251345243564e4100000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "block_timestamp": 1792343673,
+            "receipt": {
+              "blockNumber": "36431004",
+              "gasUsed": "401819",
+              "status": 1,
+              "gasLimit": "520258",
+              "transactionHash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6"
+            },
+            "transaction": {
+              "blockNumber": "36431004",
+              "timestamp": 1792343669000,
+              "gasLimit": "520258",
+              "gasPrice": "1",
+              "status": "success",
+              "hash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+              "from": "axelar1lzd0nzexnvyy50htwlkpqjfzjnq2qhuhtr90v6"
+            },
+            "id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "chain_type": "cosmos",
+            "destination_chain_type": "vm",
+            "created_at": {
+              "ms": 1792343673000,
+              "hour": 1792342800000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "messageIdIndex": 7519579,
+            "messageIdHash": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9"
+          },
+          "fees": {
+            "source_base_fee_usd": 0,
+            "destination_base_fee_usd": 0,
+            "express_fee_string": "0.000000",
+            "express_fee": 0,
+            "destination_base_fee_string": "0.0000000",
+            "source_token": {
+              "token_price": {
+                "usd": 0.054485
+              },
+              "gas_price": "0.0000003",
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar",
+              "gas_price_in_units": {
+                "decimals": 7,
+                "value": "3"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "express_supported": false,
+            "ethereum_token": {
+              "token_price": {
+                "usd": 2372.1
+              },
+              "symbol": "ETH",
+              "decimals": 18,
+              "name": "Ethereum"
+            },
+            "execute_min_gas_price": "0",
+            "source_base_fee": 0,
+            "axelar_token": {
+              "token_price": {
+                "usd": 0.054485
+              },
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar"
+            },
+            "destination_express_fee": {
+              "total": 5.7301993,
+              "relayer_fee_usd": 1.0000000006402,
+              "relayer_fee": 5.7301993,
+              "total_usd": 1.0000000006402,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee": 0,
+            "express_execute_gas_multiplier": 1.54,
+            "destination_base_fee": 0,
+            "express_fee_usd": 0,
+            "destination_native_token": {
+              "token_price": {
+                "usd": 0.174514
+              },
+              "gas_price": "0.0000001",
+              "symbol": "XLM",
+              "gas_price_gwei": "0.000000001",
+              "decimals": 7,
+              "name": "Stellar",
+              "gas_price_in_units": {
+                "decimals": 7,
+                "value": "1"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "execute_gas_multiplier": 1.32,
+            "destination_confirm_fee": 0,
+            "source_base_fee_string": "0.000000",
+            "source_express_fee": {
+              "total": 18.353675,
+              "relayer_fee_usd": 0.9999999823749999,
+              "relayer_fee": 18.353675,
+              "total_usd": 0.9999999823749999,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee_usd": 0,
+            "source_confirm_fee": 0
+          },
+          "is_invalid_source_address": false,
+          "message_id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+          "is_invalid_symbol": false,
+          "is_invalid_amount": false,
+          "time_spent": {
+            "call_approved": 14,
+            "total": 29,
+            "approved_executed": 15
+          },
+          "is_invalid_payload_hash": false,
+          "is_invalid_contract_address": false,
+          "is_invalid_destination_chain": false,
+          "gas": {
+            "gas_execute_amount": 0.0088763990749,
+            "gas_approve_amount": 0.1546385755481,
+            "gas_callback_amount": 0,
+            "gas_callback_approve_amount": 0,
+            "gas_express_fee_amount": 0,
+            "gas_used_amount": 0.1546385755481,
+            "gas_remain_amount": 0.175119,
+            "gas_paid_amount": 0.175119,
+            "gas_base_fee_amount": 0,
+            "gas_express_amount": 0,
+            "gas_callback_base_fee_amount": 0,
+            "gas_used_value": 0.008425482788738229
+          },
+          "is_call_from_relayer": true,
+          "is_insufficient_fee": false,
+          "no_gas_remain": false,
+          "is_invalid_call": false,
+          "gas_paid_to_callback": "546739",
+          "origin_chain": "Ethereum",
+          "approved": {
+            "chain": "stellar",
+            "chain_type": "vm",
+            "created_at": {
+              "ms": 1792343687000,
+              "hour": 1792342800000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "eventIndex": 0,
+            "transactionHash": "1453fa918a4465a5081be9d056157f7c28e9128c84f45907eb5b1b315fa7fd7f",
+            "returnValues": {
+              "sourceEventIndex": 7519579,
+              "sourceChain": "axelar",
+              "sourceAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "sourceTxHash": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9",
+              "contractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "messageId": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+              "payloadHash": "0x38c0bddfc4de06aa11c0f3ab889c10097b484871df224ef3c8852fae7d5bb47f"
+            },
+            "blockNumber": 65011581,
+            "block_timestamp": 1792343687,
+            "receipt": {
+              "gasLimit": "482797",
+              "gasUsed": "482797",
+              "blockNumber": 65011581,
+              "from": "GDNB45FD23MUUSANSEALGHYOLUVHEQKFL3TMLPXVZDTQQMJRSCGTS5E4",
+              "transactionHash": "1453fa918a4465a5081be9d056157f7c28e9128c84f45907eb5b1b315fa7fd7f",
+              "status": 1
+            },
+            "_id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "event": "ContractCallApproved",
+            "transaction": {
+              "gasLimit": "482797",
+              "blockNumber": 65011581,
+              "from": "GDNB45FD23MUUSANSEALGHYOLUVHEQKFL3TMLPXVZDTQQMJRSCGTS5E4",
+              "hash": "1453fa918a4465a5081be9d056157f7c28e9128c84f45907eb5b1b315fa7fd7f",
+              "status": "success",
+              "timestamp": "1792343687",
+              "gasPrice": "1"
+            },
+            "_logIndex": 0
+          },
+          "is_not_enough_gas": false,
+          "executed": {
+            "chain": "stellar",
+            "sourceChain": "axelar",
+            "chain_type": "vm",
+            "messageId": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "created_at": {
+              "ms": 1792343702000,
+              "hour": 1792342800000,
+              "day": 1792281600000,
+              "week": 1792281600000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "contract_address": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+            "sourceTransactionEventIndex": 7519579,
+            "relayerAddress": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+            "transactionHash": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+            "returnValues": {
+              "messageId": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579"
+            },
+            "blockNumber": 65011584,
+            "block_timestamp": 1792343702,
+            "receipt": {
+              "gasLimit": "27713",
+              "gasUsed": "27713",
+              "blockNumber": 65011584,
+              "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "transactionHash": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+              "status": 1
+            },
+            "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+            "_id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "sourceTransactionHash": "2D41427908386C3F8DF9CAA949796CFA921EDD063C8DCBC020C4714B8A9B39C9",
+            "id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+            "event": "execute",
+            "transaction": {
+              "gasLimit": "27713",
+              "blockNumber": 65011584,
+              "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "hash": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+              "status": "success",
+              "timestamp": "1792343702",
+              "gasPrice": "1"
+            }
+          },
+          "not_enough_gas_to_execute": false,
+          "execute_nonce": null,
+          "to_refund": true,
+          "is_execute_from_relayer": true,
+          "id": "0x2d41427908386c3f8df9caa949796cfa921edd063c8dcbc020c4714b8a9b39c9-7519579",
+          "status": "executed",
+          "simplified_status": "received"
+        }
+      ],
+      "stellarTx": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+      "getTransaction": {
+        "latestLedger": 65043194,
+        "latestLedgerCloseTime": "1792501753",
+        "oldestLedger": 64922235,
+        "oldestLedgerCloseTime": "1791896957",
+        "status": "SUCCESS",
+        "txHash": "25013b849de4e95bd8b351eebd61babc3374da8797d9d0d23212f65e82914ee6",
+        "applicationOrder": 155,
+        "feeBump": true,
+        "envelopeXdr": "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",
+        "resultXdr": "AAAAAAAAbEEAAAABZuDEmCeJpFCoGrVTt0kekoA/qxnBdQFdbtaMfacYrioAAAAAAAAAAAAAAAAAAAABAAAAAAAAABgAAAAAm8+RCXFm9eBJrBZkB5hdJpTS/KzHOXvLKqQBtHqLvjcAAAAAAAAAAA==",
+        "resultMetaXdr": "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",
+        "diagnosticEventsXdr": [
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAADAAAADwAAAAdmbl9jYWxsAAAAAA0AAAAgRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAAPAAAAB2V4ZWN1dGUAAAAAEAAAAAEAAAAEAAAADgAAAAZheGVsYXIAAAAAAA4AAABKMHgyZDQxNDI3OTA4Mzg2YzNmOGRmOWNhYTk0OTc5NmNmYTkyMWVkZDA2M2M4ZGNiYzAyMGM0NzE0YjhhOWIzOWM5LTc1MTk1NzkAAAAAAA4AAABBYXhlbGFyMWFxY2o1NGx6ejByazIyZ3ZxZ2NuOGZyNXR4NHJ6d2R2NXd2NWo5ZG1uYWNnZWZ2ZDd3enN5MmoybXIAAAAAAAANAAACQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIRXRoZXJldW0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAliwAiPDhT1pH6RyJJPLVmGbLAjfBNey80BJs6e47AaQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAhMhdTnrwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU1kiTwm5BlGva5/m0Gnh+dLKIi7cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOEdBWTRRSlhRNDNKWFhUVVgzS0tBUlhKUzdBUlBUSzVLRjVJSzRSMkI1Q1lLSUVGWTJRNFJDVk5BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+          "AAAAAQAAAAAAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAACAAAAAAAAAAMAAAAPAAAAB2ZuX2NhbGwAAAAADQAAACD9WSrh4fGh2p8j9PojEwpCnfljTcmW8bK5cF7h+/jGWwAAAA8AAAAQdmFsaWRhdGVfbWVzc2FnZQAAABAAAAABAAAABQAAABIAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAAOAAAABmF4ZWxhcgAAAAAADgAAAEoweDJkNDE0Mjc5MDgzODZjM2Y4ZGY5Y2FhOTQ5Nzk2Y2ZhOTIxZWRkMDYzYzhkY2JjMDIwYzQ3MTRiOGE5YjM5YzktNzUxOTU3OQAAAAAADgAAAEFheGVsYXIxYXFjajU0bHp6MHJrMjJndnFnY244ZnI1dHg0cnp3ZHY1d3Y1ajlkbW5hY2dlZnZkN3d6c3kyajJtcgAAAAAAAA0AAAAgOMC938TeBqoRwPOriJwQCXtISHHfIk7zyIUvrn1btH8=",
+          "AAAAAQAAAAAAAAAB/Vkq4eHxodqfI/T6IxMKQp35Y03JlvGyuXBe4fv4xlsAAAABAAAAAAAAAAIAAAAPAAAAEG1lc3NhZ2VfZXhlY3V0ZWQAAAARAAAAAQAAAAUAAAAPAAAAEGNvbnRyYWN0X2FkZHJlc3MAAAASAAAAAUYWIcU5rULHB9j3KaNDOF1jDGEUVQJQPImgQNTf5IhBAAAADwAAAAptZXNzYWdlX2lkAAAAAAAOAAAASjB4MmQ0MTQyNzkwODM4NmMzZjhkZjljYWE5NDk3OTZjZmE5MjFlZGQwNjNjOGRjYmMwMjBjNDcxNGI4YTliMzljOS03NTE5NTc5AAAAAAAPAAAADHBheWxvYWRfaGFzaAAAAA0AAAAgOMC938TeBqoRwPOriJwQCXtISHHfIk7zyIUvrn1btH8AAAAPAAAADnNvdXJjZV9hZGRyZXNzAAAAAAAOAAAAQWF4ZWxhcjFhcWNqNTRsenowcmsyMmd2cWdjbjhmcjV0eDRyendkdjV3djVqOWRtbmFjZ2VmdmQ3d3pzeTJqMm1yAAAAAAAADwAAAAxzb3VyY2VfY2hhaW4AAAAOAAAABmF4ZWxhcgAAAAAAEAAAAAEAAAAA",
+          "AAAAAQAAAAAAAAAB/Vkq4eHxodqfI/T6IxMKQp35Y03JlvGyuXBe4fv4xlsAAAACAAAAAAAAAAIAAAAPAAAACWZuX3JldHVybgAAAAAAAA8AAAAQdmFsaWRhdGVfbWVzc2FnZQAAAAAAAAAB",
+          "AAAAAQAAAAAAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAACAAAAAAAAAAMAAAAPAAAAB2ZuX2NhbGwAAAAADQAAACCbYFC6M1fag5F1LZmsw/hKYzn8DsU8edvHvQT28js3DQAAAA8AAAAHZXhlY3V0ZQAAAAAQAAAAAQAAAAMAAAASAAAAAecbwo4qxNAQXxhzPfmBrDRB0bRU+Gw7J3Mw4sfwtMXUAAAADwAAAAltaW50X2Zyb20AAAAAAAAQAAAAAQAAAAMAAAASAAAAAZtgULozV9qDkXUtmazD+EpjOfwOxTx528e9BPbyOzcNAAAAEgAAAAAAAAAAMcgm8ObTe86X2pQI3TL4Ivmrqi9QrkdB6LCkELjUOREAAAAKAAAAAAAAAAACEyF1OevAAA==",
+          "AAAAAQAAAAAAAAABm2BQujNX2oORdS2ZrMP4SmM5/A7FPHnbx70E9vI7Nw0AAAACAAAAAAAAAAMAAAAPAAAAB2ZuX2NhbGwAAAAADQAAACDnG8KOKsTQEF8Ycz35gaw0QdG0VPhsOydzMOLH8LTF1AAAAA8AAAAJbWludF9mcm9tAAAAAAAAEAAAAAEAAAADAAAAEgAAAAGbYFC6M1fag5F1LZmsw/hKYzn8DsU8edvHvQT28js3DQAAABIAAAAAAAAAADHIJvDm03vOl9qUCN0y+CL5q6ovUK5HQeiwpBC41DkRAAAACgAAAAAAAAAAAhMhdTnrwAA=",
+          "AAAAAQAAAAAAAAAB5xvCjirE0BBfGHM9+YGsNEHRtFT4bDsnczDix/C0xdQAAAABAAAAAAAAAAIAAAAPAAAABG1pbnQAAAASAAAAAAAAAAAxyCbw5tN7zpfalAjdMvgi+auqL1CuR0HosKQQuNQ5EQAAABEAAAABAAAAAQAAAA8AAAAGYW1vdW50AAAAAAAKAAAAAAAAAAACEyF1OevAAA==",
+          "AAAAAQAAAAAAAAAB5xvCjirE0BBfGHM9+YGsNEHRtFT4bDsnczDix/C0xdQAAAACAAAAAAAAAAIAAAAPAAAACWZuX3JldHVybgAAAAAAAA8AAAAJbWludF9mcm9tAAAAAAAAAQ==",
+          "AAAAAQAAAAAAAAABm2BQujNX2oORdS2ZrMP4SmM5/A7FPHnbx70E9vI7Nw0AAAACAAAAAAAAAAIAAAAPAAAACWZuX3JldHVybgAAAAAAAA8AAAAHZXhlY3V0ZQAAAAAB",
+          "AAAAAQAAAAAAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAABAAAAAAAAAAYAAAAPAAAAHGludGVyY2hhaW5fdHJhbnNmZXJfcmVjZWl2ZWQAAAAOAAAACEV0aGVyZXVtAAAADQAAACCWLACI8OFPWkfpHIkk8tWYZssCN8E17LzQEmzp7jsBpAAAAA0AAAAU1kiTwm5BlGva5/m0Gnh+dLKIi7cAAAASAAAAAAAAAAAxyCbw5tN7zpfalAjdMvgi+auqL1CuR0HosKQQuNQ5EQAAAAoAAAAAAAAAAAITIXU568AAAAAAEAAAAAEAAAABAAAAAQ==",
+          "AAAAAQAAAAAAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAACAAAAAAAAAAIAAAAPAAAACWZuX3JldHVybgAAAAAAAA8AAAAHZXhlY3V0ZQAAAAAB",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACnJlYWRfZW50cnkAAAAAAAUAAAAAAAAADg==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAC3dyaXRlX2VudHJ5AAAAAAUAAAAAAAAAAw==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEGxlZGdlcl9yZWFkX2J5dGUAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEWxlZGdlcl93cml0ZV9ieXRlAAAAAAAABQAAAAAAAALM",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADXJlYWRfa2V5X2J5dGUAAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADndyaXRlX2tleV9ieXRlAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADnJlYWRfZGF0YV9ieXRlAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD3dyaXRlX2RhdGFfYnl0ZQAAAAAFAAAAAAAAAsw=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADnJlYWRfY29kZV9ieXRlAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD3dyaXRlX2NvZGVfYnl0ZQAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACmVtaXRfZXZlbnQAAAAAAAUAAAAAAAAAAw==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD2VtaXRfZXZlbnRfYnl0ZQAAAAAFAAAAAAAAA2w=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACGNwdV9pbnNuAAAABQAAAAAAOHun",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACG1lbV9ieXRlAAAABQAAAAAAP1FF",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEWludm9rZV90aW1lX25zZWNzAAAAAAAABQAAAAAADO0r",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD21heF9yd19rZXlfYnl0ZQAAAAAFAAAAAAAAALQ=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEG1heF9yd19kYXRhX2J5dGUAAAAFAAAAAAAAAVw=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEG1heF9yd19jb2RlX2J5dGUAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAE21heF9lbWl0X2V2ZW50X2J5dGUAAAAABQAAAAAAAAHQ"
+        ],
+        "events": {
+          "transactionEventsXdr": [
+            "AAAAAAAAAAAAAAABJbT82FmuwvpjSEOMSJs8PBDJi20hvk/TyzDLaJU++XcAAAABAAAAAAAAAAIAAAAPAAAAA2ZlZQAAAAASAAAAAAAAAADjY4eDkIof2QvgUND54D72WlYn1rjUOdxwCag/e1y7UQAAAAoAAAAAAAAAAAAAAAAAAJRN",
+            "AAAAAgAAAAAAAAABJbT82FmuwvpjSEOMSJs8PBDJi20hvk/TyzDLaJU++XcAAAABAAAAAAAAAAIAAAAPAAAAA2ZlZQAAAAASAAAAAAAAAADjY4eDkIof2QvgUND54D72WlYn1rjUOdxwCag/e1y7UQAAAAr//////////////////9f0"
+          ],
+          "contractEventsXdr": [
+            [
+              "AAAAAAAAAAH9WSrh4fGh2p8j9PojEwpCnfljTcmW8bK5cF7h+/jGWwAAAAEAAAAAAAAAAgAAAA8AAAAQbWVzc2FnZV9leGVjdXRlZAAAABEAAAABAAAABQAAAA8AAAAQY29udHJhY3RfYWRkcmVzcwAAABIAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAAPAAAACm1lc3NhZ2VfaWQAAAAAAA4AAABKMHgyZDQxNDI3OTA4Mzg2YzNmOGRmOWNhYTk0OTc5NmNmYTkyMWVkZDA2M2M4ZGNiYzAyMGM0NzE0YjhhOWIzOWM5LTc1MTk1NzkAAAAAAA8AAAAMcGF5bG9hZF9oYXNoAAAADQAAACA4wL3fxN4GqhHA86uInBAJe0hIcd8iTvPIhS+ufVu0fwAAAA8AAAAOc291cmNlX2FkZHJlc3MAAAAAAA4AAABBYXhlbGFyMWFxY2o1NGx6ejByazIyZ3ZxZ2NuOGZyNXR4NHJ6d2R2NXd2NWo5ZG1uYWNnZWZ2ZDd3enN5MmoybXIAAAAAAAAPAAAADHNvdXJjZV9jaGFpbgAAAA4AAAAGYXhlbGFyAAAAAAAQAAAAAQAAAAA=",
+              "AAAAAAAAAAHnG8KOKsTQEF8Ycz35gaw0QdG0VPhsOydzMOLH8LTF1AAAAAEAAAAAAAAAAgAAAA8AAAAEbWludAAAABIAAAAAAAAAADHIJvDm03vOl9qUCN0y+CL5q6ovUK5HQeiwpBC41DkRAAAAEQAAAAEAAAABAAAADwAAAAZhbW91bnQAAAAAAAoAAAAAAAAAAAITIXU568AA",
+              "AAAAAAAAAAFGFiHFOa1CxwfY9ymjQzhdYwxhFFUCUDyJoEDU3+SIQQAAAAEAAAAAAAAABgAAAA8AAAAcaW50ZXJjaGFpbl90cmFuc2Zlcl9yZWNlaXZlZAAAAA4AAAAIRXRoZXJldW0AAAANAAAAIJYsAIjw4U9aR+kciSTy1ZhmywI3wTXsvNASbOnuOwGkAAAADQAAABTWSJPCbkGUa9rn+bQaeH50soiLtwAAABIAAAAAAAAAADHIJvDm03vOl9qUCN0y+CL5q6ovUK5HQeiwpBC41DkRAAAACgAAAAAAAAAAAhMhdTnrwAAAAAAQAAAAAQAAAAEAAAAB"
+            ]
+          ]
+        },
+        "ledger": 65011584,
+        "createdAt": "1792343702"
+      },
+      "token": {
+        "id": "CDTRXQUOFLCNAEC7DBZT36MBVQ2EDUNUKT4GYOZHOMYOFR7QWTC5IIRV",
+        "decimals": 18,
+        "symbol": "ETH",
+        "name": "Ether",
+        "instance": {
+          "entries": [
+            {
+              "key": "AAAABgAAAAHnG8KOKsTQEF8Ycz35gaw0QdG0VPhsOydzMOLH8LTF1AAAABQAAAAB",
+              "xdr": "AAAABgAAAAAAAAAB5xvCjirE0BBfGHM9+YGsNEHRtFT4bDsnczDix/C0xdQAAAAUAAAAAQAAABMAAAAA/SU6/k01TtGJtzYkfDVqXMp3yiH5fCHGduo9mWhL/3IAAAABAAAAAwAAABAAAAABAAAAAQAAAA8AAAAFQWRtaW4AAAAAAAASAAAAAAAAAABOICHEmo50CJY38Q+N4+VmkvcF4wWO5/okAvR+bp/OLwAAABAAAAABAAAAAQAAAA8AAAAETWV0YQAAABEAAAABAAAAAwAAAA8AAAAIZGVjaW1hbHMAAAADAAAAEgAAAA8AAAAEbmFtZQAAAA4AAAAFRXRoZXIAAAAAAAAPAAAABnN5bWJvbAAAAAAADgAAAANFVEgAAAAAEAAAAAEAAAABAAAADwAAAAtUb3RhbFN1cHBseQAAAAAKAAAAAAAAAAEjWOukceWPPw==",
+              "lastModifiedLedgerSeq": 65011584,
+              "liveUntilLedgerSeq": 65958728,
+              "extXdr": "AAAAAA=="
+            }
+          ],
+          "latestLedger": 65043195
+        }
+      }
+    },
+    "bcb": {
+      "sourceTxHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+      "first": [
+        {
+          "call": {
+            "chain": "ethereum",
+            "contract_address": "0x4F4495243837681061C4743b74B3eEdf548D56A5",
+            "address": "0x4F4495243837681061C4743b74B3eEdf548D56A5",
+            "topics": [
+              "0x30ae6cc78c27e651745bf2ad08a11de83910ac1e347a52f7ac898c0fbef94dae",
+              "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144"
+            ],
+            "blockNumber": 26212735,
+            "transactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+            "transactionIndex": 340,
+            "blockHash": "0xc2305477f253031ee742c048c35b4c49c00d7c2e93019db5bca591c4f8596e62",
+            "blockTimestamp": 1792245647,
+            "logIndex": 1063,
+            "id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315_340_1063",
+            "event": "ContractCall",
+            "eventSignature": "ContractCall(address,string,string,bytes32,bytes)",
+            "returnValues": {
+              "sender": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "destinationChain": "axelar",
+              "destinationContractAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "payloadHash": "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000077374656c6c61720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000006fc23ac0000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014fa9a8ab62ee978c66962cf53fe5ab50eb5307e49000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "chain_type": "evm",
+            "destination_chain_type": "cosmos",
+            "created_at": {
+              "ms": 1792245647000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "eventIndex": 3,
+            "block_timestamp": 1792245647,
+            "receipt": {
+              "gasUsed": "143482",
+              "blockNumber": 26212735,
+              "cumulativeGasUsed": "36526057",
+              "from": "0xfa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+              "transactionIndex": 340,
+              "effectiveGasPrice": "63230476",
+              "confirmations": 2,
+              "logs": [
+                {
+                  "logIndex": 1060,
+                  "data": "0x00000000000000000000000000000000000000000000000000000006fc23ac00",
+                  "topics": [
+                    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                    "0x000000000000000000000000fa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  ],
+                  "blockNumber": 26212735,
+                  "transactionIndex": 340
+                },
+                {
+                  "logIndex": 1061,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000006fc23ac0000000000000000000000000000000000000000000000000000000000000000077374656c6c617200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c0000000000000000",
+                  "topics": [
+                    "0xcd05f5b9dc4bb03babf40f5da98f5f46819846207d916f89b67d36fd1f7fd74f",
+                    "0x950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f",
+                    "0x000000000000000000000000fa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                  ],
+                  "blockNumber": 26212735,
+                  "transactionIndex": 340
+                },
+                {
+                  "logIndex": 1062,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000006e8a51a30e4000000000000000000000000fa9a8ab62ee978c66962cf53fe5ab50eb5307e4900000000000000000000000000000000000000000000000000000000000000066178656c6172000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000416178656c6172316171636a35346c7a7a30726b323267767167636e38667235747834727a776476357776356a39646d6e6163676566766437777a7379326a326d7200000000000000000000000000000000000000000000000000000000000000",
+                  "topics": [
+                    "0x617332c1832058df6ee45fcbdf471251474c9945a8e5d229287a21a5f67ccf0a",
+                    "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+                    "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144"
+                  ],
+                  "blockNumber": 26212735,
+                  "transactionIndex": 340
+                },
+                {
+                  "logIndex": 1063,
+                  "data": "0x000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000066178656c6172000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000416178656c6172316171636a35346c7a7a30726b323267767167636e38667235747834727a776476357776356a39646d6e6163676566766437777a7379326a326d720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000077374656c6c61720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000006fc23ac0000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014fa9a8ab62ee978c66962cf53fe5ab50eb5307e49000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                  "topics": [
+                    "0x30ae6cc78c27e651745bf2ad08a11de83910ac1e347a52f7ac898c0fbef94dae",
+                    "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+                    "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144"
+                  ],
+                  "blockNumber": 26212735,
+                  "transactionIndex": 340
+                }
+              ],
+              "transactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+              "status": 1
+            },
+            "transaction": {
+              "chainId": 1,
+              "blockNumber": 26212735,
+              "gas": "146942",
+              "maxPriorityFeePerGas": "0",
+              "from": "0xfa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+              "transactionIndex": 340,
+              "to": "0xb5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "maxFeePerGas": "121512282",
+              "nonce": 2,
+              "hash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+              "gasPrice": "0x3c4d20c"
+            },
+            "_logIndex": 3
+          },
+          "is_invalid_payload_hash": false,
+          "is_invalid_source_address": false,
+          "is_invalid_contract_address": false,
+          "is_invalid_destination_chain": false,
+          "message_id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+          "is_call_from_relayer": false,
+          "is_insufficient_fee": false,
+          "is_invalid_symbol": false,
+          "is_invalid_amount": false,
+          "is_invalid_call": false,
+          "time_spent": {
+            "call_approved": 880,
+            "call_confirm": 878,
+            "total": 882,
+            "approved_executed": 2
+          },
+          "interchain_transfer": {
+            "symbol": "BCB",
+            "rawDestinationAddress": "0x47444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c",
+            "amount": "30000000000",
+            "sourceAddress": "0xfA9A8AB62eE978C66962cF53fe5Ab50Eb5307e49",
+            "destinationAddress": "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+            "tokenId": "0x950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f",
+            "dataHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "contract_address": "0x9101cCF1Dd8838C655516f488021134C9CdF8129",
+            "decimals": 7,
+            "name": "BCB",
+            "destinationChain": "stellar",
+            "id": "Ethereum_BCB",
+            "event": "InterchainTransfer"
+          },
+          "amount": 3000,
+          "gas_paid": {
+            "blockHash": "0xc2305477f253031ee742c048c35b4c49c00d7c2e93019db5bca591c4f8596e62",
+            "chain": "ethereum",
+            "chain_type": "evm",
+            "address": "0x2d5d7d31F671F86C782533cc367F14109a082712",
+            "logIndex": 1062,
+            "topics": [
+              "0x617332c1832058df6ee45fcbdf471251474c9945a8e5d229287a21a5f67ccf0a",
+              "0x000000000000000000000000b5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144"
+            ],
+            "eventSignature": "NativeGasPaidForContractCall(address,string,string,bytes32,uint256,address)",
+            "created_at": {
+              "ms": 1792245647000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "transactionIndex": 340,
+            "eventIndex": 2,
+            "contract_address": "0x2d5d7d31F671F86C782533cc367F14109a082712",
+            "transactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+            "returnValues": {
+              "refundAddress": "0xfA9A8AB62eE978C66962cF53fe5Ab50Eb5307e49",
+              "sourceAddress": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "destinationAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "gasFeeAmount": "7596272136420",
+              "payloadHash": "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144",
+              "destinationChain": "axelar"
+            },
+            "blockNumber": 26212735,
+            "block_timestamp": 1792245647,
+            "blockTimestamp": 1792245647,
+            "receipt": {
+              "gasUsed": "143482",
+              "blockNumber": 26212735,
+              "cumulativeGasUsed": "36526057",
+              "from": "0xfa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+              "transactionIndex": 340,
+              "effectiveGasPrice": "63230476",
+              "confirmations": 2,
+              "transactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+              "status": 1
+            },
+            "id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315_340_1062",
+            "event": "NativeGasPaidForContractCall",
+            "destination_chain_type": "cosmos",
+            "transaction": {
+              "chainId": 1,
+              "blockNumber": 26212735,
+              "gas": "146942",
+              "maxPriorityFeePerGas": "0",
+              "from": "0xfa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+              "transactionIndex": 340,
+              "to": "0xb5fb4be02232b1bba4dc8f81dc24c26980de9e3c",
+              "maxFeePerGas": "121512282",
+              "nonce": 2,
+              "hash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+              "gasPrice": "0x3c4d20c"
+            },
+            "_logIndex": 2
+          },
+          "symbol": "BCB",
+          "fees": {
+            "source_base_fee_usd": 0.013395322559999584,
+            "destination_base_fee_usd": 0.013395322559999999,
+            "express_fee_string": "0.000000000000000000",
+            "express_fee": 0,
+            "destination_base_fee_string": "0.242160",
+            "source_token": {
+              "token_price": {
+                "usd": 2421.43
+              },
+              "gas_price": "0.000000000000228444",
+              "symbol": "ETH",
+              "gas_price_gwei": "0.000228444",
+              "decimals": 18,
+              "name": "Ethereum",
+              "gas_price_in_units": {
+                "decimals": 18,
+                "value": "228444"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "express_supported": false,
+            "ethereum_token": {
+              "token_price": {
+                "usd": 2421.43
+              },
+              "symbol": "ETH",
+              "decimals": 18,
+              "name": "Ethereum"
+            },
+            "execute_min_gas_price": "0",
+            "source_base_fee": 0.000005531988353989,
+            "axelar_token": {
+              "token_price": {
+                "usd": 0.055316
+              },
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar"
+            },
+            "destination_express_fee": {
+              "total": 18.077952,
+              "relayer_fee_usd": 0.9999999928319999,
+              "relayer_fee": 18.077952,
+              "total_usd": 0.9999999928319999,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee": 0.000005531988353989,
+            "express_execute_gas_multiplier": 1.54,
+            "destination_base_fee": 0.24216,
+            "express_fee_usd": 0,
+            "destination_native_token": {
+              "token_price": {
+                "usd": 0.055316
+              },
+              "gas_price": "0.00000001",
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar",
+              "gas_price_in_units": {
+                "decimals": 18,
+                "value": "10000000000"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "execute_gas_multiplier": 1.32,
+            "destination_confirm_fee": 0.24,
+            "source_base_fee_string": "0.000005531988353989",
+            "source_express_fee": {
+              "total": 0.000413033933946957,
+              "relayer_fee_usd": 0.9999999999999993,
+              "relayer_fee": 0.000412979107386957,
+              "total_usd": 1.00013275867718,
+              "express_gas_overhead_fee": 5.482656e-8,
+              "express_gas_overhead_fee_usd": 0.00013275867718079998
+            },
+            "base_fee_usd": 0.013395322559999584,
+            "source_confirm_fee": 0.000005482644553012
+          },
+          "is_invalid_gas_paid": false,
+          "is_invalid_gas_paid_mismatch_source_address": false,
+          "callback_chain": "stellar",
+          "callback_destination_address": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+          "gas": {
+            "gas_execute_amount": 8.329050850117517e-8,
+            "gas_approve_amount": 0.000005482644553012,
+            "gas_callback_amount": 2.1186375e-7,
+            "gas_callback_approve_amount": 0.00000354855795,
+            "gas_express_fee_amount": 0,
+            "gas_used_amount": 0.000005777798811513175,
+            "gas_remain_amount": 0.0000018184733249068248,
+            "gas_paid_amount": 0.00000759627213642,
+            "gas_base_fee_amount": 0.000005531988353989,
+            "gas_express_amount": 0,
+            "gas_callback_base_fee_amount": 0,
+            "gas_used_value": 0.013990535376162346
+          },
+          "no_gas_remain": true,
+          "confirm": {
+            "sourceChain": "ethereum",
+            "poll_id": "3266072",
+            "confirmation_txhash": "45759DF4EEF8DE307CE3DDCED7E2FBFE7694F840C12A381AD32B2015B747F93A",
+            "blockNumber": 36375736,
+            "block_timestamp": 1792246525,
+            "transactionIndex": 0,
+            "sourceTransactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+            "event": "confirm",
+            "transactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315"
+          },
+          "approved": {
+            "returnValues": {
+              "sourceEventIndex": 3,
+              "sourceChain": "Ethereum",
+              "sourceAddress": "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C",
+              "sourceTxHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+              "contractAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "messageId": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+              "payloadHash": "0x5ff36086542c17071f52b09deb1ae7b0c180899477d46643ae126c894f0dd144"
+            },
+            "chain": "axelar",
+            "chain_type": "cosmos",
+            "blockNumber": 36375736,
+            "block_timestamp": 1792246527,
+            "created_at": {
+              "ms": 1792246527000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "receipt": {
+              "gasLimit": "0",
+              "gasUsed": "0",
+              "blockNumber": 36375736,
+              "status": 1
+            },
+            "_id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+            "eventIndex": 23,
+            "id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+            "event": "ContractCallApproved",
+            "transaction": {
+              "gasLimit": "0",
+              "blockNumber": 36375736,
+              "gasPrice": "1"
+            }
+          },
+          "is_not_enough_gas": false,
+          "executed": {
+            "chain": "axelar",
+            "sourceTransactionIndex": 340,
+            "sourceChain": "Ethereum",
+            "chain_type": "cosmos",
+            "childMessageIDs": [
+              "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447"
+            ],
+            "created_at": {
+              "ms": 1792246529000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "sourceTransactionLogIndex": 1063,
+            "contract_address": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+            "sourceTransactionEventIndex": 3,
+            "relayerAddress": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+            "transactionHash": "9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee",
+            "returnValues": {
+              "messageId": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3"
+            },
+            "blockNumber": "36375737",
+            "block_timestamp": 1792246529,
+            "receipt": {
+              "gasLimit": "520801",
+              "gasUsed": "3646",
+              "blockNumber": "36375737",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+              "transactionHash": "9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee",
+              "status": 1
+            },
+            "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+            "_id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315_340_1063",
+            "sourceTransactionHash": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+            "id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315_340_1063",
+            "event": "execute",
+            "transaction": {
+              "gasLimit": "520801",
+              "blockNumber": "36375737",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+              "hash": "9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee",
+              "timestamp": 1792246527000,
+              "gasPrice": "1",
+              "status": "success"
+            }
+          },
+          "not_enough_gas_to_execute": false,
+          "execute_nonce": null,
+          "to_refund": false,
+          "is_execute_from_relayer": true,
+          "callback": {
+            "chain": "axelar",
+            "chain_type": "cosmos",
+            "created_at": {
+              "week": 1791676800000,
+              "hour": 1792245600000,
+              "month": 1790812800000,
+              "year": 1767225600000,
+              "ms": 1792246529000,
+              "day": 1792195200000,
+              "quarter": 1790812800000
+            },
+            "eventIndex": 17,
+            "transactionHash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+            "returnValues": {
+              "sourceChain": "axelar",
+              "destinationContractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "sender": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000008457468657265756d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000006fc23ac0000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014fa9a8ab62ee978c66962cf53fe5ab50eb5307e49000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "messageId": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+              "payloadHash": "0x597716b95996b828fc8bb513e1f4ed7e090be137bf119f87e3ce46867059d98c",
+              "destinationChain": "stellar"
+            },
+            "messageIdIndex": 7510447,
+            "blockNumber": "36375737",
+            "block_timestamp": 1792246529,
+            "parentMessageID": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+            "receipt": {
+              "gasLimit": "520801",
+              "gasUsed": "402206",
+              "blockNumber": "36375737",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+              "transactionHash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+              "status": 1
+            },
+            "_id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "messageIdHash": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee",
+            "event": "ContractCall",
+            "transaction": {
+              "gasLimit": "520801",
+              "blockNumber": "36375737",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc",
+              "hash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+              "timestamp": 1792246527000,
+              "gasPrice": "1",
+              "status": "success"
+            },
+            "destination_chain_type": "vm"
+          },
+          "not_to_refund": true,
+          "id": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315_340_1063",
+          "status": "executed",
+          "simplified_status": "received"
+        }
+      ],
+      "second": [
+        {
+          "call": {
+            "chain": "axelar",
+            "_id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "blockNumber": "36375737",
+            "transactionHash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+            "parentMessageID": "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315-3",
+            "eventIndex": 17,
+            "event": "ContractCall",
+            "returnValues": {
+              "destinationContractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "messageId": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+              "payloadHash": "0x597716b95996b828fc8bb513e1f4ed7e090be137bf119f87e3ce46867059d98c",
+              "sender": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "sourceChain": "axelar",
+              "destinationChain": "stellar",
+              "payload": "0x0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000008457468657265756d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000006fc23ac0000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000014fa9a8ab62ee978c66962cf53fe5ab50eb5307e49000000000000000000000000000000000000000000000000000000000000000000000000000000000000003847444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "block_timestamp": 1792246529,
+            "receipt": {
+              "blockNumber": "36375737",
+              "gasUsed": "402206",
+              "status": 1,
+              "gasLimit": "520801",
+              "transactionHash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc"
+            },
+            "transaction": {
+              "blockNumber": "36375737",
+              "timestamp": 1792246527000,
+              "gasLimit": "520801",
+              "gasPrice": "1",
+              "status": "success",
+              "hash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+              "from": "axelar1nk9l5qynnte044g39p4c7kv3aw3rvk7g9clduc"
+            },
+            "id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "chain_type": "cosmos",
+            "destination_chain_type": "vm",
+            "created_at": {
+              "ms": 1792246529000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "messageIdIndex": 7510447,
+            "messageIdHash": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee"
+          },
+          "fees": {
+            "source_base_fee_usd": 0,
+            "destination_base_fee_usd": 0,
+            "express_fee_string": "0.000000",
+            "express_fee": 0,
+            "destination_base_fee_string": "0.0000000",
+            "source_token": {
+              "token_price": {
+                "usd": 0.055309
+              },
+              "gas_price": "0.0000003",
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar",
+              "gas_price_in_units": {
+                "decimals": 7,
+                "value": "3"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "express_supported": false,
+            "ethereum_token": {
+              "token_price": {
+                "usd": 2420.62
+              },
+              "symbol": "ETH",
+              "decimals": 18,
+              "name": "Ethereum"
+            },
+            "execute_min_gas_price": "0",
+            "source_base_fee": 0,
+            "axelar_token": {
+              "token_price": {
+                "usd": 0.055309
+              },
+              "symbol": "AXL",
+              "decimals": 6,
+              "name": "Axelar"
+            },
+            "destination_express_fee": {
+              "total": 5.6199982,
+              "relayer_fee_usd": 0.9999999997152001,
+              "relayer_fee": 5.6199982,
+              "total_usd": 0.9999999997152001,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee": 0,
+            "express_execute_gas_multiplier": 1.54,
+            "destination_base_fee": 0,
+            "express_fee_usd": 0,
+            "destination_native_token": {
+              "token_price": {
+                "usd": 0.177936
+              },
+              "gas_price": "0.0000001",
+              "symbol": "XLM",
+              "gas_price_gwei": "0.000000001",
+              "decimals": 7,
+              "name": "Stellar",
+              "gas_price_in_units": {
+                "decimals": 7,
+                "value": "1"
+              },
+              "contract_address": "0x0000000000000000000000000000000000000000"
+            },
+            "execute_gas_multiplier": 1.32,
+            "destination_confirm_fee": 0,
+            "source_base_fee_string": "0.000000",
+            "source_express_fee": {
+              "total": 18.08024,
+              "relayer_fee_usd": 0.99999999416,
+              "relayer_fee": 18.08024,
+              "total_usd": 0.99999999416,
+              "express_gas_overhead_fee": 0,
+              "express_gas_overhead_fee_usd": 0
+            },
+            "base_fee_usd": 0,
+            "source_confirm_fee": 0
+          },
+          "is_invalid_source_address": false,
+          "message_id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+          "is_invalid_symbol": false,
+          "is_invalid_amount": false,
+          "time_spent": {
+            "call_approved": 23,
+            "total": 38,
+            "approved_executed": 15
+          },
+          "is_invalid_payload_hash": false,
+          "is_invalid_contract_address": false,
+          "is_invalid_destination_chain": false,
+          "gas": {
+            "gas_execute_amount": 0.009273365695,
+            "gas_approve_amount": 0.1553218781422,
+            "gas_callback_amount": 0,
+            "gas_callback_approve_amount": 0,
+            "gas_express_fee_amount": 0,
+            "gas_used_amount": 0.1553218781422,
+            "gas_remain_amount": 0.088888,
+            "gas_paid_amount": 0.088888,
+            "gas_base_fee_amount": 0,
+            "gas_express_amount": 0,
+            "gas_callback_base_fee_amount": 0,
+            "gas_used_value": 0.008590697758166939
+          },
+          "is_call_from_relayer": true,
+          "is_insufficient_fee": false,
+          "no_gas_remain": false,
+          "is_invalid_call": false,
+          "gas_paid_to_callback": "276297",
+          "interchain_transfer": {
+            "symbol": "BCB",
+            "rawDestinationAddress": "0x47444b4642544a5041553734434e58363452544d34374553515234515359535843324e4d4842374248515453474c445a515453364341584c",
+            "amount": "30000000000",
+            "sourceAddress": "0xfa9a8ab62ee978c66962cf53fe5ab50eb5307e49",
+            "destinationAddress": "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+            "tokenId": "950977f4434f471408edcad1a60e9d7fb392504dab2bc599edc7ad42a6a2ea1f",
+            "data": null,
+            "decimals": 6,
+            "name": "BCB",
+            "destinationChain": "stellar",
+            "event": "InterchainTransfer"
+          },
+          "amount": 30000,
+          "origin_chain": "Ethereum",
+          "symbol": "BCB",
+          "approved": {
+            "chain": "stellar",
+            "chain_type": "vm",
+            "created_at": {
+              "ms": 1792246552000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "eventIndex": 0,
+            "transactionHash": "c9b5acecc605e8d717cb73406c267a048a9c6ab7b3b1a4b1f77808fb3140ece9",
+            "returnValues": {
+              "sourceEventIndex": 7510447,
+              "sourceChain": "axelar",
+              "sourceAddress": "axelar1aqcj54lzz0rk22gvqgcn8fr5tx4rzwdv5wv5j9dmnacgefvd7wzsy2j2mr",
+              "sourceTxHash": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee",
+              "contractAddress": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+              "messageId": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+              "payloadHash": "0x597716b95996b828fc8bb513e1f4ed7e090be137bf119f87e3ce46867059d98c"
+            },
+            "blockNumber": 64992154,
+            "block_timestamp": 1792246552,
+            "receipt": {
+              "gasLimit": "482797",
+              "gasUsed": "482797",
+              "blockNumber": 64992154,
+              "from": "GDNB45FD23MUUSANSEALGHYOLUVHEQKFL3TMLPXVZDTQQMJRSCGTS5E4",
+              "transactionHash": "c9b5acecc605e8d717cb73406c267a048a9c6ab7b3b1a4b1f77808fb3140ece9",
+              "status": 1
+            },
+            "_id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "event": "ContractCallApproved",
+            "transaction": {
+              "gasLimit": "482797",
+              "blockNumber": 64992154,
+              "from": "GDNB45FD23MUUSANSEALGHYOLUVHEQKFL3TMLPXVZDTQQMJRSCGTS5E4",
+              "hash": "c9b5acecc605e8d717cb73406c267a048a9c6ab7b3b1a4b1f77808fb3140ece9",
+              "status": "success",
+              "timestamp": "1792246552",
+              "gasPrice": "1"
+            },
+            "_logIndex": 0
+          },
+          "is_not_enough_gas": false,
+          "executed": {
+            "chain": "stellar",
+            "sourceChain": "axelar",
+            "chain_type": "vm",
+            "messageId": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "created_at": {
+              "ms": 1792246567000,
+              "hour": 1792245600000,
+              "day": 1792195200000,
+              "week": 1791676800000,
+              "month": 1790812800000,
+              "quarter": 1790812800000,
+              "year": 1767225600000
+            },
+            "contract_address": "CBDBMIOFHGWUFRYH3D3STI2DHBOWGDDBCRKQEUB4RGQEBVG74SEED6C6",
+            "sourceTransactionEventIndex": 7510447,
+            "relayerAddress": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+            "transactionHash": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+            "returnValues": {
+              "messageId": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447"
+            },
+            "blockNumber": 64992157,
+            "block_timestamp": 1792246567,
+            "receipt": {
+              "gasLimit": "28825",
+              "gasUsed": "28825",
+              "blockNumber": 64992157,
+              "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "transactionHash": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+              "status": 1
+            },
+            "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+            "_id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "sourceTransactionHash": "9D3069DA301B63F9A36DEF269200FA2E71E2B3FC0FC5ED69F1450AD90E6471EE",
+            "id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+            "event": "execute",
+            "transaction": {
+              "gasLimit": "28825",
+              "blockNumber": 64992157,
+              "from": "GCA5P3NJ4UOFYOUYUFNVSNEOMLMFZASJC5LWGEIURKUPO3IVUA4UTLOP",
+              "hash": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+              "status": "success",
+              "timestamp": "1792246567",
+              "gasPrice": "1"
+            }
+          },
+          "not_enough_gas_to_execute": false,
+          "execute_nonce": null,
+          "to_refund": true,
+          "is_execute_from_relayer": true,
+          "id": "0x9d3069da301b63f9a36def269200fa2e71e2b3fc0fc5ed69f1450ad90e6471ee-7510447",
+          "status": "executed",
+          "simplified_status": "received"
+        }
+      ],
+      "stellarTx": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+      "getTransaction": {
+        "latestLedger": 65043195,
+        "latestLedgerCloseTime": "1792501758",
+        "oldestLedger": 64922236,
+        "oldestLedgerCloseTime": "1791896962",
+        "status": "SUCCESS",
+        "txHash": "02a227c90a4e07f9b8e0b30e117f568120642bb813210af409c9f178cd273a77",
+        "applicationOrder": 177,
+        "feeBump": true,
+        "envelopeXdr": "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",
+        "resultXdr": "AAAAAAAAcJkAAAABCjfzBanPx59CBT9ltd2zu7DbGDf/iQ5UyPkfH+68bZAAAAAAAAAAAAAAAAAAAAABAAAAAAAAABgAAAAABhboz4YOzLVIUcVptPGHE5txTSCoReBtuxF+XAGw1bsAAAAAAAAAAA==",
+        "resultMetaXdr": "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",
+        "diagnosticEventsXdr": [
+          "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",
+          "AAAAAQAAAAAAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAACAAAAAAAAAAIAAAAPAAAACWZuX3JldHVybgAAAAAAAA8AAAAHZXhlY3V0ZQAAAAAB",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACnJlYWRfZW50cnkAAAAAAAUAAAAAAAAADQ==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAC3dyaXRlX2VudHJ5AAAAAAUAAAAAAAAAAw==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEGxlZGdlcl9yZWFkX2J5dGUAAAAFAAAAAAAAAHQ=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEWxlZGdlcl93cml0ZV9ieXRlAAAAAAAABQAAAAAAAAIw",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADXJlYWRfa2V5X2J5dGUAAAAAAAAFAAAAAAAAAFQ=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADndyaXRlX2tleV9ieXRlAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADnJlYWRfZGF0YV9ieXRlAAAAAAAFAAAAAAAAAHQ=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD3dyaXRlX2RhdGFfYnl0ZQAAAAAFAAAAAAAAAjA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAADnJlYWRfY29kZV9ieXRlAAAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD3dyaXRlX2NvZGVfYnl0ZQAAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACmVtaXRfZXZlbnQAAAAAAAUAAAAAAAAAAw==",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD2VtaXRfZXZlbnRfYnl0ZQAAAAAFAAAAAAAAA8A=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACGNwdV9pbnNuAAAABQAAAAAAL2RR",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAACG1lbV9ieXRlAAAABQAAAAAAK/Es",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEWludm9rZV90aW1lX25zZWNzAAAAAAAABQAAAAAACyY/",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAD21heF9yd19rZXlfYnl0ZQAAAAAFAAAAAAAAALQ=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEG1heF9yd19kYXRhX2J5dGUAAAAFAAAAAAAAAOA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAEG1heF9yd19jb2RlX2J5dGUAAAAFAAAAAAAAAAA=",
+          "AAAAAQAAAAAAAAAAAAAAAgAAAAAAAAACAAAADwAAAAxjb3JlX21ldHJpY3MAAAAPAAAAE21heF9lbWl0X2V2ZW50X2J5dGUAAAAABQAAAAAAAAHQ"
+        ],
+        "events": {
+          "transactionEventsXdr": [
+            "AAAAAAAAAAAAAAABJbT82FmuwvpjSEOMSJs8PBDJi20hvk/TyzDLaJU++XcAAAABAAAAAAAAAAIAAAAPAAAAA2ZlZQAAAAASAAAAAAAAAADjY4eDkIof2QvgUND54D72WlYn1rjUOdxwCag/e1y7UQAAAAoAAAAAAAAAAAAAAAAAAJji",
+            "AAAAAgAAAAAAAAABJbT82FmuwvpjSEOMSJs8PBDJi20hvk/TyzDLaJU++XcAAAABAAAAAAAAAAIAAAAPAAAAA2ZlZQAAAAASAAAAAAAAAADjY4eDkIof2QvgUND54D72WlYn1rjUOdxwCag/e1y7UQAAAAr//////////////////9e3"
+          ],
+          "contractEventsXdr": [
+            [
+              "AAAAAAAAAAH9WSrh4fGh2p8j9PojEwpCnfljTcmW8bK5cF7h+/jGWwAAAAEAAAAAAAAAAgAAAA8AAAAQbWVzc2FnZV9leGVjdXRlZAAAABEAAAABAAAABQAAAA8AAAAQY29udHJhY3RfYWRkcmVzcwAAABIAAAABRhYhxTmtQscH2Pcpo0M4XWMMYRRVAlA8iaBA1N/kiEEAAAAPAAAACm1lc3NhZ2VfaWQAAAAAAA4AAABKMHg5ZDMwNjlkYTMwMWI2M2Y5YTM2ZGVmMjY5MjAwZmEyZTcxZTJiM2ZjMGZjNWVkNjlmMTQ1MGFkOTBlNjQ3MWVlLTc1MTA0NDcAAAAAAA8AAAAMcGF5bG9hZF9oYXNoAAAADQAAACBZdxa5WZa4KPyLtRPh9O1+CQvhN78Rn4fjzkaGcFnZjAAAAA8AAAAOc291cmNlX2FkZHJlc3MAAAAAAA4AAABBYXhlbGFyMWFxY2o1NGx6ejByazIyZ3ZxZ2NuOGZyNXR4NHJ6d2R2NXd2NWo5ZG1uYWNnZWZ2ZDd3enN5MmoybXIAAAAAAAAPAAAADHNvdXJjZV9jaGFpbgAAAA4AAAAGYXhlbGFyAAAAAAAQAAAAAQAAAAA=",
+              "AAAAAAAAAAERhf7XSkQMYoTjtZNyTzhFiniiqVzALZIIqL4TzF3Q9wAAAAEAAAAAAAAABAAAAA8AAAAIdHJhbnNmZXIAAAASAAAAASgAs7NXd3xZ2yOqzk2/vZCvWP86ngsnZY3Bp3s882qgAAAAEgAAAAAAAAAA1FDNLwU/wTb+5GbOfJKEeQliVxaaw4fhPCcjLHmE5eEAAAAOAAAAPEJDQjpHRDdQMkg0TVNWVzNWNkwzNFlGWDdZWkJJTVdBT1NTWlZYRUxKQU5CUEtNRFJPMzREWVYzN0JDQgAAAAoAAAAAAAAAAAAAAAb8I6wA",
+              "AAAAAAAAAAFGFiHFOa1CxwfY9ymjQzhdYwxhFFUCUDyJoEDU3+SIQQAAAAEAAAAAAAAABgAAAA8AAAAcaW50ZXJjaGFpbl90cmFuc2Zlcl9yZWNlaXZlZAAAAA4AAAAIRXRoZXJldW0AAAANAAAAIJUJd/RDT0cUCO3K0aYOnX+zklBNqyvFme3HrUKmouofAAAADQAAABT6moq2Lul4xmliz1P+WrUOtTB+SQAAABIAAAAAAAAAANRQzS8FP8E2/uRmznyShHkJYlcWmsOH4TwnIyx5hOXhAAAACgAAAAAAAAAAAAAABvwjrAAAAAAQAAAAAQAAAAEAAAAB"
+            ]
+          ]
+        },
+        "ledger": 64992157,
+        "createdAt": "1792246567"
+      },
+      "token": {
+        "id": "CAIYL7WXJJCAYYUE4O2ZG4SPHBCYU6FCVFOMALMSBCUL4E6MLXIPPQA7",
+        "decimals": 7,
+        "symbol": "BCB",
+        "name": "BCB:GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+        "instance": {
+          "entries": [
+            {
+              "key": "AAAABgAAAAERhf7XSkQMYoTjtZNyTzhFiniiqVzALZIIqL4TzF3Q9wAAABQAAAAB",
+              "xdr": "AAAABgAAAAAAAAABEYX+10pEDGKE47WTck84RYp4oqlcwC2SCKi+E8xd0PcAAAAUAAAAAQAAABMAAAABAAAAAQAAAAMAAAAPAAAACE1FVEFEQVRBAAAAEQAAAAEAAAADAAAADwAAAAdkZWNpbWFsAAAAAAMAAAAHAAAADwAAAARuYW1lAAAADgAAADxCQ0I6R0Q3UDJINE1TVlczVjZMMzRZRlg3WVpCSU1XQU9TU1pWWEVMSkFOQlBLTURSTzM0RFlWMzdCQ0IAAAAPAAAABnN5bWJvbAAAAAAADgAAAANCQ0IAAAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAAAAABIAAAAAAAAAAP79H4yVbbr5e+YLf+MhQywHSlmtyLSBoXqYOLt8Hiu/AAAAEAAAAAEAAAABAAAADwAAAAlBc3NldEluZm8AAAAAAAAQAAAAAQAAAAIAAAAPAAAACUFscGhhTnVtNAAAAAAAABEAAAABAAAAAgAAAA8AAAAKYXNzZXRfY29kZQAAAAAADgAAAARCQ0IAAAAADwAAAAZpc3N1ZXIAAAAAAA0AAAAg/v0fjJVtuvl75gt/4yFDLAdKWa3ItIGhepg4u3weK78=",
+              "lastModifiedLedgerSeq": 64951791,
+              "liveUntilLedgerSeq": 67025390,
+              "extXdr": "AAAAAA=="
+            }
+          ],
+          "latestLedger": 65043195
+        }
+      }
+    }
+  },
+  "itsAssets": []
+}

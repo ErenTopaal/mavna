@@ -41,6 +41,8 @@ export { REQUEST_TIMEOUT_MS, requestJson } from "./http.js";
 export type { PinnedChain } from "./pinned.js";
 export { DEPLOYMENTS_COMMIT, PINNED_DEPLOYMENTS } from "./pinned.js";
 export { ItsNotRegistered, StellarItsReader } from "./stellar-its.js";
+export type { StellarReceipt } from "./stellar-receipt.js";
+export { readStellarReceipt, tokenPaid } from "./stellar-receipt.js";
 export type { ItsToken, ResolveInputs } from "./token.js";
 export {
   chainsTrustEachOther,

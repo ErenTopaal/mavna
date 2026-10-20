@@ -34,6 +34,7 @@ import { type EthCall, EvmReader, fetchEthCall } from "./evm.js";
 import { type PricedIn, priceTransfer } from "./fees.js";
 import { buildAddGas, GAS_SERVICE_ABI, GmpApi, type GmpRecord, legDelivered } from "./gmp.js";
 import { type DeliveredToken, StellarItsReader } from "./stellar-its.js";
+import { readStellarReceipt, tokenPaid } from "./stellar-receipt.js";
 import { chainsTrustEachOther, type ItsToken, resolveItsToken, UnsupportedToken } from "./token.js";
 import {
   buildApproval,
@@ -717,7 +718,17 @@ export class AxelarAdapter implements BridgeAdapter {
 
     if (!legDelivered(second)) return { phase: "pending", ref, expectedByUnix: 0 };
 
-    return { phase: "done", ref, received: await this.receivedFrom(second) };
+    // Axelar marks the leg executed before it has indexed the Stellar
+    // transaction, and that transaction is the only proof of what arrived.
+    if (second.executedTransactionHash === undefined || second.messageId === undefined) {
+      return { phase: "pending", ref, expectedByUnix: 0 };
+    }
+
+    return {
+      phase: "done",
+      ref,
+      received: await this.receivedOnStellar(second, handle.destinationAddress),
+    };
   }
 
   /**
@@ -898,47 +909,64 @@ export class AxelarAdapter implements BridgeAdapter {
    * quote resolves it, and a record missing what is needed is refused rather
    * than filled in.
    */
-  private async receivedFrom(second: GmpRecord): Promise<Amount> {
-    const { tokenId, amount } = second;
-    if (tokenId === undefined || amount === undefined || !/^\d+$/.test(amount)) {
-      throw new MavnaError(
-        "Axelar reports this transfer delivered but its record does not say how much " +
-          "arrived, so no amount is shown rather than a guessed one.",
-        { retryable: true },
-      );
-    }
-
+  /**
+   * What landed, read from the Stellar transaction that executed the second leg
+   * (see stellar-receipt.ts), named as the Stellar asset it is, in the token's
+   * own decimals read from the token. Axelar's record only says which
+   * transaction to read.
+   */
+  private async receivedOnStellar(
+    second: GmpRecord,
+    destination: string | undefined,
+  ): Promise<Amount> {
+    const stellar = await this.registry.stellarChain();
     const stellarIts = await this.stellarReader();
-    const token = await stellarIts.registeredTokenAddress(tokenId);
-    if (token === undefined) {
+    const tokenService = (await chainConfig(this.network, stellar.id)).interchainTokenService ?? "";
+
+    const receipt = await readStellarReceipt({
+      client: this.rpc,
+      txHash: second.executedTransactionHash ?? "",
+      ledger: second.executedLedger,
+      atUnix: second.executedAtUnix,
+      gateway: stellar.gateway,
+      tokenService,
+      messageId: second.messageId ?? "",
+    });
+
+    if (destination !== undefined && receipt.recipient !== destination) {
       throw new MavnaError(
-        "Axelar reports this transfer delivered, but Stellar's token service has no " +
-          "token under its id, so what arrived cannot be named.",
+        `This transfer was delivered to ${receipt.recipient}, not to ${destination}.`,
         { retryable: false },
       );
     }
+
+    const token = await stellarIts.registeredTokenAddress(receipt.tokenId);
+    if (token === undefined) {
+      throw new MavnaError(
+        "Stellar's token service has no token under the id it just delivered, so what " +
+          "arrived cannot be named.",
+        { retryable: false },
+      );
+    }
+    if (!tokenPaid(receipt.events, token, receipt.recipient, receipt.amount)) {
+      throw new MavnaError(
+        "The token service on Stellar says it delivered this transfer, and the token itself " +
+          "shows no matching payment in the same transaction. Not reporting it as arrived.",
+        { retryable: false },
+      );
+    }
+
     const [delivered, decimals] = await Promise.all([
       stellarIts.deliveredAs(token),
       stellarIts.tokenDecimals(token),
     ]);
-
-    // Axelar's record states the precision it counted in. If that is not the
-    // token's own on Stellar, the amount is in some other unit.
-    if (second.decimals !== undefined && second.decimals !== decimals) {
-      throw new MavnaError(
-        `Axelar states the delivered amount in ${second.decimals} decimals, and the token ` +
-          `on Stellar has ${decimals}. Refusing to show an amount in the wrong unit.`,
-        { retryable: false },
-      );
-    }
-
     const label =
       delivered.kind === "classic"
         ? {
             symbol: delivered.asset.isNative() ? "XLM" : delivered.asset.getCode(),
             curatedBy: undefined,
           }
-        : await this.contractTokenLabel(tokenId, token, stellarIts);
+        : await this.contractTokenLabel(receipt.tokenId, token, stellarIts);
 
     return {
       asset: {
@@ -948,7 +976,7 @@ export class AxelarAdapter implements BridgeAdapter {
         decimals,
         curatedBy: label.curatedBy,
       },
-      baseUnits: amount,
+      baseUnits: receipt.amount.toString(),
     };
   }
 

@@ -1,4 +1,11 @@
-import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
+import {
+  type Asset,
+  MavnaError,
+  type QuoteRequest,
+  type Route,
+  type RouteRejection,
+  type StepPhase,
+} from "@mavna/core";
 import {
   createNetworkConfig,
   PUBLIC_MAINNET_RPC_URLS,
@@ -492,14 +499,15 @@ describe("status, across both legs", () => {
   const DELIVERED = "0x6d2b4dd58e2501708cd6bd73ca578097cec519fe634bc9fbadf6e86e9b05ca7f";
 
   it("reports a finished transfer as done, having checked the second leg too", async () => {
-    const phase = await adapter.status({
-      sourceTxHash: DELIVERED,
-      sourceChainId: "base-sepolia",
-      depositAddress: undefined,
-      destinationAddress: undefined,
-    });
-    expect(phase.phase).toBe("done");
-    if (phase.phase !== "done") return;
+    const phase = await doneOrAged(() =>
+      adapter.status({
+        sourceTxHash: DELIVERED,
+        sourceChainId: "base-sepolia",
+        depositAddress: undefined,
+        destinationAddress: undefined,
+      }),
+    );
+    if (phase === "aged") return;
     expect(phase.received.baseUnits).toBe("10000000000");
     expect(phase.received.asset.symbol).toBe("IXE");
     // Axelar's own explorer, because it is the only view showing both legs.
@@ -611,5 +619,77 @@ describe("mainnet, where the assets people actually hold are", () => {
     const byApiName = await chainConfig("mainnet", "ethereum");
     const byContractName = await chainConfig("mainnet", "Ethereum");
     expect(byContractName.id).toBe(byApiName.id);
+  });
+});
+
+/**
+ * Done, or the one refusal allowed once the delivery transaction has aged out
+ * of what public Stellar RPC keeps (days, not months). What arrived is read
+ * from that transaction, so after that the honest answer is that it cannot be
+ * shown, never a done without it and never another amount.
+ */
+async function doneOrAged(
+  ask: () => Promise<StepPhase>,
+): Promise<Extract<StepPhase, { phase: "done" }> | "aged"> {
+  // Axelar's search rate limits a burst with 429, which the adapter rightly
+  // reports as a retry, so a retry is what this does before judging.
+  let outcome: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    outcome = await ask().catch((cause: unknown) => cause);
+    if (!(outcome instanceof MavnaError && outcome.retryable)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  if (outcome instanceof MavnaError && /no longer keeps/.test(outcome.message)) {
+    expect(outcome.retryable).toBe(false);
+    return "aged";
+  }
+  if (outcome instanceof Error) throw outcome;
+  const phase = outcome as StepPhase;
+  expect(phase.phase).toBe("done");
+  if (phase.phase !== "done") throw new Error(`expected done, got ${phase.phase}`);
+  return phase;
+}
+
+describe("mainnet transfers whose Stellar-leg record misstates the amount", () => {
+  // Read-only. Axelar's record for the WETH leg carries no amount, and for BCB
+  // it says six decimals for a seven-decimal token. Both were delivered.
+  const mainnet = new AxelarAdapter({
+    network: "mainnet",
+    rpc: new RpcClient({ url: PUBLIC_MAINNET_RPC_URLS[0] ?? "" }),
+    baseReserveStroops: 5_000_000,
+  });
+
+  it("reads the WETH delivery from Stellar", async () => {
+    const phase = await doneOrAged(() =>
+      mainnet.status({
+        sourceTxHash: "0xa41f1ccdbf2f5261e98007fb688338696d6bbfa62eacb55ef74d7dc2d5a96ffc",
+        sourceChainId: "ethereum",
+        depositAddress: undefined,
+        destinationAddress: "GAY4QJXQ43JXXTUX3KKARXJS7ARPTK5KF5IK4R2B5CYKIEFY2Q4RCVNA",
+      }),
+    );
+    if (phase === "aged") return;
+    expect(phase.received.baseUnits).toBe("149500000000000000");
+    expect(phase.received.asset.id).toBe(
+      "CDTRXQUOFLCNAEC7DBZT36MBVQ2EDUNUKT4GYOZHOMYOFR7QWTC5IIRV",
+    );
+    expect(phase.received.asset.decimals).toBe(18);
+  });
+
+  it("reads the BCB delivery from Stellar in the token's own seven decimals", async () => {
+    const phase = await doneOrAged(() =>
+      mainnet.status({
+        sourceTxHash: "0x8d9e3dd8d6ebf65e91e951974d72339d0e4bcb901e60347db01b6713d9d43315",
+        sourceChainId: "ethereum",
+        depositAddress: undefined,
+        destinationAddress: "GDKFBTJPAU74CNX64RTM47ESQR4QSYSXC2NMHB7BHQTSGLDZQTS6CAXL",
+      }),
+    );
+    if (phase === "aged") return;
+    expect(phase.received.baseUnits).toBe("30000000000");
+    expect(phase.received.asset.id).toBe(
+      "BCB:GD7P2H4MSVW3V6L34YFX7YZBIMWAOSSZVXELJANBPKMDRO34DYV37BCB",
+    );
+    expect(phase.received.asset.decimals).toBe(7);
   });
 });
