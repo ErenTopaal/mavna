@@ -15,6 +15,8 @@ const network = createNetworkConfig({ id: "testnet", rpcUrl: "https://example.in
 const SPONSOR = Keypair.random().publicKey();
 const CHANNEL = Keypair.random().publicKey();
 const ATTACKER = Keypair.random().publicKey();
+// the order book's mid: 5 XLM to the USDC, so 1.5 XLM may honestly cost up to 0.6 USDC
+const PRICE = 50_000_000n;
 const USDC = new Asset("USDC", USDC_ISSUER);
 // the fixture route delivers 5 USDC (50000000 at seven decimals) and quotes 1.5 XLM of reserve
 const route = routeFor("cctp", { newAccount: true });
@@ -108,7 +110,7 @@ describe("preparationProblem", () => {
 
 describe("readSettlement", () => {
   it("reads what the sponsor builds and says what it may spend", () => {
-    expect(readSettlement(settlement(), network.passphrase, route, CHANNEL)).toEqual({
+    expect(readSettlement(settlement(), network.passphrase, route, CHANNEL, PRICE)).toEqual({
       sendMax: 6_000_000n,
     });
   });
@@ -129,20 +131,20 @@ describe("readSettlement", () => {
       ],
       86_400,
     );
-    expect(readSettlement(hostile, network.passphrase, route, CHANNEL)).toEqual({
+    expect(readSettlement(hostile, network.passphrase, route, CHANNEL, PRICE)).toEqual({
       problem: "its repayment is not the receiving account buying back its own reserve",
     });
   });
 
   it("refuses one that may spend the whole arrival", () => {
     expect(
-      readSettlement(settlement({ maxSpend: "5" }), network.passphrase, route, CHANNEL),
+      readSettlement(settlement({ maxSpend: "5" }), network.passphrase, route, CHANNEL, PRICE),
     ).toEqual({ problem: "it may spend as much USDC as the whole transfer brings in" });
   });
 
   it("refuses one that buys back more than the quoted reserve", () => {
     expect(
-      readSettlement(settlement({ xlmNeeded: "2" }), network.passphrase, route, CHANNEL),
+      readSettlement(settlement({ xlmNeeded: "2" }), network.passphrase, route, CHANNEL, PRICE),
     ).toEqual({ problem: "it buys back more XLM than the reserve this route quoted" });
   });
 
@@ -163,14 +165,29 @@ describe("readSettlement", () => {
       ],
       86_400,
     );
-    expect(readSettlement(hostile, network.passphrase, route, CHANNEL)).toEqual({
+    expect(readSettlement(hostile, network.passphrase, route, CHANNEL, PRICE)).toEqual({
       problem: "it asks the receiving account for more than the repayment",
     });
   });
 
   it("refuses one not built on the channel the sponsor named", () => {
-    expect(readSettlement(settlement(), network.passphrase, route, SPONSOR)).toEqual({
+    expect(readSettlement(settlement(), network.passphrase, route, SPONSOR, PRICE)).toEqual({
       problem: "it is not built on the sponsor's own channel",
     });
+  });
+});
+
+describe("readSettlement against the quote's ceiling", () => {
+  it("refuses a sendMax above twice the buy-back's worth, though below the arrival", () => {
+    expect(
+      readSettlement(settlement({ maxSpend: "0.64" }), network.passphrase, route, CHANNEL, PRICE),
+    ).toEqual({
+      problem:
+        "it may spend more than twice the reserve's worth at the order book's price (at most " +
+        "0.63 USDC), which is what this setup was offered on",
+    });
+    expect(
+      readSettlement(settlement({ maxSpend: "0.63" }), network.passphrase, route, CHANNEL, PRICE),
+    ).toEqual({ sendMax: 6_300_000n });
   });
 });

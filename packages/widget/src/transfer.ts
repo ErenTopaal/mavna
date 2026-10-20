@@ -159,6 +159,7 @@ export type TransferEngine = Pick<
   | "usdcOnStellar"
   | "sponsorTerms"
   | "stellarNetwork"
+  | "xlmStroopsPerUsdc"
 >;
 
 export interface TransferDeps {
@@ -217,8 +218,24 @@ async function collectSettlement(
     }
     throw cause;
   }
-  // held and submitted later against the arrival, so it is read in full first
-  const read = readSettlement(built.xdr, engine.stellarNetwork.passphrase, route, built.channel);
+  // held and submitted later against the arrival, so it is read in full first,
+  // and held to the ceiling the quote offered this setup on
+  let price: bigint;
+  try {
+    price = await engine.xlmStroopsPerUsdc();
+  } catch (cause) {
+    throw new Error(
+      "The sponsor's repayment could not be held to the order book's price " +
+        `(${asError(cause).message}), so it was not signed. Nothing has been sent.`,
+    );
+  }
+  const read = readSettlement(
+    built.xdr,
+    engine.stellarNetwork.passphrase,
+    route,
+    built.channel,
+    price,
+  );
   if ("problem" in read) {
     throw new Error(
       `The sponsor's repayment was not signed: ${read.problem}. Nothing has been sent.`,

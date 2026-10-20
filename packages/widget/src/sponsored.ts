@@ -21,6 +21,34 @@ const PREPARATION_MAX_SECONDS = 600;
 /** The sponsor holds a settlement for a day; a little longer is clock skew, not a standing grant. */
 const SETTLEMENT_MAX_SECONDS = 86_400 + 600;
 
+/**
+ * Headroom over the sponsor's own ceiling, for the price moving between its read
+ * of the order book and this page's, a few seconds apart.
+ */
+const PRICE_DRIFT_BPS = 500n;
+
+/**
+ * The most a settlement buying back `destStroops` of XLM may spend, in base
+ * units of the paying asset: twice its worth at the mid price, as the sponsor
+ * builds it, with a little headroom, rounded up.
+ */
+export function repaymentCeiling(
+  destStroops: bigint,
+  xlmStroopsPerUnit: bigint,
+  decimals: number,
+): bigint {
+  if (xlmStroopsPerUnit <= 0n) return 0n;
+  const num = destStroops * 2n * 10n ** BigInt(decimals) * (10_000n + PRICE_DRIFT_BPS);
+  const den = xlmStroopsPerUnit * 10_000n;
+  return (num + den - 1n) / den;
+}
+
+function fmtUnitsPlain(baseUnits: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const fraction = (baseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction === "" ? (baseUnits / scale).toString() : `${baseUnits / scale}.${fraction}`;
+}
+
 type Parsed = Exclude<ReturnType<typeof TransactionBuilder.fromXDR>, FeeBumpTransaction>;
 
 function parse(xdr: string, passphrase: string): Parsed | undefined {
@@ -114,6 +142,11 @@ export function readSettlement(
   passphrase: string,
   route: Route,
   channel: string,
+  /**
+   * The order book's mid price for what arrives, in stroops per whole unit: the
+   * figure the sponsor builds its ceiling from, twice the buy-back's worth.
+   */
+  xlmStroopsPerUnit: bigint,
 ): { readonly sendMax: bigint } | { readonly problem: string } {
   const tx = parse(xdr, passphrase);
   if (tx === undefined) return { problem: "it could not be read" };
@@ -144,6 +177,16 @@ export function readSettlement(
   const sendMax = xlmToStroops(buy.sendMax);
   if (sendMax >= BigInt(route.deliveredAtLeast.baseUnits)) {
     return { problem: `it may spend as much ${holds.symbol} as the whole transfer brings in` };
+  }
+  // the quote offered this setup on that same ceiling, so nothing above it is signed
+  const ceiling = repaymentCeiling(xlmToStroops(buy.destAmount), xlmStroopsPerUnit, holds.decimals);
+  if (sendMax > ceiling) {
+    return {
+      problem:
+        "it may spend more than twice the reserve's worth at the order book's price " +
+        `(at most ${fmtUnitsPlain(ceiling, holds.decimals)} ${holds.symbol}), which is what ` +
+        "this setup was offered on",
+    };
   }
   let accountReleased = false;
   for (const op of rest) {

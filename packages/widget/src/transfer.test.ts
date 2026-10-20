@@ -58,6 +58,8 @@ let settleReplies: Array<[number, unknown]>;
 let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
 let refuses: "PREPARATION" | "CONVERSION" | undefined;
+/** Horizon's order-book mid for USDC, in stroops per whole USDC: 5 XLM to the USDC. */
+let xlmPerUsdc: bigint | Error;
 /** What /submit and /settlement answer before their usual 200, in turn. */
 let submitRefusals: Array<[number, unknown]>;
 let settlementRefusals: Array<[number, unknown]>;
@@ -159,6 +161,7 @@ beforeEach(() => {
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   refuses = undefined;
+  xlmPerUsdc = 50_000_000n;
   submitRefusals = [];
   settlementRefusals = [];
   stored = new Map();
@@ -426,6 +429,11 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     adapters: [adapter],
     sponsor,
     sponsorTerms: () => sponsor.terms(),
+    // the order book, at Horizon's boundary
+    xlmStroopsPerUsdc: async () => {
+      if (xlmPerUsdc instanceof Error) throw xlmPerUsdc;
+      return xlmPerUsdc;
+    },
     // the stellar wallet, at its signing boundary
     stellar: {
       connect: async () => {
@@ -893,6 +901,30 @@ describe("a sponsor that fronts the reserve, read before the account signs", () 
     expect(log).not.toContain("stellar sign SETTLEMENT");
     expect(log).not.toContain("sponsor /settlement/commit");
     expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("refuses a settlement that may spend more than twice the reserve's worth, though less than the arrival", async () => {
+    // 1.5 XLM at 5 XLM to the USDC is 0.3 USDC; twice that is 0.6, and 4.9 is asked
+    settlementXdr = settlementSpending("4.9");
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/more than twice the reserve's worth.*0\.63 USDC.*Nothing has been sent/);
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+
+  it("refuses a settlement it could not hold to a price, rather than signing it unchecked", async () => {
+    xlmPerUsdc = new Error("The order book has no bids.");
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(adapter, routeFor("layerzero", { newAccount: true }), patches().patch),
+    ).rejects.toThrow(/no bids.*Nothing has been sent/);
+    expect(log).not.toContain("stellar sign SETTLEMENT");
   });
 
   it("tells the user the most the repayment may take before they sign it", async () => {
@@ -1530,6 +1562,8 @@ describe("runTransfer when the account pays its own reserve", () => {
     it("skips the conversion and says the funds stay as they arrived when nothing would be left", async () => {
       // a repayment may never claim the whole arrival, so less arrives than it may take
       settlementXdr = settlementSpending("4.9");
+      // at 0.5 XLM to the USDC, the 1.5 XLM buy-back may honestly take up to 6 USDC
+      xlmPerUsdc = 5_000_000n;
       settleReplies = [[200, { settled: false, settlementRetryable: true }]];
       const adapter = new ScriptedAdapter("layerzero", [delivered()], {
         transactions: [layerZeroSend("777")],
