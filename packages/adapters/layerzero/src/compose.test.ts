@@ -268,12 +268,12 @@ describe("what finishing a compose would pay to renew the contract's storage", (
         ({
           latestLedger: LATEST,
           entries: keys.map((key) =>
-            key.switch().name === "contractCode"
+            key.type === "contractCode"
               ? {
                   key,
                   val: xdr.LedgerEntryData.contractCode(
                     new xdr.ContractCodeEntry({
-                      ext: new xdr.ContractCodeEntryExt(0),
+                      ext: xdr.ContractCodeEntryExt.v0(),
                       hash: WASM,
                       code: Buffer.alloc(1),
                     }),
@@ -285,10 +285,10 @@ describe("what finishing a compose would pay to renew the contract's storage", (
                   key,
                   val: xdr.LedgerEntryData.contractData(
                     new xdr.ContractDataEntry({
-                      ext: new xdr.ExtensionPoint(0),
+                      ext: xdr.ExtensionPoint.v0(),
                       contract: new Address(CONTRACT).toScAddress(),
                       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-                      durability: xdr.ContractDataDurability.persistent(),
+                      durability: xdr.ContractDataDurability.persistent,
                       val: xdr.ScVal.scvContractInstance(
                         new xdr.ScContractInstance({
                           executable: xdr.ContractExecutable.contractExecutableWasm(WASM),
@@ -304,9 +304,10 @@ describe("what finishing a compose would pay to renew the contract's storage", (
         }) as never,
     );
     vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
-      const data = (tx as { toEnvelope(): xdr.TransactionEnvelope }).toEnvelope().v1().tx().ext();
-      const keys = data.switch() === 1 ? data.sorobanData().resources().footprint().readOnly() : [];
-      simulated.push(keys.map((k) => k.switch().name).join(","));
+      const envelope = (tx as { toEnvelope(): xdr.TransactionEnvelope }).toEnvelope();
+      const data = xdr.expectUnionVariant(envelope, "envelopeTypeTx").v1.tx.ext;
+      const keys = data.type === "sorobanData" ? data.sorobanData.resources.footprint.readOnly : [];
+      simulated.push(keys.map((k) => k.type).join(","));
       return { latestLedger: LATEST, minResourceFee: rentFee, transactionData: undefined } as never;
     });
     return { client, simulated };

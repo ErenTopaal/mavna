@@ -88,21 +88,24 @@ describe("converting on Stellar", () => {
               xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
               new Address(tokenOut).toScVal(),
             ]),
-          ]).toXDR("base64"),
+          ]).toXdr("base64"),
           pools: ["CD3LFMMLBQ6RBJUD3Z2LFDFE6544WDRMWHEZYPI5YDVESYRSO2TT32BX"],
           tokens_addresses: [tokenIn, tokenOut],
           amount: quoteOut(Number((asked as { amount?: unknown }).amount)),
         });
       }
       if (url.startsWith(RPC)) {
-        const tx = TransactionBuilder.fromXDR(
+        const tx = TransactionBuilder.fromXdr(
           JSON.parse(typeof init?.body === "string" ? init.body : "{}").params.transaction,
           Networks.TESTNET,
         );
         if ("operations" in tx && tx.operations[0]?.type === "invokeHostFunction") {
-          const call = tx.operations[0].func.invokeContract();
+          const call = xdr.expectUnionVariant(
+            tx.operations[0].func,
+            "hostFunctionTypeInvokeContract",
+          ).invokeContract;
           simulated.push(
-            `${Address.fromScAddress(call.contractAddress()).toString()} ${call.functionName().toString()}`,
+            `${Address.fromScAddress(call.contractAddress).toString()} ${call.functionName.toString()}`,
           );
         }
         return respond({
@@ -111,8 +114,8 @@ describe("converting on Stellar", () => {
           result: {
             latestLedger: 10,
             minResourceFee: "100",
-            transactionData: new SorobanDataBuilder().setResourceFee(100).build().toXDR("base64"),
-            results: [{ auth: [], xdr: xdr.ScVal.scvVoid().toXDR("base64") }],
+            transactionData: new SorobanDataBuilder().setResourceFee(100).build().toXdr("base64"),
+            results: [{ auth: [], xdr: xdr.ScVal.scvVoid().toXdr("base64") }],
           },
         });
       }
@@ -126,7 +129,7 @@ describe("converting on Stellar", () => {
     });
     const sent: string[] = [];
     vi.spyOn(node.server, "sendTransaction").mockImplementation(async (tx) => {
-      sent.push(tx.toXDR());
+      sent.push(tx.toXdr());
       return { status: "PENDING", hash: "ab".repeat(32), latestLedger: 10 } as never;
     });
     vi.spyOn(node.server, "getTransaction").mockImplementation(
@@ -168,7 +171,7 @@ describe("converting on Stellar", () => {
     expect(simulated).toEqual([`${ROUTER} swap_chained`]);
     expect(signed).toHaveLength(1);
     expect(sent).toEqual(signed);
-    const tx = TransactionBuilder.fromXDR(signed[0] ?? "", Networks.TESTNET);
+    const tx = TransactionBuilder.fromXdr(signed[0] ?? "", Networks.TESTNET);
     expect("source" in tx && tx.source).toBe(DESTINATION);
   });
 
@@ -249,7 +252,7 @@ describe("converting on Stellar", () => {
         errorResult: new xdr.TransactionResult({
           feeCharged: xdr.Int64.fromString("100"),
           result: xdr.TransactionResultResult.txBadSeq(),
-          ext: new xdr.TransactionResultExt(0),
+          ext: xdr.TransactionResultExt.v0(),
         }),
       } as never;
     });

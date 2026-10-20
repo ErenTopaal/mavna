@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createNetworkConfig, PUBLIC_TESTNET_RPC_URL } from "@mavna/stellar";
-import { Account } from "@stellar/stellar-sdk";
+import { Account, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { hideBufferFrom } from "./__fixtures__/no-buffer.js";
 import {
@@ -95,7 +95,9 @@ describe("the delivery without Node's Buffer, as in a browser", () => {
     });
     // the operation, not the envelope: the envelope's time bounds follow the clock
     const call = (tx: ReturnType<typeof buildDelivery>) =>
-      tx.toEnvelope().v1().tx().operations()[0]?.toXDR("base64");
+      xdr
+        .expectUnionVariant(tx.toEnvelope(), "envelopeTypeTx")
+        .v1.tx.operations[0]?.toXdr("base64");
     const withNode = call(buildDelivery(inputs()));
     const restore = hideBufferFrom(fileURLToPath(new URL(".", import.meta.url)));
     try {

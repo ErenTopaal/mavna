@@ -130,11 +130,14 @@ class RecordingRpc extends RpcClient {
     // the endpoint's compose_queue, the one contract read the compose path makes
     this.server.simulateTransaction = (async (tx: Transaction) => {
       const op = tx.operations[0] as Operation.InvokeHostFunction | undefined;
-      const call = op?.func.invokeContract();
-      if (call?.functionName().toString() !== "compose_queue") {
+      const call =
+        op?.func.type === "hostFunctionTypeInvokeContract" ? op.func.invokeContract : undefined;
+      if (call?.functionName.toString() !== "compose_queue") {
         return { error: "this node only answers compose_queue", latestLedger: 1 };
       }
-      const guid = Buffer.from(call.args()[2]?.bytes() ?? Buffer.alloc(0)).toString("hex");
+      const guidArg = call.args[2];
+      const guid =
+        guidArg?.type === "scvBytes" ? xdr.encodeBytes(guidArg.bytes.toBytes(), "hex") : "";
       const slot = this.queuedComposes.get(guid);
       return {
         latestLedger: 1,
@@ -145,7 +148,7 @@ class RecordingRpc extends RpcClient {
       };
     }) as never;
     this.server.sendTransaction = async (tx) => {
-      const label = this.labels.get(tx.hash().toString("hex"));
+      const label = this.labels.get(xdr.encodeBytes(tx.hash(), "hex"));
       const stall = label === undefined ? undefined : this.stalls.get(label);
       if (label !== undefined && stall !== undefined) {
         this.stalls.delete(label);
@@ -174,21 +177,17 @@ class RecordingRpc extends RpcClient {
 
   private entryFor(key: xdr.LedgerKey): xdr.LedgerEntryData | undefined {
     // the Arrival Contract's own storage, replayed from a testnet recording
-    const recorded = RECORDED_CONTRACT_ENTRIES.get(key.toXDR("base64"));
-    if (recorded !== undefined) return xdr.LedgerEntryData.fromXDR(recorded, "base64");
-    if (key.switch().name === "account") {
-      const accountId = key.account().accountId();
-      const sequence = this.accounts.get(StrKey.encodeEd25519PublicKey(accountId.ed25519()));
+    const recorded = RECORDED_CONTRACT_ENTRIES.get(key.toXdr("base64"));
+    if (recorded !== undefined) return xdr.LedgerEntryData.fromXdr(recorded, "base64");
+    if (key.type === "account") {
+      const accountId = key.account.accountId;
+      const holder = StrKey.encodeEd25519PublicKey(accountId.ed25519.toBytes());
+      const sequence = this.accounts.get(holder);
       if (sequence === undefined) return undefined;
       return xdr.LedgerEntryData.account(
         new xdr.AccountEntry({
           accountId,
-          balance: xdr.Int64.fromString(
-            (
-              this.nativeBalances.get(StrKey.encodeEd25519PublicKey(accountId.ed25519())) ??
-              100_000_000n
-            ).toString(),
-          ),
+          balance: this.nativeBalances.get(holder) ?? 100_000_000n,
           seqNum: xdr.Int64.fromString(sequence.toString()),
           numSubEntries: 1,
           inflationDest: null,
@@ -196,38 +195,34 @@ class RecordingRpc extends RpcClient {
           homeDomain: "",
           thresholds: Buffer.from([1, 0, 0, 0]),
           signers: [],
-          ext: new xdr.AccountEntryExt(0),
+          ext: xdr.AccountEntryExt.v0(),
         }),
       );
     }
-    if (key.switch().name === "trustline") {
-      const line = key.trustLine();
-      if (line.asset().toXDR("hex") !== USDC.toTrustLineXDRObject().toXDR("hex")) return undefined;
-      const balance = this.trustlines.get(
-        StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
-      );
+    if (key.type === "trustline") {
+      const line = key.trustLine;
+      if (line.asset.toXdr("hex") !== USDC.toTrustLineXdrObject().toXdr("hex")) return undefined;
+      const holder = StrKey.encodeEd25519PublicKey(line.accountId.ed25519.toBytes());
+      const balance = this.trustlines.get(holder);
       if (balance === undefined) return undefined;
-      const selling = this.sellingLiabilities.get(
-        StrKey.encodeEd25519PublicKey(line.accountId().ed25519()),
-      );
+      const selling = this.sellingLiabilities.get(holder);
       return xdr.LedgerEntryData.trustline(
         new xdr.TrustLineEntry({
-          accountId: line.accountId(),
-          asset: line.asset(),
+          accountId: line.accountId,
+          asset: line.asset,
           balance: xdr.Int64.fromString(balance.toString()),
           limit: xdr.Int64.fromString("9223372036854775807"),
           flags: 1,
           ext:
             selling === undefined
-              ? new xdr.TrustLineEntryExt(0)
-              : new xdr.TrustLineEntryExt(
-                  1,
+              ? xdr.TrustLineEntryExt.v0()
+              : xdr.TrustLineEntryExt.v1(
                   new xdr.TrustLineEntryV1({
                     liabilities: new xdr.Liabilities({
                       buying: xdr.Int64.fromString("0"),
                       selling: xdr.Int64.fromString(selling.toString()),
                     }),
-                    ext: new xdr.TrustLineEntryV1Ext(0),
+                    ext: xdr.TrustLineEntryV1Ext.v0(),
                   }),
                 ),
         }),
@@ -260,7 +255,7 @@ class RecordingRpc extends RpcClient {
     }
     const labelled = async () => {
       const tx = await build();
-      this.labels.set(tx.hash().toString("hex"), label);
+      this.labels.set(xdr.encodeBytes(tx.hash(), "hex"), label);
       return tx;
     };
     return super.submit(label, labelled, options);
@@ -294,7 +289,7 @@ class RecordingRpc extends RpcClient {
   }
 
   private send(tx: Transaction | FeeBumpTransaction): rpc.Api.SendTransactionResponse {
-    const hash = tx.hash().toString("hex");
+    const hash = xdr.encodeBytes(tx.hash(), "hex");
     const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
     // Only a queued transaction is a duplicate. One that landed has spent its
     // sequence, and the network answers a resend of it with txBadSeq.
@@ -319,7 +314,7 @@ class RecordingRpc extends RpcClient {
       errorResult: new xdr.TransactionResult({
         feeCharged: xdr.Int64.fromString("100"),
         result: xdr.TransactionResultResult[code](),
-        ext: new xdr.TransactionResultExt(0),
+        ext: xdr.TransactionResultExt.v0(),
       }),
     };
   }
@@ -336,7 +331,7 @@ class RecordingRpc extends RpcClient {
       }
     }
     const now = Math.floor(Date.now() / 1000);
-    const hash = tx.hash().toString("hex");
+    const hash = xdr.encodeBytes(tx.hash(), "hex");
     this.landed.set(hash, {
       status: rpc.Api.GetTransactionStatus.SUCCESS,
       txHash: hash,
@@ -352,9 +347,9 @@ class RecordingRpc extends RpcClient {
       resultXdr: new xdr.TransactionResult({
         feeCharged: xdr.Int64.fromString(tx.fee),
         result: xdr.TransactionResultResult.txSuccess([]),
-        ext: new xdr.TransactionResultExt(0),
+        ext: xdr.TransactionResultExt.v0(),
       }),
-      resultMetaXdr: new xdr.TransactionMeta(0, []),
+      resultMetaXdr: xdr.TransactionMeta.operations([]),
       events: { transactionEventsXdr: [], contractEventsXdr: [] },
     });
   }
@@ -513,9 +508,9 @@ async function startServer(
 }
 
 function signXdr(xdrText: string, ...signers: Keypair[]): string {
-  const tx = TransactionBuilder.fromXDR(xdrText, network.passphrase) as Transaction;
+  const tx = TransactionBuilder.fromXdr(xdrText, network.passphrase) as Transaction;
   for (const signer of signers) tx.sign(signer);
-  return tx.toXDR();
+  return tx.toXdr();
 }
 
 /** The honest flow up to a held settlement, as the app runs it. */
@@ -581,7 +576,7 @@ describe("the sponsor only countersigns what it built", () => {
     junk.sign(attacker);
     await server.post("/settlement/commit", {
       destination: attacker.publicKey(),
-      signedXdr: junk.toXDR(),
+      signedXdr: junk.toXdr(),
     });
 
     const sponsorAccount = await server.rpc.loadAccount(server.sponsor.publicKey());
@@ -595,7 +590,7 @@ describe("the sponsor only countersigns what it built", () => {
       .setTimeout(300)
       .build();
 
-    const response = await server.post("/submit", { signedXdr: forged.toXDR() });
+    const response = await server.post("/submit", { signedXdr: forged.toXdr() });
     expect(response.status).toBe(409);
     expect(server.rpc.submissions).toHaveLength(0);
   });
@@ -624,7 +619,7 @@ describe("the sponsor only countersigns what it built", () => {
 
     const response = await server.post("/settlement/commit", {
       destination: victim.publicKey(),
-      signedXdr: forged.toXDR(),
+      signedXdr: forged.toXdr(),
     });
     expect(response.status).toBe(409);
     expect(response.body.error).toBe(
@@ -675,7 +670,7 @@ describe("the sponsor only countersigns what it built", () => {
     expect(response.status).toBe(200);
     expect(server.rpc.submissions).toHaveLength(1);
     const submitted = server.rpc.submissions[0]?.tx as Transaction;
-    expect(response.body.txHash).toBe(submitted.hash().toString("hex"));
+    expect(response.body.txHash).toBe(xdr.encodeBytes(submitted.hash(), "hex"));
     expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
     expect(signedBy(submitted, user.publicKey())).toBe(true);
   });
@@ -1362,7 +1357,7 @@ describe("any rail can trigger a held settlement", () => {
     expect(response.body.settled).toBe(true);
     expect(server.rpc.submissions.map((s) => s.label)).toEqual(["settlement"]);
     const submitted = server.rpc.submissions[0]?.tx as Transaction;
-    expect(response.body.settlementTxHash).toBe(submitted.hash().toString("hex"));
+    expect(response.body.settlementTxHash).toBe(xdr.encodeBytes(submitted.hash(), "hex"));
     expect(signedBy(submitted, user.publicKey())).toBe(true);
     expect(signedBy(submitted, server.channel.publicKey())).toBe(true);
     expect(signedBy(submitted, server.sponsor.publicKey())).toBe(true);
@@ -1439,7 +1434,7 @@ describe("any rail can trigger a held settlement", () => {
     const later = await server.post("/settle", { destination: user.publicKey() });
     expect(later.body.settled).toBe(true);
     const landed = server.rpc.submissions[0]?.tx as Transaction;
-    expect(later.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+    expect(later.body.settlementTxHash).toBe(xdr.encodeBytes(landed.hash(), "hex"));
   });
 
   it("limits only accounts with a settlement to submit", async () => {
@@ -1564,7 +1559,7 @@ describe("the sponsor reports a submission that landed", () => {
 
     expect(response.status).toBe(200);
     const submitted = server.rpc.submissions[0]?.tx as Transaction;
-    expect(response.body.txHash).toBe(submitted.hash().toString("hex"));
+    expect(response.body.txHash).toBe(xdr.encodeBytes(submitted.hash(), "hex"));
     expect(logged.mock.calls.flat().join(" ")).toContain("cap store is unreachable");
     logged.mockRestore();
   });
@@ -1804,7 +1799,7 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     expect(page.status).toBe(200);
     expect(page.body).toEqual({
       settled: true,
-      settlementTxHash: submitted.hash().toString("hex"),
+      settlementTxHash: xdr.encodeBytes(submitted.hash(), "hex"),
     });
     expect(server.rpc.submissions).toHaveLength(1);
   });
@@ -1840,7 +1835,9 @@ describe("the sponsor sweeps held settlements the page never finished", () => {
     expect(after.body.settled).toBe(true);
     const submitted = server.rpc.submissions[0]?.tx as Transaction | undefined;
     expect(submitted).toBeDefined();
-    expect(after.body.settlementTxHash).toBe(submitted?.hash().toString("hex"));
+    expect(after.body.settlementTxHash).toBe(
+      submitted === undefined ? undefined : xdr.encodeBytes(submitted.hash(), "hex"),
+    );
   });
 
   it("forgets a repayment once the settlement's own time bound has passed", async () => {
@@ -2076,7 +2073,7 @@ describe("a channel's sequence belongs to whoever holds its lease", () => {
     expect(again.body.settled).toBe(true);
     const landed = server.rpc.submissions[0]?.tx as Transaction;
     expect(server.rpc.submissions).toHaveLength(1);
-    expect(again.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+    expect(again.body.settlementTxHash).toBe(xdr.encodeBytes(landed.hash(), "hex"));
     expect((await caps.usage()).stranded).toBe(0);
   });
 });
@@ -2378,7 +2375,7 @@ describe("a settlement that lands after the sponsor stopped waiting", () => {
     const later = await server.post("/settle", { destination: user.publicKey() });
     expect(later.body.settled).toBe(true);
     const landed = server.rpc.submissions[0]?.tx as Transaction;
-    expect(later.body.settlementTxHash).toBe(landed.hash().toString("hex"));
+    expect(later.body.settlementTxHash).toBe(xdr.encodeBytes(landed.hash(), "hex"));
 
     // and its channel is free for the next account
     const next = await server.post("/settlement", {
@@ -3035,8 +3032,9 @@ describe("the sponsor does not take a failed read for a missing account", () => 
     server.rpc.server.getLedgerEntries = async (...keys) => {
       const asksForUser = keys.some(
         (key) =>
-          key.switch().name === "account" &&
-          StrKey.encodeEd25519PublicKey(key.account().accountId().ed25519()) === user.publicKey(),
+          key.type === "account" &&
+          StrKey.encodeEd25519PublicKey(key.account.accountId.ed25519.toBytes()) ===
+            user.publicKey(),
       );
       if (asksForUser) throw new Error("connection reset");
       return read(...keys);
@@ -3645,7 +3643,7 @@ describe("with reserve funding set to self, the account pays its own reserve", (
       sourceChainId: "1",
     });
     expect(response.status).toBe(200);
-    const tx = TransactionBuilder.fromXDR(
+    const tx = TransactionBuilder.fromXdr(
       response.body.xdr as string,
       network.passphrase,
     ) as Transaction;
@@ -3748,7 +3746,7 @@ describe("with reserve funding set to self, an account can open its own USDT0 tr
     });
     expect(response.status).toBe(200);
     expect(response.body.selfFunded).toBe(true);
-    const tx = TransactionBuilder.fromXDR(
+    const tx = TransactionBuilder.fromXdr(
       response.body.xdr as string,
       network.passphrase,
     ) as Transaction;
@@ -3757,7 +3755,7 @@ describe("with reserve funding set to self, an account can open its own USDT0 tr
     expect(tx.operations).toHaveLength(1);
     expect(op?.line.toString()).toBe(USDT0.toString());
 
-    const submitted = await server.post("/submit", { signedXdr: signXdr(tx.toXDR(), user) });
+    const submitted = await server.post("/submit", { signedXdr: signXdr(tx.toXdr(), user) });
     expect(submitted.status).toBe(200);
   });
 

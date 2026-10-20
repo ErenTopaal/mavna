@@ -58,7 +58,7 @@ function accountLedger(balance: bigint, subEntries: number) {
         homeDomain: "",
         thresholds: Buffer.from([1, 0, 0, 0]),
         signers: [],
-        ext: new xdr.AccountEntryExt(0),
+        ext: xdr.AccountEntryExt.v0(),
       }),
     ),
   };

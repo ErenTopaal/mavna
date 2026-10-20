@@ -292,7 +292,7 @@ async function openOwnTrustline(
 function opensOnly(xdr: string, passphrase: string, account: string, assetId: string): boolean {
   let parsed: ReturnType<typeof TransactionBuilder.fromXDR>;
   try {
-    parsed = TransactionBuilder.fromXDR(xdr, passphrase);
+    parsed = TransactionBuilder.fromXdr(xdr, passphrase);
   } catch {
     // unreadable is answered as "not that trustline" by the caller
     return false;
@@ -414,8 +414,8 @@ export async function convertOnStellar(
   }
   const stellarAccount = await engine.rpc.loadAccount(account);
   const unsigned = await engine.swapVenues.build({ quote, account: stellarAccount });
-  const signed = await engine.stellar.sign(unsigned.toXDR(), account);
-  const parsed = TransactionBuilder.fromXDR(signed, unsigned.networkPassphrase);
+  const signed = await engine.stellar.sign(unsigned.toXdr(), account);
+  const parsed = TransactionBuilder.fromXdr(signed, unsigned.networkPassphrase);
   // signed by the user, so its sequence is fixed: a stale one cannot be resent
   await engine.rpc.submit("conversion", async () => parsed as never, { presigned: true });
   return "converted";

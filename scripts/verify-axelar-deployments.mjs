@@ -181,7 +181,7 @@ async function inspectStellar(network, chain) {
     new xdr.LedgerKeyContractData({
       contract: new Address(its).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   );
   const { entries } = await server.getLedgerEntries(key);

@@ -344,7 +344,7 @@ async function stellarInstance(server, address) {
     new xdr.LedgerKeyContractData({
       contract: new Contract(address).address().toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   );
   const response = await server.getLedgerEntries(key);
@@ -352,10 +352,14 @@ async function stellarInstance(server, address) {
   if (entry === undefined) return undefined;
 
   const values = new Map();
-  for (const item of entry.val.contractData().val().instance().storage() ?? []) {
-    const name = scValToNative(item.key());
+  const instance = xdr.expectUnionVariant(
+    xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+    "scvContractInstance",
+  ).instance;
+  for (const item of instance.storage ?? []) {
+    const name = scValToNative(item.key);
     if (Array.isArray(name) && typeof name[0] === "string") {
-      values.set(name[0], scValToNative(item.val()));
+      values.set(name[0], scValToNative(item.val));
     }
   }
   return values;

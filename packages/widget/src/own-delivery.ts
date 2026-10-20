@@ -95,8 +95,8 @@ export async function deliverOwn(
   const fee = BigInt(prepared.fee);
   if (fee > OWN_DELIVERY_FEE_BUDGET_STROOPS) return { kind: "too-costly", feeStroops: fee };
 
-  const signed = TransactionBuilder.fromXDR(
-    await engine.stellar.sign(prepared.toXDR(), payer),
+  const signed = TransactionBuilder.fromXdr(
+    await engine.stellar.sign(prepared.toXdr(), payer),
     engine.stellarNetwork.passphrase,
   );
   try {
@@ -113,19 +113,26 @@ function authorizesOnlyDelivery(prepared: Transaction, payer: string, forwarder:
   const op = prepared.operations[0];
   if (prepared.operations.length !== 1 || op?.type !== "invokeHostFunction") return false;
   return (op.auth ?? []).every((entry) => {
-    const credentials = entry.credentials();
+    const credentials = entry.credentials;
+    // an address signature in either encoding the network records; one with
+    // delegates would hand the payer's authority to others
+    const signer =
+      credentials.type === "sorobanCredentialsAddress"
+        ? credentials.address.address
+        : credentials.type === "sorobanCredentialsAddressV2"
+          ? credentials.addressV2.address
+          : undefined;
     const own =
-      credentials.switch().name === "sorobanCredentialsSourceAccount" ||
-      (credentials.switch().name === "sorobanCredentialsAddress" &&
-        Address.fromScAddress(credentials.address().address()).toString() === payer);
-    const root = entry.rootInvocation();
-    const fn = root.function();
+      credentials.type === "sorobanCredentialsSourceAccount" ||
+      (signer !== undefined && Address.fromScAddress(signer).toString() === payer);
+    const root = entry.rootInvocation;
+    const fn = root.function;
     return (
       own &&
-      root.subInvocations().length === 0 &&
-      fn.switch().name === "sorobanAuthorizedFunctionTypeContractFn" &&
-      Address.fromScAddress(fn.contractFn().contractAddress()).toString() === forwarder &&
-      fn.contractFn().functionName().toString() === "mint_and_forward"
+      root.subInvocations.length === 0 &&
+      fn.type === "sorobanAuthorizedFunctionTypeContractFn" &&
+      Address.fromScAddress(fn.contractFn.contractAddress).toString() === forwarder &&
+      fn.contractFn.functionName.toString() === "mint_and_forward"
     );
   });
 }

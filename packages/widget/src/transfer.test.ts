@@ -111,7 +111,7 @@ function settlementSpending(sendMax: string): string {
     )
     .setTimeout(86_400)
     .build()
-    .toXDR();
+    .toXdr();
 }
 
 const STELLAR_USDT0 = {
@@ -120,6 +120,13 @@ const STELLAR_USDT0 = {
   symbol: "USDT0",
   curatedBy: "LayerZero",
 };
+
+/** The trustlines a test can say the destination holds, by CODE:ISSUER. */
+const KNOWN_LINES = [STELLAR_USDC.id, STELLAR_USDT0.id];
+function trustLineOf(id: string): xdr.TrustLineAsset {
+  const [code, issuer] = id.split(":");
+  return new Asset(code ?? "", issuer).toTrustLineXdrObject();
+}
 
 beforeEach(() => {
   log = [];
@@ -148,7 +155,7 @@ beforeEach(() => {
     userAddress: DESTINATION,
     createAccount: true,
     assets: [new Asset("USDC", STELLAR_USDC.id.split(":")[1])],
-  }).toXDR();
+  }).toXdr();
   onDeliver = undefined;
   deliverReplies = [[200, { kind: "delivered", txHash: "d311", ledger: 9 }]];
   refuses = undefined;
@@ -223,7 +230,7 @@ beforeEach(() => {
           )
           .setTimeout(preparedShape.timeout ?? 300)
           .build()
-          .toXDR();
+          .toXdr();
         return reply(200, { xdr: preparation, selfFunded: true });
       }
       case "/submit": {
@@ -290,7 +297,7 @@ function ledgerEntries(): unknown[] {
         homeDomain: "",
         thresholds: Buffer.from([1, 0, 0, 0]),
         signers: [],
-        ext: new xdr.AccountEntryExt(0),
+        ext: xdr.AccountEntryExt.v0(),
       }),
     ),
   };
@@ -299,11 +306,11 @@ function ledgerEntries(): unknown[] {
     val: xdr.LedgerEntryData.trustline(
       new xdr.TrustLineEntry({
         accountId,
-        asset: new Asset(code ?? "", issuer).toTrustLineXDRObject(),
+        asset: new Asset(code ?? "", issuer).toTrustLineXdrObject(),
         balance: xdr.Int64.fromString(usdcHeld.toString()),
         limit: xdr.Int64.fromString(usdcLimit.toString()),
         flags: usdcFlags,
-        ext: new xdr.TrustLineEntryExt(0),
+        ext: xdr.TrustLineEntryExt.v0(),
       }),
     ),
   };
@@ -351,13 +358,13 @@ function stellarNode(): RpcClient {
     // asked key by key: the account, and only the trustlines it holds
     const [account] = ledgerEntries();
     const entries = keys.flatMap((key) => {
-      if (key.switch().name === "account") return account === undefined ? [] : [account];
-      if (key.switch().name !== "trustline") return [];
-      const line = key.trustLine().asset();
+      if (key.type === "account") return account === undefined ? [] : [account];
+      if (key.type !== "trustline") return [];
+      const line = key.trustLine.asset;
+      // which asset this key asks about, matched on its encoded form
       const held =
-        line.switch().name === "assetTypeCreditAlphanum12"
-          ? `${line.alphaNum12().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum12().issuer().ed25519())}`
-          : `${line.alphaNum4().assetCode().toString().replace(/\0+$/, "")}:${StrKey.encodeEd25519PublicKey(line.alphaNum4().issuer().ed25519())}`;
+        KNOWN_LINES.find((id) => trustLineOf(id).toXdr("base64") === line.toXdr("base64")) ??
+        "unknown";
       // a node that stops answering for this one asset
       if (unreadable !== undefined && held.startsWith(`${unreadable}:`)) {
         throw new Error("the node did not answer");
@@ -367,12 +374,12 @@ function stellarNode(): RpcClient {
         {
           val: xdr.LedgerEntryData.trustline(
             new xdr.TrustLineEntry({
-              accountId: key.trustLine().accountId(),
+              accountId: key.trustLine.accountId,
               asset: line,
               balance: xdr.Int64.fromString("0"),
               limit: xdr.Int64.fromString((10n ** 15n).toString()),
               flags: 1,
-              ext: new xdr.TrustLineEntryExt(0),
+              ext: xdr.TrustLineEntryExt.v0(),
             }),
           ),
         },
@@ -842,7 +849,7 @@ describe("a sponsor that fronts the reserve, read before the account signs", () 
       )
       .setTimeout(300)
       .build()
-      .toXDR();
+      .toXdr();
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
     });
@@ -872,7 +879,7 @@ describe("a sponsor that fronts the reserve, read before the account signs", () 
       )
       .setTimeout(86_400)
       .build()
-      .toXDR();
+      .toXdr();
     const cctp = new CctpAdapter({
       network: "testnet",
       rpc: stellarNode(),
@@ -1107,7 +1114,9 @@ describe("runTransfer when the account pays its own reserve", () => {
         rootInvocation: new xdr.SorobanAuthorizedInvocation({
           function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
             new xdr.InvokeContractArgs({
-              contractAddress: xdr.ScAddress.scAddressTypeContract(Buffer.alloc(32, 9) as never),
+              contractAddress: xdr.ScAddress.scAddressTypeContract(
+                new xdr.ContractId(new Uint8Array(32).fill(9)),
+              ),
               functionName: "transfer",
               args: [],
             }),

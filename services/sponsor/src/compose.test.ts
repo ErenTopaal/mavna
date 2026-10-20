@@ -46,12 +46,51 @@ function byAddress(
   });
 }
 
+/** The same signature as the network records it now, CAP-71's address credentials. */
+function byAddressV2(
+  who: string,
+  root: xdr.SorobanAuthorizedInvocation,
+  delegated = false,
+): xdr.SorobanAuthorizationEntry {
+  const credentials = new xdr.SorobanAddressCredentials({
+    address: new Address(who).toScAddress(),
+    nonce: 1n,
+    signatureExpirationLedger: 0,
+    signature: xdr.ScVal.scvVoid(),
+  });
+  return new xdr.SorobanAuthorizationEntry({
+    credentials: delegated
+      ? xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
+          new xdr.SorobanAddressCredentialsWithDelegates({
+            addressCredentials: credentials,
+            delegates: [],
+          }),
+        )
+      : xdr.SorobanCredentials.sorobanCredentialsAddressV2(credentials),
+    rootInvocation: root,
+  });
+}
+
 const expected = { executor, contract: CONTRACT, args };
 const good = byAddress(executor, invocation(CONTRACT, "lz_compose", args));
 
 describe("what a finish may authorize", () => {
   it("accepts exactly the executor's lz_compose on the configured contract", () => {
     expect(() => assertOnlyExecutorCompose([good], expected)).not.toThrow();
+  });
+
+  it("accepts the executor's signature in the encoding the network records now", () => {
+    const v2 = byAddressV2(executor, invocation(CONTRACT, "lz_compose", args));
+    expect(() => assertOnlyExecutorCompose([v2], expected)).not.toThrow();
+  });
+
+  it("refuses another key's v2 signature, and one that carries delegates", () => {
+    for (const entry of [
+      byAddressV2(Keypair.random().publicKey(), invocation(CONTRACT, "lz_compose", args)),
+      byAddressV2(executor, invocation(CONTRACT, "lz_compose", args), true),
+    ]) {
+      expect(() => assertOnlyExecutorCompose([entry], expected)).toThrow(ComposeRefused);
+    }
   });
 
   it("refuses anything a token in the message could have added", () => {

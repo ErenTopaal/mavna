@@ -27,7 +27,7 @@ function node(limitStroops: bigint): RpcClient {
   });
   const accountId = Keypair.fromPublicKey(RECIPIENT).xdrAccountId();
   const [code, issuer] = USDC.split(":");
-  const line = new StellarAsset(code ?? "", issuer).toTrustLineXDRObject();
+  const line = new StellarAsset(code ?? "", issuer).toTrustLineXdrObject();
   vi.spyOn(client.server, "getLedgerEntries").mockResolvedValue({
     latestLedger: 100,
     entries: [
@@ -43,7 +43,7 @@ function node(limitStroops: bigint): RpcClient {
             homeDomain: "",
             thresholds: Buffer.from([1, 0, 0, 0]),
             signers: [],
-            ext: new xdr.AccountEntryExt(0),
+            ext: xdr.AccountEntryExt.v0(),
           }),
         ),
       },
@@ -55,7 +55,7 @@ function node(limitStroops: bigint): RpcClient {
             balance: xdr.Int64.fromString("0"),
             limit: xdr.Int64.fromString(limitStroops.toString()),
             flags: 1,
-            ext: new xdr.TrustLineEntryExt(0),
+            ext: xdr.TrustLineEntryExt.v0(),
           }),
         ),
       },

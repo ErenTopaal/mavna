@@ -511,7 +511,7 @@ export class Discovery {
       nativeToScVal(sourceEid, { type: "u32" }),
     ]);
     const expected = pad(oft.toLowerCase() as `0x${string}`);
-    const named = back.switch().name === "scvBytes" ? bytesToHex(back.bytes()) : undefined;
+    const named = back.type === "scvBytes" ? bytesToHex(back.bytes.toBytes()) : undefined;
     if (named !== expected) {
       throw new MavnaError(
         `its Stellar peer ${stellarOft} does not peer back to it for endpoint ${sourceEid} ` +
@@ -615,14 +615,14 @@ export class Discovery {
         nativeToScVal(route.sourceEid, { type: "u32" }),
       ]),
     ]);
-    if (paused.switch().name !== "scvBool" || capacity.switch().name !== "scvI128") {
+    if (paused.type !== "scvBool" || capacity.type !== "scvI128") {
       throw new MavnaError(
         `The Stellar OFT ${route.stellarOft} answered is_paused or rate_limit_capacity in a ` +
           "shape it does not use.",
         { retryable: false },
       );
     }
-    return { paused: paused.b(), capacity: BigInt(scValToNative(capacity) as bigint) };
+    return { paused: paused.b, capacity: BigInt(scValToNative(capacity) as bigint) };
   }
 
   private passphrase(): string {
@@ -744,12 +744,16 @@ export async function readStellarOft(rpc: RpcClient, contract: string): Promise<
     );
   }
 
-  const storage = entry.val.contractData().val().instance().storage() ?? [];
+  const storage =
+    xdr.expectUnionVariant(
+      xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+      "scvContractInstance",
+    ).instance.storage ?? [];
   const values = new Map<string, unknown>();
   for (const item of storage) {
-    const name = scValToNative(item.key()) as unknown;
+    const name = scValToNative(item.key) as unknown;
     if (Array.isArray(name) && typeof name[0] === "string") {
-      values.set(name[0], scValToNative(item.val()) as unknown);
+      values.set(name[0], scValToNative(item.val) as unknown);
     }
   }
 
@@ -782,7 +786,7 @@ async function readInstance(
     new xdr.LedgerKeyContractData({
       contract: new Contract(contract).address().toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   );
   return rpc.read(label, async () => {
@@ -817,32 +821,36 @@ export async function readStellarToken(
       { retryable: false },
     );
   }
-  const instance = entry.val.contractData().val().instance();
-  if (instance.executable().switch().name !== "contractExecutableStellarAsset") return undefined;
+  const instance = xdr.expectUnionVariant(
+    xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+    "scvContractInstance",
+  ).instance;
+  if (instance.executable.type !== "contractExecutableStellarAsset") return undefined;
 
   let info: xdr.ScVal | undefined;
-  for (const item of instance.storage() ?? []) {
-    const key = item.key();
-    if (key.switch().name !== "scvVec") continue;
-    const head = key.vec()?.[0];
-    if (head?.switch().name === "scvSymbol" && head.sym().toString() === "AssetInfo") {
-      info = item.val();
+  for (const item of instance.storage ?? []) {
+    const key = item.key;
+    if (key.type !== "scvVec") continue;
+    const head = key.vec?.[0];
+    if (head?.type === "scvSymbol" && head.sym.toString() === "AssetInfo") {
+      info = item.val;
     }
   }
-  const parts = info?.switch().name === "scvVec" ? (info.vec() ?? []) : [];
+  const parts = info?.type === "scvVec" ? (info.vec ?? []) : [];
   const head = parts[0];
-  const variant = head?.switch().name === "scvSymbol" ? head.sym().toString() : undefined;
+  const variant = head?.type === "scvSymbol" ? head.sym.toString() : undefined;
   if (variant !== "AlphaNum4" && variant !== "AlphaNum12") return undefined;
 
   const fields = new Map<string, xdr.ScVal>();
-  for (const field of parts[1]?.map() ?? []) {
-    if (field.key().switch().name === "scvSymbol") {
-      fields.set(field.key().sym().toString(), field.val());
+  const body = parts[1];
+  for (const field of body?.type === "scvMap" ? (body.map ?? []) : []) {
+    if (field.key.type === "scvSymbol") {
+      fields.set(field.key.sym.toString(), field.val);
     }
   }
   const rawCode = fields.get("asset_code");
   const rawIssuer = fields.get("issuer");
-  if (rawCode === undefined || rawIssuer?.switch().name !== "scvBytes") {
+  if (rawCode === undefined || rawIssuer?.type !== "scvBytes") {
     throw new MavnaError(
       `the Stellar asset contract ${token} has no readable asset code and issuer`,
       { retryable: false },
@@ -850,7 +858,7 @@ export async function readStellarToken(
   }
   // stored at its fixed width, padded with NULs
   const code = String(scValToNative(rawCode)).replace(/\0+$/, "");
-  const issuer = StrKey.encodeEd25519PublicKey(rawIssuer.bytes());
+  const issuer = StrKey.encodeEd25519PublicKey(rawIssuer.bytes.toBytes());
 
   let derived = "";
   try {

@@ -128,8 +128,8 @@ export class DeliveryBudgetSpent extends MavnaError {
 
 /** What the network charged for a landed delivery, or the whole share when it does not say. */
 function chargedBy(result: Awaited<ReturnType<RpcClient["submit"]>>, reserved: bigint): bigint {
-  const charged = result.resultXdr?.feeCharged();
-  return charged === undefined ? reserved : BigInt(charged.toString());
+  const charged = result.resultXdr?.feeCharged;
+  return charged === undefined ? reserved : charged;
 }
 
 /** Circle marks an unfinished attestation with this rather than omitting it. */

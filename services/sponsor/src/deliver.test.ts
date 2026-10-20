@@ -149,7 +149,7 @@ class SequencedRpc extends RpcClient {
       if (this.landsFirst.delete(this.sent.length)) this.sequence += 1n;
       const inner = tx as Transaction;
       this.sent.push(BigInt(inner.sequence));
-      const hash = tx.hash().toString("hex");
+      const hash = xdr.encodeBytes(tx.hash(), "hex");
       const base = { hash, latestLedger: 1, latestLedgerCloseTime: 0 };
       if (this.refuseWith !== undefined || BigInt(inner.sequence) !== this.sequence + 1n) {
         return {
@@ -161,7 +161,7 @@ class SequencedRpc extends RpcClient {
               this.refuseWith === undefined
                 ? xdr.TransactionResultResult.txBadSeq()
                 : xdr.TransactionResultResult.txBadAuth(),
-            ext: new xdr.TransactionResultExt(0),
+            ext: xdr.TransactionResultExt.v0(),
           }),
         };
       }

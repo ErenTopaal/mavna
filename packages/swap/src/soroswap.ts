@@ -6,13 +6,7 @@ import {
   positiveBaseUnits,
   stellarAddress,
 } from "@mavna/core";
-import {
-  Address,
-  scValToNative,
-  type Transaction,
-  TransactionBuilder,
-  xdr,
-} from "@stellar/stellar-sdk";
+import { Address, scValToNative, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
 import * as z from "zod";
 import {
   applySlippage,
@@ -365,7 +359,7 @@ export class SoroswapProvider implements SwapProvider {
 
     let tx: ReturnType<typeof TransactionBuilder.fromXDR>;
     try {
-      tx = TransactionBuilder.fromXDR(built.xdr, PASSPHRASE[this.network]);
+      tx = TransactionBuilder.fromXdr(built.xdr, PASSPHRASE[this.network]);
     } catch (cause) {
       throw new MavnaError("Soroswap built something that is not a transaction.", {
         retryable: false,
@@ -491,15 +485,15 @@ export function soroswapBuildMismatch(
 
   if (op.type !== "invokeHostFunction") return `a ${op.type} operation`;
   const fn = op.func;
-  if (fn.switch() !== xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
+  if (fn.type !== "hostFunctionTypeInvokeContract") {
     return "something other than a contract call";
   }
-  const call = fn.invokeContract();
-  const contract = Address.fromScAddress(call.contractAddress()).toString();
-  const name = call.functionName().toString();
+  const call = fn.invokeContract;
+  const contract = Address.fromScAddress(call.contractAddress).toString();
+  const name = call.functionName.toString();
   let args: unknown[];
   try {
-    args = call.args().map((arg) => scValToNative(arg) as unknown);
+    args = call.args.map((arg) => scValToNative(arg) as unknown);
   } catch {
     return "a call with arguments that cannot be read";
   }

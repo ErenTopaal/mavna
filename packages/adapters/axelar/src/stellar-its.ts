@@ -130,7 +130,7 @@ export class StellarItsReader {
       new xdr.LedgerKeyContractData({
         contract: new Address(token).toScAddress(),
         key: xdr.ScVal.scvLedgerKeyContractInstance(),
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     );
     const entry = await this.client.read(`token contract ${token}`, async () => {
@@ -144,8 +144,11 @@ export class StellarItsReader {
       );
     }
 
-    const executable = entry.val.contractData().val().instance().executable();
-    if (executable.switch().name !== "contractExecutableStellarAsset") {
+    const executable = xdr.expectUnionVariant(
+      xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+      "scvContractInstance",
+    ).instance.executable;
+    if (executable.type !== "contractExecutableStellarAsset") {
       return { kind: "contract", id: token };
     }
 

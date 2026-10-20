@@ -46,8 +46,10 @@ async function horizon(address: string): Promise<Record<string, unknown>> {
  */
 async function refusal(tx: Transaction): Promise<{ tx: string; ops: string[] }> {
   const codes = (result: xdr.TransactionResult) => ({
-    tx: result.result().switch().name,
-    ops: (result.result().results() ?? []).map((op) => op.tr().value().switch().name),
+    tx: result.result.type,
+    ops: ("results" in result.result ? result.result.results : []).map((op) =>
+      op.type === "opInner" ? op.tr.value.type : op.type,
+    ),
   });
   const sent = await client.server.sendTransaction(tx);
   if (sent.status === "ERROR" && sent.errorResult !== undefined) return codes(sent.errorResult);

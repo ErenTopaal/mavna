@@ -39,7 +39,7 @@ function chainOf(...steps: Array<[string[], string]>): string {
         new Address(out).toScVal(),
       ]),
     ),
-  ).toXDR("base64");
+  ).toXdr("base64");
 }
 const CHAIN = chainOf([[USDC, XLM], XLM]);
 
@@ -150,7 +150,7 @@ describe("the swap chain Aquarius sends back", () => {
     ["starts at a pool without the asked token", chainOf([[OTHER, XLM], XLM])],
     ["skips a token between hops", chainOf([[USDC, OTHER], OTHER], [[USDC, XLM], XLM])],
     ["is empty", chainOf()],
-    ["does not decode as a chain", xdr.ScVal.scvVec([xdr.ScVal.scvU32(7)]).toXDR("base64")],
+    ["does not decode as a chain", xdr.ScVal.scvVec([xdr.ScVal.scvU32(7)]).toXdr("base64")],
   ])("is refused when it %s, whatever the answer's token list says", async (_what, chain) => {
     const error = await quoting(chain);
     expect(error).toBeInstanceOf(MavnaError);
@@ -200,7 +200,7 @@ describe("aquarius builds", () => {
     expect(call?.source).toBe(owner);
     const [user, chain, tokenIn, amountIn, floor] = call?.args ?? [];
     expect(user && Address.fromScVal(user).toString()).toBe(owner);
-    expect(chain?.toXDR("base64")).toBe(CHAIN);
+    expect(chain?.toXdr("base64")).toBe(CHAIN);
     expect(tokenIn && Address.fromScVal(tokenIn).toString()).toBe(USDC);
     expect(amountIn && scValToNative(amountIn)).toBe(10_000_000n);
     expect(floor && scValToNative(floor)).toBe(51_480_000n);
@@ -242,8 +242,8 @@ describe("Aquarius's swap chain as router hops", () => {
   });
 
   it("refuses something that is not a swap chain", () => {
-    expect(() => decodeSwapChain(xdr.ScVal.scvU32(1).toXDR("base64"))).toThrow(/shape/);
-    expect(() => decodeSwapChain(xdr.ScVal.scvVec([]).toXDR("base64"))).toThrow(/shape/);
+    expect(() => decodeSwapChain(xdr.ScVal.scvU32(1).toXdr("base64"))).toThrow(/shape/);
+    expect(() => decodeSwapChain(xdr.ScVal.scvVec([]).toXdr("base64"))).toThrow(/shape/);
     expect(() => decodeSwapChain("not xdr")).toThrow();
   });
 
@@ -281,7 +281,7 @@ describe("a conversion path built from the router's own pools between listed tok
   /** The router's order for a pool's tokens: by the address bytes, not the string. */
   const byBytes = (tokens: string[]) =>
     [...tokens].sort((a, b) =>
-      Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+      Buffer.compare(new Address(a).toScAddress().toXdr(), new Address(b).toScAddress().toXdr()),
     );
   const key = (tokens: string[]) => byBytes(tokens).join(",");
 
@@ -307,7 +307,9 @@ describe("a conversion path built from the router's own pools between listed tok
         );
       }
       if (call.method === "estimate_swap") {
-        const poolIndex = Buffer.from((call.args[3] as xdr.ScVal).bytes()).readUInt8(0);
+        const poolIndex = xdr
+          .expectUnionVariant(call.args[3] as xdr.ScVal, "scvBytes")
+          .bytes.toBytes()[0];
         const amount = BigInt(scValToNative(call.args[4] as xdr.ScVal) as bigint);
         const pool = known.find(([n]) => n === poolIndex);
         if (pool === undefined) return { error: "HostError: no such pool" };
@@ -417,7 +419,7 @@ describe("aquarius paths in a browser, where there is no Buffer", () => {
   it("builds a listed path from the router's pools, in the router's token order", async () => {
     const AQUA = "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE";
     const ordered = [XLM, USDC].sort((a, b) =>
-      Buffer.compare(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+      Buffer.compare(new Address(a).toScAddress().toXdr(), new Address(b).toScAddress().toXdr()),
     );
     const seen: string[][] = [];
     const node = sorobanNode((call) => {

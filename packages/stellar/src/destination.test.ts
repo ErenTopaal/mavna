@@ -11,12 +11,12 @@ const usdc = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH
  */
 function ledger(entries: readonly xdr.LedgerEntryData[]): RpcClient {
   const held = new Map<string, xdr.LedgerEntryData>();
-  for (const data of entries) held.set(keyOf(data).toXDR("base64"), data);
+  for (const data of entries) held.set(keyOf(data).toXdr("base64"), data);
   const client = new RpcClient({ url: "https://example.invalid", baseDelayMs: 0 });
   client.server.getLedgerEntries = async (...keys: xdr.LedgerKey[]) => ({
     latestLedger: 100,
     entries: keys.flatMap((key) => {
-      const val = held.get(key.toXDR("base64"));
+      const val = held.get(key.toXdr("base64"));
       return val === undefined ? [] : [{ key, val, lastModifiedLedgerSeq: 90 }];
     }),
   });
@@ -24,33 +24,31 @@ function ledger(entries: readonly xdr.LedgerEntryData[]): RpcClient {
 }
 
 function keyOf(data: xdr.LedgerEntryData): xdr.LedgerKey {
-  switch (data.switch().name) {
+  switch (data.type) {
     case "account":
-      return xdr.LedgerKey.account(
-        new xdr.LedgerKeyAccount({ accountId: data.account().accountId() }),
-      );
+      return xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId: data.account.accountId }));
     case "trustline":
       return xdr.LedgerKey.trustline(
         new xdr.LedgerKeyTrustLine({
-          accountId: data.trustLine().accountId(),
-          asset: data.trustLine().asset(),
+          accountId: data.trustLine.accountId,
+          asset: data.trustLine.asset,
         }),
       );
     case "contractData":
       return xdr.LedgerKey.contractData(
         new xdr.LedgerKeyContractData({
-          contract: data.contractData().contract(),
-          key: data.contractData().key(),
-          durability: data.contractData().durability(),
+          contract: data.contractData.contract,
+          key: data.contractData.key,
+          durability: data.contractData.durability,
         }),
       );
     default:
-      throw new Error(`no key for ${data.switch().name}`);
+      throw new Error(`no key for ${data.type}`);
   }
 }
 
 const accountIdOf = (address: string): xdr.AccountId =>
-  Address.fromString(address).toScAddress().accountId();
+  Keypair.fromPublicKey(address).xdrAccountId();
 
 function accountEntry(address: string, balance = 100_000_000n): xdr.LedgerEntryData {
   return xdr.LedgerEntryData.account(
@@ -64,7 +62,7 @@ function accountEntry(address: string, balance = 100_000_000n): xdr.LedgerEntryD
       homeDomain: "",
       thresholds: new Uint8Array([1, 0, 0, 0]) as never,
       signers: [],
-      ext: new xdr.AccountEntryExt(0),
+      ext: xdr.AccountEntryExt.v0(),
     }),
   );
 }
@@ -76,21 +74,20 @@ function trustlineEntry(
 ): xdr.LedgerEntryData {
   const ext =
     fields.buying === undefined
-      ? new xdr.TrustLineEntryExt(0)
-      : new xdr.TrustLineEntryExt(
-          1,
+      ? xdr.TrustLineEntryExt.v0()
+      : xdr.TrustLineEntryExt.v1(
           new xdr.TrustLineEntryV1({
             liabilities: new xdr.Liabilities({
               buying: xdr.Int64.fromString(fields.buying.toString()),
               selling: xdr.Int64.fromString("0"),
             }),
-            ext: new xdr.TrustLineEntryV1Ext(0),
+            ext: xdr.TrustLineEntryV1Ext.v0(),
           }),
         );
   return xdr.LedgerEntryData.trustline(
     new xdr.TrustLineEntry({
       accountId: accountIdOf(address),
-      asset: asset.toTrustLineXDRObject(),
+      asset: asset.toTrustLineXdrObject(),
       balance: xdr.Int64.fromString((fields.balance ?? 0n).toString()),
       limit: xdr.Int64.fromString((fields.limit ?? 9_223_372_036_854_775_807n).toString()),
       flags: fields.flags ?? 1,
@@ -102,10 +99,10 @@ function trustlineEntry(
 function contractInstance(contractId: string): xdr.LedgerEntryData {
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
-      ext: new xdr.ExtensionPoint(0),
+      ext: xdr.ExtensionPoint.v0(),
       contract: Address.fromString(contractId).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
       val: xdr.ScVal.scvContractInstance(
         new xdr.ScContractInstance({
           executable: xdr.ContractExecutable.contractExecutableStellarAsset(),

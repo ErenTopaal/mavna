@@ -1,5 +1,5 @@
 import type { Asset } from "@stellar/stellar-sdk";
-import { Address, xdr } from "@stellar/stellar-sdk";
+import { Address, Keypair, xdr } from "@stellar/stellar-sdk";
 import { classifyAddress } from "./address.js";
 import { stroopsToXlm } from "./reserve.js";
 import type { RpcClient } from "./rpc.js";
@@ -97,7 +97,7 @@ export async function inspectDestination(
       new xdr.LedgerKeyContractData({
         contract: Address.fromString(address).toScAddress(),
         key: xdr.ScVal.scvLedgerKeyContractInstance(),
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     );
     const found = await client.read(`contract ${address}`, async () => {
@@ -121,15 +121,15 @@ export async function inspectDestination(
   // A muxed address is a wrapper: the account entry and the trustline both belong
   // to the account underneath it.
   const holder = classified.trustlineHolder ?? address;
-  const accountId = Address.fromString(holder).toScAddress().accountId();
+  const accountId = Keypair.fromPublicKey(holder).xdrAccountId();
 
   // an account holds XLM by existing; there is no trustline to look for
   const native = asset.isNative();
-  const keys = [xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }))];
+  const keys: xdr.LedgerKey[] = [xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }))];
   if (!native) {
     keys.push(
       xdr.LedgerKey.trustline(
-        new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXDRObject() }),
+        new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXdrObject() }),
       ),
     );
   }
@@ -144,25 +144,23 @@ export async function inspectDestination(
 
   for (const entry of entries) {
     const data = entry.val;
-    if (data.switch().name === "account") {
-      const parsed = data.account();
+    if (data.type === "account") {
       account = {
-        balanceStroops: parsed.balance().toString(),
-        subEntryCount: parsed.numSubEntries(),
+        balanceStroops: data.account.balance.toString(),
+        subEntryCount: data.account.numSubEntries,
       };
     }
-    if (data.switch().name === "trustline") {
-      const parsed = data.trustLine();
-      const ext = parsed.ext();
+    if (data.type === "trustline") {
+      const parsed = data.trustLine;
       // an open buy offer reserves room under the limit, so it counts against it
-      const buying = ext.switch() === 1 ? BigInt(ext.v1().liabilities().buying().toString()) : 0n;
-      const balance = BigInt(parsed.balance().toString());
-      const limit = BigInt(parsed.limit().toString());
+      const buying = parsed.ext.type === "v1" ? parsed.ext.v1.liabilities.buying : 0n;
+      const balance = parsed.balance;
+      const limit = parsed.limit;
       trustline = {
         balanceStroops: balance.toString(),
         limitStroops: limit.toString(),
         headroomStroops: (limit - balance - buying).toString(),
-        authorized: (parsed.flags() & AUTHORIZED_FLAG) !== 0,
+        authorized: (parsed.flags & AUTHORIZED_FLAG) !== 0,
       };
     }
   }

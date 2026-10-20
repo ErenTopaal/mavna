@@ -26,7 +26,6 @@ import {
 } from "@mavna/stellar";
 import {
   Account,
-  Address,
   Asset,
   Keypair,
   Operation,
@@ -642,7 +641,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
   /** The hash a held settlement lands under; its signatures do not change it. */
   function settlementHash(held: { readonly xdr: string }): string {
-    return TransactionBuilder.fromXDR(held.xdr, options.network.passphrase).hash().toString("hex");
+    return xdr.encodeBytes(
+      TransactionBuilder.fromXdr(held.xdr, options.network.passphrase).hash(),
+      "hex",
+    );
   }
 
   /** Whether a preparation backs the account's held settlement, landed or on its way. */
@@ -950,7 +952,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const work = (async () => {
       const entry = await readAccountEntry(options.rpc, address);
       if (entry === undefined) return;
-      const balance = BigInt(entry.balance().toString());
+      const balance = entry.balance;
       if (balance >= CHANNEL_LOW_STROOPS) return;
       const amount = CHANNEL_TOP_UP_TO_STROOPS - balance;
       console.error(
@@ -1464,7 +1466,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     });
     built.record(
       {
-        hash: transaction.hash().toString("hex"),
+        hash: xdr.encodeBytes(transaction.hash(), "hex"),
         kind: "preparation",
         destination: body.destination,
         signer: signerFor(body.destination),
@@ -1474,7 +1476,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       nowUnix(),
     );
 
-    await answer(res, 200, { xdr: transaction.toXDR(), sponsor: keypair.publicKey() }, origin);
+    await answer(res, 200, { xdr: transaction.toXdr(), sponsor: keypair.publicKey() }, origin);
   }
 
   /**
@@ -1530,7 +1532,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const builder = new TransactionBuilder(new Account(holder, entry.seqNum().toString()), {
+    const builder = new TransactionBuilder(new Account(holder, entry.seqNum.toString()), {
       fee: String(SELF_FUNDED_FEE_STROOPS),
       networkPassphrase: options.network.passphrase,
     });
@@ -1538,7 +1540,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const transaction = builder.setTimeout(300).build();
     built.record(
       {
-        hash: transaction.hash().toString("hex"),
+        hash: xdr.encodeBytes(transaction.hash(), "hex"),
         kind: "preparation",
         destination,
         signer: holder,
@@ -1548,7 +1550,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       },
       nowUnix(),
     );
-    await answer(res, 200, { xdr: transaction.toXDR(), selfFunded: true }, origin);
+    await answer(res, 200, { xdr: transaction.toXdr(), selfFunded: true }, origin);
   }
 
   /**
@@ -1569,7 +1571,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    const record = built.take(transaction.hash().toString("hex"), "preparation", nowUnix());
+    const record = built.take(xdr.encodeBytes(transaction.hash(), "hex"), "preparation", nowUnix());
     if (record === undefined || record.selfFunded !== true) {
       if (record !== undefined) built.record(record, nowUnix());
       await answer(
@@ -1793,7 +1795,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     });
     built.record(
       {
-        hash: transaction.hash().toString("hex"),
+        hash: xdr.encodeBytes(transaction.hash(), "hex"),
         kind: "settlement",
         destination: body.destination,
         signer: account,
@@ -1807,7 +1809,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       nowUnix(),
     );
 
-    await answer(res, 200, { xdr: transaction.toXDR(), channel: channel.address }, origin);
+    await answer(res, 200, { xdr: transaction.toXdr(), channel: channel.address }, origin);
   }
 
   /**
@@ -1858,7 +1860,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const record = built.take(transaction.hash().toString("hex"), "settlement", nowUnix());
+    const record = built.take(xdr.encodeBytes(transaction.hash(), "hex"), "settlement", nowUnix());
     if (record === undefined) {
       await answer(
         res,
@@ -2040,7 +2042,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (!held.prepared) return { settled: false, settlementRetryable: true };
     const pool = await ensureChannels();
 
-    const transaction = TransactionBuilder.fromXDR(held.xdr, options.network.passphrase);
+    const transaction = TransactionBuilder.fromXdr(held.xdr, options.network.passphrase);
     if ("innerTransaction" in transaction) return { settled: false };
     // Only while this account still holds the channel. Once the lease has moved
     // on, the channel's next sequence belongs to someone else's settlement, and
@@ -2086,7 +2088,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (held.sentAtUnix !== undefined) {
       let found: Awaited<ReturnType<RpcClient["findTransaction"]>>;
       try {
-        found = await options.rpc.findTransaction(transaction.hash().toString("hex"));
+        found = await options.rpc.findTransaction(xdr.encodeBytes(transaction.hash(), "hex"));
       } catch (cause) {
         console.error(
           `[sponsor] could not look up the settlement sent for ${destination}:`,
@@ -2094,7 +2096,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         );
         return { settled: false, settlementRetryable: true };
       }
-      if (found.status === "SUCCESS") return settled(transaction.hash().toString("hex"));
+      if (found.status === "SUCCESS") return settled(xdr.encodeBytes(transaction.hash(), "hex"));
       if (found.status === "FAILED") return await stranded();
     }
 
@@ -2127,7 +2129,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return settled(result.txHash);
     } catch (cause) {
       if (cause instanceof SubmitRejected && cause.code === "txBadSeq") {
-        return await spentSequence(transaction.hash().toString("hex"), settled, stranded);
+        return await spentSequence(xdr.encodeBytes(transaction.hash(), "hex"), settled, stranded);
       }
       // The channel cannot pay the fee: the sponsor's own shortfall, and nothing
       // was spent on-chain, so the settlement stays held while the channel is
@@ -2256,7 +2258,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
 
     // Taken, not read: once countersigned, the same signed body must never earn
     // a second signature.
-    const record = built.take(transaction.hash().toString("hex"), "preparation", nowUnix());
+    const record = built.take(xdr.encodeBytes(transaction.hash(), "hex"), "preparation", nowUnix());
     if (record === undefined) {
       await answer(
         res,
@@ -2905,7 +2907,7 @@ function parseTransaction(
     throw new RequestError("That is not a Stellar transaction.", 400);
   }
   try {
-    return TransactionBuilder.fromXDR(xdrText, passphrase);
+    return TransactionBuilder.fromXdr(xdrText, passphrase);
   } catch {
     throw new RequestError("That is not a Stellar transaction.", 400);
   }
@@ -3215,23 +3217,24 @@ async function readTrustline(
   holder: string,
   asset: Asset,
 ): Promise<TrustlineState | undefined> {
-  const accountId = Address.fromString(holder).toScAddress().accountId();
+  const accountId = Keypair.fromPublicKey(holder).xdrAccountId();
   const key = xdr.LedgerKey.trustline(
-    new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXDRObject() }),
+    new xdr.LedgerKeyTrustLine({ accountId, asset: asset.toTrustLineXdrObject() }),
   );
   const entries = await rpc.read(`trustline ${holder}`, async () => {
     const response = await rpc.server.getLedgerEntries(key);
     return { value: response.entries, ledger: response.latestLedger };
   });
-  const found = entries.find((entry) => entry.val.switch().name === "trustline");
-  if (found === undefined) return undefined;
-  const line = found.val.trustLine();
-  const ext = line.ext();
-  return {
-    balanceStroops: BigInt(line.balance().toString()),
-    sellingStroops: ext.switch() === 1 ? BigInt(ext.v1().liabilities().selling().toString()) : 0n,
-    authorized: (line.flags() & AUTHORIZED_FLAG) !== 0,
-  };
+  for (const entry of entries) {
+    if (entry.val.type !== "trustline") continue;
+    const line = entry.val.trustLine;
+    return {
+      balanceStroops: line.balance,
+      sellingStroops: line.ext.type === "v1" ? line.ext.v1.liabilities.selling : 0n,
+      authorized: (line.flags & AUTHORIZED_FLAG) !== 0,
+    };
+  }
+  return undefined;
 }
 
 /**

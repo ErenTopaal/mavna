@@ -70,7 +70,7 @@ describe("this package's runtime code never touches the Buffer global", () => {
       createAccount: true,
       assets: [usdc],
     });
-    expect(preparation.toXDR().length).toBeGreaterThan(0);
+    expect(preparation.toXdr().length).toBeGreaterThan(0);
     const ladder = stellar.buildSettlementLadder(
       {
         network,

@@ -47,7 +47,7 @@ const aquariusFound = (tokens: string[]) => ({
             new Address(tokens.at(-1) as string).toScVal(),
           ]),
         ],
-  ).toXDR("base64"),
+  ).toXdr("base64"),
   pools: ["CBBMQBNHB2FYVZYV7VNHOJHUMTFJLR4PUMRVQYNW6RHIKZO2NQMIBUCV"],
   tokens_addresses: tokens,
   amount: 565_000_000,
@@ -133,7 +133,8 @@ describe("the chain", () => {
   it("puts SushiSwap ahead of Aquarius for a USDT0 pair when Soroswap is down", async () => {
     const node = sorobanNode((call) => {
       if (call.method === "get_pool") {
-        return call.args[2]?.u32() === 500
+        return call.args[2] !== undefined &&
+          xdr.expectUnionVariant(call.args[2], "scvU32").u32 === 500
           ? nativeToScVal("CBVHBZSZOS6KRDJ4D44FU2YLIENOVSSLM3UGKW6XQMVIFUAMWIWCVH2U", {
               type: "address",
             })

@@ -122,7 +122,7 @@ describe("submission", () => {
       errorResult: new xdr.TransactionResult({
         feeCharged: xdr.Int64.fromString("100"),
         result: xdr.TransactionResultResult[code](),
-        ext: new xdr.TransactionResultExt(0),
+        ext: xdr.TransactionResultExt.v0(),
       }),
     };
   }
@@ -198,7 +198,7 @@ describe("submission", () => {
     const tx = presignedTx(86_400);
     client.server.sendTransaction = async () => ({
       status: "PENDING",
-      hash: tx.hash().toString("hex"),
+      hash: xdr.encodeBytes(tx.hash(), "hex"),
       latestLedger: 1,
       latestLedgerCloseTime: 0,
     });
@@ -384,7 +384,7 @@ describe("request timeouts", () => {
   it("looks for a send that timed out by its hash instead of building another", async () => {
     const client = clientForTest();
     const tx = txValidFor(300);
-    const hash = tx.hash().toString("hex");
+    const hash = xdr.encodeBytes(tx.hash(), "hex");
     let built = 0;
     client.server.sendTransaction = async () => {
       throw timedOut();
@@ -401,7 +401,7 @@ describe("request timeouts", () => {
   it("keeps waiting through a lookup that timed out", async () => {
     const client = clientForTest();
     const tx = txValidFor(300);
-    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
     let asked = 0;
     client.server.getTransaction = async (h) => {
       asked += 1;
@@ -424,7 +424,7 @@ describe("deciding a transaction expired", () => {
     const maxTime = Number(tx.timeBounds?.maxTime);
     // the local clock runs two minutes ahead of the network
     vi.setSystemTime((maxTime + 120) * 1000);
-    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
     let asked = 0;
     client.server.getTransaction = async (h) => {
       asked += 1;
@@ -439,7 +439,7 @@ describe("deciding a transaction expired", () => {
     const tx = txValidFor(60);
     const maxTime = Number(tx.timeBounds?.maxTime);
     client.observeWrite(10);
-    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
     client.server.getTransaction = async (h) => missing(h, 12, maxTime + 1);
     const failure = await client
       .submit("delivery", async () => tx, { attempts: 1 })
@@ -453,7 +453,7 @@ describe("deciding a transaction expired", () => {
     const tx = txValidFor(60);
     const maxTime = Number(tx.timeBounds?.maxTime);
     client.observeWrite(20);
-    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
     let asked = 0;
     client.server.getTransaction = async (h) => {
       asked += 1;
@@ -467,7 +467,7 @@ describe("deciding a transaction expired", () => {
     const client = clockedClient();
     const tx = txValidFor(60);
     const maxTime = Number(tx.timeBounds?.maxTime);
-    client.server.sendTransaction = async () => pendingTx(tx.hash().toString("hex"));
+    client.server.sendTransaction = async () => pendingTx(xdr.encodeBytes(tx.hash(), "hex"));
     // a node stuck before the bound, for good
     client.server.getTransaction = async (h) => missing(h, 10, maxTime - 30);
     const failure = await client
@@ -550,8 +550,9 @@ describe("preparing a contract call", () => {
     const prepared = await client.prepare(call);
 
     expect(asked).toBe(2);
-    const data = prepared.toEnvelope().v1().tx().ext().sorobanData();
-    expect(data.resourceFee().toString()).toBe("123");
+    const envelope = xdr.expectUnionVariant(prepared.toEnvelope(), "envelopeTypeTx");
+    const data = xdr.expectUnionVariant(envelope.v1.tx.ext, "sorobanData").sorobanData;
+    expect(data.resourceFee.toString()).toBe("123");
   });
 
   it("surfaces a simulation that failed", async () => {

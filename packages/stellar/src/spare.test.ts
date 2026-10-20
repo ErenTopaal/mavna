@@ -13,21 +13,19 @@ function entry(options: {
 }): xdr.AccountEntry {
   const v2 =
     options.sponsoring === undefined && options.sponsored === undefined
-      ? new xdr.AccountEntryExtensionV1Ext(0)
-      : new xdr.AccountEntryExtensionV1Ext(
-          2,
+      ? xdr.AccountEntryExtensionV1Ext.v0()
+      : xdr.AccountEntryExtensionV1Ext.v2(
           new xdr.AccountEntryExtensionV2({
             numSponsored: options.sponsored ?? 0,
             numSponsoring: options.sponsoring ?? 0,
             signerSponsoringIDs: [],
-            ext: new xdr.AccountEntryExtensionV2Ext(0),
+            ext: xdr.AccountEntryExtensionV2Ext.v0(),
           }),
         );
   const ext =
-    options.sellingLiabilities === undefined && v2.switch() === 0
-      ? new xdr.AccountEntryExt(0)
-      : new xdr.AccountEntryExt(
-          1,
+    options.sellingLiabilities === undefined && v2.type === "v0"
+      ? xdr.AccountEntryExt.v0()
+      : xdr.AccountEntryExt.v1(
           new xdr.AccountEntryExtensionV1({
             liabilities: new xdr.Liabilities({
               buying: xdr.Int64.fromString("0"),

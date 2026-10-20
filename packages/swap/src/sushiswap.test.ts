@@ -41,7 +41,9 @@ function addr(v: xdr.ScVal | undefined): string {
 
 function fieldsOf(v: xdr.ScVal | undefined): Record<string, xdr.ScVal> {
   const out: Record<string, xdr.ScVal> = {};
-  for (const entry of v?.map() ?? []) out[entry.key().sym().toString()] = entry.val();
+  const entries = v === undefined ? [] : (xdr.expectUnionVariant(v, "scvMap").map ?? []);
+  for (const entry of entries)
+    out[xdr.expectUnionVariant(entry.key, "scvSymbol").sym.toString()] = entry.val;
   return out;
 }
 
@@ -53,14 +55,16 @@ function sushiChain(seen: ContractCall[], overrides: Partial<Record<string, Call
     if (override !== undefined) return override;
     if (call.contract === FACTORY && call.method === "get_pool") {
       const [a, b, fee] = call.args;
-      const key = `${[addr(a), addr(b)].sort().join("|")}|${fee?.u32()}`;
+      const key = `${[addr(a), addr(b)].sort().join("|")}|${fee === undefined ? undefined : xdr.expectUnionVariant(fee, "scvU32").u32}`;
       const pool = POOLS[key];
       return pool === undefined ? xdr.ScVal.scvVoid() : new Address(pool).toScVal();
     }
     if (call.contract === ROUTER && call.method === "quote_exact_input") {
       const params = fieldsOf(call.args[0]);
       let amount = BigInt(scValToNative(params.amount_in ?? xdr.ScVal.scvVoid()));
-      for (const _ of params.fees?.vec() ?? []) amount = (amount * 999n) / 1000n;
+      const fees =
+        params.fees === undefined ? [] : (xdr.expectUnionVariant(params.fees, "scvVec").vec ?? []);
+      for (const _ of fees) amount = (amount * 999n) / 1000n;
       return xdr.ScVal.scvMap([
         new xdr.ScMapEntry({
           key: xdr.ScVal.scvSymbol("amount"),
@@ -143,9 +147,9 @@ describe("sushiswap quotes", () => {
     for (const lookup of lookups) {
       const [a, b] = lookup.args;
       // Base32 text order does not follow byte order, so this is checked on bytes.
-      expect(StrKey.decodeContract(addr(a)).compare(StrKey.decodeContract(addr(b)))).toBeLessThan(
-        0,
-      );
+      expect(
+        Buffer.compare(StrKey.decodeContract(addr(a)), StrKey.decodeContract(addr(b))),
+      ).toBeLessThan(0);
     }
   });
 
@@ -194,8 +198,12 @@ describe("sushiswap builds", () => {
     expect(addr(params.recipient)).toBe(owner);
     expect(scValToNative(params.amount_in ?? xdr.ScVal.scvVoid())).toBe(100_000_000n);
     expect(scValToNative(params.amount_out_minimum ?? xdr.ScVal.scvVoid())).toBe(99_400_500n);
-    expect((params.path?.vec() ?? []).map((v) => addr(v))).toEqual([USDT0, USDC]);
-    const hints = swap?.args[1]?.vec() ?? [];
+    const path =
+      params.path === undefined ? [] : (xdr.expectUnionVariant(params.path, "scvVec").vec ?? []);
+    expect(path.map((v) => addr(v))).toEqual([USDT0, USDC]);
+    const hintArg = swap?.args[1];
+    const hints =
+      hintArg === undefined ? [] : (xdr.expectUnionVariant(hintArg, "scvVec").vec ?? []);
     expect(hints).toHaveLength(1);
     expect(scValToNative(hints[0] ?? xdr.ScVal.scvVoid())).toEqual({
       checkpoint: 6,

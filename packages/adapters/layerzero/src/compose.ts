@@ -24,7 +24,6 @@ import {
   keccak256,
   numberToHex,
 } from "viem";
-import { sdkBytes } from "./oft.js";
 
 /**
  * Sending to the Mavna Arrival Contract, and reading what it did.
@@ -148,7 +147,7 @@ export function encodeArrivalMessage(recipient: string, compose: ComposeArrival)
 export function arrivalRecipientOf(composeMsg: string): string | undefined {
   const raw = messageBytes(composeMsg);
   if (raw === undefined || raw.length < 34 || raw[0] !== MESSAGE_VERSION) return undefined;
-  const payload = sdkBytes(raw.subarray(2, 34));
+  const payload = raw.subarray(2, 34);
   if (raw[1] === KIND_ACCOUNT) return StrKey.encodeEd25519PublicKey(payload);
   if (raw[1] === KIND_CONTRACT) return StrKey.encodeContract(payload);
   return undefined;
@@ -158,7 +157,7 @@ export function arrivalRecipientOf(composeMsg: string): string | undefined {
 export function arrivalWantedOf(composeMsg: string): string | undefined {
   const raw = messageBytes(composeMsg);
   if (raw === undefined || raw.length < 66 || raw[0] !== MESSAGE_VERSION) return undefined;
-  return StrKey.encodeContract(sdkBytes(raw.subarray(34, 66)));
+  return StrKey.encodeContract(raw.subarray(34, 66));
 }
 
 /** A compose message's bytes, or undefined when it is not hex at all. */
@@ -298,7 +297,7 @@ export async function readArrivalConfig(
     new xdr.LedgerKeyContractData({
       contract: new Contract(contract).address().toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   );
   const entry = await rpcClient.read(`Arrival Contract ${contract}`, async () => {
@@ -310,11 +309,15 @@ export async function readArrivalConfig(
       retryable: false,
     });
   }
-  const storage = entry.val.contractData().val().instance().storage() ?? [];
+  const storage =
+    xdr.expectUnionVariant(
+      xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+      "scvContractInstance",
+    ).instance.storage ?? [];
   for (const item of storage) {
-    const name = scValToNative(item.key()) as unknown;
+    const name = scValToNative(item.key) as unknown;
     if (!Array.isArray(name) || name[0] !== "Config") continue;
-    const config = scValToNative(item.val()) as {
+    const config = scValToNative(item.val) as {
       endpoint?: unknown;
       router?: unknown;
       ofts?: unknown;
@@ -432,13 +435,14 @@ export async function readComposeQueue(
     guidScVal(slot.guid),
     nativeToScVal(slot.index, { type: "u32" }),
   ]);
-  if (value.switch().name === "scvVoid") return undefined;
-  if (value.switch().name !== "scvBytes" || value.bytes().length !== 32) {
+  if (value.type === "scvVoid") return undefined;
+  const queued = value.type === "scvBytes" ? value.bytes.toBytes() : undefined;
+  if (queued === undefined || queued.length !== 32) {
     throw new MavnaError("The endpoint answered compose_queue in a shape it does not use.", {
       retryable: false,
     });
   }
-  return hex(value.bytes());
+  return hex(queued);
 }
 
 /** A guid as the endpoint and the Arrival Contract key it: 32 raw bytes. */
@@ -500,7 +504,7 @@ export async function findArrivalEvent(
   const health = await rpcClient.server.getHealth();
   let startLedger = Math.max(fromLedger ?? health.oldestLedger, health.oldestLedger);
   const topics = [
-    [nativeToScVal("arrival", { type: "symbol" }).toXDR("base64"), guidScVal(guid).toXDR("base64")],
+    [nativeToScVal("arrival", { type: "symbol" }).toXdr("base64"), guidScVal(guid).toXdr("base64")],
   ];
   let cursor: string | undefined;
   for (let page = 0; page < EVENT_SCAN_PAGES; page++) {
@@ -587,7 +591,7 @@ export async function estimateFinishRent(
     new xdr.LedgerKeyContractData({
       contract: new Contract(contract).address().toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
     }),
   );
   const read = (key: xdr.LedgerKey, label: string) =>
@@ -606,7 +610,13 @@ export async function estimateFinishRent(
   }
   const code = xdr.LedgerKey.contractCode(
     new xdr.LedgerKeyContractCode({
-      hash: held.entry.val.contractData().val().instance().executable().wasmHash(),
+      hash: xdr.expectUnionVariant(
+        xdr.expectUnionVariant(
+          xdr.expectUnionVariant(held.entry.val, "contractData").contractData.val,
+          "scvContractInstance",
+        ).instance.executable,
+        "contractExecutableWasm",
+      ).wasmHash,
     }),
   );
   const codeHeld = await read(code, `Arrival Contract code ${contract}`);

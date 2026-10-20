@@ -56,8 +56,8 @@ describe("a pair Circle does not route", () => {
     vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async () => ({
       latestLedger: entries.latestLedger,
       entries: entries.entries.map((e) => ({
-        key: xdr.LedgerKey.fromXDR(e.key, "base64"),
-        val: xdr.LedgerEntryData.fromXDR(e.xdr, "base64"),
+        key: xdr.LedgerKey.fromXdr(e.key, "base64"),
+        val: xdr.LedgerEntryData.fromXdr(e.xdr, "base64"),
       })),
     }));
     vi.stubGlobal("fetch", async (input: string | URL) => {

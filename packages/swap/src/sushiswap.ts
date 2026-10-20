@@ -256,7 +256,7 @@ export class SushiSwapProvider implements SwapProvider {
     caller: AbortSignal | undefined,
   ): Promise<string | undefined> {
     const [token0, token1] =
-      StrKey.decodeContract(a).compare(StrKey.decodeContract(b)) < 0 ? [a, b] : [b, a];
+      byteOrder(StrKey.decodeContract(a), StrKey.decodeContract(b)) < 0 ? [a, b] : [b, a];
     const key = `${token0}:${token1}:${fee}`;
     const cached = this.pools.get(key);
     if (cached !== undefined && Date.now() - cached.at < POOL_CACHE_MS) return cached.pool;
@@ -355,4 +355,13 @@ function struct(fields: Readonly<Record<string, xdr.ScVal>>): xdr.ScVal {
           }),
       ),
   );
+}
+
+/** Raw byte order, the order the factory sorts a pair's two addresses by. */
+function byteOrder(a: Uint8Array, b: Uint8Array): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const d = (a[i] as number) - (b[i] as number);
+    if (d !== 0) return d;
+  }
+  return a.length - b.length;
 }

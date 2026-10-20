@@ -79,15 +79,15 @@ export function sorobanNode(
     if (request.method === "getHealth") {
       return json({ jsonrpc: "2.0", id: request.id, result: { status: "healthy" } });
     }
-    const tx = TransactionBuilder.fromXDR(String(request.params?.transaction), passphrase);
+    const tx = TransactionBuilder.fromXdr(String(request.params?.transaction), passphrase);
     if (tx instanceof FeeBumpTransaction) return json({ error: "fee bump" }, 400);
     const op = tx.operations[0];
     if (op?.type !== "invokeHostFunction") return json({ error: "not a call" }, 400);
-    const invoke = op.func.invokeContract();
+    const invoke = xdr.expectUnionVariant(op.func, "hostFunctionTypeInvokeContract").invokeContract;
     const call: ContractCall = {
-      contract: Address.fromScAddress(invoke.contractAddress()).toString(),
-      method: invoke.functionName().toString(),
-      args: invoke.args(),
+      contract: Address.fromScAddress(invoke.contractAddress).toString(),
+      method: invoke.functionName.toString(),
+      args: invoke.args,
       source: tx.source,
     };
     const result = answer(call);
@@ -104,8 +104,8 @@ export function sorobanNode(
       result: {
         latestLedger: 100,
         minResourceFee: "12345",
-        transactionData: new SorobanDataBuilder().setResourceFee(12_345).build().toXDR("base64"),
-        results: [{ auth: [], xdr: result.toXDR("base64") }],
+        transactionData: new SorobanDataBuilder().setResourceFee(12_345).build().toXdr("base64"),
+        results: [{ auth: [], xdr: result.toXdr("base64") }],
       },
     });
   };

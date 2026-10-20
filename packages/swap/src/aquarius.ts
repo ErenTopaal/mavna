@@ -90,7 +90,7 @@ export function swapChainMismatch(
 ): string | undefined {
   let steps: unknown;
   try {
-    steps = scValToNative(xdr.ScVal.fromXDR(chainXdr, "base64"));
+    steps = scValToNative(xdr.ScVal.fromXdr(chainXdr, "base64"));
   } catch {
     return "does not decode";
   }
@@ -272,16 +272,24 @@ export class AquariusProvider implements SwapProvider {
     // the router keys a pool by its tokens in address byte order, not string order
     const ordered = (tokens: readonly string[]): string[] =>
       [...tokens].sort((a, b) =>
-        compareBytes(new Address(a).toScAddress().toXDR(), new Address(b).toScAddress().toXDR()),
+        compareBytes(new Address(a).toScAddress().toXdr(), new Address(b).toScAddress().toXdr()),
       );
     const vecOf = (tokens: readonly string[]) =>
       xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal()));
 
-    // pool keys stay the sdk's own byte objects, which scvBytes takes back as is
-    type PoolKey = ReturnType<xdr.ScVal["bytes"]>;
+    // a pool key is the 32 bytes the router hands out, passed back as they came
+    type PoolKey = Uint8Array;
     const pools = new Map<string, readonly PoolKey[]>();
     // the router's refusals, kept for the answer when nothing connects
     const refusals: string[] = [];
+    const unreadablePools = (): never => {
+      throw new MavnaError(
+        "The Aquarius router listed its pools in a shape it does not document.",
+        {
+          retryable: false,
+        },
+      );
+    };
     const poolsOf = async (tokens: readonly string[]): Promise<readonly PoolKey[]> => {
       const key = tokens.join(",");
       const known = pools.get(key);
@@ -289,7 +297,12 @@ export class AquariusProvider implements SwapProvider {
       let found: PoolKey[] = [];
       try {
         const answer = await read("get_pools", [vecOf(tokens)]);
-        found = (answer.map() ?? []).map((entry) => entry.key().bytes());
+        found =
+          answer.type === "scvMap"
+            ? (answer.map ?? []).map((entry) =>
+                entry.key.type === "scvBytes" ? entry.key.bytes.toBytes() : unreadablePools(),
+              )
+            : unreadablePools();
       } catch (cause) {
         // a node that did not answer is not a pair with no pools
         if (cause instanceof MavnaError && cause.retryable) throw cause;
@@ -397,7 +410,7 @@ export class AquariusProvider implements SwapProvider {
     }
     let chain: xdr.ScVal;
     try {
-      chain = xdr.ScVal.fromXDR(raw.swapChainXdr, "base64");
+      chain = xdr.ScVal.fromXdr(raw.swapChainXdr, "base64");
     } catch (cause) {
       throw new MavnaError("Aquarius returned a swap path that does not decode.", {
         retryable: false,
@@ -442,7 +455,7 @@ export interface PathQuote {
 export function decodeSwapChain(swapChainXdr: string): readonly ComposeHop[] {
   let chain: xdr.ScVal;
   try {
-    chain = xdr.ScVal.fromXDR(swapChainXdr, "base64");
+    chain = xdr.ScVal.fromXdr(swapChainXdr, "base64");
   } catch (cause) {
     throw new MavnaError("Aquarius returned a swap chain that is not readable.", {
       retryable: false,
@@ -454,17 +467,16 @@ export function decodeSwapChain(swapChainXdr: string): readonly ComposeHop[] {
       retryable: false,
     });
   };
-  const vec = (v: xdr.ScVal): xdr.ScVal[] =>
-    v.switch().name === "scvVec" ? (v.vec() ?? []) : bad();
+  const vec = (v: xdr.ScVal): xdr.ScVal[] => (v.type === "scvVec" ? (v.vec ?? []) : bad());
   const address = (v: xdr.ScVal): string =>
-    v.switch().name === "scvAddress" ? Address.fromScVal(v).toString() : bad();
+    v.type === "scvAddress" ? Address.fromScVal(v).toString() : bad();
 
   const hops = vec(chain).map((hop): ComposeHop => {
     const [tokens, index, out] = vec(hop);
     if (tokens === undefined || index === undefined || out === undefined || vec(hop).length !== 3) {
       return bad();
     }
-    const indexBytes = index.switch().name === "scvBytes" ? index.bytes() : bad();
+    const indexBytes = index.type === "scvBytes" ? index.bytes.toBytes() : bad();
     if (indexBytes.length !== 32) bad();
     return {
       tokens: vec(tokens).map(address),

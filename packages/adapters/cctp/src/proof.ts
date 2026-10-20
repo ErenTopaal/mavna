@@ -233,9 +233,9 @@ export class DeliveryProof {
         contractIds: [messageTransmitter],
         topics: [
           [
-            xdr.ScVal.scvSymbol("message_received").toXDR("base64"),
-            new Address(cctpForwarder).toScVal().toXDR("base64"),
-            nativeToScVal(message.nonce).toXDR("base64"),
+            xdr.ScVal.scvSymbol("message_received").toXdr("base64"),
+            new Address(cctpForwarder).toScVal().toXdr("base64"),
+            nativeToScVal(message.nonce).toXdr("base64"),
             "*",
           ],
         ],
@@ -279,7 +279,7 @@ export class DeliveryProof {
         {
           type: "contract",
           contractIds: [cctpForwarder],
-          topics: [[xdr.ScVal.scvSymbol("mint_and_forward").toXDR("base64")]],
+          topics: [[xdr.ScVal.scvSymbol("mint_and_forward").toXdr("base64")]],
         },
       ],
       limit: FORWARDS_PER_LEDGER,
@@ -390,7 +390,7 @@ function forwarderCall(
     return undefined;
   }
   const [contract, fn, message] = (operation.parameters ?? []).map((p) =>
-    scValToNative(xdr.ScVal.fromXDR(p.value, "base64")),
+    scValToNative(xdr.ScVal.fromXdr(p.value, "base64")),
   );
   if (contract !== cctpForwarder || fn !== "mint_and_forward" || !(message instanceof Uint8Array)) {
     return undefined;
@@ -420,7 +420,7 @@ function forwarderCall(
 }
 
 function symbolOf(value: xdr.ScVal | undefined): string | undefined {
-  return value?.switch().name === "scvSymbol" ? value.sym().toString() : undefined;
+  return value?.type === "scvSymbol" ? value.sym.toString() : undefined;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

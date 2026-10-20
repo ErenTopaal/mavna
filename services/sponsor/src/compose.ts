@@ -103,20 +103,24 @@ export function assertOnlyExecutorCompose(
   };
   if (entries.length !== 1) refuse();
   const entry = entries[0] as xdr.SorobanAuthorizationEntry;
-  const credentials = entry.credentials();
-  if (credentials.switch().name !== "sorobanCredentialsAddress") refuse();
-  if (Address.fromScAddress(credentials.address().address()).toString() !== expected.executor) {
-    refuse();
-  }
-  const root = entry.rootInvocation();
-  if (root.subInvocations().length !== 0) refuse();
-  const fn = root.function();
-  if (fn.switch().name !== "sorobanAuthorizedFunctionTypeContractFn") refuse();
-  const call = fn.contractFn();
-  if (Address.fromScAddress(call.contractAddress()).toString() !== expected.contract) refuse();
-  if (call.functionName().toString() !== "lz_compose") refuse();
-  const got = call.args().map((a) => a.toXDR("base64"));
-  const want = expected.args.map((a) => a.toXDR("base64"));
+  const credentials = entry.credentials;
+  // the executor's address signature, in either encoding the network records;
+  // one with delegates would hand its authority to others
+  const signer =
+    credentials.type === "sorobanCredentialsAddress"
+      ? credentials.address.address
+      : credentials.type === "sorobanCredentialsAddressV2"
+        ? credentials.addressV2.address
+        : refuse();
+  if (Address.fromScAddress(signer).toString() !== expected.executor) refuse();
+  const root = entry.rootInvocation;
+  if (root.subInvocations.length !== 0) refuse();
+  const fn = root.function;
+  const call = fn.type === "sorobanAuthorizedFunctionTypeContractFn" ? fn.contractFn : refuse();
+  if (Address.fromScAddress(call.contractAddress).toString() !== expected.contract) refuse();
+  if (call.functionName.toString() !== "lz_compose") refuse();
+  const got = call.args.map((a) => a.toXdr("base64"));
+  const want = expected.args.map((a) => a.toXdr("base64"));
   if (got.length !== want.length || got.some((a, i) => a !== want[i])) refuse();
 }
 
@@ -205,7 +209,7 @@ export class Composer {
       new xdr.LedgerKeyContractData({
         contract: new Contract(contract).address().toScAddress(),
         key: xdr.ScVal.scvLedgerKeyContractInstance(),
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     );
     const entry = await rpc.read(`Arrival Contract ${contract}`, async () => {
@@ -217,9 +221,15 @@ export class Composer {
         retryable: false,
       });
     }
-    const executable = entry.val.contractData().val().instance().executable();
+    const executable = xdr.expectUnionVariant(
+      xdr.expectUnionVariant(
+        xdr.expectUnionVariant(entry.val, "contractData").contractData.val,
+        "scvContractInstance",
+      ).instance.executable,
+      "contractExecutableWasm",
+    );
     const code = xdr.LedgerKey.contractCode(
-      new xdr.LedgerKeyContractCode({ hash: executable.wasmHash() }),
+      new xdr.LedgerKeyContractCode({ hash: executable.wasmHash }),
     );
     const result = await rpc.submit("arrival keep alive", async () => {
       const unsigned = new TransactionBuilder(await rpc.loadAccount(this.#payer.publicKey()), {
@@ -324,7 +334,7 @@ export class Composer {
       const prepared = await rpc.prepare(await transaction(call([signed])));
       const op = prepared.operations[0] as Operation.InvokeHostFunction;
       const auth = op.auth ?? [];
-      if (auth.length !== 1 || auth[0]?.toXDR("base64") !== signed.toXDR("base64")) {
+      if (auth.length !== 1 || auth[0]?.toXdr("base64") !== signed.toXdr("base64")) {
         throw new ComposeRefused("The prepared conversion changed what it authorizes; refused.");
       }
       // what the run may cost: any storage renewal now due, plus the run itself

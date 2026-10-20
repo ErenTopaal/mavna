@@ -41,7 +41,7 @@
     "@mavna/status": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@mavna/swap": "workspace:*",
-    "@stellar/stellar-sdk": "16.2.0",
+    "@stellar/stellar-sdk": "17.2.1",
     "@web3icons/react": "4.1.24",
     "motion": "14.4.0",
     "viem": "2.57.7"

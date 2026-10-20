@@ -22,10 +22,10 @@ const { TransactionBuilder, Networks } = createRequire(
 function invocationOf(transaction: string): string {
   for (const passphrase of [Networks.TESTNET, Networks.PUBLIC]) {
     try {
-      const tx = TransactionBuilder.fromXDR(transaction, passphrase);
+      const tx = TransactionBuilder.fromXdr(transaction, passphrase);
       if ("operations" in tx) {
         return tx.operations
-          .map((op) => ("func" in op ? op.func.toXDR("base64") : op.type))
+          .map((op) => ("func" in op ? op.func.toXdr("base64") : op.type))
           .join(",");
       }
     } catch {

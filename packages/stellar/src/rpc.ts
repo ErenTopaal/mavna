@@ -1,6 +1,6 @@
 import { MavnaError } from "@mavna/core";
 import type { FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
-import { Account, Address, rpc, xdr } from "@stellar/stellar-sdk";
+import { Account, Keypair, rpc, xdr } from "@stellar/stellar-sdk";
 
 /**
  * The public Stellar RPC endpoint is load balanced across nodes that are NOT at
@@ -226,7 +226,7 @@ export class RpcClient {
     // sequence, gets rebuilt from the same stale node, and the whole thing
     // cascades into an apparent network failure. Reading the ledger entry directly
     // is the only way to see the ledger and apply the freshness guard.
-    const accountId = Address.fromString(address).toScAddress().accountId();
+    const accountId = Keypair.fromPublicKey(address).xdrAccountId();
     const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId }));
 
     const entry = await this.read(`account ${address}`, async () => {
@@ -238,8 +238,8 @@ export class RpcClient {
       throw new AccountNotFound(address);
     }
 
-    const parsed = entry.val.account();
-    return new Account(address, parsed.seqNum().toString());
+    if (entry.val.type !== "account") throw new AccountNotFound(address);
+    return new Account(address, entry.val.account.seqNum.toString());
   }
 
   /**
@@ -424,14 +424,14 @@ export class RpcClient {
         // twice; only its hash can say
         sent = {
           status: "PENDING",
-          hash: tx.hash().toString("hex"),
+          hash: xdr.encodeBytes(tx.hash(), "hex"),
           latestLedger: 0,
           latestLedgerCloseTime: 0,
         };
       }
 
       if (sent.status === "ERROR") {
-        const reason = sent.errorResult?.result().switch().name ?? "unknown";
+        const reason = sent.errorResult?.result.type ?? "unknown";
         // A stale sequence is only transient for a transaction that can be
         // rebuilt. A signed envelope carries its sequence for good, so resending
         // it cannot help, and the caller needs to know which failure this was.

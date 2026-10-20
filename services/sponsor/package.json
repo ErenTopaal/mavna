@@ -17,7 +17,7 @@
     "@mavna/stellar": "workspace:*",
     "@mavna/swap": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
-    "@stellar/stellar-sdk": "16.2.0",
+    "@stellar/stellar-sdk": "17.2.1",
     "zod": "4.6.7"
   }
 }

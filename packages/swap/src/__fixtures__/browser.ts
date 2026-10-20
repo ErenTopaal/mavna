@@ -31,9 +31,15 @@ export async function loadInBrowser<T>(
     });
     const file = readdirSync(outDir).find((f) => f.endsWith(".js"));
     if (file === undefined) throw new Error(`bundling ${entry} produced no script`);
+    const host = new TextEncoder();
     const context = vm.createContext({
-      TextEncoder,
+      // the page's own TextEncoder hands back the page's own Uint8Array, as in a
+      // browser; this process's would hand back another realm's, which the sdk's
+      // byte checks rightly refuse
+      __encodeOutside: (text: string) => Array.from(host.encode(text)),
       TextDecoder,
+      atob,
+      btoa,
       AbortController,
       AbortSignal,
       Response,
@@ -47,6 +53,11 @@ export async function loadInBrowser<T>(
       fetch: () => Promise.reject(new Error("this test did not expect a request")),
       ...globals,
     });
+    vm.runInContext(
+      "globalThis.TextEncoder = class TextEncoder { get encoding() { return 'utf-8'; } " +
+        "encode(text = '') { return Uint8Array.from(__encodeOutside(String(text))); } };",
+      context,
+    );
     vm.runInContext(readFileSync(join(outDir, file), "utf8"), context);
     if (vm.runInContext("typeof Buffer", context) !== "undefined") {
       throw new Error("the bundle defined a Buffer global, so this proves nothing");

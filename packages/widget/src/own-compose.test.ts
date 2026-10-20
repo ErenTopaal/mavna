@@ -45,7 +45,33 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function composeAuth(args: xdr.ScVal[], nested = false): xdr.SorobanAuthorizationEntry {
+/** Credentials the simulation may record: the wallet's own, or an address signature. */
+type Signer = "source" | { readonly v2: string } | { readonly delegated: string };
+
+function credentialsOf(signer: Signer): xdr.SorobanCredentials {
+  if (signer === "source") return xdr.SorobanCredentials.sorobanCredentialsSourceAccount();
+  const address = "v2" in signer ? signer.v2 : signer.delegated;
+  const credentials = new xdr.SorobanAddressCredentials({
+    address: new Address(address).toScAddress(),
+    nonce: 1n,
+    signatureExpirationLedger: 100,
+    signature: xdr.ScVal.scvVoid(),
+  });
+  return "v2" in signer
+    ? xdr.SorobanCredentials.sorobanCredentialsAddressV2(credentials)
+    : xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
+        new xdr.SorobanAddressCredentialsWithDelegates({
+          addressCredentials: credentials,
+          delegates: [],
+        }),
+      );
+}
+
+function composeAuth(
+  args: xdr.ScVal[],
+  nested = false,
+  signer: Signer = "source",
+): xdr.SorobanAuthorizationEntry {
   const fn = (contract: string, name: string, a: xdr.ScVal[]) =>
     xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
       new xdr.InvokeContractArgs({
@@ -55,7 +81,7 @@ function composeAuth(args: xdr.ScVal[], nested = false): xdr.SorobanAuthorizatio
       }),
     );
   return new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+    credentials: credentialsOf(signer),
     rootInvocation: new xdr.SorobanAuthorizedInvocation({
       function: fn(ARRIVAL, "lz_compose", args),
       subInvocations: nested
@@ -88,13 +114,13 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => ({
     latestLedger: entries.arrival.latestLedger,
     entries: keys.flatMap((k) => {
-      const e = known.get(k.toXDR("base64"));
+      const e = known.get(k.toXdr("base64"));
       return e === undefined
         ? []
         : [
             {
               key: k,
-              val: xdr.LedgerEntryData.fromXDR(e.xdr, "base64"),
+              val: xdr.LedgerEntryData.fromXdr(e.xdr, "base64"),
               lastModifiedLedgerSeq: e.lastModifiedLedgerSeq,
             },
           ];
@@ -105,8 +131,11 @@ function stellarNode(): RpcClient {
   } as never);
   vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
     const op = (tx as { operations: Operation.InvokeHostFunction[] }).operations[0];
-    const call = op?.func.invokeContract();
-    const name = call?.functionName().toString();
+    const call =
+      op === undefined
+        ? undefined
+        : xdr.expectUnionVariant(op.func, "hostFunctionTypeInvokeContract").invokeContract;
+    const name = call?.functionName.toString();
     log.push(`simulate ${name}`);
     if (name === "compose_queue") {
       return {
@@ -123,7 +152,7 @@ function stellarNode(): RpcClient {
       latestLedger: entries.arrival.latestLedger,
       minResourceFee: resourceFee.toString(),
       transactionData: new SorobanDataBuilder().setResourceFee(resourceFee),
-      result: { retval: xdr.ScVal.scvVoid(), auth: recordedAuth(call?.args() ?? []) },
+      result: { retval: xdr.ScVal.scvVoid(), auth: recordedAuth(call?.args ?? []) },
     } as never;
   });
   vi.spyOn(client.server, "sendTransaction").mockImplementation(async (tx) => {
@@ -231,6 +260,24 @@ describe("finishing a conversion on arrival from Activity", () => {
     const engine = engineFor("self");
     queued = xdr.ScVal.scvBytes(Buffer.from(composeMessageHash(MESSAGE).slice(2), "hex"));
     recordedAuth = (args) => [composeAuth(args, true)];
+    await expect(finishCompose(engine, finish)).rejects.toThrow(/more than the conversion/);
+    expect(log).not.toContain("stellar sign compose");
+  });
+
+  it("accepts the wallet's own address signature in the encoding the network records now", async () => {
+    const engine = engineFor("self");
+    queued = xdr.ScVal.scvBytes(Buffer.from(composeMessageHash(MESSAGE).slice(2), "hex"));
+    recordedAuth = (args) => [composeAuth(args, false, { v2: USER })];
+    expect(await finishCompose(engine, finish)).toMatchObject({ kind: "priced" });
+  });
+
+  it.each([
+    ["another account's address signature", { v2: FROM }],
+    ["a signature that hands the authority to delegates", { delegated: USER }],
+  ] as const)("refuses %s", async (_what, signer) => {
+    const engine = engineFor("self");
+    queued = xdr.ScVal.scvBytes(Buffer.from(composeMessageHash(MESSAGE).slice(2), "hex"));
+    recordedAuth = (args) => [composeAuth(args, false, signer)];
     await expect(finishCompose(engine, finish)).rejects.toThrow(/more than the conversion/);
     expect(log).not.toContain("stellar sign compose");
   });

@@ -26,7 +26,7 @@ type Parsed = Exclude<ReturnType<typeof TransactionBuilder.fromXDR>, FeeBumpTran
 function parse(xdr: string, passphrase: string): Parsed | undefined {
   let parsed: ReturnType<typeof TransactionBuilder.fromXDR>;
   try {
-    parsed = TransactionBuilder.fromXDR(xdr, passphrase);
+    parsed = TransactionBuilder.fromXdr(xdr, passphrase);
   } catch {
     return undefined;
   }

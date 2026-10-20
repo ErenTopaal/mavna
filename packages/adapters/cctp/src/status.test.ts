@@ -203,8 +203,8 @@ function adapterWith(options: {
     return {
       latestLedger: captured.latestLedger,
       entries: captured.entries.map((e) => ({
-        key: xdr.LedgerKey.fromXDR(e.key, "base64"),
-        val: xdr.LedgerEntryData.fromXDR(e.xdr, "base64"),
+        key: xdr.LedgerKey.fromXdr(e.key, "base64"),
+        val: xdr.LedgerEntryData.fromXdr(e.xdr, "base64"),
       })),
     };
   });

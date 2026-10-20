@@ -76,7 +76,7 @@ export async function simulate(
         jsonrpc: "2.0",
         id: 1,
         method: "simulateTransaction",
-        params: { transaction: tx.toXDR() },
+        params: { transaction: tx.toXdr() },
       }),
       signal: boundedBy(timeoutMs, caller),
     });
@@ -126,7 +126,7 @@ export async function simulate(
       ...(result.minResourceFee === undefined ? {} : { minResourceFee: result.minResourceFee }),
       results: [{ xdr: first.xdr, ...(first.auth === undefined ? {} : { auth: first.auth }) }],
     },
-    retval: xdr.ScVal.fromXDR(first.xdr, "base64"),
+    retval: xdr.ScVal.fromXdr(first.xdr, "base64"),
   };
 }
 

@@ -76,7 +76,7 @@ async function run(
       .addOperation(op)
       .setTimeout(120)
       .build();
-    if (op.body().switch().name === "invokeHostFunction") tx = await rpc.prepare(tx);
+    if (op.body.type === "invokeHostFunction") tx = await rpc.prepare(tx);
     tx.sign(kp);
     return tx;
   });
@@ -108,9 +108,9 @@ async function directPath(
   const tokens = [from, to].sort();
   const tokensVal = xdr.ScVal.scvVec(tokens.map((t) => new Address(t).toScVal()));
   const pools = await readRouter("get_pools", tokensVal);
-  let best: { out: bigint; index: Buffer } | undefined;
-  for (const entry of pools?.map() ?? []) {
-    const index = entry.key().bytes();
+  let best: { out: bigint; index: Uint8Array } | undefined;
+  for (const entry of pools?.type === "scvMap" ? (pools.map ?? []) : []) {
+    const index = xdr.expectUnionVariant(entry.key, "scvBytes").bytes.toBytes();
     const est = await readRouter(
       "estimate_swap",
       tokensVal,
@@ -126,7 +126,7 @@ async function directPath(
   if (best === undefined) throw new Error(`no pool between ${from} and ${to}`);
   return {
     out: best.out,
-    path: [{ tokens, poolIndex: best.index.toString("hex"), tokenOut: to }],
+    path: [{ tokens, poolIndex: xdr.encodeBytes(best.index, "hex"), tokenOut: to }],
   };
 }
 
@@ -332,7 +332,7 @@ describe("keeping the contract alive", () => {
       new xdr.LedgerKeyContractData({
         contract: new Address(arrival).toScAddress(),
         key: xdr.ScVal.scvLedgerKeyContractInstance(),
-        durability: xdr.ContractDataDurability.persistent(),
+        durability: xdr.ContractDataDurability.persistent,
       }),
     );
     const entries = await rpc.server.getLedgerEntries(key);

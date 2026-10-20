@@ -220,10 +220,10 @@ function remoteServices(): void {
 function contractInstance(executable: Executable): xdr.LedgerEntryData {
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
-      ext: new xdr.ExtensionPoint(0),
+      ext: xdr.ExtensionPoint.v0(),
       contract: new Address(ledger.token).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
       val: xdr.ScVal.scvContractInstance(
         new xdr.ScContractInstance({
           executable:
@@ -248,9 +248,9 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
     const op = (tx as Transaction).operations[0];
     if (op?.type !== "invokeHostFunction") throw new Error("not a contract call");
-    const call = op.func.invokeContract();
-    const method = call.functionName().toString();
-    const target = Address.fromScAddress(call.contractAddress()).toString();
+    const call = xdr.expectUnionVariant(op.func, "hostFunctionTypeInvokeContract").invokeContract;
+    const method = call.functionName.toString();
+    const target = Address.fromScAddress(call.contractAddress).toString();
     asked.push(`simulate ${method}`);
     const answer = (value: xdr.ScVal) => ({ result: { retval: value }, latestLedger: 100 });
     if (target === STELLAR_SERVICE && method === "is_trusted_chain") {
@@ -274,32 +274,43 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => {
     const entries: unknown[] = [];
     for (const key of keys) {
-      const kind = key.switch().name;
+      const kind = key.type;
       asked.push(`ledger ${kind}`);
       if (kind === "contractData") {
         entries.push({ key, val: contractInstance(ledger.executable) });
       }
-      if (kind === "account" && ledger.account) {
+      if (key.type === "account" && ledger.account) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "account" }),
-            account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 0 }),
-          },
+          val: xdr.LedgerEntryData.account(
+            new xdr.AccountEntry({
+              accountId: key.account.accountId,
+              balance: 50_000_000n,
+              seqNum: 1n,
+              numSubEntries: 0,
+              inflationDest: null,
+              flags: 0,
+              homeDomain: "",
+              thresholds: new Uint8Array([1, 0, 0, 0]),
+              signers: [],
+              ext: xdr.AccountEntryExt.v0(),
+            }),
+          ),
         });
       }
-      if (kind === "trustline" && ledger.trustline) {
+      if (key.type === "trustline" && ledger.trustline) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "trustline" }),
-            trustLine: () => ({
-              balance: () => 0n,
-              limit: () => ledger.trustlineLimit ?? 10n ** 15n,
-              flags: () => 1,
-              ext: () => ({ switch: () => 0 }),
+          val: xdr.LedgerEntryData.trustline(
+            new xdr.TrustLineEntry({
+              accountId: key.trustLine.accountId,
+              asset: key.trustLine.asset,
+              balance: 0n,
+              limit: ledger.trustlineLimit ?? 10n ** 15n,
+              flags: 1,
+              ext: xdr.TrustLineEntryExt.v0(),
             }),
-          },
+          ),
         });
       }
     }

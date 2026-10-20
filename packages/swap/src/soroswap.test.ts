@@ -51,7 +51,7 @@ function unsignedFor(source: string): string {
     .addOperation(Operation.payment({ destination: source, asset: Asset.native(), amount: "1" }))
     .setTimeout(60)
     .build()
-    .toXDR();
+    .toXdr();
 }
 
 const V3 = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4";
@@ -79,7 +79,7 @@ function envelope(source: string, op: xdr.Operation, fee: string = BASE_FEE): st
     .addOperation(op)
     .setTimeout(60)
     .build()
-    .toXDR();
+    .toXdr();
 }
 
 /**
@@ -391,7 +391,7 @@ describe("what Soroswap built, checked before the user signs it", () => {
       )
       .setTimeout(60)
       .build()
-      .toXDR();
+      .toXdr();
     expect(await built(two, { ...quoteBody, platform: "sdex" })).toBeInstanceOf(MavnaError);
   });
 

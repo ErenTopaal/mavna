@@ -27,7 +27,7 @@ function preparation(createAccount: boolean): string {
     userAddress: DESTINATION,
     createAccount,
     assets: [USDC],
-  }).toXDR();
+  }).toXdr();
 }
 
 function settlement(overrides: { maxSpend?: string; xlmNeeded?: string } = {}): string {
@@ -41,7 +41,7 @@ function settlement(overrides: { maxSpend?: string; xlmNeeded?: string } = {}): 
     maxSpend: overrides.maxSpend ?? "0.6",
     assets: [USDC],
     createdAccount: true,
-  }).toXDR();
+  }).toXdr();
 }
 
 /** A transaction sourced by `source` carrying `ops`, bounded like the sponsor's. */
@@ -55,7 +55,7 @@ function built(
     networkPassphrase: Networks.TESTNET,
   });
   for (const op of ops) builder.addOperation(op);
-  return builder.setTimeout(seconds).build().toXDR();
+  return builder.setTimeout(seconds).build().toXdr();
 }
 
 describe("preparationProblem", () => {

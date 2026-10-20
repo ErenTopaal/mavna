@@ -23,7 +23,7 @@
     "@mavna/routing": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@solana/addresses": "8.5.0",
-    "@stellar/stellar-sdk": "16.2.0",
+    "@stellar/stellar-sdk": "17.2.1",
     "viem": "2.57.7"
   }
 }

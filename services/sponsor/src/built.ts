@@ -141,5 +141,11 @@ export function signedBy(tx: Transaction, signer: string): boolean {
   const keypair = Keypair.fromPublicKey(signer);
   const hint = keypair.signatureHint();
   const hash = tx.hash();
-  return tx.signatures.some((s) => hint.equals(s.hint()) && keypair.verify(hash, s.signature()));
+  return tx.signatures.some(
+    (s) => sameBytes(hint, s.hint.toBytes()) && keypair.verify(hash, s.signature.toBytes()),
+  );
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }

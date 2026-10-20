@@ -6,6 +6,7 @@ import {
   Operation,
   type Transaction,
   TransactionBuilder,
+  xdr,
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { BuiltLedger, type BuiltRecord, signedBy } from "./built.js";
@@ -25,7 +26,7 @@ function buildTx(sequence = "1", destination = Keypair.random().publicKey()): Tr
 
 function recordFor(tx: Transaction, over: Partial<BuiltRecord> = {}): BuiltRecord {
   return {
-    hash: tx.hash().toString("hex"),
+    hash: xdr.encodeBytes(tx.hash(), "hex"),
     kind: "preparation",
     destination: "0xabc",
     signer: user.publicKey(),
@@ -123,11 +124,11 @@ describe("a ledger written down and read back", () => {
     const taken = buildTx("2");
     ledger.record(recordFor(kept), 0);
     ledger.record(recordFor(taken), 0);
-    ledger.take(taken.hash().toString("hex"), "preparation", 0);
+    ledger.take(xdr.encodeBytes(taken.hash(), "hex"), "preparation", 0);
 
     const restored = BuiltLedger.fromSnapshot(ledger.snapshot(), 0);
     expect(restored.size).toBe(1);
-    expect(restored.take(kept.hash().toString("hex"), "preparation", 0)).toBeDefined();
+    expect(restored.take(xdr.encodeBytes(kept.hash(), "hex"), "preparation", 0)).toBeDefined();
   });
 
   it("does not bring back a record that expired while the process was down", () => {
@@ -144,8 +145,20 @@ describe("what anonymous builds can make the ledger hold", () => {
     for (const tx of txs) ledger.record(recordFor(tx, { kind: "settlement" }), 0);
     ledger.record(recordFor(buildTx("5")), 0);
     expect(ledger.size).toBe(4);
-    expect(ledger.take(txs[0]?.hash().toString("hex") ?? "", "settlement", 0)).toBeUndefined();
-    expect(ledger.take(txs[3]?.hash().toString("hex") ?? "", "settlement", 0)).toBeDefined();
+    expect(
+      ledger.take(
+        txs[0] === undefined ? "" : xdr.encodeBytes(txs[0].hash(), "hex"),
+        "settlement",
+        0,
+      ),
+    ).toBeUndefined();
+    expect(
+      ledger.take(
+        txs[3] === undefined ? "" : xdr.encodeBytes(txs[3].hash(), "hex"),
+        "settlement",
+        0,
+      ),
+    ).toBeDefined();
   });
 
   it("closes a record at its own earlier bound when it has one", () => {
@@ -153,7 +166,7 @@ describe("what anonymous builds can make the ledger hold", () => {
     const tx = buildTx("1");
     ledger.record(recordFor(tx, { expiresAtUnix: 86_400, openUntilUnix: 330 }), 0);
     expect(ledger.size).toBe(1);
-    expect(ledger.take(tx.hash().toString("hex"), "preparation", 331)).toBeUndefined();
+    expect(ledger.take(xdr.encodeBytes(tx.hash(), "hex"), "preparation", 331)).toBeUndefined();
   });
 
   it("says when it holds as many open records as it may", () => {

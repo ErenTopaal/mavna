@@ -110,7 +110,7 @@ function answerCall(to: string, data: `0x${string}`): `0x${string}` {
   if (target === OFT) {
     switch (functionName) {
       case "peers":
-        return reply(`0x${StrKey.decodeContract(STELLAR_OFT).toString("hex")}`);
+        return reply(`0x${xdr.encodeBytes(StrKey.decodeContract(STELLAR_OFT), "hex")}`);
       case "token":
         return reply(TOKEN);
       case "approvalRequired":
@@ -226,7 +226,8 @@ function remoteServices(): void {
   });
 }
 
-const STELLAR_OFT_BYTES = `0x${StrKey.decodeContract(STELLAR_OFT).toString("hex")}` as const;
+const STELLAR_OFT_BYTES =
+  `0x${xdr.encodeBytes(StrKey.decodeContract(STELLAR_OFT), "hex")}` as const;
 
 /**
  * A delivered USDT0 message from Arbitrum to Stellar, shaped the way Scan
@@ -290,10 +291,10 @@ function instance(
 ): xdr.LedgerEntryData {
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
-      ext: new xdr.ExtensionPoint(0),
+      ext: xdr.ExtensionPoint.v0(),
       contract: new Address(contract).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
-      durability: xdr.ContractDataDurability.persistent(),
+      durability: xdr.ContractDataDurability.persistent,
       val: xdr.ScVal.scvContractInstance(new xdr.ScContractInstance({ executable, storage })),
     }),
   );
@@ -344,59 +345,77 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => {
     const entries: unknown[] = [];
     for (const key of keys) {
-      const kind = key.switch().name;
-      if (kind === "contractData") {
-        const contract = Address.fromScAddress(key.contractData().contract()).toString();
+      if (key.type === "contractData") {
+        const contract = Address.fromScAddress(key.contractData.contract).toString();
         if (contract === STELLAR_OFT) entries.push({ key, val: stellarOftInstance() });
         if (contract === world.token) entries.push({ key, val: tokenInstance() });
       }
-      if (kind === "account" && world.account) {
+      if (key.type === "account" && world.account) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "account" }),
-            account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 1 }),
-          },
+          val: xdr.LedgerEntryData.account(
+            new xdr.AccountEntry({
+              accountId: key.account.accountId,
+              balance: 50_000_000n,
+              seqNum: 1n,
+              numSubEntries: 1,
+              inflationDest: null,
+              flags: 0,
+              homeDomain: "",
+              thresholds: new Uint8Array([1, 0, 0, 0]),
+              signers: [],
+              ext: xdr.AccountEntryExt.v0(),
+            }),
+          ),
         });
       }
-      if (kind === "trustline" && world.trustline) {
+      if (key.type === "trustline" && world.trustline) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "trustline" }),
-            trustLine: () => ({
-              balance: () => 0n,
-              limit: () => world.trustlineLimit ?? 10n ** 15n,
-              flags: () => 1,
-              ext: () => ({ switch: () => 0 }),
+          val: xdr.LedgerEntryData.trustline(
+            new xdr.TrustLineEntry({
+              accountId: key.trustLine.accountId,
+              asset: key.trustLine.asset,
+              balance: 0n,
+              limit: world.trustlineLimit ?? 10n ** 15n,
+              flags: 1,
+              ext: xdr.TrustLineEntryExt.v0(),
             }),
-          },
+          ),
         });
       }
     }
     return { entries, latestLedger: 100 } as never;
   });
   vi.spyOn(client.server, "simulateTransaction").mockImplementation(async (tx) => {
-    const op = (tx as { toEnvelope(): xdr.TransactionEnvelope })
-      .toEnvelope()
-      .v1()
-      .tx()
-      .operations()[0];
-    const call = op?.body().invokeHostFunctionOp().hostFunction().invokeContract();
+    const envelope = (tx as { toEnvelope(): xdr.TransactionEnvelope }).toEnvelope();
+    const op = xdr.expectUnionVariant(envelope, "envelopeTypeTx").v1.tx.operations[0];
+    const call =
+      op === undefined
+        ? undefined
+        : xdr.expectUnionVariant(
+            xdr.expectUnionVariant(op.body, "invokeHostFunction").invokeHostFunctionOp.hostFunction,
+            "hostFunctionTypeInvokeContract",
+          ).invokeContract;
     const contract =
-      call === undefined ? "" : Address.fromScAddress(call.contractAddress()).toString();
-    const name = call?.functionName().toString();
-    const args = call?.args() ?? [];
+      call === undefined ? "" : Address.fromScAddress(call.contractAddress).toString();
+    const name = call?.functionName.toString();
+    const args = call?.args ?? [];
+    const u32 = (v: xdr.ScVal | undefined) => (v?.type === "scvU32" ? v.u32 : undefined);
+    const firstSymbol = (v: xdr.ScVal | undefined) => {
+      const head = v?.type === "scvVec" ? v.vec?.[0] : undefined;
+      return head?.type === "scvSymbol" ? head.sym.toString() : undefined;
+    };
     let retval: xdr.ScVal | undefined;
-    if (contract === STELLAR_OFT && name === "peer" && args[0]?.u32() === 30110) {
+    if (contract === STELLAR_OFT && name === "peer" && u32(args[0]) === 30110) {
       retval = xdr.ScVal.scvBytes(Buffer.from(world.stellarPeer.slice(2), "hex"));
     } else if (contract === STELLAR_OFT && name === "is_paused") {
       retval = xdr.ScVal.scvBool(world.paused);
     } else if (
       contract === STELLAR_OFT &&
       name === "rate_limit_capacity" &&
-      args[0]?.vec()?.[0]?.sym().toString() === "Inbound" &&
-      args[1]?.u32() === 30110
+      firstSymbol(args[0]) === "Inbound" &&
+      u32(args[1]) === 30110
     ) {
       retval = nativeToScVal(world.inboundCapacity, { type: "i128" });
     }
@@ -568,7 +587,9 @@ describe("quoting USDT0 into Stellar", () => {
       stellarToLocal(BigInt(route.deliveredAtLeast.baseUnits), 6, 6, 7).toString(),
     );
     expect(payload.args[0].minAmountLD).toBe("24875000");
-    expect(payload.args[0].to).toBe(`0x${StrKey.decodeEd25519PublicKey(READY).toString("hex")}`);
+    expect(payload.args[0].to).toBe(
+      `0x${xdr.encodeBytes(StrKey.decodeEd25519PublicKey(READY), "hex")}`,
+    );
     // the quoted fee plus a tenth, in both the fee argument and the value, since
     // the OApp requires them equal and the endpoint refunds what is not needed
     const sent = JSON.parse(txs[0]?.payload ?? "{}") as {

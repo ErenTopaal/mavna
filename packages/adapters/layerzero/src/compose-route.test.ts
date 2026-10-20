@@ -68,12 +68,12 @@ const source: Asset = {
 function accountWithRoom(address: string, room: bigint) {
   const accountId = Keypair.fromPublicKey(address).xdrAccountId();
   const at = (key: xdr.LedgerKey, data: xdr.LedgerEntryData) => ({
-    key: key.toXDR("base64"),
-    xdr: data.toXDR("base64"),
+    key: key.toXdr("base64"),
+    xdr: data.toXdr("base64"),
     lastModifiedLedgerSeq: entries.arrival.latestLedger,
   });
   const [code, issuer] = usdc.id.split(":");
-  const line = new StellarAsset(code ?? "", issuer).toTrustLineXDRObject();
+  const line = new StellarAsset(code ?? "", issuer).toTrustLineXdrObject();
   return [
     at(
       xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId })),
@@ -88,7 +88,7 @@ function accountWithRoom(address: string, room: bigint) {
           homeDomain: "",
           thresholds: Buffer.from([1, 0, 0, 0]),
           signers: [],
-          ext: new xdr.AccountEntryExt(0),
+          ext: xdr.AccountEntryExt.v0(),
         }),
       ),
     ),
@@ -101,7 +101,7 @@ function accountWithRoom(address: string, room: bigint) {
           balance: xdr.Int64.fromString("0"),
           limit: xdr.Int64.fromString(room.toString()),
           flags: 1,
-          ext: new xdr.TrustLineEntryExt(0),
+          ext: xdr.TrustLineEntryExt.v0(),
         }),
       ),
     ),
@@ -121,13 +121,13 @@ function rpcFromRecording(): RpcClient {
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => ({
     latestLedger: entries.arrival.latestLedger,
     entries: keys.flatMap((k) => {
-      const e = known.get(k.toXDR("base64"));
+      const e = known.get(k.toXdr("base64"));
       return e === undefined
         ? []
         : [
             {
               key: k,
-              val: xdr.LedgerEntryData.fromXDR(e.xdr, "base64"),
+              val: xdr.LedgerEntryData.fromXdr(e.xdr, "base64"),
               lastModifiedLedgerSeq: e.lastModifiedLedgerSeq,
             },
           ];

@@ -1,5 +1,6 @@
 import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
+import { xdr } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NearIntentsAdapter, slippageOf } from "./adapter.js";
 import { ORIGIN_CHAINS } from "./chains.js";
@@ -164,29 +165,40 @@ function stellarNode(): RpcClient {
   vi.spyOn(client.server, "getLedgerEntries").mockImplementation(async (...keys) => {
     const entries: unknown[] = [];
     for (const key of keys) {
-      const kind = key.switch().name;
+      const kind = key.type;
       asked.push(`ledger ${kind}`);
-      if (kind === "account" && ledger.account) {
+      if (key.type === "account" && ledger.account) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "account" }),
-            account: () => ({ balance: () => 50_000_000n, numSubEntries: () => 0 }),
-          },
+          val: xdr.LedgerEntryData.account(
+            new xdr.AccountEntry({
+              accountId: key.account.accountId,
+              balance: 50_000_000n,
+              seqNum: 1n,
+              numSubEntries: 0,
+              inflationDest: null,
+              flags: 0,
+              homeDomain: "",
+              thresholds: new Uint8Array([1, 0, 0, 0]),
+              signers: [],
+              ext: xdr.AccountEntryExt.v0(),
+            }),
+          ),
         });
       }
-      if (kind === "trustline" && ledger.trustline) {
+      if (key.type === "trustline" && ledger.trustline) {
         entries.push({
           key,
-          val: {
-            switch: () => ({ name: "trustline" }),
-            trustLine: () => ({
-              balance: () => 0n,
-              limit: () => ledger.trustlineLimit ?? 10n ** 15n,
-              flags: () => 1,
-              ext: () => ({ switch: () => 0 }),
+          val: xdr.LedgerEntryData.trustline(
+            new xdr.TrustLineEntry({
+              accountId: key.trustLine.accountId,
+              asset: key.trustLine.asset,
+              balance: 0n,
+              limit: ledger.trustlineLimit ?? 10n ** 15n,
+              flags: 1,
+              ext: xdr.TrustLineEntryExt.v0(),
             }),
-          },
+          ),
         });
       }
     }

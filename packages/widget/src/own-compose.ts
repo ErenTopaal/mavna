@@ -137,7 +137,7 @@ async function composeOwn(
   const prepared = await rpc.prepare(await build(entries));
   const op = prepared.operations[0] as Operation.InvokeHostFunction;
   const kept = op.auth ?? [];
-  if (kept.length !== 1 || kept[0]?.toXDR("base64") !== entries[0]?.toXDR("base64")) {
+  if (kept.length !== 1 || kept[0]?.toXdr("base64") !== entries[0]?.toXdr("base64")) {
     throw new MavnaError(
       "The prepared conversion changed what it authorizes, so it was not signed.",
       {
@@ -159,8 +159,8 @@ async function composeOwn(
     kind: "priced",
     feeStroops: BigInt(prepared.fee),
     finish: async () => {
-      const signed = TransactionBuilder.fromXDR(
-        await engine.stellar.sign(prepared.toXDR(), payer),
+      const signed = TransactionBuilder.fromXdr(
+        await engine.stellar.sign(prepared.toXdr(), payer),
         stellarNetwork.passphrase,
       );
       try {
@@ -196,21 +196,25 @@ function assertOnlyOwnCompose(
   };
   if (entries.length !== 1) refuse();
   const entry = entries[0] as xdr.SorobanAuthorizationEntry;
-  const credentials = entry.credentials();
-  const kind = credentials.switch().name;
-  if (kind === "sorobanCredentialsAddress") {
-    if (Address.fromScAddress(credentials.address().address()).toString() !== expected.payer) {
-      refuse();
-    }
-  } else if (kind !== "sorobanCredentialsSourceAccount") refuse();
-  const root = entry.rootInvocation();
-  if (root.subInvocations().length !== 0) refuse();
-  const fn = root.function();
-  if (fn.switch().name !== "sorobanAuthorizedFunctionTypeContractFn") refuse();
-  const call = fn.contractFn();
-  if (Address.fromScAddress(call.contractAddress()).toString() !== expected.contract) refuse();
-  if (call.functionName().toString() !== "lz_compose") refuse();
-  const got = call.args().map((a) => a.toXDR("base64"));
-  const want = expected.args.map((a) => a.toXDR("base64"));
+  const credentials = entry.credentials;
+  // the same signature over an address, in either encoding the network records;
+  // one that carries delegates hands the authority to others, so it is refused
+  const signer =
+    credentials.type === "sorobanCredentialsAddress"
+      ? credentials.address.address
+      : credentials.type === "sorobanCredentialsAddressV2"
+        ? credentials.addressV2.address
+        : undefined;
+  if (signer !== undefined) {
+    if (Address.fromScAddress(signer).toString() !== expected.payer) refuse();
+  } else if (credentials.type !== "sorobanCredentialsSourceAccount") refuse();
+  const root = entry.rootInvocation;
+  if (root.subInvocations.length !== 0) refuse();
+  const fn = root.function;
+  const call = fn.type === "sorobanAuthorizedFunctionTypeContractFn" ? fn.contractFn : refuse();
+  if (Address.fromScAddress(call.contractAddress).toString() !== expected.contract) refuse();
+  if (call.functionName.toString() !== "lz_compose") refuse();
+  const got = call.args.map((a) => a.toXdr("base64"));
+  const want = expected.args.map((a) => a.toXdr("base64"));
   if (got.length !== want.length || got.some((a, i) => a !== want[i])) refuse();
 }
