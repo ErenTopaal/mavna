@@ -100,6 +100,9 @@ import {
 /** Ten thousand basis points to the whole. */
 const BPS = 10_000n;
 
+/** The native fee is attached with a tenth on top, refunded when unused. */
+const FEE_HEADROOM_DIVISOR = 10n;
+
 export interface LayerZeroAdapterOptions {
   readonly network: NetworkId;
   /** Used to inspect the destination and to read the Stellar side of the pathway. */
@@ -592,6 +595,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
       );
     }
 
+    // Still a block or more old by the time it is signed, and on Ethereum the
+    // approval confirms in between. The endpoint reverts a send whose fee went
+    // up and refunds whatever is attached beyond the fee, so a tenth on top
+    // costs nothing unless it is needed. The OApp requires the fee argument and
+    // the value to be equal, so both carry it.
+    const attached =
+      fee.nativeFee + (fee.nativeFee + FEE_HEADROOM_DIVISOR - 1n) / FEE_HEADROOM_DIVISOR;
+    const native = nativeAssetOf(route.fromChain.id, resolved.source);
+    const feeNote =
+      ` Attaches up to ${readableAmount(attached, native.decimals)} ${native.symbol} for ` +
+      "LayerZero's delivery fee; whatever is not needed is refunded to this wallet.";
+
     const send: UnsignedTransaction = {
       chainId: route.fromChain.id,
       // The caller's wallet encodes this. The SDK never signs and never submits,
@@ -606,21 +621,23 @@ export class LayerZeroAdapter implements BridgeAdapter {
             amountLD: sendParam.amountLD.toString(),
             minAmountLD: sendParam.minAmountLD.toString(),
           },
-          { nativeFee: fee.nativeFee.toString(), lzTokenFee: fee.lzTokenFee.toString() },
+          { nativeFee: attached.toString(), lzTokenFee: fee.lzTokenFee.toString() },
           // Refunded to the sender. Anything left of the fee comes back to the
           // wallet that paid it, which is the only address we are entitled to name.
           SENDER_ADDRESS,
         ],
         // `send` is payable and the fee rides on the call itself. A caller that
         // ignored this would have the transaction revert having spent gas.
-        value: fee.nativeFee.toString(),
+        value: attached.toString(),
       }),
       format: "evm-tx",
       describes:
         route.compose === undefined
           ? `Send ${readableAmount(sends, resolved.tokenDecimals)} ${resolved.tokenSymbol} to ` +
-            `${route.destination} on Stellar, via LayerZero. ${describeDvnStack(resolved.uln, resolved.dvnNames)}`
-          : describeComposeSend(route.compose, route.destination, sends, resolved),
+            `${route.destination} on Stellar, via LayerZero. ` +
+            describeDvnStack(resolved.uln, resolved.dvnNames) +
+            feeNote
+          : describeComposeSend(route.compose, route.destination, sends, resolved) + feeNote,
       ephemeralSigners: [],
       unnecessaryWhen: undefined,
     };

@@ -519,6 +519,15 @@ describe("quoting USDT0 into Stellar", () => {
     );
     expect(payload.args[0].minAmountLD).toBe("24875000");
     expect(payload.args[0].to).toBe(`0x${StrKey.decodeEd25519PublicKey(READY).toString("hex")}`);
+    // the quoted fee plus a tenth, in both the fee argument and the value, since
+    // the OApp requires them equal and the endpoint refunds what is not needed
+    const sent = JSON.parse(txs[0]?.payload ?? "{}") as {
+      value: string;
+      args: [unknown, { nativeFee: string }, string];
+    };
+    expect(sent.value).toBe("45100000000000");
+    expect(sent.args[1].nativeFee).toBe("45100000000000");
+    expect(txs[0]?.describes).toMatch(/refunded/);
     // the verifiers are named, by LayerZero's name or else by address
     expect(txs[0]?.describes).toContain(`2 verifiers must all agree (LayerZero Labs, ${DVN_B})`);
   });

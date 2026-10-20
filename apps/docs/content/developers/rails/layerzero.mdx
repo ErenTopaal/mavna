@@ -73,6 +73,15 @@ reset carries `skipAlsoWhenExactly: "0"` and the approval carries the amount as
 `atLeastBaseUnits`, so a caller that honours both sends the reset only when an
 allowance sits between zero and the amount, and neither when it already covers it.
 
+## The delivery fee
+
+LayerZero's fee is paid in the source chain's gas token, on top of the amount. The
+quote states the fee `quoteSend` returns. The build prices it again and attaches a
+tenth more, in both `fee.nativeFee` and the call's `value` (the OApp requires them
+equal). The endpoint reverts a send whose fee rose after it was priced and refunds
+anything above the current fee to the sender, so the extra only gets spent if the
+fee really did go up. The send's description states the maximum attached.
+
 ## The floor is enforced on-chain
 
 Unlike a native mint, the amount received is not equal to the amount sent, because
