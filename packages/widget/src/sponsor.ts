@@ -64,6 +64,8 @@ export interface SponsorSettle {
   settlementRetryable?: boolean;
   /** Present, and false, only when the sponsor holds no settlement for the account. */
   held?: false;
+  /** Asked too often (429): nothing is known about what it holds. */
+  busy?: true;
 }
 
 /**
@@ -237,7 +239,7 @@ export function createSponsorClient(
     async settle(destination) {
       const answer = await send("/settle", { destination });
       if (answer.status === 404) return { settled: false, held: false };
-      if (answer.status === 429) return { settled: false, settlementRetryable: true };
+      if (answer.status === 429) return { settled: false, settlementRetryable: true, busy: true };
       if (!answer.ok) throw failure(answer);
       return answer.body as SponsorSettle;
     },

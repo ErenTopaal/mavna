@@ -595,10 +595,12 @@ async function deliverToStellar(
   // The sponsor's first answer says whether it keeps delivering by itself once
   // this page is gone; only then is closing it safe. A new account still needs
   // its own wallet to be set up, which no sponsor can do for it.
-  let told = ownDelivery;
+  // said once, and said again only to upgrade: a later answer that the sponsor is
+  // watching makes closing safe after all, while nothing ever downgrades it
+  let told: "nothing" | "paused" | "settled" = ownDelivery ? "settled" : "nothing";
   const tellClosing = (watching: boolean): void => {
-    if (told) return;
-    told = true;
+    if (told === "settled" || (told === "paused" && !watching)) return;
+    told = watching ? "settled" : "paused";
     patch("attest", {
       phase: "pending",
       note: !watching
@@ -737,7 +739,19 @@ export async function finishDelivery(
   // The sponsor accepts a preparation only against a repayment it holds, and it
   // holds one about a day. Past that, a new one is signed first, held to the
   // same checks as at the start, for what Circle will actually mint.
-  if ((await engine.sponsor.settle(recipient)).held === false) {
+  // /settle submits a held repayment only once the money has arrived, which an
+  // undelivered burn has not, so asking it here takes nothing; only an explicit
+  // "nothing held" means a new one is needed, and a busy sponsor tells nothing
+  const probe = await engine.sponsor.settle(recipient).catch((cause: unknown) => {
+    throw withFunds(cause, funds);
+  });
+  if (probe.busy === true) {
+    throw new Error(
+      "The sponsor is busy right now, so whether it still holds this account's repayment is " +
+        `not known. ${funds} Try again in a moment.`,
+    );
+  }
+  if (probe.held === false) {
     const usdc = engine.usdcOnStellar;
     const { lane } = await inspectDestination(
       engine.rpc,

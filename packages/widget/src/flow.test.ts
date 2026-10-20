@@ -566,3 +566,81 @@ describe("the header's Stellar address", () => {
     expect(flow.state.stellarAddress).toBeNull();
   });
 });
+
+describe("a transfer that ended without arriving", () => {
+  const endings: Array<[string, () => Error]> = [
+    ["failed", () => new Error("The network refused it.")],
+    ["still moving", () => new StillMoving("This page stopped watching.")],
+    [
+      "delivered, unproven",
+      () =>
+        new DeliveredUnverified(
+          "The rail's record no longer says what arrived.",
+          "f00d",
+          "https://stellar.expert/explorer/testnet/tx/f00d",
+        ),
+    ],
+  ];
+
+  const ended = (variant: "wide" | "compact", ending: () => Error) => {
+    const quoting = {
+      ...engine,
+      usdcOnStellar: STELLAR_USDC,
+      xlmOnStellar: STELLAR_XLM,
+      adapters: [],
+      sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+      usdt0Chains: [],
+      // the sponsor cannot be asked, which a quote turns into declines and finishes
+      sponsorTerms: () => Promise.reject(new Error("The sponsor is down.")),
+      xlmStroopsPerUsdc: async () => 100_000_000n,
+    } as unknown as Engine;
+    const flow = applied(new Flow({ engine: quoting, variant }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = {
+      ...flow.state,
+      ...FORM,
+      routes: [view],
+      selected: view.id,
+      screen: "flight",
+      phase: "sending",
+      steps: [{ id: "burn", label: "Send", user: true, actor: "Your wallet", phase: "pending" }],
+    };
+    flow.endWith(ending());
+    return flow;
+  };
+
+  for (const variant of ["wide", "compact"] as const) {
+    for (const [name, ending] of endings) {
+      it(`${name}, ${variant}: offers a way back, and a new quote then resolves`, async () => {
+        const flow = ended(variant, ending);
+        const html = renderToStaticMarkup(flow.render() as React.ReactElement);
+        expect(html).toContain("Send another");
+        expect(html).toContain('aria-label="Back"');
+        flow.sendAnother();
+        expect(flow.state.screen).toBe("send");
+        expect(flow.state.phase).toBe("quote");
+        await vi.waitFor(() => expect(flow.state.quoting).toBe(false));
+        expect(flow.state.complete).toBe(true);
+      });
+    }
+  }
+
+  it("lets a new amount quote after an ending, and Escape go back from the flight", async () => {
+    vi.useFakeTimers();
+    try {
+      const flow = ended("compact", endings[0]?.[1] ?? (() => new Error("x")));
+      flow.state = { ...flow.state, cameFrom: "review" };
+      const inside = {};
+      (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
+      flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
+      expect(flow.state.screen).toBe("review");
+      flow.setAmount("2");
+      await vi.advanceTimersByTimeAsync(500);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(flow.state.quoting).toBe(false));
+      expect(flow.state.complete).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -63,9 +63,13 @@ describe("settle", () => {
     expect(await client.settle("G")).toEqual({ settled: false, held: false });
   });
 
-  it("reads a 429 as retryable", async () => {
+  it("reads a 429 as retryable, and as saying nothing about what is held", async () => {
     answer(429, JSON.stringify({ error: "Slow down.", retryable: true }));
-    expect(await client.settle("G")).toEqual({ settled: false, settlementRetryable: true });
+    expect(await client.settle("G")).toEqual({
+      settled: false,
+      settlementRetryable: true,
+      busy: true,
+    });
   });
 
   it("rejects a 400 with the server's error", async () => {

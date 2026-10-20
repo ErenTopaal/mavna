@@ -1867,6 +1867,31 @@ describe("finishing a Circle delivery from Activity", () => {
     expect(log.filter((l) => l === "sponsor /prepare")).toHaveLength(2);
   });
 
+  it("says it cannot tell whether the repayment is held when the sponsor is busy, preparing nothing", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    settleReplies = [[429, { error: "Asked too often.", retryable: true }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    await expect(
+      finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia"),
+    ).rejects.toThrow(/busy.*not known.*safe on Circle's side.*Try again in a moment/);
+    expect(log).not.toContain("sponsor /prepare");
+  });
+
+  it("says the funds are safe when asking about the repayment fails", async () => {
+    attestedTo(DESTINATION, 5_000_000);
+    settleReplies = [[500, { error: "The sponsor's state could not be read.", retryable: true }]];
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+    ];
+    await expect(
+      finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia"),
+    ).rejects.toThrow(
+      "The sponsor's state could not be read. The funds are safe on Circle's side and still deliverable.",
+    );
+  });
+
   it("signs a new repayment first when the one held for a new account has lapsed", async () => {
     attestedTo(DESTINATION, 5_000_000);
     lane = "needs-account";
@@ -2144,6 +2169,21 @@ describe("whether closing the page is safe while Circle attests", () => {
     const { seen, patch } = patches();
     await run(cctp(), routeFor("cctp"), patch);
     expect(attestNotes(seen)[0]).toMatch(/Safe to close this page: the sponsor delivers it/);
+  });
+
+  it("is upgraded to safe once a later answer says the sponsor is watching", async () => {
+    deliverReplies = [
+      [0, undefined],
+      [404, { error: "Not attested yet.", retryable: true, watching: true }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const { seen, patch } = patches();
+    await run(cctp(), routeFor("cctp"), patch);
+    const notes = attestNotes(seen).map(String);
+    const paused = notes.findIndex((n) => /Closing this page pauses the delivery/.test(n));
+    const safe = notes.findIndex((n) => /Safe to close this page/.test(n));
+    expect(paused).toBeGreaterThan(-1);
+    expect(safe).toBeGreaterThan(paused);
   });
 
   it("is not said for a new account, which its own wallet still has to set up", async () => {
