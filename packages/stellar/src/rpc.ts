@@ -110,6 +110,24 @@ export class SubmitRejected extends MavnaError {
 }
 
 /**
+ * Every attempt at a submission was used up without one being included.
+ * `stale-sequence` means each was refused at submission for a stale sequence,
+ * so none reached the ledger and none was charged a fee. `exhausted` is any
+ * other mix, where a caller cannot assume that.
+ */
+export class SubmitExhausted extends MavnaError {
+  readonly code: "stale-sequence" | "exhausted";
+  readonly lastReason: string;
+
+  constructor(message: string, code: "stale-sequence" | "exhausted", lastReason: string) {
+    super(message, { retryable: true });
+    this.name = "SubmitExhausted";
+    this.code = code;
+    this.lastReason = lastReason;
+  }
+}
+
+/**
  * A node at or past our high-water mark has no such account. Its own class so
  * callers can tell this answer from a read that failed, which says nothing
  * about whether the account exists.
@@ -381,6 +399,8 @@ export class RpcClient {
   ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
     const attempts = options.attempts ?? 8;
     let lastReason = "unknown";
+    // stays true only while every refusal is a stale sequence at submission
+    let onlyStaleSequence = true;
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       const tx = await build();
@@ -422,10 +442,12 @@ export class RpcClient {
           throw new SubmitRejected(`${label} was rejected: ${reason}`, reason);
         }
         lastReason = reason;
+        onlyStaleSequence &&= reason === "txBadSeq";
         await this.sleep(this.baseDelayMs * 2 ** Math.min(attempt, 4));
         continue;
       }
 
+      onlyStaleSequence = false;
       if (sent.status === "TRY_AGAIN_LATER") {
         lastReason = "TRY_AGAIN_LATER";
         await this.sleep(this.baseDelayMs * 2 ** Math.min(attempt, 4));
@@ -457,10 +479,11 @@ export class RpcClient {
       throw new MavnaError(`${label} failed on-chain.`, { retryable: false });
     }
 
-    throw new MavnaError(
+    throw new SubmitExhausted(
       `${label} could not be submitted after ${attempts} attempts; ` +
         `the last reason was ${lastReason}.`,
-      { retryable: true },
+      onlyStaleSequence ? "stale-sequence" : "exhausted",
+      lastReason,
     );
   }
 }

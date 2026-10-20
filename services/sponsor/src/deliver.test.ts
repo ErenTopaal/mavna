@@ -303,6 +303,18 @@ describe("a delivery against the day's budget", () => {
     expect(rpcClient.sent).toEqual([]);
   });
 
+  it("gives its share back when every attempt was refused for a stale sequence", async () => {
+    const rpcClient = new SequencedRpc();
+    // something else the payer signs lands before every send, so none is ever current
+    for (let n = 0; n < 8; n += 1) rpcClient.landsFirst.add(n);
+    const budget = new DeliveryBudget(new MemoryDocumentStore(), 50_000_000n, () => "2026-10-20");
+    await expect(
+      deliveryOn(rpcClient, budget).deliver({ messageHex: "0xabcd", attestationHex: "0x1234" }),
+    ).rejects.toThrow();
+    expect(rpcClient.sent.length).toBeGreaterThan(1);
+    expect(await budget.spentToday()).toBe(0n);
+  });
+
   it("gives its share back when the network refused it outright", async () => {
     const rpcClient = new SequencedRpc();
     rpcClient.refuseWith = "txBadAuth";

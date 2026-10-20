@@ -12,7 +12,13 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AccountNotFound, createLedgerFloor, RpcClient, SubmitRejected } from "./rpc.js";
+import {
+  AccountNotFound,
+  createLedgerFloor,
+  RpcClient,
+  SubmitExhausted,
+  SubmitRejected,
+} from "./rpc.js";
 
 const noSleep = async (): Promise<void> => {};
 
@@ -157,6 +163,25 @@ describe("submission", () => {
     expect(failure).toBeInstanceOf(MavnaError);
     expect((failure as MavnaError).retryable).toBe(true);
     expect(sent).toBe(3);
+    // refused at the door every time, so nothing was ever included or charged
+    expect(failure).toBeInstanceOf(SubmitExhausted);
+    expect((failure as SubmitExhausted).code).toBe("stale-sequence");
+  });
+
+  it("does not call it a stale sequence when the node was only busy", async () => {
+    const client = clientForTest();
+    let sent = 0;
+    client.server.sendTransaction = async () => {
+      sent += 1;
+      return sent === 1
+        ? { status: "TRY_AGAIN_LATER", hash: "00", latestLedger: 1, latestLedgerCloseTime: 0 }
+        : rejectedWith("txBadSeq");
+    };
+    const failure = await client
+      .submit("delivery", async () => presignedTx(300), { attempts: 3 })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubmitExhausted);
+    expect((failure as SubmitExhausted).code).toBe("exhausted");
   });
 
   it("stops waiting for inclusion after the wait it was given, not the time bound", async () => {

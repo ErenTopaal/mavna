@@ -1,6 +1,11 @@
 import { deliveryFailureOf } from "@mavna/adapter-cctp";
 import { MavnaError } from "@mavna/core";
-import { type NetworkConfig, type RpcClient, SubmitRejected } from "@mavna/stellar";
+import {
+  type NetworkConfig,
+  type RpcClient,
+  SubmitExhausted,
+  SubmitRejected,
+} from "@mavna/stellar";
 import { Keypair, type Transaction } from "@stellar/stellar-sdk";
 import { assertFeeWithin } from "./compose.js";
 import type { DeliveryBudget } from "./delivery-budget.js";
@@ -223,9 +228,16 @@ export class Deliverer {
       await reservation?.settle(chargedBy(result, ceiling));
       return { kind: "delivered", txHash: result.txHash, ledger: result.ledger };
     } catch (cause) {
-      // Refused before anything was sent costs nothing. Anything sent may
-      // have been charged, so its share stays counted in full.
-      if (!sent || cause instanceof SubmitRejected) await reservation?.release();
+      // Refused before anything was sent costs nothing, and so does every send
+      // refused at submission for a stale sequence. Anything else sent may have
+      // been charged, so its share stays counted in full.
+      if (
+        !sent ||
+        cause instanceof SubmitRejected ||
+        (cause instanceof SubmitExhausted && cause.code === "stale-sequence")
+      ) {
+        await reservation?.release();
+      }
       // Sent, not refused, and not retryable: it was included and failed, so
       // its fee was paid. Said as such, never as a failure that cost nothing.
       if (
