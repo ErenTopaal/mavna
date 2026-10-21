@@ -1224,3 +1224,59 @@ describe("the approvals a route will ask for", () => {
     expect(approvalsLabel(toRouteView(every))).toBe("2 steps");
   });
 });
+
+describe("a conversion the recipient pays the network fee for", () => {
+  // the conversion on Stellar is the recipient's own transaction, so an account
+  // with no XLM to spare cannot send it: a live Arc transfer to a zero-XLM
+  // account arrived and its conversion failed with txINSUFFICIENT_BALANCE
+  const intoXlm = routeFor("cctp", { swap: true, delivers: STELLAR_XLM });
+  const terms = {
+    network: "testnet",
+    reserveFunding: "sponsor" as const,
+    minDeliveryBaseUnits: 0n,
+  };
+  const offered = (
+    spareStroops: bigint | undefined,
+    destination: "exists" | "missing" = "exists",
+  ) =>
+    applySponsorTerms(
+      { routes: [intoXlm], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms,
+        destination,
+        spareStroops,
+        baseReserveStroops: 5_000_000,
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
+    );
+
+  it("is declined for an account with no XLM to spare, saying why and what to do", () => {
+    const set = offered(0n);
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ reason: "destination-unsupported" });
+    expect(set.rejected[0]?.explanation).toMatch(/network fee/);
+    expect(set.rejected[0]?.explanation).toMatch(/0 XLM to spare/);
+    expect(set.rejected[0]?.explanation).toMatch(/Receive USDC/);
+  });
+
+  it("is offered to an account that can spare the fee", () => {
+    expect(offered(100_000_000n).routes).toEqual([intoXlm]);
+  });
+
+  it("is declined into a new account, which is set up holding only its minimum", () => {
+    const fresh = routeFor("cctp", { newAccount: true, swap: true, delivers: STELLAR_XLM });
+    const set = applySponsorTerms(
+      { routes: [fresh], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms,
+        destination: "missing",
+        baseReserveStroops: 5_000_000,
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
+    );
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/network fee/);
+  });
+});

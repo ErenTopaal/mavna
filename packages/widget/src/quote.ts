@@ -415,8 +415,8 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     retryable: rejectionIsRetryable(reason),
   });
   if (!circle && !setsUp) {
-    // only the conversion's trustline to check; the sponsor is not involved
-    const holds = convertBlocker(route, check);
+    // only the conversion's trustline and fee to check; the sponsor is not involved
+    const holds = convertBlocker(route, check) ?? conversionFeeBlocker(route, check);
     return holds === undefined ? undefined : decline(holds[0], holds[1]);
   }
 
@@ -472,7 +472,7 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     if (blocked !== undefined) return decline(blocked[0], blocked[1]);
   }
 
-  const holds = convertBlocker(route, check);
+  const holds = convertBlocker(route, check) ?? conversionFeeBlocker(route, check);
   if (holds !== undefined) return decline(holds[0], holds[1]);
 
   if (circle && terms.reserveFunding === "self") {
@@ -604,6 +604,51 @@ function convertBlocker(
 }
 
 /**
+ * What a conversion on Stellar may cost its signer in network fees. The order
+ * book venue builds with 0.1 XLM; an Aquarius conversion measured on testnet
+ * charged 0.03 XLM against a 0.034 XLM maximum.
+ */
+const CONVERSION_FEE_BUDGET_STROOPS = 1_000_000n;
+
+/**
+ * Why the recipient could not pay for its own conversion. It signs and sends
+ * that transaction after the money lands, so an account with no XLM above its
+ * minimum balance is refused by the network and the arrival stays unconverted.
+ * A new account is set up holding exactly its minimum, so it has none either.
+ */
+function conversionFeeBlocker(
+  route: Route,
+  check: SponsorCheck,
+): [RouteRejection["reason"], string] | undefined {
+  const swap = route.steps.find((s) => s.kind === "swap");
+  if (swap === undefined || check.terms instanceof Error) return undefined;
+  const spare =
+    check.destination === "missing"
+      ? 0n
+      : check.destination === "exists"
+        ? check.spareStroops
+        : undefined;
+  if (spare === undefined) return undefined;
+  // paying for its own Circle delivery comes out of the same XLM first
+  const delivery =
+    route.source === "cctp" && check.terms.reserveFunding === "self"
+      ? OWN_DELIVERY_FEE_BUDGET_STROOPS
+      : 0n;
+  if (spare >= CONVERSION_FEE_BUDGET_STROOPS + delivery) return undefined;
+  const arrives = swap.from.asset.symbol;
+  const has = spare > 0n ? spare : 0n;
+  return [
+    "destination-unsupported",
+    `Converting into ${swap.to.asset.symbol} is a transaction the receiving account signs and ` +
+      `pays a network fee for, up to ${stroopsToXlm(CONVERSION_FEE_BUDGET_STROOPS)} XLM, and ` +
+      (check.destination === "missing"
+        ? "a new account is set up with no XLM to spare. "
+        : `it has ${stroopsToXlm(has)} XLM to spare. `) +
+      `Receive ${arrives}, or add a little XLM to the account first.`,
+  ];
+}
+
+/**
  * Why the receiving account cannot pay for Circle's delivery on Stellar, when
  * it must. It signs and pays `mint_and_forward` itself, so it has to be an
  * account that exists, can sign, and can spare the fee, and the trustline's
@@ -702,6 +747,8 @@ async function checkSponsor(
   destination: string,
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
+  /** Whether the route converts at all, whose fee the recipient pays. */
+  converts = false,
 ): Promise<SponsorCheck> {
   let terms: SponsorTerms | Error;
   try {
@@ -722,6 +769,11 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
+      // the recipient pays its own conversion's fee, from XLM it can spare
+      if (converts && found === "exists" && StrKey.isValidEd25519PublicKey(destination)) {
+        const entry = await readAccountEntry(engine.rpc, destination);
+        if (entry !== undefined) spare = spareStroops(entry, baseReserveStroops);
+      }
       // something will be set up, and repaid from the arrival at this price
       if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
         try {
@@ -882,7 +934,7 @@ export function runQuote(
     // and then taken back. They are cached on the engine after the first answer.
     // a conversion into anything but XLM needs a trustline the recipient holds
     const into = swap !== undefined && swap.wanted.id !== "native" ? swap.wanted : undefined;
-    void checkSponsor(engine, destination, into)
+    void checkSponsor(engine, destination, into, swap !== undefined)
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
