@@ -62,13 +62,15 @@
   --mv-ink-3: oklch(0.42 0 0);
   --mv-knob: oklch(0.3 0 0);
 
-  /* Muted text, brightest to faintest. */
+  /* Muted text, brightest to faintest. Each step is text somewhere, so even the
+     faintest keeps 4.5:1 on the brightest surface text sits on (surface-3, a
+     selected or hovered row); the steps keep their order inside that room. */
   --mv-muted: oklch(0.46 0 0);
-  --mv-muted-b: oklch(0.5 0 0);
-  --mv-muted-2: oklch(0.52 0 0);
-  --mv-faint: oklch(0.56 0 0);
-  --mv-faint-2: oklch(0.6 0 0);
-  --mv-faintest: oklch(0.64 0 0);
+  --mv-muted-b: oklch(0.48 0 0);
+  --mv-muted-2: oklch(0.49 0 0);
+  --mv-faint: oklch(0.5 0 0);
+  --mv-faint-2: oklch(0.51 0 0);
+  --mv-faintest: oklch(0.52 0 0);
 
   /* Rules: black-alpha on light, white-alpha on dark. Kept by role, not by value:
      a rest hairline and a hover border are different tokens even at close alpha. */
@@ -207,11 +209,11 @@
     --mv-ink-3: oklch(0.75 0 0);
     --mv-knob: oklch(0.8 0 0);
     --mv-muted: oklch(0.72 0 0);
-    --mv-muted-b: oklch(0.66 0 0);
-    --mv-muted-2: oklch(0.62 0 0);
-    --mv-faint: oklch(0.58 0 0);
-    --mv-faint-2: oklch(0.52 0 0);
-    --mv-faintest: oklch(0.46 0 0);
+    --mv-muted-b: oklch(0.7 0 0);
+    --mv-muted-2: oklch(0.685 0 0);
+    --mv-faint: oklch(0.67 0 0);
+    --mv-faint-2: oklch(0.66 0 0);
+    --mv-faintest: oklch(0.65 0 0);
     --mv-rule-hair: oklch(1 0 0 / 0.08);
     --mv-rule: oklch(1 0 0 / 0.12);
     --mv-rule-2: oklch(1 0 0 / 0.16);
@@ -243,11 +245,11 @@
   --mv-ink-3: oklch(0.75 0 0);
   --mv-knob: oklch(0.8 0 0);
   --mv-muted: oklch(0.72 0 0);
-  --mv-muted-b: oklch(0.66 0 0);
-  --mv-muted-2: oklch(0.62 0 0);
-  --mv-faint: oklch(0.58 0 0);
-  --mv-faint-2: oklch(0.52 0 0);
-  --mv-faintest: oklch(0.46 0 0);
+  --mv-muted-b: oklch(0.7 0 0);
+  --mv-muted-2: oklch(0.685 0 0);
+  --mv-faint: oklch(0.67 0 0);
+  --mv-faint-2: oklch(0.66 0 0);
+  --mv-faintest: oklch(0.65 0 0);
   --mv-rule-hair: oklch(1 0 0 / 0.08);
   --mv-rule: oklch(1 0 0 / 0.12);
   --mv-rule-2: oklch(1 0 0 / 0.16);
