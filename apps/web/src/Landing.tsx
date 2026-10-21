@@ -2,11 +2,10 @@ import { MavnaWidget, type MavnaWidgetConfig } from "@mavna/widget";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 
 /*
- * The Mavna landing page. Ported from the design as faithfully as possible: every
- * element keeps its original inline styles (parsed from a CSS string by `s`), the
- * design's `style-hover` becomes the `Hover` wrapper, and the hero shader, the
- * scroll chrome and the reveal-on-scroll all live in one effect. The only edits to
- * the design are the links, which now point at the real Mavna domains.
+ * The Mavna landing page. Elements keep their styles inline (parsed from a CSS
+ * string by `s`), `Hover` adds a hover style, and the hero shader, the scroll
+ * chrome and the reveal-on-scroll all live in one effect. What inline styles
+ * cannot say (keyframes, pseudo-elements, breakpoints) is in landing.css.
  */
 
 const APP = "https://mavna.app";
@@ -15,6 +14,28 @@ const DOCS_SDK = "https://docs.mavna.app/developers";
 const DOCS_WIDGET = "https://docs.mavna.app/widget";
 const PLAYGROUND = "https://playground.mavna.app";
 const GITHUB = "https://github.com/ErenTopaal/mavna";
+
+// the widget's own neutrals and its signal red, so the page and the product it
+// shows read as one thing
+const GROUND = "oklch(0.985 0 0)";
+const INK = "oklch(0.205 0 0)";
+const MUTED = "oklch(0.46 0 0)";
+const FAINT = "oklch(0.72 0 0)";
+const RULE = "oklch(0 0 0 / 0.1)";
+const NIGHT = "oklch(0.145 0 0)";
+const NIGHT_2 = "oklch(0.205 0 0)";
+const ON_NIGHT = "oklch(0.97 0 0)";
+const MUTED_NIGHT = "oklch(0.74 0 0)";
+const RULE_NIGHT = "oklch(1 0 0 / 0.12)";
+const SIGNAL = "oklch(0.55 0.2 25)";
+const SIGNAL_BRIGHT = "oklch(0.7 0.17 28)";
+const OXIDE = "oklch(0.4 0.15 25)";
+const ON_OXIDE = "oklch(0.97 0.012 25)";
+const MUTED_OXIDE = "oklch(0.88 0.04 25)";
+
+const WRAP =
+  "max-width: 1180px; margin: 0 auto; padding-left: clamp(20px, 4vw, 48px); padding-right: clamp(20px, 4vw, 48px)";
+const BIG = "margin: 0; font-weight: 300; letter-spacing: -0.04em; line-height: 0.98";
 
 /** Split a box shorthand value into top/right/bottom/left, respecting the spaces
  *  inside functions like clamp(), and applying the 1/2/3/4-value CSS rules. */
@@ -102,34 +123,6 @@ function Hover({ as = "div", base, hover, href, external, row2, children }: Hove
   );
 }
 
-/** A documentation topic link: dark text that warms to the accent on hover. */
-function DocLink({ href, children }: { href: string; children: ReactNode }): ReactNode {
-  return (
-    <Hover
-      as="a"
-      href={href}
-      base="font-size: 15.5px; color: oklch(0.42 0.012 250); transition: color .4s ease"
-      hover="color: oklch(0.60 0.075 45)"
-    >
-      {children}
-    </Hover>
-  );
-}
-
-/** A footer link: light-on-dark text that brightens on hover. */
-function FootLink({ href, children }: { href: string; children: ReactNode }): ReactNode {
-  return (
-    <Hover
-      as="a"
-      href={href}
-      base="font-size: 14.5px; color: oklch(0.80 0.012 250); transition: color .4s ease"
-      hover="color: oklch(0.96 0.008 85)"
-    >
-      {children}
-    </Hover>
-  );
-}
-
 // set at build time, and vite.config.ts refuses a production build without it.
 // a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
 const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
@@ -140,10 +133,12 @@ const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL |
 function Live({
   config,
   hold,
+  fit,
   style,
 }: {
   readonly config: MavnaWidgetConfig;
   readonly hold: number;
+  readonly fit?: boolean;
   readonly style?: CSSProperties;
 }): ReactNode {
   const ref = useRef<HTMLDivElement>(null);
@@ -163,7 +158,11 @@ function Live({
     };
   }, [show]);
   return (
-    <div ref={ref} style={{ minHeight: show ? undefined : hold, ...style }}>
+    <div
+      ref={ref}
+      data-fit={fit ? "" : undefined}
+      style={{ minHeight: show ? undefined : hold, ...style }}
+    >
       {show ? (
         <MavnaWidget
           config={SPONSOR_URL === undefined ? config : { ...config, sponsorUrl: SPONSOR_URL }}
@@ -173,16 +172,265 @@ function Live({
   );
 }
 
-const CODE_HTML =
-  '<span style="color: oklch(0.66 0.05 245);">import</span> { raceAdapters } <span style="color: oklch(0.66 0.05 245);">from</span> <span style="color: oklch(0.76 0.07 45);">"@mavna/routing"</span>;\n\n' +
-  '<span style="color: oklch(0.66 0.05 245);">const</span> { routes, rejected } = <span style="color: oklch(0.66 0.05 245);">await</span> raceAdapters(adapters, request, {\n' +
-  '  ranking: <span style="color: oklch(0.76 0.07 45);">"best-received"</span>,\n' +
-  "  onUpdate: (partial) => render(partial),\n" +
-  "});\n\n" +
-  'routes[<span style="color: oklch(0.74 0.03 145);">0</span>].receives             <span style="color: oklch(0.58 0.012 250);">// what actually lands</span>\n' +
-  'routes[<span style="color: oklch(0.74 0.03 145);">0</span>].signaturesRequired   <span style="color: oklch(0.58 0.012 250);">// how many prompts</span>\n' +
-  'rejected[<span style="color: oklch(0.74 0.03 145);">0</span>].explanation       <span style="color: oklch(0.58 0.012 250);">// why that one said no</span>\n' +
-  'rejected[<span style="color: oklch(0.74 0.03 145);">0</span>].retryable         <span style="color: oklch(0.58 0.012 250);">// worth asking again?</span>';
+/** A plain arrow, sized by the text around it. */
+function Arrow({ size = "1em" }: { size?: string }): ReactNode {
+  return (
+    <svg
+      data-arrowhead=""
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={s("display: block; flex: none")}
+    >
+      <path d="M4 12h16M14 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+const RAILS = ["Circle CCTP", "LayerZero", "Axelar", "NEAR Intents"];
+
+/** The rails' names drifting past, twice over so the loop has no seam. */
+function RailBand(): ReactNode {
+  const row = [...RAILS, ...RAILS];
+  return (
+    <div data-band="" aria-hidden="true" style={s("overflow: hidden; padding: 6px 0")}>
+      <div data-band-track="" style={s("display: flex; width: max-content")}>
+        {[0, 1].map((copy) => (
+          <div key={copy} style={s("display: flex; align-items: center")}>
+            {row.map((name, i) => (
+              <span
+                // biome-ignore lint/suspicious/noArrayIndexKey: the names repeat on purpose, so the index is what tells them apart.
+                key={`${copy}-${i}`}
+                style={s("display: flex; align-items: center")}
+              >
+                <span
+                  style={s(
+                    "font-weight: 300; font-size: clamp(56px, 10vw, 150px); letter-spacing: -0.045em; line-height: 1.05; white-space: nowrap; padding: 0 clamp(18px, 2.4vw, 36px)",
+                  )}
+                >
+                  {name}
+                </span>
+                <img
+                  src="/assets/mark-paper.png"
+                  alt=""
+                  style={s("width: clamp(26px, 3vw, 44px); height: auto; opacity: 0.5")}
+                />
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const COINS = ["USDC", "USDT0", "XLM"] as const;
+type Coin = (typeof COINS)[number];
+
+/** The three hops of a delivery, with the last one set by the coin the visitor picks. */
+function CoinPicker(): ReactNode {
+  const [coin, setCoin] = useState<Coin>("XLM");
+  const stage =
+    "flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 18px; text-align: center";
+  const disc =
+    "width: clamp(150px, 17vw, 210px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; padding: 24px";
+  return (
+    <div>
+      <div data-flow="" style={s("display: flex; align-items: center; gap: 0; position: relative")}>
+        <div style={s(stage)}>
+          <div style={s(`${disc}; border: 1px solid ${RULE_NIGHT}`)}>
+            <span
+              style={s(
+                `font-size: clamp(17px, 1.6vw, 21px); line-height: 1.3; color: ${MUTED_NIGHT}`,
+              )}
+            >
+              A coin on another chain
+            </span>
+          </div>
+        </div>
+        <div
+          data-pipe=""
+          aria-hidden="true"
+          style={s("flex: 0 0 clamp(40px, 7vw, 110px); height: 2px")}
+        />
+        <div style={s(stage)}>
+          <div style={s(`${disc}; background: ${NIGHT_2}`)}>
+            <span
+              style={s(
+                `font-size: clamp(17px, 1.6vw, 21px); line-height: 1.3; color: ${MUTED_NIGHT}`,
+              )}
+            >
+              Whatever that bridge carries
+            </span>
+          </div>
+        </div>
+        <div
+          data-pipe=""
+          aria-hidden="true"
+          style={s("flex: 0 0 clamp(40px, 7vw, 110px); height: 2px")}
+        />
+        <div style={s(stage)}>
+          <div
+            key={coin}
+            data-pop=""
+            style={s(
+              `width: clamp(170px, 19vw, 240px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: ${SIGNAL}; color: ${ON_NIGHT}; box-shadow: 0 30px 80px oklch(0.55 0.2 25 / 0.35)`,
+            )}
+          >
+            <span
+              style={s(
+                "font-weight: 400; font-size: clamp(34px, 4vw, 54px); letter-spacing: -0.03em",
+              )}
+            >
+              {coin}
+            </span>
+          </div>
+        </div>
+      </div>
+      <fieldset
+        style={s(
+          "margin: clamp(40px, 5vw, 60px) 0 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px",
+        )}
+      >
+        <legend
+          style={s(`float: left; margin-right: 14px; font-size: 16px; color: ${MUTED_NIGHT}`)}
+        >
+          Land it as
+        </legend>
+        {COINS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-pressed={c === coin}
+            onClick={() => setCoin(c)}
+            data-chip=""
+            style={s(
+              `min-height: 46px; padding: 0 22px; border-radius: 999px; font: inherit; font-size: 15.5px; cursor: pointer; border: 1px solid ${c === coin ? ON_NIGHT : RULE_NIGHT}; background: ${c === coin ? ON_NIGHT : "transparent"}; color: ${c === coin ? NIGHT : ON_NIGHT}; transition: background .35s ease, color .35s ease, border-color .35s ease`,
+            )}
+          >
+            {c}
+          </button>
+        ))}
+      </fieldset>
+    </div>
+  );
+}
+
+const STAGES = ["Ask", "Set up", "Cross", "Swap", "Deliver"];
+
+/** Three real looks for the drawer, each just a setting the host passes in. */
+const LOOKS: readonly {
+  readonly name: string;
+  readonly swatch: readonly [string, string];
+  readonly config: MavnaWidgetConfig;
+}[] = [
+  {
+    name: "Plain",
+    swatch: [GROUND, INK],
+    config: {
+      integrator: "web.mavna.app",
+      network: "testnet",
+      variant: "drawer",
+      appearance: "light",
+    },
+  },
+  {
+    name: "Night",
+    swatch: [NIGHT, ON_NIGHT],
+    config: {
+      integrator: "web.mavna.app",
+      network: "testnet",
+      variant: "drawer",
+      appearance: "dark",
+    },
+  },
+  {
+    name: "Harbor",
+    swatch: ["oklch(0.97 0.01 245)", "oklch(0.32 0.1 250)"],
+    config: {
+      integrator: "web.mavna.app",
+      network: "testnet",
+      variant: "drawer",
+      appearance: "light",
+      theme: {
+        tokens: {
+          "--mv-signal": "oklch(0.52 0.15 245)",
+          "--mv-signal-strong": "oklch(0.52 0.17 245)",
+          "--mv-ink": "oklch(0.32 0.1 250)",
+          "--mv-white": "oklch(0.32 0.1 250)",
+          "--mv-line": "oklch(0.32 0.1 250)",
+          "--mv-ink-strong": "oklch(0.36 0.1 250)",
+          "--mv-cta-hover": "oklch(0.4 0.11 250)",
+        },
+        font: "'Space Grotesk', system-ui, sans-serif",
+        radius: "12px",
+        radiusLg: "18px",
+      },
+    },
+  },
+];
+
+/** The real drawer, restyled live by the look the visitor picks. */
+function LookPicker(): ReactNode {
+  const [pick, setPick] = useState(0);
+  const look = LOOKS[pick] ?? LOOKS[0];
+  if (look === undefined) return null;
+  return (
+    <div
+      data-row=""
+      style={s(
+        "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 72px); align-items: center",
+      )}
+    >
+      <fieldset
+        aria-label="Widget look"
+        style={s(
+          "margin: 0; padding: 0; border: 0; display: flex; gap: clamp(12px, 2vw, 22px); flex-wrap: wrap",
+        )}
+      >
+        {LOOKS.map((l, i) => (
+          <button
+            key={l.name}
+            type="button"
+            aria-pressed={i === pick}
+            onClick={() => setPick(i)}
+            data-look=""
+            style={s(
+              `display: grid; justify-items: start; gap: 14px; padding: 16px 16px 14px; min-width: 128px; border-radius: 18px; cursor: pointer; font: inherit; text-align: left; background: ${i === pick ? GROUND : "transparent"}; border: 1px solid ${i === pick ? INK : RULE}; color: ${INK}; transition: border-color .35s ease, background .35s ease, transform .5s cubic-bezier(.2,.7,.2,1)`,
+            )}
+          >
+            <span
+              aria-hidden="true"
+              style={s(
+                `width: 96px; height: 60px; border-radius: 10px; background: ${l.swatch[0]}; border: 1px solid ${RULE}; display: grid; place-items: center`,
+              )}
+            >
+              <span
+                style={s(
+                  `width: 52px; height: 14px; border-radius: 999px; background: ${l.swatch[1]}`,
+                )}
+              />
+            </span>
+            <span style={s("font-size: 15.5px")}>{l.name}</span>
+          </button>
+        ))}
+      </fieldset>
+      <div
+        style={s(
+          `display: grid; justify-items: center; gap: 18px; padding: clamp(40px, 5vw, 64px) 20px; border-radius: 28px; background: ${look.swatch[0]}; border: 1px solid ${RULE}; transition: background .6s ease`,
+        )}
+      >
+        <Live hold={64} style={{ display: "grid", justifyItems: "center" }} config={look.config} />
+      </div>
+    </div>
+  );
+}
 
 export function Landing(): ReactNode {
   const shaderRef = useRef<HTMLCanvasElement>(null);
@@ -190,11 +438,21 @@ export function Landing(): ReactNode {
   useEffect(() => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    // --- Hero shader: a warm plate refracted through vertical glass slats. ---
+    // --- Hero shader: a plate refracted through slanted glass slats, with a red
+    // light behind the glass that follows the pointer and bends the slats near it. ---
     let plate: HTMLCanvasElement | null = null;
     let markImg: HTMLImageElement | null = null;
     let ro: ResizeObserver | null = null;
     let raf = 0;
+    const hero = shaderRef.current?.parentElement ?? null;
+    const aim = { x: 0.7, y: 0.55 };
+    const at = { x: 0.7, y: 0.55 };
+    const onPointer = (e: PointerEvent): void => {
+      if (hero === null) return;
+      const r = hero.getBoundingClientRect();
+      aim.x = (e.clientX - r.left) / r.width;
+      aim.y = 1 - (e.clientY - r.top) / r.height;
+    };
 
     const drawPlate = (w: number, h: number): HTMLCanvasElement => {
       if (plate === null) plate = document.createElement("canvas");
@@ -204,20 +462,20 @@ export function Landing(): ReactNode {
       const x = c.getContext("2d");
       if (x === null) return c;
       const g = x.createLinearGradient(0, 0, w, h);
-      g.addColorStop(0, "#faf9f6");
-      g.addColorStop(0.55, "#f2f0eb");
-      g.addColorStop(1, "#eae7e0");
+      g.addColorStop(0, "#fbfbfb");
+      g.addColorStop(0.55, "#f1f1f1");
+      g.addColorStop(1, "#e6e6e7");
       x.fillStyle = g;
       x.fillRect(0, 0, w, h);
       const band = x.createLinearGradient(w * 0.35, 0, w, h);
-      band.addColorStop(0, "rgba(150,120,100,0)");
-      band.addColorStop(0.6, "rgba(150,120,100,0.10)");
-      band.addColorStop(1, "rgba(110,120,135,0.16)");
+      band.addColorStop(0, "rgba(120,120,128,0)");
+      band.addColorStop(0.6, "rgba(120,120,128,0.10)");
+      band.addColorStop(1, "rgba(90,92,100,0.18)");
       x.fillStyle = band;
       x.fillRect(0, 0, w, h);
       if (markImg?.complete && markImg.naturalWidth > 0) {
         const sz = Math.min(w, h) * 1.15;
-        x.globalAlpha = 0.13;
+        x.globalAlpha = 0.14;
         x.drawImage(markImg, w * 0.66 - sz / 2, h * 0.48 - sz / 2, sz, sz);
         x.globalAlpha = 1;
       }
@@ -235,22 +493,25 @@ export function Landing(): ReactNode {
         const vs = "attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }";
         const fs = [
           "precision highp float;",
-          "uniform vec2 u_res; uniform float u_t; uniform sampler2D u_tex;",
+          "uniform vec2 u_res; uniform float u_t; uniform sampler2D u_tex; uniform vec2 u_m;",
           "float hash(float n){ return fract(sin(n * 127.1) * 43758.5453); }",
           "void main(){",
           "  vec2 uv = gl_FragCoord.xy / u_res.xy;",
           "  vec2 tuv = vec2(uv.x, 1.0 - uv.y);",
           "  float ar = u_res.x / max(u_res.y, 1.0);",
-          "  float ang = 0.5236;",
+          "  vec2 dm = (uv - u_m) * vec2(ar, 1.0);",
+          "  float near = exp(-dot(dm, dm) * 5.0);",
+          "  float ang = 0.5236 + 0.05 * sin(u_t * 0.07);",
           "  vec2 dir = vec2(cos(ang), sin(ang));",
           "  vec2 perp = vec2(-dir.y, dir.x);",
-          "  float across = dot(vec2(uv.x * ar, uv.y), dir);",
+          "  float across = dot(vec2(uv.x * ar, uv.y), dir) + u_t * 0.006;",
           "  float k = across / 0.052;",
           "  float kk = k + (hash(floor(k)) - 0.5) * 0.55;",
           "  float ii = floor(kk);",
           "  float c = fract(kk) * 2.0 - 1.0;",
           "  float lens = c * (0.78 + 0.5 * hash(ii + 3.0));",
-          "  float amt = 0.030 * lens + 0.0035 * sin(u_t * 0.12 + ii * 1.7);",
+          // slats near the pointer bend harder, so the glass feels like it answers
+          "  float amt = (0.030 + 0.055 * near) * lens + 0.006 * sin(u_t * 0.4 + ii * 1.7);",
           "  vec2 offs = dir * amt / vec2(ar, 1.0);",
           "  vec3 col = vec3(0.0);",
           "  for (int i = -2; i <= 2; i++) {",
@@ -258,9 +519,13 @@ export function Landing(): ReactNode {
           "    col += texture2D(u_tex, tuv + offs + o).rgb;",
           "  }",
           "  col /= 5.0;",
+          // a red light behind the glass, broken up by the same refraction
+          "  vec2 gl2 = dm + offs * vec2(ar, 1.0) * 9.0;",
+          "  float glow = exp(-dot(gl2, gl2) * 7.0);",
+          "  col = mix(col, vec3(0.86, 0.30, 0.22), glow * 0.17);",
           "  float hi = smoothstep(0.55, 1.0, 1.0 - abs(c + 0.52)) * (0.6 + 0.4 * hash(ii + 9.0));",
-          "  col += hi * 0.045;",
-          "  col -= smoothstep(0.82, 1.0, abs(c)) * 0.045;",
+          "  col += hi * 0.05;",
+          "  col -= smoothstep(0.82, 1.0, abs(c)) * 0.05;",
           "  col += (hash(dot(gl_FragCoord.xy, vec2(0.63, 1.31)) + fract(u_t) * 7.0) - 0.5) * 0.012;",
           "  gl_FragColor = vec4(col, 1.0);",
           "}",
@@ -270,6 +535,10 @@ export function Landing(): ReactNode {
           if (sh === null) return null;
           gl.shaderSource(sh, src);
           gl.compileShader(sh);
+          if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+            console.error("landing shader did not compile:", gl.getShaderInfoLog(sh));
+            return null;
+          }
           return sh;
         };
         const prog = gl.createProgram();
@@ -294,6 +563,7 @@ export function Landing(): ReactNode {
             gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
             const uRes = gl.getUniformLocation(prog, "u_res");
             const uT = gl.getUniformLocation(prog, "u_t");
+            const uM = gl.getUniformLocation(prog, "u_m");
             const tex = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -324,8 +594,13 @@ export function Landing(): ReactNode {
             size();
             ro = new ResizeObserver(size);
             ro.observe(cv);
+            hero?.addEventListener("pointermove", onPointer, { passive: true });
             const t0 = performance.now();
             const frame = (now: number): void => {
+              // ease toward the pointer so the light trails it instead of snapping
+              at.x += (aim.x - at.x) * 0.045;
+              at.y += (aim.y - at.y) * 0.045;
+              gl.uniform2f(uM, at.x, at.y);
               gl.uniform1f(uT, (now - t0) / 1000);
               gl.drawArrays(gl.TRIANGLES, 0, 3);
               raf = requestAnimationFrame(frame);
@@ -342,26 +617,28 @@ export function Landing(): ReactNode {
     // a tab that is not the foreground one can withhold observer callbacks and leave
     // whole sections stuck at opacity 0. will-change is dropped once a section has
     // revealed, so it never keeps a stale composited layer that only a repaint (a
-    // stray hover) would clear. ---
+    // stray hover) would clear. data-in is what starts a section's own motion. ---
     const revealEls: HTMLElement[] = [];
-    if (!reduce) {
-      Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]")).forEach((el) => {
-        el.style.transition =
-          "opacity 1s cubic-bezier(.2,.7,.2,1), transform 1.1s cubic-bezier(.2,.7,.2,1)";
-        if (el.getBoundingClientRect().top < window.innerHeight * 0.92) return;
-        el.style.willChange = "opacity, transform";
-        el.style.opacity = "0";
-        el.style.transform = "translateY(24px)";
-        revealEls.push(el);
-      });
-    }
+    Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]")).forEach((el) => {
+      if (reduce || el.getBoundingClientRect().top < window.innerHeight * 0.92) {
+        el.setAttribute("data-in", "");
+        return;
+      }
+      el.style.transition =
+        "opacity 1s cubic-bezier(.2,.7,.2,1), transform 1.1s cubic-bezier(.2,.7,.2,1)";
+      el.style.willChange = "opacity, transform";
+      el.style.opacity = "0";
+      el.style.transform = "translateY(28px)";
+      revealEls.push(el);
+    });
     const revealVisible = (): void => {
       for (let i = revealEls.length - 1; i >= 0; i -= 1) {
         const el = revealEls[i];
         if (el === undefined) continue;
-        if (el.getBoundingClientRect().top >= window.innerHeight * 0.9) continue;
+        if (el.getBoundingClientRect().top >= window.innerHeight * 0.86) continue;
         el.style.opacity = "1";
         el.style.transform = "none";
+        el.setAttribute("data-in", "");
         window.setTimeout(() => {
           el.style.willChange = "auto";
         }, 1300);
@@ -369,27 +646,13 @@ export function Landing(): ReactNode {
       }
     };
 
-    // --- Chrome: header border after scroll, and the active section in the nav. ---
+    // --- Chrome: the header gains its rule once the page has moved. ---
     const header = document.querySelector("header");
-    const links = Array.from(
-      document.querySelectorAll<HTMLAnchorElement>('header nav a[href^="#"]'),
-    ).filter((a) => ["#app", "#sdk", "#widget"].includes(a.getAttribute("href") ?? ""));
-    const ids = ["app", "sdk", "widget"];
     const onScroll = (): void => {
       revealVisible();
       if (header instanceof HTMLElement) {
-        header.style.borderBottomColor =
-          window.scrollY > 40 ? "oklch(0.885 0.006 85)" : "transparent";
+        header.style.borderBottomColor = window.scrollY > 40 ? RULE : "transparent";
       }
-      const mid = window.scrollY + 130;
-      let active: string | null = null;
-      ids.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el && el.offsetTop <= mid) active = id;
-      });
-      links.forEach((a) => {
-        a.setAttribute("data-active", String(a.getAttribute("href") === `#${active}`));
-      });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
@@ -397,20 +660,21 @@ export function Landing(): ReactNode {
     return () => {
       ro?.disconnect();
       if (raf) cancelAnimationFrame(raf);
+      hero?.removeEventListener("pointermove", onPointer);
       window.removeEventListener("scroll", onScroll);
     };
   }, []);
 
   return (
-    <div style={s("background: oklch(0.972 0.004 85)")}>
+    <div style={s(`background: ${GROUND}; overflow-x: clip`)}>
       <header
         style={s(
-          "position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: oklch(0.972 0.004 85 / 0.8); border-bottom: 1px solid transparent; transition: border-color .5s ease",
+          `position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: oklch(0.985 0 0 / 0.8); border-bottom: 1px solid transparent; transition: border-color .5s ease`,
         )}
       >
         <div
           style={s(
-            "max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 48px); height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px",
+            `${WRAP}; height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px`,
           )}
         >
           <a href="#top" style={s("display: flex; align-items: center; gap: 12px")}>
@@ -429,32 +693,27 @@ export function Landing(): ReactNode {
           </a>
           <nav
             style={s(
-              "display: flex; align-items: center; gap: clamp(18px, 3vw, 34px); font-size: 14px; color: oklch(0.52 0.012 250)",
+              `display: flex; align-items: center; gap: clamp(18px, 3vw, 34px); font-size: 14px; color: ${MUTED}`,
             )}
           >
-            <a href={APP} style={s("transition: color .4s ease")}>
-              App
-            </a>
-            <a href={DOCS_SDK} style={s("transition: color .4s ease")}>
+            <a data-navlink="" href={DOCS_SDK}>
               SDK
             </a>
-            <a href={DOCS_WIDGET} style={s("transition: color .4s ease")}>
+            <a data-navlink="" href={DOCS_WIDGET}>
               Widget
             </a>
-            <a
-              href={GITHUB}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={s("transition: color .4s ease")}
-            >
+            <a data-navlink="" href={DOCS}>
+              Docs
+            </a>
+            <a data-navlink="" href={GITHUB} target="_blank" rel="noopener noreferrer">
               GitHub
             </a>
             <Hover
               as="a"
               href={APP}
               external
-              base="border: 1px solid oklch(0.80 0.01 85); border-radius: 999px; padding: 8px 18px; color: oklch(0.24 0.012 250); transition: background .45s ease, color .45s ease, border-color .45s ease"
-              hover="background: oklch(0.24 0.012 250); color: oklch(0.972 0.004 85); border-color: oklch(0.24 0.012 250)"
+              base={`border: 1px solid ${INK}; border-radius: 999px; padding: 8px 18px; color: ${INK}; transition: background .45s ease, color .45s ease`}
+              hover={`background: ${INK}; color: ${GROUND}`}
             >
               Open the app
             </Hover>
@@ -478,241 +737,135 @@ export function Landing(): ReactNode {
         />
         <div
           style={s(
-            "position: relative; width: 100%; max-width: 1180px; margin: 0 auto; padding: clamp(52px, 10vh, 120px) clamp(20px, 4vw, 48px) clamp(56px, 8vh, 92px)",
+            `position: relative; width: 100%; ${WRAP}; padding-top: clamp(52px, 10vh, 120px); padding-bottom: clamp(56px, 8vh, 92px)`,
           )}
         >
           <h1
             style={s(
-              "margin: 0; font-weight: 300; font-size: clamp(42px, 7.6vw, 112px); line-height: 0.96; letter-spacing: -0.038em; max-width: 20ch; animation: riseIn 1.5s cubic-bezier(.16,.84,.24,1) .15s both",
+              "margin: 0; font-weight: 300; font-size: clamp(42px, 7.6vw, 112px); line-height: 0.96; letter-spacing: -0.038em; max-width: 20ch",
             )}
           >
-            Ask every rail at once.
-            <br />
-            Bring it ashore in one flow.
+            <span
+              data-line=""
+              style={s("display: block; overflow: hidden; padding-bottom: 0.08em")}
+            >
+              <span
+                style={s(
+                  "display: block; animation: lineUp 1.3s cubic-bezier(.16,.84,.24,1) .1s both",
+                )}
+              >
+                Ask every rail at once.
+              </span>
+            </span>
+            <span
+              data-line=""
+              style={s("display: block; overflow: hidden; padding-bottom: 0.08em")}
+            >
+              <span
+                style={s(
+                  "display: block; animation: lineUp 1.3s cubic-bezier(.16,.84,.24,1) .25s both",
+                )}
+              >
+                Bring it ashore in one flow.
+              </span>
+            </span>
           </h1>
           <div
             style={s(
-              "margin-top: clamp(34px, 6vh, 72px); display: flex; flex-wrap: wrap; align-items: baseline; gap: clamp(22px, 4vw, 52px); animation: riseIn 1.5s cubic-bezier(.16,.84,.24,1) .4s both",
+              "margin-top: clamp(34px, 6vh, 64px); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: clamp(22px, 4vw, 52px); animation: riseIn 1.4s cubic-bezier(.16,.84,.24,1) .55s both",
             )}
           >
             <p
               style={s(
-                "margin: 0; font-size: clamp(16px, 1.3vw, 18.5px); line-height: 1.6; color: oklch(0.42 0.012 250); max-width: 40ch",
+                `margin: 0; font-size: clamp(16px, 1.3vw, 19px); line-height: 1.6; color: ${MUTED}; max-width: 40ch`,
               )}
             >
               Move money from another chain onto Stellar, and see exactly what arrives before you
               send it.
             </p>
-          </div>
-        </div>
-      </section>
-
-      <section
-        id="paths"
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(48px, 7vh, 92px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <div
-          data-row2=""
-          style={s(
-            "display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: oklch(0.885 0.006 85); border: 1px solid oklch(0.885 0.006 85)",
-          )}
-        >
-          {[
-            {
-              href: APP,
-              tag: "Send",
-              title: "Move money onto Stellar",
-              note: "Paste an address, see what lands.",
-            },
-            {
-              href: DOCS_SDK,
-              tag: "Build",
-              title: "Build it into your app",
-              note: "Quotes, routes, and transactions your users sign.",
-            },
-            {
-              href: PLAYGROUND,
-              tag: "Embed",
-              title: "Drop in the widget",
-              note: "The whole transfer, inside your product.",
-            },
-          ].map((p) => (
-            <Hover
-              key={p.tag}
-              as="a"
-              href={p.href}
-              base="background: oklch(0.972 0.004 85); padding: clamp(26px, 3vw, 40px) clamp(22px, 2.4vw, 32px); display: grid; gap: 12px; align-content: start; transition: background .5s ease, padding-left .5s cubic-bezier(.2,.7,.2,1)"
-              hover="background: oklch(0.99 0.003 85); padding-left: clamp(30px, 3vw, 44px)"
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-                )}
-              >
-                {p.tag}
-              </span>
-              <span
-                style={s(
-                  "font-size: clamp(20px, 2vw, 25px); font-weight: 300; letter-spacing: -0.02em",
-                )}
-              >
-                {p.title}
-              </span>
-              <span style={s("font-size: 14.5px; line-height: 1.5; color: oklch(0.48 0.012 250)")}>
-                {p.note}
-              </span>
-              <span
-                style={s(
-                  "margin-top: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: oklch(0.52 0.012 250)",
-                )}
-              >
-                →
-              </span>
-            </Hover>
-          ))}
-        </div>
-      </section>
-
-      <section
-        id="docs"
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <div
-          data-row=""
-          style={s(
-            "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(24px, 5vw, 70px); align-items: end; padding-bottom: clamp(30px, 4vw, 48px)",
-          )}
-        >
-          <h2
-            style={s(
-              "margin: 0; font-weight: 300; font-size: clamp(28px, 3.6vw, 46px); letter-spacing: -0.03em; line-height: 1.04",
-            )}
-          >
-            Documentation
-          </h2>
-          <p
-            style={s(
-              "margin: 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 44ch",
-            )}
-          >
-            Grouped by how you use Mavna. Every reference page is generated from the source, so the
-            API it lists always matches the code.
-          </p>
-        </div>
-        <div
-          data-row2=""
-          style={s(
-            "display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: oklch(0.885 0.006 85); border: 1px solid oklch(0.885 0.006 85)",
-          )}
-        >
-          {[
-            {
-              tag: "App",
-              items: [
-                { label: "Your first transfer", href: `${DOCS}/guides/send` },
-                { label: "Send to a new address", href: `${DOCS}/guides/new-account` },
-                { label: "Track a transfer", href: `${DOCS}/guides/track` },
-                { label: "What a transfer costs", href: `${DOCS}/guides/costs` },
-              ],
-            },
-            {
-              tag: "SDK",
-              items: [
-                { label: "Quickstart", href: `${DOCS}/developers/quickstart` },
-                { label: "Concepts", href: `${DOCS}/developers/concepts` },
-                { label: "Rails & networks", href: `${DOCS}/developers/rails` },
-                { label: "Package reference", href: `${DOCS}/developers/reference/packages` },
-              ],
-            },
-            {
-              tag: "Widget",
-              items: [
-                { label: "Quickstart", href: `${DOCS}/widget/quickstart` },
-                { label: "Configuration", href: `${DOCS}/widget/configuration` },
-                { label: "Theming", href: `${DOCS}/widget/theming` },
-                { label: "Security model", href: `${DOCS}/developers/security/model` },
-              ],
-            },
-          ].map((col) => (
-            <div
-              key={col.tag}
-              style={s(
-                "background: oklch(0.972 0.004 85); padding: clamp(24px, 3vw, 38px) clamp(22px, 2.4vw, 32px); display: grid; gap: 15px; align-content: start",
-              )}
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-                )}
-              >
-                {col.tag}
-              </span>
-              {col.items.map((item) => (
-                <DocLink key={item.label} href={item.href}>
-                  {item.label}
-                </DocLink>
-              ))}
+            <div style={s("display: flex; align-items: center; gap: 26px; flex-wrap: wrap")}>
+              <a data-cta="" href={APP} style={s(`background: ${SIGNAL}; color: ${GROUND}`)}>
+                Open the app <Arrow size="18px" />
+              </a>
+              <a data-underline="" href={DOCS} style={s(`font-size: 15.5px; color: ${INK}`)}>
+                Read the docs
+              </a>
             </div>
-          ))}
+          </div>
         </div>
-        <Hover
-          as="a"
-          href={PLAYGROUND}
-          base="margin-top: 1px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; background: oklch(0.24 0.012 250); color: oklch(0.955 0.004 85); padding: clamp(22px, 2.8vw, 32px) clamp(24px, 3vw, 38px); transition: padding-left .55s cubic-bezier(.2,.7,.2,1)"
-          hover="padding-left: clamp(34px, 4vw, 52px)"
-        >
-          <span style={s("display: grid; gap: 6px")}>
-            <span
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.72 0.075 45)",
-              )}
-            >
-              Widget playground
-            </span>
-            <span
-              style={s(
-                "font-size: clamp(18px, 2vw, 23px); font-weight: 300; letter-spacing: -0.02em",
-              )}
-            >
-              Try the real component against live quotes.
-            </span>
-          </span>
-          <span style={s("font-weight: 300; font-size: clamp(24px, 3vw, 34px); line-height: 1")}>
-            →
-          </span>
-        </Hover>
       </section>
 
-      <section id="screen" style={s("background: #171717; color: oklch(0.955 0.004 85)")}>
+      <section
+        id="rails"
+        data-reveal=""
+        style={s("padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(70px, 10vh, 130px)")}
+      >
+        <h2 style={s(`${BIG}; ${WRAP}; font-size: clamp(34px, 5.4vw, 80px)`)}>
+          <span style={s(`color: ${FAINT}`)}>Mavna isn’t a bridge.</span> It is every bridge at
+          once.
+        </h2>
+        <div style={s(`margin-top: clamp(40px, 6vw, 80px); color: ${INK}`)}>
+          <RailBand />
+        </div>
+      </section>
+
+      <section id="screen" style={s(`background: ${NIGHT}; color: ${ON_NIGHT}`)}>
         <div
           style={s(
-            "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+            `${WRAP}; padding-top: clamp(70px, 10vh, 130px); padding-bottom: clamp(70px, 10vh, 130px)`,
           )}
         >
-          <div
-            data-reveal=""
-            style={s(
-              "max-width: 26ch; font-weight: 300; font-size: clamp(26px, 3.2vw, 42px); line-height: 1.1; letter-spacing: -0.032em",
-            )}
-          >
-            One transfer. Every bridge answers at the same time.
-          </div>
           <div
             data-row=""
             style={s(
-              "display: grid; grid-template-columns: 1.55fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; margin-top: clamp(36px, 5vw, 64px)",
+              "display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(36px, 6vw, 90px); align-items: center",
             )}
           >
-            <div data-reveal="" style={s("display: grid; justify-items: center")}>
+            <div data-reveal="" style={s("display: grid; gap: clamp(22px, 2.6vw, 30px)")}>
+              <h2 style={s(`${BIG}; font-size: clamp(32px, 4.4vw, 64px); max-width: 13ch`)}>
+                One transfer. Every bridge answers at the same time.
+              </h2>
+              <p
+                style={s(
+                  `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 38ch`,
+                )}
+              >
+                Pick where your money is now and the Stellar address it should land in. Every route
+                comes back ranked by what actually reaches you, and the ones that cannot help say
+                why, before you commit to anything.
+              </p>
+              <p
+                style={s(
+                  `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 38ch`,
+                )}
+              >
+                No sign-up, no account. Just the wallet you already use.
+              </p>
+              <a
+                data-underline=""
+                href={APP}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={s(`justify-self: start; font-size: 15.5px; color: ${ON_NIGHT}`)}
+              >
+                Open mavna.app
+              </a>
+            </div>
+            <div
+              data-reveal=""
+              style={s("position: relative; display: grid; justify-items: center")}
+            >
+              <div
+                data-halo=""
+                aria-hidden="true"
+                style={s(
+                  "position: absolute; inset: 10% 0; border-radius: 50%; background: radial-gradient(closest-side, oklch(0.55 0.2 25 / 0.28), transparent); filter: blur(30px)",
+                )}
+              />
               <Live
                 hold={540}
-                style={{ width: "100%", maxWidth: 440 }}
+                fit
+                style={{ position: "relative", width: "100%", maxWidth: 440 }}
                 config={{
                   integrator: "web.mavna.app",
                   network: "testnet",
@@ -721,194 +874,96 @@ export function Landing(): ReactNode {
                 }}
               />
             </div>
-            <div
-              data-reveal=""
-              style={s("display: grid; gap: clamp(18px, 2.2vw, 24px); align-content: center")}
-            >
-              <p
-                style={s(
-                  "margin: 0; font-size: 17px; line-height: 1.6; color: oklch(0.86 0.008 85); max-width: 34ch",
-                )}
-              >
-                The Mavna App is a web interface for moving money from another chain onto Stellar.
-                You pick where your money is now and type the Stellar address it should land in, and
-                every rail is asked at once. You see each route ranked by what actually arrives, and
-                a plain reason for any that could not serve you, before you commit to anything.
-              </p>
-              <p
-                style={s(
-                  "margin: 0; font-size: 17px; line-height: 1.6; color: oklch(0.74 0.012 250); max-width: 34ch",
-                )}
-              >
-                There is no sign-up and no account. You connect the wallet you already use, confirm
-                exactly what you are sending, and it lands on Stellar.
-              </p>
-              <Hover
-                as="a"
-                href={APP}
-                external
-                base="justify-self: start; margin-top: 6px; font-size: 15.5px; color: oklch(0.92 0.008 85); border-bottom: 1px solid oklch(0.44 0.02 250); padding-bottom: 3px; transition: border-color .45s ease"
-                hover="border-color: oklch(0.92 0.008 85)"
-              >
-                Open mavna.app
-              </Hover>
-            </div>
           </div>
-        </div>
-      </section>
-
-      <section
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <div
-          data-row=""
-          style={s(
-            "display: grid; grid-template-columns: 1fr 1.35fr; gap: clamp(24px, 5vw, 70px); align-items: end; padding-bottom: 26px",
-          )}
-        >
-          <h2
-            style={s(
-              "margin: 0; font-weight: 300; font-size: clamp(28px, 3.4vw, 46px); letter-spacing: -0.03em; line-height: 1.04; max-width: 20ch",
-            )}
-          >
-            Mavna isn’t a bridge. It is every bridge at once.
-          </h2>
-        </div>
-        <div>
-          {[
-            { name: "Circle CCTP", asset: "USDC", who: "Circle itself" },
-            { name: "LayerZero OFT", asset: "USDT0", who: "The verifiers the token trusts" },
-            { name: "Axelar ITS", asset: "Interchain assets", who: "A named group of validators" },
-            {
-              name: "NEAR Intents",
-              asset: "ERC-20 from 13 EVM chains, to USDC or XLM",
-              who: "Traders bid for it",
-            },
-          ].map((rail, i, arr) => (
-            <Hover
-              key={rail.name}
-              row2
-              base={`display: grid; grid-template-columns: 1fr 1.1fr 0.9fr; gap: clamp(10px, 2vw, 30px); align-items: baseline; padding: clamp(19px, 2.2vw, 26px) 0; border-top: 1px solid oklch(0.885 0.006 85);${i === arr.length - 1 ? " border-bottom: 1px solid oklch(0.885 0.006 85);" : ""} transition: padding-left .5s cubic-bezier(.2,.7,.2,1)`}
-              hover="padding-left: 10px"
-            >
-              <span style={s("font-size: clamp(19px, 2vw, 23px); font-weight: 300")}>
-                {rail.name}
-              </span>
-              <span style={s("font-size: 15px; color: oklch(0.45 0.012 250)")}>{rail.asset}</span>
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: oklch(0.55 0.012 250)",
-                )}
-              >
-                {rail.who}
-              </span>
-            </Hover>
-          ))}
         </div>
       </section>
 
       <section
         id="app"
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
+        style={s(`position: relative; background: ${OXIDE}; color: ${ON_OXIDE}; overflow: hidden`)}
       >
         <div
-          data-row=""
+          aria-hidden="true"
+          data-drift=""
           style={s(
-            "display: grid; grid-template-columns: 1fr 1.15fr; gap: clamp(30px, 6vw, 90px); align-items: start",
+            "position: absolute; right: -8vw; top: 50%; width: min(70vw, 760px); aspect-ratio: 1; margin-top: calc(min(70vw, 760px) / -2); border-radius: 50%; border: 1px dashed oklch(1 0 0 / 0.22)",
+          )}
+        />
+        <div
+          data-reveal=""
+          style={s(
+            `position: relative; ${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
           )}
         >
-          <div>
-            <h2
+          <div
+            aria-hidden="true"
+            style={s(
+              "font-weight: 300; font-size: clamp(110px, 22vw, 330px); line-height: 0.8; letter-spacing: -0.07em",
+            )}
+          >
+            1.5
+            <span
               style={s(
-                "margin: 0; font-weight: 300; font-size: clamp(28px, 3.8vw, 52px); line-height: 1.04; letter-spacing: -0.034em; max-width: 15ch",
+                "font-family: 'IBM Plex Mono', monospace; font-size: 0.16em; letter-spacing: 0.1em; margin-left: 0.4em; vertical-align: 0.9em",
               )}
             >
+              XLM
+            </span>
+          </div>
+          <div
+            data-row=""
+            style={s(
+              "margin-top: clamp(40px, 6vw, 72px); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 6vw, 90px); align-items: start",
+            )}
+          >
+            <h2 style={s(`${BIG}; font-size: clamp(32px, 4.4vw, 64px); max-width: 13ch`)}>
               The address does not have to exist yet.
             </h2>
-            <div
-              style={s(
-                "margin-top: clamp(14px, 1.8vw, 20px); font-family: 'IBM Plex Mono', monospace; font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              We put up the reserve
-            </div>
             <p
               style={s(
-                "margin: clamp(20px, 2.6vw, 28px) 0 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.42 0.012 250); max-width: 36ch",
+                `margin: 0; font-size: 17.5px; line-height: 1.62; color: ${MUTED_OXIDE}; max-width: 40ch`,
               )}
             >
-              A new Stellar account has to lock up 1.5 XLM before it can hold a coin like USDC.
-              Someone arriving from another chain has no XLM yet, and most products stop right here
-              and tell them to go and buy some first.
-            </p>
-            <p
-              style={s(
-                "margin: 18px 0 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.42 0.012 250); max-width: 36ch",
-              )}
-            >
-              We put it up for you, and the money coming in pays us back inside the same transfer.
-              The 1.5 XLM stays locked in your own account. It is not a fee anyone keeps, and it is
-              released back to you if you ever close the account. That is for USDC, with a sponsor
-              that fronts reserves, as the one behind mavna.app does.
+              A new Stellar account has to set aside 1.5 XLM before it can hold USDC, and someone
+              arriving from another chain has none. We put it up, and the money coming in pays us
+              back inside the same transfer. It stays in your own account, and comes back to you if
+              you ever close it.
             </p>
           </div>
-          <div>
+          <div
+            data-journey=""
+            aria-hidden="true"
+            style={s("margin-top: clamp(56px, 8vw, 100px); position: relative; height: 70px")}
+          >
+            <div
+              style={s(
+                "position: absolute; left: 0; right: 0; top: 10px; height: 1px; background: oklch(1 0 0 / 0.3)",
+              )}
+            />
+            <div
+              data-journey-fill=""
+              style={s(
+                `position: absolute; left: 0; right: 0; top: 9px; height: 3px; background: ${ON_OXIDE}; transform-origin: left`,
+              )}
+            />
             {[
-              {
-                title: "You agree to pay it back",
-                note: "You sign this with the wallet that will receive the funds, before we put anything up. The signature can only spend money that has not arrived yet, so it cannot move anything on its own.",
-                tag: "Signed",
-                accent: false,
-              },
-              {
-                title: "You send",
-                note: "Your money starts moving. Nothing has been put up yet.",
-                tag: "Nothing lent",
-                accent: false,
-              },
-              {
-                title: "We open the account, as late as we can",
-                note: "Only once your money is certain to arrive, so the account is ready the moment it lands.",
-                tag: "1.50 XLM lent",
-                accent: true,
-              },
-              {
-                title: "It arrives and pays us back",
-                note: "The moment it is delivered, the repayment goes through with it. Nobody owes anyone anything, and the account is yours.",
-                tag: "Repaid",
-                accent: false,
-                last: true,
-              },
-            ].map((row) => (
+              { at: "0%", label: "You send", align: "left" },
+              { at: "50%", label: "We open the account", align: "center" },
+              { at: "100%", label: "It pays us back", align: "right" },
+            ].map((stop, i) => (
               <div
-                key={row.title}
+                key={stop.label}
+                data-stop={i}
                 style={s(
-                  `display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: baseline; padding: clamp(17px, 2vw, 23px) 0; border-top: 1px solid oklch(0.885 0.006 85);${row.last ? " border-bottom: 1px solid oklch(0.885 0.006 85)" : ""}`,
+                  `position: absolute; top: 0; left: ${stop.at}; transform: translateX(${stop.align === "left" ? "0" : stop.align === "center" ? "-50%" : "-100%"}); display: grid; justify-items: ${stop.align === "left" ? "start" : stop.align === "center" ? "center" : "end"}; gap: 16px`,
                 )}
               >
-                <div>
-                  <div style={s("font-size: 16.5px")}>{row.title}</div>
-                  <div
-                    style={s(
-                      "margin-top: 5px; font-size: 14.5px; line-height: 1.5; color: oklch(0.50 0.012 250); max-width: 40ch",
-                    )}
-                  >
-                    {row.note}
-                  </div>
-                </div>
                 <span
                   style={s(
-                    `font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: ${row.accent ? "oklch(0.60 0.075 45)" : "oklch(0.55 0.012 250)"}; white-space: nowrap`,
+                    `width: 21px; height: 21px; border-radius: 50%; background: ${OXIDE}; border: 2px solid ${ON_OXIDE}`,
                   )}
-                >
-                  {row.tag}
-                </span>
+                />
+                <span style={s("font-size: 15px; white-space: nowrap")}>{stop.label}</span>
               </div>
             ))}
           </div>
@@ -919,1279 +974,278 @@ export function Landing(): ReactNode {
         id="trustlines"
         data-reveal=""
         style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+          `${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
         )}
       >
-        <h2
-          style={s(
-            "margin: clamp(18px, 2.4vw, 26px) 0 0; font-weight: 300; font-size: clamp(30px, 4.6vw, 68px); line-height: 1.01; letter-spacing: -0.036em; max-width: 17ch",
-          )}
-        >
+        <h2 style={s(`${BIG}; font-size: clamp(34px, 5.4vw, 80px); max-width: 16ch`)}>
           Nobody has to know what a trustline is.
         </h2>
-        <p
-          style={s(
-            "margin: clamp(20px, 2.6vw, 30px) 0 0; font-size: 16.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 52ch",
-          )}
-        >
-          On Stellar, an account has to say yes to a coin before it can hold it. That yes costs a
-          little XLM, and it is what turns a simple deposit into a chore.
-        </p>
         <div
           data-row=""
           style={s(
-            "margin-top: clamp(40px, 6vw, 72px); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 76px); align-items: start",
-          )}
-        >
-          <div>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.58 0.012 250); padding-bottom: 16px; border-bottom: 1px solid oklch(0.885 0.006 85)",
-              )}
-            >
-              Everywhere else
-            </div>
-            <div
-              style={s(
-                "display: grid; gap: 14px; padding-top: 18px; color: oklch(0.52 0.012 250); font-size: 15.5px; line-height: 1.5",
-              )}
-            >
-              {[
-                "Find some XLM somewhere",
-                "Send it to the new address to open the account",
-                "Work out which wallet screen adds a trustline",
-                "Add one for the exact coin you are about to receive",
-                "Go back and start the transfer",
-              ].map((step, i) => (
-                <div
-                  key={step}
-                  style={s("display: grid; grid-template-columns: 26px 1fr; gap: 10px")}
-                >
-                  <span
-                    style={s(
-                      "font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: oklch(0.66 0.01 85)",
-                    )}
-                  >
-                    {`0${i + 1}`}
-                  </span>
-                  <span>{step}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45); padding-bottom: 16px; border-bottom: 1px solid oklch(0.60 0.075 45)",
-              )}
-            >
-              Here
-            </div>
-            <div
-              style={s(
-                "padding-top: 18px; font-weight: 300; font-size: clamp(22px, 2.6vw, 32px); line-height: 1.25; letter-spacing: -0.026em; max-width: 18ch",
-              )}
-            >
-              Paste the address and send.
-            </div>
-            <p
-              style={s(
-                "margin: clamp(16px, 2vw, 22px) 0 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 34ch",
-              )}
-            >
-              For USDC, we say yes to the coin for you, inside the transfer, whether the account is
-              brand new or has simply never held it before. Your users never see the word, and it is
-              never a step they can get wrong.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <h2
-          style={s(
-            "margin: 0 0 clamp(36px, 5vw, 60px); font-weight: 300; font-size: clamp(30px, 4.6vw, 68px); line-height: 1.01; letter-spacing: -0.036em; max-width: 18ch",
-          )}
-        >
-          Arrive on Stellar without the hassle.
-        </h2>
-        <div
-          data-row=""
-          style={s(
-            "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 6vw, 90px); align-items: center",
+            "margin-top: clamp(48px, 7vw, 88px); display: grid; grid-template-columns: 1.1fr 1fr; gap: clamp(30px, 6vw, 90px); align-items: center",
           )}
         >
           <div
             style={s(
-              "display: grid; gap: clamp(6px, 0.9vw, 12px); font-weight: 300; font-size: clamp(22px, 2.8vw, 36px); line-height: 1.16; letter-spacing: -0.028em",
+              `display: grid; gap: clamp(4px, 0.8vw, 10px); font-weight: 300; font-size: clamp(22px, 2.7vw, 36px); line-height: 1.2; letter-spacing: -0.028em; color: ${FAINT}`,
             )}
           >
             {[
               "Buy XLM before you can start",
-              "Open a trustline for the coin",
-              "Fund and create the account",
+              "Open the account by hand",
+              "Find the screen that adds a trustline",
               "Work out which bridge to use",
               "Bridge first, then swap by hand",
-            ].map((t) => (
-              <span
-                key={t}
-                style={s(
-                  "color: oklch(0.66 0.012 250); text-decoration: line-through; text-decoration-color: oklch(0.60 0.075 45 / 0.55); text-decoration-thickness: 2px",
-                )}
-              >
+            ].map((t, i) => (
+              <span key={t} data-strike="" style={{ transitionDelay: `${0.35 + i * 0.22}s` }}>
                 {t}
               </span>
             ))}
           </div>
-          <div
-            style={s(
-              "border-left: 1px solid oklch(0.885 0.006 85); padding-left: clamp(24px, 4vw, 48px)",
-            )}
-          >
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              You
-            </div>
+          <div data-answer="" style={s("display: grid; gap: clamp(18px, 2.4vw, 26px)")}>
             <p
               style={s(
-                "margin: 14px 0 0; font-weight: 300; font-size: clamp(26px, 3.4vw, 46px); line-height: 1.1; letter-spacing: -0.03em; color: oklch(0.24 0.012 250)",
+                `${BIG}; font-size: clamp(30px, 3.8vw, 54px); line-height: 1.05; color: ${INK}`,
               )}
             >
               Paste an address and send, even with nothing on Stellar yet.
             </p>
+            <p
+              style={s(
+                `margin: 0; font-size: 16.5px; line-height: 1.62; color: ${MUTED}; max-width: 38ch`,
+              )}
+            >
+              An account has to say yes to a coin before it can hold it. For USDC, Mavna says that
+              yes for you inside the transfer, so it is never a step anyone can get wrong.
+            </p>
           </div>
         </div>
       </section>
 
-      <section style={s("background: #171717; color: oklch(0.955 0.004 85)")}>
+      <section id="swap" style={s(`background: ${NIGHT}; color: ${ON_NIGHT}`)}>
         <div
+          data-reveal=""
           style={s(
-            "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+            `${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
           )}
         >
           <div
             data-row=""
-            data-reveal=""
             style={s(
-              "display: grid; grid-template-columns: 1fr 1.2fr; gap: clamp(28px, 5vw, 80px); align-items: end; padding-bottom: clamp(34px, 5vw, 56px)",
+              "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 80px); align-items: end; margin-bottom: clamp(56px, 8vw, 100px)",
             )}
           >
-            <h2
-              style={s(
-                "margin: 0; font-weight: 300; font-size: clamp(28px, 3.6vw, 48px); line-height: 1.04; letter-spacing: -0.034em; max-width: 14ch",
-              )}
-            >
-              Mavna delivers what you want
+            <h2 style={s(`${BIG}; font-size: clamp(34px, 5vw, 72px); max-width: 12ch`)}>
+              You get the coin you asked for.
             </h2>
             <p
               style={s(
-                "margin: 0; font-size: 16px; line-height: 1.62; color: oklch(0.74 0.012 250); max-width: 46ch",
+                `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 42ch`,
               )}
             >
-              A bridge hands over whatever it happens to carry, which is often not the coin you
-              wanted. Mavna keeps going: it trades that for the one you asked for on Stellar’s own
-              exchanges, in the same transfer, and puts it in the account.
+              A bridge can only hand over what it carries. When that is not what you wanted, Mavna
+              trades it on Stellar in the same transfer, and the amount you saw at the start already
+              counts it.
             </p>
           </div>
-          <div
-            data-reveal=""
-            data-flow=""
-            style={s(
-              "display: flex; align-items: stretch; gap: clamp(8px, 1.5vw, 22px); border-top: 1px solid oklch(0.30 0.008 250); padding-top: clamp(30px, 4vw, 48px)",
-            )}
-          >
-            <div
-              data-conn=""
-              style={s("flex: 1 1 0; min-width: 0; display: grid; gap: 12px; align-content: start")}
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-                )}
-              >
-                You have
-              </span>
-              <span
-                style={s(
-                  "font-weight: 300; font-size: clamp(20px, 2.3vw, 31px); line-height: 1.12; letter-spacing: -0.026em; color: oklch(0.88 0.008 85)",
-                )}
-              >
-                A coin on another chain
-              </span>
-            </div>
-            <div
-              data-conn=""
-              style={s(
-                "flex: 0 0 auto; width: clamp(104px, 13vw, 164px); display: grid; gap: 12px; justify-items: center; align-content: center; text-align: center",
-              )}
-            >
-              <span
-                data-arrow=""
-                style={s(
-                  "font-weight: 300; font-size: 30px; line-height: 1; color: oklch(0.58 0.05 45)",
-                )}
-              >
-                →
-              </span>
-            </div>
-            <div
-              data-conn=""
-              style={s("flex: 1 1 0; min-width: 0; display: grid; gap: 12px; align-content: start")}
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-                )}
-              >
-                It lands
-              </span>
-              <span
-                style={s(
-                  "font-weight: 300; font-size: clamp(20px, 2.3vw, 31px); line-height: 1.12; letter-spacing: -0.026em; color: oklch(0.88 0.008 85)",
-                )}
-              >
-                Whatever that bridge carries
-              </span>
-            </div>
-            <div
-              data-conn=""
-              style={s(
-                "flex: 0 0 auto; width: clamp(104px, 13vw, 164px); display: grid; gap: 12px; justify-items: center; align-content: center; text-align: center",
-              )}
-            >
-              <span
-                data-arrow=""
-                style={s(
-                  "font-weight: 300; font-size: 30px; line-height: 1; color: oklch(0.58 0.05 45)",
-                )}
-              >
-                →
-              </span>
-            </div>
-            <div
-              data-conn=""
-              style={s("flex: 1 1 0; min-width: 0; display: grid; gap: 12px; align-content: start")}
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-                )}
-              >
-                You get
-              </span>
-              <span
-                style={s(
-                  "font-weight: 300; font-size: clamp(20px, 2.3vw, 31px); line-height: 1.12; letter-spacing: -0.026em; color: oklch(0.96 0.008 85)",
-                )}
-              >
-                The coin you actually asked for
-              </span>
-            </div>
-          </div>
+          <CoinPicker />
         </div>
       </section>
 
       <section
-        id="swap"
+        id="sdk"
         data-reveal=""
         style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+          `${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
         )}
       >
+        <h2 style={s(`${BIG}; font-size: clamp(34px, 5.4vw, 80px); max-width: 15ch`)}>
+          The whole transfer, not just the crossing.
+        </h2>
+        <div
+          data-stages=""
+          aria-hidden="true"
+          style={s(
+            `margin-top: clamp(48px, 7vw, 90px); display: flex; flex-wrap: wrap; align-items: center; gap: clamp(6px, 1vw, 14px) 0; font-weight: 300; font-size: clamp(30px, 5vw, 74px); letter-spacing: -0.04em; line-height: 1.1`,
+          )}
+        >
+          {STAGES.map((st, i) => (
+            <span key={st} style={s("display: flex; align-items: center")}>
+              <span
+                data-stage={st === "Cross" ? "middle" : ""}
+                style={{ transitionDelay: `${0.3 + i * 0.25}s` }}
+              >
+                {st}
+              </span>
+              {i < STAGES.length - 1 ? (
+                <span data-stage-link="" style={{ transitionDelay: `${0.42 + i * 0.25}s` }} />
+              ) : null}
+            </span>
+          ))}
+        </div>
         <div
           data-row=""
           style={s(
-            "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 6vw, 90px); align-items: start",
+            "margin-top: clamp(44px, 6vw, 72px); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 6vw, 90px); align-items: start",
           )}
         >
-          <div>
-            <h2
-              style={s(
-                "margin: clamp(18px, 2.4vw, 26px) 0 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.03; letter-spacing: -0.034em; max-width: 17ch",
-              )}
-            >
-              A bridge can only hand over what it carries.
-            </h2>
+          <p
+            style={s(
+              `margin: 0; font-size: 17.5px; line-height: 1.62; color: ${MUTED}; max-width: 40ch`,
+            )}
+          >
+            Most tools only do the crossing in the middle and leave you the rest. The SDK is the
+            same engine our own app runs on, and it hands you the whole row: asking every bridge,
+            setting up the account, the swap, and following it home.
+          </p>
+          <div style={s("display: grid; gap: 22px; justify-items: start")}>
             <p
               style={s(
-                "margin: clamp(20px, 2.6vw, 30px) 0 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.42 0.012 250); max-width: 38ch",
+                `margin: 0; font-size: 17.5px; line-height: 1.62; color: ${MUTED}; max-width: 36ch`,
               )}
             >
-              If that is not the coin you asked for, Mavna adds one more step on Stellar and trades
-              it for you. It is part of the same transfer and the same quote, so the amount you were
-              shown at the start already includes it.
+              It builds, your users sign. No package ever holds a key.
             </p>
-          </div>
-          <div>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.55 0.012 250); padding-bottom: 16px",
-              )}
-            >
-              Where the trade happens
-            </div>
-            {[
-              {
-                name: "Soroswap",
-                note: "Looks across Stellar’s pools and its order book at once, and takes the best of them.",
-              },
-              {
-                name: "SushiSwap",
-                note: "Its own pools on Stellar, for trades that start in USDT0.",
-              },
-              {
-                name: "Aquarius",
-                note: "Its own pools, for when the others cannot price the pair.",
-                last: true,
-              },
-            ].map((v) => (
-              <div
-                key={v.name}
-                style={s(
-                  `display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: clamp(16px, 2vw, 22px) 0; border-top: 1px solid oklch(0.885 0.006 85);${v.last ? " border-bottom: 1px solid oklch(0.885 0.006 85)" : ""}`,
-                )}
-              >
-                <div style={s("font-size: 17px")}>{v.name}</div>
-                <div
-                  style={s(
-                    "font-size: 15px; line-height: 1.55; color: oklch(0.48 0.012 250); max-width: 40ch",
-                  )}
-                >
-                  {v.note}
-                </div>
-              </div>
-            ))}
-            <p
-              style={s(
-                "margin: clamp(18px, 2.2vw, 24px) 0 0; font-size: 15px; line-height: 1.6; color: oklch(0.48 0.012 250); max-width: 40ch",
-              )}
-            >
-              We ask them in that order and use the first that can actually price your pair.
-            </p>
+            <a data-underline="" href={DOCS_SDK} style={s(`font-size: 15.5px; color: ${INK}`)}>
+              Build on the SDK
+            </a>
           </div>
         </div>
-        <div
-          data-row2=""
-          style={s(
-            "margin-top: clamp(44px, 6vw, 76px); display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 4vw, 56px)",
-          )}
-        >
-          {[
-            {
-              title: "Priced at the last second",
-              note: "We ask for the price again right before trading. Never the one from when you started.",
-            },
-            {
-              title: "Your floor goes with it",
-              note: "You set the least you will accept. If the market moves past it, the trade does not happen.",
-            },
-            {
-              title: "Never a substitute",
-              note: "If no venue can trade that pair, you are told before you send anything, and never handed something else instead.",
-            },
-          ].map((f) => (
-            <div
-              key={f.title}
-              style={s(
-                "padding-top: clamp(18px, 2.2vw, 24px); border-top: 1px solid oklch(0.24 0.012 250)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-size: clamp(17px, 1.8vw, 20px); font-weight: 300; letter-spacing: -0.018em",
-                )}
-              >
-                {f.title}
-              </div>
-              <p
-                style={s(
-                  "margin: 10px 0 0; font-size: 15px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 30ch",
-                )}
-              >
-                {f.note}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section
-        id="open"
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <Hover
-          as="a"
-          href={APP}
-          external
-          base="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 20px; padding: clamp(26px, 4vw, 52px) 0; border-top: 1px solid oklch(0.24 0.012 250); border-bottom: 1px solid oklch(0.24 0.012 250); transition: padding-left .6s cubic-bezier(.2,.7,.2,1), color .4s ease"
-          hover="padding-left: 18px; color: oklch(0.60 0.075 45)"
-        >
-          <span
-            style={s(
-              "font-weight: 300; font-size: clamp(38px, 7vw, 104px); line-height: 0.98; letter-spacing: -0.04em",
-            )}
-          >
-            Open mavna.app
-          </span>
-          <span style={s("font-weight: 300; font-size: clamp(30px, 5vw, 72px); line-height: 1")}>
-            →
-          </span>
-        </Hover>
-      </section>
-
-      <section id="sdk" style={s("background: #171717; color: oklch(0.955 0.004 85)")}>
-        <div
-          style={s(
-            "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-          )}
-        >
-          <div
-            data-row=""
-            data-reveal=""
-            style={s(
-              "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 6vw, 90px); align-items: end",
-            )}
-          >
-            <h2
-              style={s(
-                "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 15ch",
-              )}
-            >
-              Mavna, as code you build on.
-            </h2>
-            <p
-              style={s(
-                "margin: 0; font-size: 16px; line-height: 1.62; color: oklch(0.74 0.012 250); max-width: 42ch",
-              )}
-            >
-              The SDK is the same engine our own app runs on, opened up as a small set of packages
-              you build your own interface on. You bring the wallet and the screens; it moves value
-              into Stellar behind one interface, so you never have to learn a single bridge’s own
-              toolkit.
-            </p>
-          </div>
-
-          <div
-            data-row=""
-            data-reveal=""
-            style={s(
-              "margin-top: clamp(40px, 6vw, 72px); display: grid; grid-template-columns: 1.1fr 1fr; gap: clamp(30px, 6vw, 90px); align-items: start",
-            )}
-          >
-            <pre
-              style={s(
-                "margin: 0; overflow-x: auto; font-family: 'IBM Plex Mono', monospace; font-size: clamp(12px, 1.05vw, 13.5px); line-height: 1.95; color: oklch(0.88 0.008 85)",
-              )}
-              // biome-ignore lint/security/noDangerouslySetInnerHtml: a static, author-written syntax-highlighted snippet, no user input.
-              dangerouslySetInnerHTML={{ __html: CODE_HTML }}
-            />
-            <div>
-              <p
-                style={s(
-                  "margin: 0; font-size: 16px; line-height: 1.62; color: oklch(0.74 0.012 250); max-width: 36ch",
-                )}
-              >
-                You ask once and work with the answer. What happens underneath, which bridges exist,
-                how each one is reached, what network you are on, is Mavna’s problem, not something
-                your code has to know.
-              </p>
-              <p
-                style={s(
-                  "margin: 18px 0 0; font-size: 16px; line-height: 1.62; color: oklch(0.74 0.012 250); max-width: 36ch",
-                )}
-              >
-                It builds; you sign. No package can hold a key, so custody stays with your users
-                from first call to last.
-              </p>
-            </div>
-          </div>
-          <div
-            data-reveal=""
-            data-row2=""
-            style={s(
-              "margin-top: clamp(44px, 7vw, 84px); display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: oklch(0.30 0.008 250); border: 1px solid oklch(0.30 0.008 250)",
-            )}
-          >
-            {[
-              { pkg: "@mavna/core", note: "The words everything else uses." },
-              {
-                pkg: "@mavna/routing",
-                note: "Asks the bridges, ranks the answers, adds the swap.",
-              },
-              { pkg: "@mavna/stellar", note: "Reads Stellar and does the account math." },
-              { pkg: "@mavna/status", note: "Follows a transfer, and finds it again later." },
-              { pkg: "@mavna/swap", note: "Stellar's exchanges, in one place." },
-              {
-                pkg: "@mavna/adapter-*",
-                note: "One per bridge. Add a rail by adding a file, not by touching the rest.",
-              },
-            ].map((p) => (
-              <div key={p.pkg} style={s("background: #171717; padding: clamp(20px, 2.4vw, 30px)")}>
-                <div
-                  style={s(
-                    "font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: oklch(0.90 0.008 85); word-break: break-word",
-                  )}
-                >
-                  {p.pkg}
-                </div>
-                <div
-                  style={s(
-                    "margin-top: 9px; font-size: 14.5px; line-height: 1.55; color: oklch(0.66 0.012 250)",
-                  )}
-                >
-                  {p.note}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section
-        id="whole"
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <h2
-          style={s(
-            "margin: clamp(18px, 2.4vw, 26px) 0 clamp(34px, 5vw, 54px); font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 20ch",
-          )}
-        >
-          The whole transfer, not just the crossing.
-        </h2>
-
-        <div style={s("position: relative")}>
-          <div
-            data-crossbrace=""
-            style={s(
-              "position: absolute; top: -30px; left: 40%; width: 20%; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none",
-            )}
-          >
-            <span
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: oklch(0.60 0.075 45); white-space: nowrap",
-              )}
-            >
-              Where most tools stop
-            </span>
-            <span
-              style={s(
-                "width: 100%; height: 6px; border: 1px solid oklch(0.60 0.075 45 / 0.5); border-bottom: none",
-              )}
-            />
-          </div>
-          <div data-bar="" style={s("display: flex; border: 1px solid oklch(0.885 0.006 85)")}>
-            <div
-              data-seg=""
-              style={s(
-                "flex: 1 1 0; min-width: 0; padding: clamp(20px, 2.4vw, 30px) clamp(16px, 1.8vw, 24px)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; color: oklch(0.62 0.012 250)",
-                )}
-              >
-                01
-              </div>
-              <div
-                style={s("margin-top: 12px; font-size: clamp(16px, 1.5vw, 18px); font-weight: 400")}
-              >
-                Ask & route
-              </div>
-              <div
-                style={s(
-                  "margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: oklch(0.50 0.012 250)",
-                )}
-              >
-                Every bridge is asked at once and ranked by what lands.
-              </div>
-            </div>
-            <div
-              data-seg=""
-              style={s(
-                "flex: 1 1 0; min-width: 0; padding: clamp(20px, 2.4vw, 30px) clamp(16px, 1.8vw, 24px); border-left: 1px solid oklch(0.885 0.006 85)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; color: oklch(0.62 0.012 250)",
-                )}
-              >
-                02
-              </div>
-              <div
-                style={s("margin-top: 12px; font-size: clamp(16px, 1.5vw, 18px); font-weight: 400")}
-              >
-                Set up
-              </div>
-              <div
-                style={s(
-                  "margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: oklch(0.50 0.012 250)",
-                )}
-              >
-                The receiving account is opened and made able to hold the coin.
-              </div>
-            </div>
-            <div
-              data-seg=""
-              style={s(
-                "flex: 0.85 1 0; min-width: 0; padding: clamp(20px, 2.4vw, 30px) clamp(16px, 1.8vw, 24px); background: oklch(0.60 0.075 45 / 0.09); border-left: 1px solid oklch(0.60 0.075 45 / 0.4); border-right: 1px solid oklch(0.60 0.075 45 / 0.4)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; color: oklch(0.55 0.075 45)",
-                )}
-              >
-                03
-              </div>
-              <div
-                style={s(
-                  "margin-top: 12px; font-size: clamp(16px, 1.5vw, 18px); font-weight: 400; color: oklch(0.42 0.055 40)",
-                )}
-              >
-                The crossing
-              </div>
-              <div
-                style={s(
-                  "margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: oklch(0.52 0.05 45)",
-                )}
-              >
-                A bridge moves the value. This is the only part it does.
-              </div>
-            </div>
-            <div
-              data-seg=""
-              style={s(
-                "flex: 1 1 0; min-width: 0; padding: clamp(20px, 2.4vw, 30px) clamp(16px, 1.8vw, 24px); border-left: 1px solid oklch(0.885 0.006 85)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; color: oklch(0.62 0.012 250)",
-                )}
-              >
-                04
-              </div>
-              <div
-                style={s("margin-top: 12px; font-size: clamp(16px, 1.5vw, 18px); font-weight: 400")}
-              >
-                Swap
-              </div>
-              <div
-                style={s(
-                  "margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: oklch(0.50 0.012 250)",
-                )}
-              >
-                Traded on Stellar into the coin you actually asked for.
-              </div>
-            </div>
-            <div
-              data-seg=""
-              style={s(
-                "flex: 1 1 0; min-width: 0; padding: clamp(20px, 2.4vw, 30px) clamp(16px, 1.8vw, 24px); border-left: 1px solid oklch(0.885 0.006 85)",
-              )}
-            >
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.16em; color: oklch(0.62 0.012 250)",
-                )}
-              >
-                05
-              </div>
-              <div
-                style={s("margin-top: 12px; font-size: clamp(16px, 1.5vw, 18px); font-weight: 400")}
-              >
-                Deliver & track
-              </div>
-              <div
-                style={s(
-                  "margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: oklch(0.50 0.012 250)",
-                )}
-              >
-                Put in the account, and followable until it lands or is refunded.
-              </div>
-            </div>
-          </div>
-          <div
-            data-crossbrace=""
-            style={s(
-              "margin-top: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px",
-            )}
-          >
-            <span
-              style={s(
-                "width: 100%; height: 8px; border: 1px solid oklch(0.60 0.075 45 / 0.45); border-top: none",
-              )}
-            />
-            <span
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              Mavna does all five
-            </span>
-          </div>
-        </div>
-
-        <p
-          style={s(
-            "margin: clamp(30px, 4vw, 48px) auto 0; text-align: center; font-size: 16px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 58ch",
-          )}
-        >
-          Everything else hands you the middle box and calls it done. The SDK gives you the whole
-          row, so you wire in one thing instead of stitching a bridge, an exchange, an account-setup
-          step and a tracker together yourself.
-        </p>
-      </section>
-
-      <section
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <Hover
-          as="a"
-          href={DOCS}
-          base="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 20px; padding: clamp(26px, 4vw, 52px) 0; border-top: 1px solid oklch(0.24 0.012 250); border-bottom: 1px solid oklch(0.24 0.012 250); transition: padding-left .6s cubic-bezier(.2,.7,.2,1), color .4s ease"
-          hover="padding-left: 18px; color: oklch(0.60 0.075 45)"
-        >
-          <span
-            style={s(
-              "font-weight: 300; font-size: clamp(38px, 7vw, 104px); line-height: 0.98; letter-spacing: -0.04em",
-            )}
-          >
-            Build on the SDK
-          </span>
-          <span style={s("font-weight: 300; font-size: clamp(30px, 5vw, 72px); line-height: 1")}>
-            →
-          </span>
-        </Hover>
       </section>
 
       <section
         id="widget"
-        data-reveal=""
-        style={s("background: #171717; color: oklch(0.955 0.004 85)")}
-      >
-        <div
-          style={s(
-            "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-          )}
-        >
-          <h2
-            style={s(
-              "margin: clamp(18px, 2.4vw, 26px) 0 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 20ch",
-            )}
-          >
-            Everything a cross-chain deposit needs, in one drop-in.
-          </h2>
-          <p
-            style={s(
-              "margin: clamp(18px, 2.4vw, 24px) 0 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.74 0.012 250); max-width: 56ch",
-            )}
-          >
-            Run a wallet, an exchange, or anything whose users hold money on other chains, and this
-            is how they bring it onto Stellar from inside your product. The same flow our own app
-            runs.
-          </p>
-          <div
-            data-row=""
-            style={s(
-              "margin-top: clamp(46px, 7vw, 84px); display: grid; grid-template-columns: 1fr auto 1fr; gap: clamp(18px, 3vw, 44px); align-items: center",
-            )}
-          >
-            <div style={s("display: grid; gap: 10px")}>
-              <div
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: oklch(0.55 0.012 250); padding-bottom: 4px",
-                )}
-              >
-                What you would build yourself
-              </div>
-              {[
-                "Routing across every bridge",
-                "Live quotes, kept ranked",
-                "Tracking a transfer in flight",
-                "Recovering the ones that stall",
-                "Wallet prompts, in plain words",
-              ].map((t) => (
-                <div
-                  key={t}
-                  style={s(
-                    "display: flex; align-items: center; gap: 11px; padding: 12px 15px; border: 1px dashed oklch(0.34 0.01 250); border-radius: 10px",
-                  )}
-                >
-                  <span
-                    style={s(
-                      "width: 5px; height: 5px; border-radius: 50%; background: oklch(0.44 0.01 250); flex: none",
-                    )}
-                  />
-                  <span style={s("font-size: 14.5px; color: oklch(0.64 0.012 250)")}>{t}</span>
-                </div>
-              ))}
-            </div>
-            <div
-              data-arrow=""
-              style={s(
-                "font-weight: 300; font-size: clamp(28px, 3.5vw, 48px); line-height: 1; color: oklch(0.62 0.075 45); justify-self: center",
-              )}
-            >
-              →
-            </div>
-            <div
-              style={s(
-                "border: 1px solid oklch(0.34 0.012 250); border-radius: 18px; padding: clamp(22px, 3vw, 38px); background: oklch(0.185 0.008 264); display: grid; gap: clamp(18px, 2.2vw, 26px)",
-              )}
-            >
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: oklch(0.82 0.06 55)",
-                )}
-              >
-                @mavna/widget
-              </span>
-              <div
-                style={s(
-                  "border: 1px solid oklch(0.34 0.012 250); border-radius: 12px; padding: clamp(14px, 1.8vw, 18px); background: oklch(0.20 0.008 264); display: grid; gap: 10px",
-                )}
-              >
-                <span
-                  style={s(
-                    "font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: oklch(0.66 0.06 50)",
-                  )}
-                >
-                  Transfer
-                </span>
-                <span
-                  style={s(
-                    "height: 8px; border-radius: 999px; background: oklch(0.32 0.01 250); width: 72%",
-                  )}
-                />
-                <span
-                  style={s(
-                    "height: 8px; border-radius: 999px; background: oklch(0.32 0.01 250); width: 50%",
-                  )}
-                />
-                <span
-                  style={s(
-                    "height: 30px; border-radius: 999px; background: oklch(0.62 0.085 48); width: 100%; margin-top: 2px",
-                  )}
-                />
-              </div>
-              <div style={s("display: grid; gap: 10px")}>
-                <span
-                  style={s(
-                    "font-weight: 300; font-size: clamp(20px, 2.6vw, 32px); line-height: 1.1; letter-spacing: -0.024em; color: oklch(0.96 0.008 85)",
-                  )}
-                >
-                  One component you drop in.
-                </span>
-                <span
-                  style={s("font-size: 14.5px; line-height: 1.5; color: oklch(0.74 0.012 250)")}
-                >
-                  The quote, the confirmation and the wait, all inside it.
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section
-        data-reveal=""
         style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+          `background: oklch(0.955 0 0); border-top: 1px solid ${RULE}; border-bottom: 1px solid ${RULE}`,
         )}
       >
-        <div
-          data-row=""
-          style={s(
-            "display: grid; grid-template-columns: 1fr 1.3fr; gap: clamp(24px, 5vw, 70px); align-items: end; padding-bottom: clamp(30px, 4vw, 48px)",
-          )}
-        >
-          <h2
-            style={s(
-              "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 13ch",
-            )}
-          >
-            One component. The whole flow.
-          </h2>
-          <p
-            style={s(
-              "margin: 0; font-size: 16.5px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 52ch",
-            )}
-          >
-            A cross-chain deposit into Stellar is a project on its own: routing across bridges, live
-            quotes, wallets on both sides, the reserve on a brand-new account, the swap into the
-            asset they asked for, tracking, and recovery when one stalls. The widget is all of it,
-            already built, and it is the same flow our own app runs.
-          </p>
-        </div>
         <div
           data-reveal=""
           style={s(
-            "display: grid; justify-items: center; text-align: center; gap: clamp(18px, 2.2vw, 26px); margin: clamp(8px, 1.5vw, 16px) 0 clamp(30px, 4vw, 50px); padding: clamp(38px, 5.5vw, 68px) 0; border-top: 1px solid oklch(0.885 0.006 85); border-bottom: 1px solid oklch(0.885 0.006 85)",
+            `${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
           )}
         >
-          <span
+          <div
+            data-row=""
             style={s(
-              "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
+              "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 80px); align-items: end; margin-bottom: clamp(48px, 7vw, 88px)",
             )}
           >
-            Try it live
-          </span>
-          <Live
-            hold={64}
-            style={{ display: "grid", justifyItems: "center" }}
-            config={{
-              integrator: "web.mavna.app",
-              network: "testnet",
-              variant: "drawer",
-              appearance: "light",
-            }}
+            <h2 style={s(`${BIG}; font-size: clamp(34px, 5vw, 72px); max-width: 11ch`)}>
+              One component. The whole flow.
+            </h2>
+            <p
+              style={s(
+                `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED}; max-width: 42ch`,
+              )}
+            >
+              Drop it into your wallet or exchange and your users bring money onto Stellar without
+              leaving. It takes your colours, your type and your shape. Pick a look, then open it.
+            </p>
+          </div>
+          <LookPicker />
+        </div>
+      </section>
+
+      <section id="name" style={s(`background: ${NIGHT}; color: ${ON_NIGHT}; overflow: hidden`)}>
+        <div
+          data-reveal=""
+          style={s(
+            `${WRAP}; padding-top: clamp(90px, 14vh, 170px); padding-bottom: clamp(60px, 8vh, 100px)`,
+          )}
+        >
+          <img
+            data-bob=""
+            src="/assets/mark-paper.png"
+            alt=""
+            style={s("width: clamp(48px, 5vw, 68px); height: auto; display: block")}
           />
           <p
             style={s(
-              "margin: 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.48 0.012 250); max-width: 44ch",
+              "margin: clamp(30px, 4vw, 48px) 0 0; font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-weight: 300; font-size: clamp(30px, 4.6vw, 68px); line-height: 1.1; letter-spacing: -0.035em; max-width: 22ch",
             )}
           >
-            One trigger you place anywhere. It rises from the bottom over your page, runs the whole
-            transfer, and closes on its own button or the Escape key.
+            A <em style={s(`font-style: normal; color: ${SIGNAL_BRIGHT}`)}>mavna</em> is the barge
+            that carries cargo ashore when the ship cannot dock.
+          </p>
+          <p
+            style={s(
+              `margin: clamp(22px, 2.6vw, 30px) 0 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 40ch`,
+            )}
+          >
+            Mavna does the last part of the trip, the part everyone else leaves to you.
           </p>
         </div>
-        <div
-          data-row2=""
-          style={s(
-            "display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(26px, 4vw, 60px)",
-          )}
-        >
+        <div data-reveal="" style={s(`${WRAP}; padding-bottom: clamp(60px, 9vh, 110px)`)}>
           {[
+            { href: APP, label: "Open the app", note: "Send something onto Stellar now." },
             {
-              title: "It brings its own wallets",
-              note: "It discovers the browser wallets your user already holds on the sending side and the Stellar wallets on the other, connects them, and asks for each signature in plain words. You never build a wallet layer to embed it.",
+              href: DOCS_SDK,
+              label: "Build on the SDK",
+              note: "Put the engine behind your own screens.",
             },
-            {
-              title: "The real flow, not a demo",
-              note: "Every rail is raced on each quote, the figure your user sees is the one that lands, and the parts that usually sink an integration, the account reserve, the swap, a transfer that stalls, are handled inside it.",
-            },
-            {
-              title: "It stays a quiet guest",
-              note: "It builds the transactions and your users sign them, so no key ever touches your page or ours. Its styles are scoped to itself and reach nothing around them, so it drops in with no global to reason about.",
-            },
-          ].map((f) => (
-            <div
-              key={f.title}
-              style={s(
-                "padding-top: clamp(18px, 2.2vw, 24px); border-top: 1px solid oklch(0.885 0.006 85)",
-              )}
-            >
-              <div
+            { href: PLAYGROUND, label: "Embed the widget", note: "Try the real component first." },
+          ].map((row) => (
+            <a key={row.label} data-way="" href={row.href} style={s(`color: ${ON_NIGHT}`)}>
+              <span
+                data-way-big=""
                 style={s(
-                  "font-size: clamp(18px, 1.9vw, 22px); font-weight: 300; letter-spacing: -0.02em",
+                  "font-weight: 300; font-size: clamp(32px, 5.2vw, 76px); line-height: 1; letter-spacing: -0.04em; white-space: nowrap",
                 )}
               >
-                {f.title}
-              </div>
-              <p
-                style={s(
-                  "margin: 12px 0 0; font-size: 15px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 34ch",
-                )}
-              >
-                {f.note}
-              </p>
-            </div>
+                {row.label}
+              </span>
+              <span data-way-note="" style={s("font-size: 15.5px; line-height: 1.5")}>
+                {row.note}
+              </span>
+              <span data-way-arrow="">
+                <Arrow size="clamp(30px, 4vw, 52px)" />
+              </span>
+            </a>
           ))}
         </div>
-        <p
-          style={s(
-            "margin: clamp(40px, 5vw, 64px) 0 0; font-weight: 300; font-size: clamp(20px, 2.4vw, 30px); line-height: 1.28; letter-spacing: -0.024em; color: oklch(0.30 0.012 250); max-width: 30ch",
-          )}
-        >
-          You ship a deposit flow in an afternoon, not a quarter.
-        </p>
       </section>
 
-      <section
-        data-reveal=""
+      <footer
         style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
+          `background: ${NIGHT}; color: ${MUTED_NIGHT}; border-top: 1px solid ${RULE_NIGHT}`,
         )}
       >
-        <h2
-          style={s(
-            "margin: 0; font-weight: 300; font-size: clamp(28px, 4vw, 56px); line-height: 1.02; letter-spacing: -0.036em; max-width: 16ch",
-          )}
-        >
-          Yours to style, yours to steer.
-        </h2>
-        <p
-          style={s(
-            "margin: clamp(18px, 2.4vw, 24px) 0 clamp(44px, 6vw, 72px); font-size: 16.5px; line-height: 1.62; color: oklch(0.45 0.012 250); max-width: 56ch",
-          )}
-        >
-          You never touch how it works. You decide how it looks and what it offers, and both are
-          settings you change whenever you like, not a rebuild.
-        </p>
-        <div
-          data-row=""
-          style={s("display: grid; grid-template-columns: 1fr 1fr; gap: clamp(30px, 5vw, 72px)")}
-        >
-          <div style={s("padding-right: clamp(4px, 2vw, 24px)")}>
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              Looks like you
-            </div>
-            <p
-              style={s(
-                "margin: clamp(16px, 2vw, 22px) 0 0; font-weight: 300; font-size: clamp(22px, 2.6vw, 34px); line-height: 1.14; letter-spacing: -0.028em; color: oklch(0.24 0.012 250); max-width: 18ch",
-              )}
-            >
-              It takes your colours, your type and your shape.
-            </p>
-            <p
-              style={s(
-                "margin: clamp(16px, 2vw, 22px) 0 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
-              )}
-            >
-              Match it to your brand once and it stays matched. There is no design work, and nothing
-              to keep in sync afterwards.
-            </p>
-          </div>
-          <div
-            style={s(
-              "border-left: 1px solid oklch(0.885 0.006 85); padding-left: clamp(28px, 4vw, 56px)",
-            )}
-          >
-            <div
-              style={s(
-                "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.60 0.075 45)",
-              )}
-            >
-              Shows what you choose
-            </div>
-            <p
-              style={s(
-                "margin: clamp(16px, 2vw, 22px) 0 0; font-weight: 300; font-size: clamp(22px, 2.6vw, 34px); line-height: 1.14; letter-spacing: -0.028em; color: oklch(0.24 0.012 250); max-width: 18ch",
-              )}
-            >
-              You pick which routes appear, and what they cost.
-            </p>
-            <p
-              style={s(
-                "margin: clamp(16px, 2vw, 22px) 0 0; font-size: 15.5px; line-height: 1.6; color: oklch(0.45 0.012 250); max-width: 40ch",
-              )}
-            >
-              Offer only the bridges you stand behind, add your own fee on routes that convert on
-              arrival, or switch a provider off. Each one is a setting in config, not a rebuild of
-              the flow.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section
-        data-reveal=""
-        style={s(
-          "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px)",
-        )}
-      >
-        <Hover
-          as="a"
-          href={PLAYGROUND}
-          base="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 20px; padding: clamp(26px, 4vw, 52px) 0; border-top: 1px solid oklch(0.24 0.012 250); border-bottom: 1px solid oklch(0.24 0.012 250); transition: padding-left .6s cubic-bezier(.2,.7,.2,1), color .4s ease"
-          hover="padding-left: 18px; color: oklch(0.60 0.075 45)"
-        >
-          <span
-            style={s(
-              "font-weight: 300; font-size: clamp(38px, 7vw, 104px); line-height: 0.98; letter-spacing: -0.04em",
-            )}
-          >
-            Embed the widget
-          </span>
-          <span style={s("font-weight: 300; font-size: clamp(30px, 5vw, 72px); line-height: 1")}>
-            →
-          </span>
-        </Hover>
-      </section>
-
-      <footer style={s("background: #171717; color: oklch(0.90 0.008 85)")}>
         <div
           style={s(
-            "max-width: 1180px; margin: 0 auto; padding: clamp(58px, 8.5vh, 112px) clamp(20px, 4vw, 48px) 36px",
+            `${WRAP}; padding-top: 32px; padding-bottom: 36px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 22px 36px; font-size: 14px`,
           )}
         >
-          <div
-            data-reveal=""
-            data-row=""
-            style={s(
-              "display: grid; grid-template-columns: auto 1fr; gap: clamp(28px, 6vw, 80px); align-items: start; padding-bottom: clamp(48px, 7vw, 88px)",
-            )}
-          >
-            <img
-              src="/assets/mark-paper.png"
-              alt=""
-              style={s("width: clamp(48px, 5vw, 68px); height: clamp(48px, 5vw, 68px)")}
-            />
-            <div>
-              <p
-                style={s(
-                  "margin: 0; font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-weight: 300; font-size: clamp(24px, 3.2vw, 44px); line-height: 1.22; letter-spacing: -0.03em; max-width: 28ch; color: oklch(0.955 0.004 85)",
-                )}
-              >
-                A mavna is the barge that carries cargo ashore when the ship cannot dock.
-              </p>
-              <p
-                style={s(
-                  "margin: clamp(20px, 2.4vw, 28px) 0 0; font-size: 16px; line-height: 1.62; color: oklch(0.72 0.012 250); max-width: 40ch",
-                )}
-              >
-                Just like its name, Mavna does the last part of the trip, the part everyone else
-                leaves to you.
-              </p>
-            </div>
-          </div>
-          <div
-            data-reveal=""
-            data-row2=""
-            style={s(
-              "display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: oklch(0.30 0.008 250); border: 1px solid oklch(0.30 0.008 250)",
-            )}
-          >
-            {[
-              {
-                href: APP,
-                tag: "Send something",
-                title: "mavna.app",
-                note: "Move money onto Stellar in one go.",
-              },
-              {
-                href: `${DOCS}/developers/quickstart`,
-                tag: "Build on it",
-                title: "SDK quickstart",
-                note: "One file, one real quote, off the live network.",
-              },
-              {
-                href: PLAYGROUND,
-                tag: "Embed it",
-                title: "Widget playground",
-                note: "Try the real component, with real quotes.",
-              },
-            ].map((card) => (
-              <Hover
-                key={card.title}
-                as="a"
-                href={card.href}
-                base="background: #171717; padding: clamp(26px, 3.4vw, 42px); display: grid; gap: 10px; align-content: start; transition: background .5s ease"
-                hover="background: #1d1d1d"
-              >
-                <span
-                  style={s(
-                    "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: oklch(0.72 0.075 45)",
-                  )}
-                >
-                  {card.tag}
-                </span>
-                <span style={s("font-size: clamp(19px, 2vw, 24px); font-weight: 300")}>
-                  {card.title}
-                </span>
-                <span
-                  style={s("font-size: 14.5px; line-height: 1.55; color: oklch(0.66 0.012 250)")}
-                >
-                  {card.note}
-                </span>
-              </Hover>
-            ))}
-          </div>
-          <div
-            data-reveal=""
-            data-row2=""
-            style={s(
-              "margin-top: clamp(46px, 6vw, 84px); padding-top: clamp(40px, 5vw, 62px); border-top: 1px solid oklch(0.30 0.008 250); display: grid; grid-template-columns: 1.7fr 1fr 1fr; gap: clamp(26px, 4vw, 56px)",
-            )}
-          >
-            <div style={s("display: grid; gap: 16px; align-content: start")}>
-              <a href="#top" style={s("display: flex; align-items: center; gap: 11px")}>
-                <img
-                  src="/assets/mark-paper.png"
-                  alt="Mavna"
-                  style={s("width: 22px; height: 22px")}
-                />
-                <span
-                  style={s(
-                    "font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; letter-spacing: 0.36em; text-transform: uppercase; color: oklch(0.92 0.008 85)",
-                  )}
-                >
-                  Mavna
-                </span>
-              </a>
-              <span
-                style={s(
-                  "font-size: 14.5px; line-height: 1.55; color: oklch(0.58 0.012 250); max-width: 26ch",
-                )}
-              >
-                Cross-chain delivery into Stellar. Open source and non-custodial.
-              </span>
-            </div>
-            <div style={s("display: grid; gap: 13px; align-content: start")}>
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.52 0.012 250)",
-                )}
-              >
-                Product
-              </span>
-              <FootLink href={APP}>The app</FootLink>
-              <FootLink href={DOCS_SDK}>SDK</FootLink>
-              <FootLink href={DOCS_WIDGET}>Widget</FootLink>
-              <FootLink href={PLAYGROUND}>Playground</FootLink>
-            </div>
-            <div style={s("display: grid; gap: 13px; align-content: start")}>
-              <span
-                style={s(
-                  "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: oklch(0.52 0.012 250)",
-                )}
-              >
-                Resources
-              </span>
-              <FootLink href={DOCS}>Documentation</FootLink>
-              <Hover
-                as="a"
-                href={GITHUB}
-                external
-                base="font-size: 14.5px; color: oklch(0.80 0.012 250); transition: color .4s ease"
-                hover="color: oklch(0.96 0.008 85)"
-              >
-                GitHub
-              </Hover>
-            </div>
-          </div>
-          <div
-            style={s(
-              "margin-top: clamp(40px, 6vw, 72px); padding-top: 22px; border-top: 1px solid oklch(0.30 0.008 250); display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: oklch(0.55 0.012 250)",
-            )}
-          >
-            <span>© 2026 Mavna</span>
-            <span>Running on Stellar testnet</span>
-          </div>
+          <a href="#top" style={s("display: flex; align-items: center; gap: 11px")}>
+            <img src="/assets/mark-paper.png" alt="Mavna" style={s("width: 22px; height: 22px")} />
+            <span
+              style={s(
+                `font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; letter-spacing: 0.36em; text-transform: uppercase; color: ${ON_NIGHT}`,
+              )}
+            >
+              Mavna
+            </span>
+          </a>
+          <span style={s("display: flex; align-items: center; gap: 10px")}>
+            <span data-pulse="" />
+            Running on Stellar testnet
+          </span>
+          <nav aria-label="Footer" style={s("display: flex; flex-wrap: wrap; gap: 24px")}>
+            <a data-footlink="" href={APP}>
+              App
+            </a>
+            <a data-footlink="" href={PLAYGROUND}>
+              Playground
+            </a>
+            <a data-footlink="" href={DOCS}>
+              Docs
+            </a>
+            <a data-footlink="" href={GITHUB} target="_blank" rel="noopener noreferrer">
+              GitHub
+            </a>
+          </nav>
+          <span>© 2026 Mavna. Open source and non-custodial.</span>
         </div>
       </footer>
     </div>
