@@ -112,6 +112,46 @@ What the constructor is given decides what the contract will ever trust, so on m
   router upgraded by them, can change what a swap does with the funds it is given. The router's
   source was not reviewed here; check these roles again at deployment time.
 
+### The mainnet lists
+
+Read from mainnet on 2026-10-21 and held in `scripts/arrival-mainnet.mjs`:
+
+| Argument      | Value                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------- |
+| `endpoint`    | `CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK`, LayerZero's Stellar endpoint, id 30600 |
+| `router`      | `CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK`, Aquarius                               |
+| `ofts`        | the USDT0 OFT `CBOWOLFS...MMF6`, crediting USDT0's asset contract `CBSJZEIO...26YF`                |
+| `wanted`      | Circle USDC's asset contract `CCW67TSZ...MI75`, native XLM's `CAS3J7GY...OWMA`                     |
+| `path_tokens` | Circle USDC's asset contract `CCW67TSZ...MI75`                                                     |
+
+Aquarius's quoting service routes USDT0 through Yield USDT (`CCOVLDJC...B6F6G`), which is a custom
+token contract with its own admin, so it is not listed. The router's own USDT0/USDC pool converts
+into USDC in one hop and into XLM through USDC, which is why USDC is a path token as well as a
+wanted asset: the SDK passes only `path_tokens` as the tokens a quote may route through. The OFT's
+owner is `CBCZ5CET...QKR6`, a three-signature LayerZero multisig contract.
+
+### Deploying
+
+Build with `contracts/build.sh` and confirm it prints the testnet row's hash: the same bytes are
+deployed on every network. Then check the lists against mainnet as it is at that moment (read-only):
+
+```sh
+pnpm --filter @mavna/swap build
+node scripts/arrival-mainnet.mjs --wasm=<built wasm> --source=<deployer key name>
+```
+
+It exits non-zero on any failed check and ends with the two commands to sign:
+`stellar contract upload`, then `stellar contract deploy` with the constructor arguments above. Any
+funded mainnet key can sign them; the contract has no admin, so the key holds no power over it
+afterwards. Measured on 2026-10-21 by simulation, at mainnet fees: the upload's resource fee is
+24.114 XLM (about 21 XLM is charged after the refundable part is settled) and the deploy's 0.109
+XLM, so the key needs 25.3 XLM including its 1 XLM minimum balance, plus headroom if fees rise.
+Afterwards, check the instance:
+
+```sh
+node scripts/arrival-mainnet.mjs --wasm=<built wasm> --contract=<new contract id>
+```
+
 Earlier testnet instances hold nothing and are not used. `CDAIQ522...QN6X` (`66948b25...06ab`) is
 the same source built with Rust 1.97.1, replaced when the toolchain moved to 1.99.1, which changes
 the bytes. `CD5M6IBU...P35A` (`688456b0...6155`) trapped when a trustline limit refused the payout,
