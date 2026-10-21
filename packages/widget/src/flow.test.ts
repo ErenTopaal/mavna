@@ -395,6 +395,33 @@ describe("a review of a new account the sponsor sets up, arriving as USDC", () =
   });
 });
 
+describe("a review where the account pays its own Circle delivery", () => {
+  const review = (source: string, funding: "self" | "sponsor") => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, reserveFunding: funding };
+    return renderToStaticMarkup(
+      renderReview(flow, {
+        r: toRouteView(routeFor(source)),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+      }),
+    );
+  };
+
+  it("shows the delivery fee the account pays, as its own line", () => {
+    // a live self-funded Sepolia transfer reviewed with no word of the fee;
+    // the account then paid 0.0139706 XLM for its own delivery
+    const html = review("cctp", "self");
+    expect(html).toContain("Delivery fee, from your own XLM");
+    expect(html).toContain("Up to 0.1 XLM");
+  });
+
+  it("shows none where the sponsor pays it or the rail delivers by itself", () => {
+    expect(review("cctp", "sponsor")).not.toContain("Delivery fee");
+    expect(review("layerzero", "self")).not.toContain("Delivery fee");
+  });
+});
+
 describe("fees and rates on a route", () => {
   const ETH = {
     chainId: "arbitrum-sepolia",

@@ -4,12 +4,14 @@
  * through s(); every hover/active/focus is pseudo(). All the bound values are
  * computed from the real component state, never from demo constants.
  */
+import { stroopsToXlm } from "@mavna/stellar";
 import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
 import { amountValue, fmt, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
+import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { pseudo } from "./pseudo";
 import {
   approvalsLabel,
@@ -952,6 +954,17 @@ export function renderReview(
                       ? "Reserve, from your own XLM"
                       : "Kept in your account",
                   value: `${fmt(r.reserveXlm)} XLM`,
+                },
+              ]
+            : []),
+          // the account signs and pays Circle's mint itself; the budget is what
+          // this page will let that transaction cost
+          ...(c.state.reserveFunding === "self" && r.route.source === "cctp"
+            ? [
+                {
+                  key: "delivery",
+                  name: "Delivery fee, from your own XLM",
+                  value: `Up to ${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM`,
                 },
               ]
             : []),
