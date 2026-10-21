@@ -755,6 +755,7 @@ describe("a request for an asset this rail does not carry", () => {
   it("declines USDC at once, saying what it carries, without asking any network", async () => {
     const asked = vi.spyOn(globalThis, "fetch");
     const node = stellarNode();
+    const entries = vi.spyOn(node.server, "getLedgerEntries");
     const adapter = new LayerZeroAdapter({
       network: "mainnet",
       rpc: node,
@@ -774,7 +775,7 @@ describe("a request for an asset this rail does not carry", () => {
     expect(rejection.retryable).toBe(false);
     expect(rejection.explanation).toBe("LayerZero carries USDT0 to Stellar, not USDC.");
     expect(asked).not.toHaveBeenCalled();
-    expect(node.server.getLedgerEntries).not.toHaveBeenCalled();
+    expect(entries).not.toHaveBeenCalled();
   });
 
   it("declines XLM the same way, since the rail lands USDT0 and converts nothing itself", async () => {
