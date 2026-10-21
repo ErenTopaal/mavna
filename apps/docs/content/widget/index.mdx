@@ -1,0 +1,38 @@
+---
+title: Embed the widget
+description: One React component that quotes, connects both wallets, runs the transfer and tracks it, styled through CSS custom properties.
+---
+
+`@mavna/widget` is the whole Mavna transfer flow as one React component: the quote, the route
+choice with each rail's trust model in plain words, wallet connection on both sides, the review,
+live progress, and finding and finishing transfers later. The Mavna app is this same component in
+its full-page layout.
+
+You render one component and pass one configuration object. React and React DOM, version 19 or
+later, are its only peer dependencies.
+
+<LiveWidget />
+
+The widget above is the real component, running against Stellar's test network from this page.
+
+## What you can change
+
+- [Configuration](/widget/configuration): the network, your own sponsor and Stellar node, which
+  chains and rails to offer, a prefilled or locked recipient, an integrator fee, and your own wallet
+  connection.
+- [Events](/widget/events): what the widget reports back to your app.
+- [Layouts](/widget/layouts): an inline card, a full page, or a drawer that rises from the bottom.
+- [Theming](/widget/theming): light, dark or the reader's system setting, and every colour, font and
+  radius as a CSS custom property.
+
+## What it does to your page
+
+Everything the widget renders sits inside one element with the class `mv-root`, and every class it
+uses starts with `mv-`, so its styles do not reach your page and yours do not collide with its
+class names. Its sizes are set in pixels, so a page that changes its root font size does not
+resize the widget.
+
+The drawer layout is a popup by design: it dims the page behind it and closes on its close button,
+the dimmed backdrop, or the Escape key.
+
+Start with the [quickstart](/widget/quickstart).

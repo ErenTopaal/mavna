@@ -31,7 +31,7 @@ describe("the package reference", () => {
   });
 
   it("shows every published package on the packages page", () => {
-    const page = readFileSync(join(docs, "content/developers/reference/packages.mdx"), "utf8");
+    const page = readFileSync(join(docs, "content/sdk/reference/packages.mdx"), "utf8");
     const shown = [...page.matchAll(/^## (@mavna\/\S+)$/gm)].map((m) => m[1]).sort();
     expect(shown).toEqual(packages);
   });

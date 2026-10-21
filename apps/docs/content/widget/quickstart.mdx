@@ -1,0 +1,37 @@
+---
+title: Quickstart
+description: Build the widget from the repository, import its stylesheet, and render it with one config object.
+---
+
+## Build it
+
+`@mavna/widget` is part of the Mavna repository and is built from a checkout along with the packages
+it uses. [Install](/sdk/install) covers building the workspace. Your app needs React and React DOM,
+version 19 or later.
+
+## Import the stylesheet
+
+```ts
+import "@mavna/widget/widget.css";
+```
+
+Import it once, anywhere in your app. The build writes the widget's styles to this separate file,
+so importing only the component renders the widget without any styling.
+
+## Render it
+
+<include lang="tsx" meta='title="apps/docs/examples/Panel.tsx"'>../../examples/Panel.tsx</include>
+
+`integrator` is the one required field: a name for your integration. The network defaults to
+Stellar's test network.
+
+`sponsorUrl` points at the [sponsor service](/operate) you run. On the test network it defaults to
+`http://localhost:8787`, a sponsor on the reader's own machine, so a page you host needs your own.
+On the main network there is no default, and the widget refuses to mount without one.
+
+## Next
+
+- Every field: [Configuration](/widget/configuration).
+- Reacting to what the user does: [Events](/widget/events).
+- Inline, full page or drawer: [Layouts](/widget/layouts).
+- Matching your product: [Theming](/widget/theming).

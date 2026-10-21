@@ -1,0 +1,68 @@
+---
+title: Theming
+description: Light, dark or the reader's system setting, and every colour, font and radius as a CSS custom property.
+---
+
+The widget is styled entirely by CSS custom properties declared on its root element, `.mv-root`.
+You change how it looks by setting those properties, through the config or through your own CSS.
+
+## Light, dark and system
+
+`appearance` takes `"system"`, `"light"` or `"dark"`. The default, `"system"`, follows the reader's
+operating system setting. `"light"` and `"dark"` override that setting in both directions. The
+widget writes an explicit choice to a `data-mv-theme` attribute on its root.
+
+## Through the config
+
+`theme` sets properties as inline styles on the root, which take precedence over any stylesheet:
+
+```tsx
+<MavnaWidget
+  config={{
+    integrator: "your-product",
+    theme: {
+      tokens: { "--mv-surface": "#101014", "--mv-ink": "#f4f4f5" },
+      font: "inherit",
+      radius: "12px",
+    },
+  }}
+/>
+```
+
+`tokens` takes any of the properties listed below. `font`, `fontMono`, `radius` and `radiusLg` set
+`--mv-font`, `--mv-font-mono`, `--mv-radius` and `--mv-radius-lg`.
+
+## Through CSS
+
+The widget declares its properties on `.mv-root`, so a `.mv-root` rule in your stylesheet ties with
+it on specificity and the order your bundler emits the stylesheets decides which wins. Doubling the
+class wins outright:
+
+```css
+.mv-root.mv-root {
+  --mv-surface: #101014;
+  --mv-ink: #f4f4f5;
+}
+```
+
+Setting the properties on an ancestor element has no effect, because the widget declares them on
+its own root.
+
+To change the dark theme as well, set your properties in a rule for
+`.mv-root[data-mv-theme="dark"]` too.
+
+## The signal colour
+
+`--mv-signal` and the properties derived from it are the widget's only colour. The widget uses it
+for problems: error notes, an address that is not valid, the warning before sending the same
+transfer again, and the button that finishes a delayed delivery.
+
+## Every property
+
+Read from the widget's stylesheet, `packages/widget/src/widget.css`, when this site is built. The
+values are shown as declared; you can set any value CSS accepts.
+
+<include>../../generated/widget-tokens.mdx</include>
+
+Class names and the structure of the widget's HTML are not part of its interface. They start with
+`mv-` so they cannot collide with yours, and they can change in any release.

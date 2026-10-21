@@ -1,0 +1,42 @@
+---
+title: Build with the SDK
+description: The packages behind Mavna, for quoting routes, building unsigned transactions and tracking transfers in your own interface.
+---
+
+The SDK is the engine the Mavna app and widget run on, as separate packages. You describe a
+transfer, every rail that can carry it is asked at the same time, and you get back routes with the
+amount that arrives, the fees, the trust model and the number of signatures, plus the refusals of
+the rails that cannot carry it, each with a reason. For the route you pick, the rail builds the
+transactions to sign. The SDK never signs, never submits and never holds a key: your wallet does
+the signing.
+
+## The packages
+
+All ten are ESM with their own type declarations, under the Apache-2.0 license.
+
+| Package | What it holds |
+| --- | --- |
+| `@mavna/core` | The shared types: assets, amounts, routes, step phases, and the `BridgeAdapter` interface every rail implements. It depends on no other Mavna package |
+| `@mavna/routing` | `raceAdapters`, which asks every rail at once and ranks the answers; step planning and signature counting; the conversion and integrator-fee enrichment; the circuit breaker |
+| `@mavna/stellar` | A Stellar RPC client that refuses stale answers, address and destination checks, reserve arithmetic, the XLM price, and the sponsorship transaction builders |
+| `@mavna/status` | Lookup keys and the state machine for a transfer in flight |
+| `@mavna/swap` | Stellar exchanges (Soroswap, SushiSwap, Aquarius and the Stellar order book) behind one interface |
+| `@mavna/adapter-cctp` | Circle CCTP as a rail |
+| `@mavna/adapter-axelar` | Axelar's Interchain Token Service as a rail |
+| `@mavna/adapter-layerzero` | LayerZero OFT as a rail, including routes that convert on arrival |
+| `@mavna/adapter-near-intents` | NEAR Intents, through its 1Click API, as a rail |
+| `@mavna/widget` | The React component. See [Embed the widget](/widget) |
+
+Each rail is one package that implements [`BridgeAdapter`](/sdk/reference/adapter-contract).
+`raceAdapters` asks whichever adapters you pass it, so adding a rail needs no change to the other
+packages.
+
+## Where to go next
+
+1. [Install](/sdk/install) and run the [quickstart](/sdk/quickstart), a real quote from the live
+   test network in one file.
+2. [Quote and rank routes](/sdk/routes), [build and sign](/sdk/transactions), and
+   [track and resume](/sdk/tracking) a transfer.
+3. The [package reference](/sdk/reference/packages) lists every export.
+
+For what each rail carries and the trust it asks for, see [How it works](/how-it-works).
