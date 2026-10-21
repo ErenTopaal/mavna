@@ -32,6 +32,23 @@ export interface TransferRecord {
   /** Seconds since the epoch, so a record is orderable without parsing a date. */
   readonly startedAtUnix: number;
   readonly explorerUrl: string | undefined;
+  /** The route's own estimate, in seconds, as quoted when it was sent. */
+  readonly expectedSeconds?: number;
+}
+
+/** What a record written before estimates were kept is held to: forty minutes. */
+const OVERDUE_WITHOUT_ESTIMATE_SECONDS = 2400;
+
+/**
+ * When a pending transfer has taken far longer than its path usually does:
+ * twice its own estimate, so seconds from Arc and hours from Linea, rather
+ * than one figure for every chain.
+ */
+export function overdueAfterSeconds(record: TransferRecord): number {
+  const expected = record.expectedSeconds;
+  return typeof expected === "number" && Number.isFinite(expected) && expected > 0
+    ? 2 * expected
+    : OVERDUE_WITHOUT_ESTIMATE_SECONDS;
 }
 
 /** Reads what is there, and treats anything unreadable as nothing. */

@@ -27,7 +27,7 @@ import type { Engine, SourceDetail } from "./engine";
 import { fromBaseUnits, toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
-import { forgetHistory, readHistory, type TransferRecord } from "./history";
+import { forgetHistory, overdueAfterSeconds, readHistory, type TransferRecord } from "./history";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { box, DUR, EASE, mo } from "./motion";
 import { type FinishAnswer, finishCompose } from "./own-compose";
@@ -1480,7 +1480,7 @@ export class Flow extends React.Component<FlowProps, State> {
             id: "bridge",
             label: "",
             phase,
-            expectedSeconds: 2400,
+            expectedSeconds: overdueAfterSeconds(rec),
             startedAtUnix: rec.startedAtUnix,
           },
           Math.floor(Date.now() / 1000),

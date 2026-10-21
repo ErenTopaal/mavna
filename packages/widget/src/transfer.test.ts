@@ -772,6 +772,18 @@ describe("runTransfer over a relayed rail", () => {
     expect(stored.get(HISTORY_KEY)).toContain(SEND_HASH);
   });
 
+  it("keeps the route's own estimate with the send, for Activity to judge it by", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("1")],
+    });
+    const route = { ...routeFor("layerzero"), estimatedSeconds: 1230 };
+    await run(adapter, route, patches().patch);
+    const [kept] = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{
+      expectedSeconds?: number;
+    }>;
+    expect(kept?.expectedSeconds).toBe(1230);
+  });
+
   it("says plainly that a declined single send moved nothing", async () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],

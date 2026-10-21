@@ -910,6 +910,7 @@ async function send(
         decimals: route.sends.asset.decimals,
         startedAtUnix,
         explorerUrl: route.fromChain.explorerTxUrl(hash),
+        expectedSeconds: route.estimatedSeconds,
       },
       engine.historyKey,
     );
