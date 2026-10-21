@@ -3207,6 +3207,17 @@ describe("the sponsor and its node agree on the network", () => {
     await expect(other.server.ready()).rejects.toThrow(/serves Public Global Stellar Network/);
     errors.mockRestore();
   });
+
+  it("says why on stderr, since the process exits on it without a word of its own", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const other = await startServer();
+    other.rpc.networkPassphrase = Networks.PUBLIC;
+    await expect(other.server.ready()).rejects.toThrow();
+    expect(errors.mock.calls.map((call) => call.join(" ")).join("\n")).toMatch(
+      /serves Public Global Stellar Network/,
+    );
+    errors.mockRestore();
+  });
 });
 
 describe("the sponsor skips stored state it did not write, and still starts", () => {
