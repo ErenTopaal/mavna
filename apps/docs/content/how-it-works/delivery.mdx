@@ -7,8 +7,10 @@ A transfer is done when the money is on Stellar, not when the source chain confi
 proves arrival its own way, and none reads the recipient's balance and calls it delivered: a
 balance cannot tell this transfer's money from money the account already held.
 
-A transfer that has not been indexed yet, or whose delivery cannot be found yet, stays `pending`.
-No rail reports `failed` without evidence of a failure.
+A source transaction a rail's index does not list answers `idle`: the index answers the same for a
+hash it has never seen and for one it has not listed yet, so the rail claims neither failure nor
+progress. A transfer the rail has found, whose delivery cannot be found yet, stays `pending`. No
+rail reports `failed` without evidence of a failure.
 
 ## Circle CCTP
 
@@ -24,7 +26,8 @@ event in the same operation, which says how much was forwarded and to whom. When
 longer has the events, the check reads the recipient's operations from Horizon instead.
 
 A Stellar address alone does not identify a Circle transfer, so a lookup without the burn
-transaction answers `idle`.
+transaction answers `idle`. A burn Circle has observed and is still confirming carries no decoded
+message yet, so where it goes is not known; the check answers `pending` for it.
 
 Circle's message transmitter records each message's nonce once it is used, and refuses a second
 delivery of the same message. Delivering again is therefore always safe: it delivers what has not

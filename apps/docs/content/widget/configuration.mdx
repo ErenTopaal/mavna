@@ -18,7 +18,8 @@ your users.
 **`rpcUrl`**. The Stellar RPC endpoint for `network`. The widget reads EVM chains through the
 connected wallet, never through this endpoint. On the test network the default is the public
 testnet endpoint; on the main network it is the first entry of `PUBLIC_MAINNET_RPC_URLS` in
-`@mavna/stellar`, a public node run by a third party. An empty string is a configuration error.
+`@mavna/stellar`, `https://soroban-rpc.mainnet.stellar.gateway.fm`, a public node run by a third
+party. An empty string is a configuration error.
 
 **`sponsorUrl`**. The [sponsor service](/operate) you run for `network`. On the test network the
 default is `http://localhost:8787`. On the main network there is no default and the widget refuses
