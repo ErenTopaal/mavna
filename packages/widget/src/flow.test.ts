@@ -11,7 +11,14 @@ import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
-import { renderChains, renderFlight, renderReview, routeDetail } from "./screens";
+import {
+  renderChains,
+  renderFlight,
+  renderReview,
+  renderRoutes,
+  renderSend,
+  routeDetail,
+} from "./screens";
 import { DeliveredAsCame, DeliveredUnverified, StillMoving } from "./transfer";
 
 // Only what the flow reads before a transfer reaches the network. start() and
@@ -816,5 +823,61 @@ describe("after an ending, round 6", () => {
     };
     flow.endWith(new Error("The network refused it."));
     expect(flow.flightVals(false).stepEyebrow).toBe("Stopped");
+  });
+});
+
+describe("the flight's headline", () => {
+  const flight = (phase: "failed" | "pending"): string => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      phase: "ended",
+      steps: [
+        { id: "burn", label: "Send", user: true, actor: "Your wallet", phase },
+        { id: "mint", label: "Mint", user: false, actor: "Circle", phase: "idle" },
+      ],
+    };
+    const d = { r: flow.chosen(), chain: { id: "x", name: "X" }, sym: "USDC", arrived: false };
+    return renderToStaticMarkup(renderFlight(flow, d));
+  };
+
+  it("does not say a transfer that stopped is arriving", () => {
+    expect(flight("failed")).not.toContain("Arriving on Stellar");
+    expect(flight("failed")).toContain("Did not arrive on Stellar");
+  });
+
+  it("still says one the page stopped watching is arriving", () => {
+    expect(flight("pending")).toContain("Arriving on Stellar");
+  });
+});
+
+describe("a figure too long for its card", () => {
+  // what a figure needs to break onto a second line inside a flex row, rather
+  // than run past the card edge and take the decimals and the unit with it
+  const wraps = (html: string, figure: string): void => {
+    const at = html.indexOf(`>${figure}`);
+    expect(at).toBeGreaterThan(-1);
+    const open = html.lastIndexOf("<", at);
+    expect(html.slice(open, at)).toContain("overflow-wrap:anywhere");
+  };
+
+  it("wraps on the form, in the routes and in the flight", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const view = toRouteView(routeFor("layerzero"));
+    const big = { ...view, receives: 123456789012.12 };
+    flow.state = { ...flow.state, routes: [big], selected: big.id };
+    const figure = "123,456,789,012.12";
+    const chain = { id: "x", name: "X" };
+    wraps(
+      renderToStaticMarkup(
+        renderSend(flow, { r: big, chain, sym: "USDC", xlm: false, resting: false }),
+      ),
+      figure,
+    );
+    wraps(renderToStaticMarkup(renderRoutes(flow, { sym: "USDC", resting: false })), figure);
+    wraps(
+      renderToStaticMarkup(renderFlight(flow, { r: big, chain, sym: "USDC", arrived: true })),
+      figure,
+    );
   });
 });

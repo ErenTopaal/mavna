@@ -238,11 +238,11 @@ export function renderSend(
             ))}
           </div>
         </div>
-        <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
+        <div style={s("display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;margin-top:12px")}>
           <span
             ref={c.figureRef}
             style={s(
-              `font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:${figureInk}`,
+              `min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:${figureInk}`,
             )}
           >
             {receiveFigure}
@@ -1129,12 +1129,16 @@ export function renderFlight(
   const { r, sym, arrived } = d;
   const chain = r === undefined ? d.chain : r.route.fromChain;
   const asCame = c.state.arrivedAs;
+  // a transfer that stopped on a failed step is not on its way, whatever it was quoted for
+  const stopped = c.state.phase === "ended" && c.state.steps.some((st) => st.phase === "failed");
   const flightEyebrow =
     asCame !== null
       ? "Arrived on Stellar, not converted"
       : arrived
         ? "Arrived on Stellar"
-        : "Arriving on Stellar";
+        : stopped
+          ? "Did not arrive on Stellar"
+          : "Arriving on Stellar";
   const flightFigure =
     asCame !== null ? fmt(asCame.amount) : r === undefined ? "-" : fmt(r.receives);
   const flightSym = asCame !== null ? asCame.symbol : sym;
@@ -1168,7 +1172,7 @@ export function renderFlight(
           </p>
           <p
             style={s(
-              "margin:9px 0 0;font-family:var(--mv-font-mono);font-size:30px;font-weight:500;letter-spacing:-0.055em",
+              "margin:9px 0 0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:30px;font-weight:500;letter-spacing:-0.055em",
             )}
           >
             {flightFigure}
@@ -1645,10 +1649,10 @@ export function renderRoutes(
                   "display:block;width:100%;padding:12px 16px 16px;background:transparent;border:0;cursor:pointer;font:inherit;color:inherit;text-align:left",
                 )}
               >
-                <span style={s("display:flex;align-items:baseline;gap:10px")}>
+                <span style={s("display:flex;flex-wrap:wrap;align-items:baseline;gap:10px")}>
                   <span
                     style={s(
-                      "font-family:var(--mv-font-mono);font-size:22px;font-weight:500;letter-spacing:-0.05em",
+                      "min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:22px;font-weight:500;letter-spacing:-0.05em",
                     )}
                   >
                     {fmt(x.receives)}
