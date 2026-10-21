@@ -27,8 +27,22 @@ USDC arrives. [Connect your wallets](/send/wallets) covers connecting one.
 The conversion spends only what this transfer brought in. Anything the account already held is
 left alone.
 
-## If the price moves
+## The account pays the conversion's fee
 
-Before you approve, the app asks the exchange for a fresh price. If converting now would deliver
-less XLM than the minimum you were shown, the app stops before asking for your signature and the
-USDC stays in the account. It is yours either way, and you can convert it later.
+The receiving account signs the conversion, so it pays the network fee from its own XLM, above the
+minimum balance Stellar holds back. The quote checks for 0.1 XLM to spare, and more when the account
+also pays for its own Circle delivery. An account without it is declined before you sign anything,
+for example: "Converting into XLM is a transaction the receiving account signs and pays a network
+fee for, up to 0.1 XLM, and it has 0 XLM to spare. Receive USDC, or add a little XLM to the account
+first."
+
+A new address always has nothing to spare, so to send to one, receive USDC. See
+[Send to a new Stellar address](/send/new-address).
+
+## If the conversion cannot run
+
+Before you approve, the app asks the exchange for a fresh price and builds the conversion. It stops
+before asking for your signature when converting now would deliver less XLM than the minimum you
+were shown, or when the built transaction's fee is more than the account can spare. The USDC then
+stays in the account, and the card shows **Arrived on Stellar, not converted** with the reason. The
+USDC is yours either way, and you can convert it later.

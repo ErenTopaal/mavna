@@ -9,7 +9,6 @@
  * starts when the reveal adds data-in to it.
  */
 html {
-  scroll-behavior: smooth;
   /* the sticky header is 76px tall; anything scrolled into view clears it */
   scroll-padding-top: 92px;
   -webkit-text-size-adjust: 100%;
@@ -268,6 +267,14 @@ a {
   transform: scale(1);
 }
 
+/* choice: a faint chart grid behind the board */
+[data-grid] {
+  background-image:
+    linear-gradient(oklch(0 0 0 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0 0 0 / 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
 /* widget looks */
 [data-look]:hover {
   transform: translateY(-3px);
@@ -342,9 +349,6 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
   *,
   *::before,
   *::after {

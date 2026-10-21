@@ -38,6 +38,16 @@ allowance. The approval is skipped when the wallet's allowance already covers th
 
 The fee is read from Circle's fee service on every quote, for the standard path.
 
+## Time
+
+The attestation waits for the source chain's finality, so the estimate depends on the chain. The
+bridge step takes Circle's published standard attestation time for the source chain, at the slow
+end of its range, plus a minute for Circle's polling and the mint on Stellar. Every other step
+counts 30 seconds, and the route's `estimatedSeconds` is the sum. The bridge step is 20 minutes from
+Ethereum, OP Mainnet, Arbitrum or Base, 4 hours and 1 minute from Starknet, 32 hours and 1 minute
+from Linea, and 61 seconds from Arc. `standardAttestationSeconds(domain)` and
+`expectedBridgeSeconds(domain)` export the figures.
+
 ## Delivery on Stellar
 
 Circle's own forwarding service does not deliver to Stellar, so someone on Stellar has to submit

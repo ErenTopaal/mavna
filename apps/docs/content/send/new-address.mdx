@@ -13,7 +13,8 @@ pays it back.
 Paste the new address as the **Recipient**, exactly as you would any other address. The route
 gains one line, **Account reserve**: 1.50 XLM for a new account that holds one asset. The review
 shows the same amount as **Kept in your account**, because the XLM stays in the new account as its
-reserve.
+reserve, and adds **Repays the reserve, from what arrives**: the most the repayment can take of the
+money that arrives.
 
 You need the Stellar wallet that holds the new address, because the account approves two steps of
 its own. For a muxed address, that is the wallet of the account the muxed address is built on. [Connect your wallets](/send/wallets) covers connecting it.
@@ -34,6 +35,18 @@ On other rails the account is set up before the send instead, so both Stellar pr
 
 Until the account is set up, closing the page pauses the transfer, and the card says so. You can
 finish it later from [Activity](/send/finish).
+
+If you turn down a Stellar prompt, the card names it and says where your money is: before the send,
+**Nothing has been sent**; after Circle has attested the transfer, the funds are safe on Circle's
+side and still deliverable.
+
+## Receive USDC at a new address
+
+A new account is set up holding exactly its reserve, with no XLM to spare, and the account pays the
+network fee of a conversion itself. So when you choose XLM for a new address, the route declines:
+"Converting into XLM is a transaction the receiving account signs and pays a network fee for, up to
+0.1 XLM, and a new account is set up with no XLM to spare. Receive USDC, or add a little XLM to the
+account first."
 
 ## Small transfers
 

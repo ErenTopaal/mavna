@@ -20,7 +20,10 @@ The card then says where the transfer is, for example:
 - **Taking longer than usual**, with what to do next.
 - **Returned**, with the address and the amount that came back.
 - **Part of this arrived**, with how much of the expected amount.
-- **Nothing has been found for this transaction yet**, when no rail knows the transaction.
+- **No rail has a record of this transaction**, when no rail lists the transaction you pasted. A
+  transaction sent in the last minute can be missing from the rails' lists, so the card asks you to
+  check again shortly, and otherwise to check that you pasted the transaction from the chain you
+  sent from.
 
 When a rail records a transfer as delivered on Stellar but the amount can no longer be read back
 from the network, the card says so and links **See the Stellar transaction** so you can check it
@@ -33,5 +36,9 @@ A Stellar address alone does not identify a transfer: the card asks for the tran
 Under **From this browser**, Activity lists the transfers you started in this browser. Each one has
 **Check**, which looks it up as above, and a link to the transaction you sent. **Clear** empties the
 list. The list is a convenience: every transfer in it can still be found from its transaction.
+
+A transfer in this list reads **On its way to Stellar** even before any rail lists it, because this
+browser saw it sent. Once it has taken more than twice the time its route estimated, it reads
+**Taking longer than usual**.
 
 If a transfer is taking long, you can [finish the delivery yourself](/send/finish).

@@ -48,6 +48,9 @@ wallet already gave.
 
 ## Compare the routes
 
+The rails are asked once the form has both an amount and a recipient. Until then, the routes panel
+reads **Awaiting an amount** or **Awaiting a recipient**.
+
 Each rail answers on its own, and each answer appears under **Receive** as it lands. A route shows
 the amount that arrives, the rail, who you trust to deliver it, the transfer fee, the estimated
 time, and the number of prompts. The best-returning route carries a **Best return** badge, and a
@@ -63,7 +66,9 @@ turn off **Show rails that declined** under **Settings**.
 1. Press **Connect a wallet** and choose your wallet from the list. The button then reads
    **Review transfer**.
 2. Press **Review transfer**. The summary shows what you send and receive, the recipient, the rail,
-   the transfer fee, the minimum you receive, the number of approvals and the estimated time.
+   the transfer fee, the minimum you receive, the number of approvals and the estimated time. The
+   amount you send is shown with every decimal it has, exactly as your wallet is asked to sign it.
+   The minimum is cut at seven decimals, never rounded up.
 3. Press **Start transfer**.
 
 Your wallet then asks you to approve each step, and the card names each one as it runs:
@@ -97,7 +102,11 @@ it later from **Activity**, as described in [Finish a delivery](/send/finish).
 ## When it arrives
 
 The card shows **Arrived on Stellar** with the amount, and the funds are in the recipient's account.
-Press **Send another** to start a new transfer.
+**Took** says how long the transfer took from **Start transfer** to arrival. Press **Send another**
+to start a new transfer.
+
+A transfer that stopped on a failed step reads **Did not arrive on Stellar**, and the failed step
+says what happened.
 
 The app remembers the transfer in this browser under **Activity**. You can also find it from any
 browser with the transaction you sent: see [Find a transfer](/send/track).
