@@ -47,7 +47,8 @@ other origin cannot read the answers. A preflight `OPTIONS` request from another
 [Sponsor configuration](/operate/sponsor#who-pays)). `minDeliveryBaseUnits` is the smallest Circle
 delivery the sponsor pays for, in USDC base units at six decimals. `lends` names the curated
 assets whose trustline the sponsor sets up for an account and is repaid in: `["USDC"]` on testnet,
-`["USDC", "USDT0"]` on mainnet, and `[]` when accounts pay their own reserve. `channels` is the channel pool's
+`["USDC", "USDT0"]` on mainnet, and `[]` when accounts pay their own reserve. An asset is left out
+while its issuer requires authorization for new trustlines, or while Horizon cannot say whether it does. `channels` is the channel pool's
 current size, how many channels are in use, and its limit (see
 [Capacity and caps](/operate/capacity#channels)). The widget reads this before it quotes, so a
 route the sponsor cannot carry is declined before anyone signs.
@@ -73,7 +74,7 @@ defaults to `"USDC"` and must be one of `lends`.
 | --- | --- |
 | `200` | `{ "xdr": "...", "channel": "G..." }` |
 | `400` | the destination is missing, not a usable Stellar address, or needs no setup; `asset` is not one the sponsor lends; or the account already holds that asset |
-| `409` | retryable: the account's previous repayment is still landing |
+| `409` | retryable: the account's previous repayment is still landing. Not retryable: the asset's issuer requires authorization for new trustlines |
 | `429` | retryable: a daily cap refuses; this client already has as many repayments waiting as it is allowed; the account's last window lapsed moments ago; or this client has many builds it has not signed |
 | `503` | retryable: every slot for unbacked repayments is in use, no channel can be added right now, or the cap counts cannot be read; or Stellar's exchange has no direct trade between `asset` and XLM, or that trade, plus 1%, costs more right now than the most the repayment can spend |
 
@@ -104,6 +105,7 @@ Request: `{ "destination": "G...", "assets": ["USDC"], "sourceChainId": "ethereu
 | --- | --- |
 | `200` | `{ "xdr": "...", "sponsor": "G..." }` |
 | `400` | the destination is missing, not usable, or can already receive; an asset is not curated; the set is not one asset from `lends`; or the account already holds that asset |
+| `409` | the asset's issuer requires authorization for new trustlines |
 | `429` | a daily cap refuses, or this client has many builds it has not signed (retryable) |
 | `503` | the cap counts cannot be read, or the sponsor is building too much at once (retryable) |
 
@@ -127,10 +129,11 @@ Request: `{ "signedXdr": "..." }`.
 | --- | --- |
 | `200` | `{ "txHash": "...", "ledger": 123 }` |
 | `400` | no transaction, a fee bump, another source, an operation outside the list, or a missing or invalid signature from the account |
-| `409` | not built here or expired; no repayment held; the setup does not match the repayment; a setup was already submitted against it; the account already holds the asset; or the repayment lost its slot |
+| `409` | not built here or expired; no repayment held; the setup does not match the repayment; a setup was already submitted against it; the account already holds the asset; the asset's issuer requires authorization for new trustlines; or the repayment lost its slot |
 | `409` with `"prepareAgain": true` | retryable: another transaction of the sponsor's took this setup's sequence number while the account was signing. Ask `/prepare` for a new one and sign that |
 | `429` | retryable: a daily cap refuses |
 | `502` | Stellar did not accept the submission |
+| `503` | retryable: Horizon cannot say whether the asset's issuer requires authorization |
 
 ### `POST /settle`
 

@@ -50,6 +50,7 @@ import { createSponsorClient, SponsorRefusal } from "../../../packages/widget/sr
 import { signedBy } from "./built.js";
 import { CapLedger, type CapUsage, DEFAULT_CAPS, InMemoryCapStore } from "./caps.js";
 import { ChannelPool } from "./channels.js";
+import type { IssuerFlags } from "./issuer.js";
 import type { ChainSponsorshipView } from "./reconcile.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
@@ -421,6 +422,24 @@ class FixedSpend extends DirectSpendQuote {
   }
 }
 
+/**
+ * The issuers' flags, answered here: no issuer requires authorization unless a
+ * test names its asset's code in `required`, and one named in `unreadable`
+ * fails the way an unreachable Horizon does.
+ */
+class FixedIssuerFlags implements IssuerFlags {
+  readonly required = new Set<string>();
+  readonly unreadable = new Set<string>();
+  async authRequired(asset: Asset): Promise<boolean> {
+    if (this.unreadable.has(asset.getCode())) {
+      throw new MavnaError(`Horizon could not read ${asset.getCode()}'s issuer (HTTP 503).`, {
+        retryable: true,
+      });
+    }
+    return this.required.has(asset.getCode());
+  }
+}
+
 /** Horizon's view of what the sponsor carries, answered here. */
 class FixedSponsorshipView implements ChainSponsorshipView {
   slots = 0;
@@ -513,6 +532,7 @@ async function startServer(
     channels: new ChannelPool({ channels: [channel] }),
     prices: new FixedPrice(),
     spendQuote: new FixedSpend(),
+    issuerFlags: new FixedIssuerFlags(),
     sponsorshipView: new FixedSponsorshipView(),
     allowedOrigins: [],
     ...overrides,
@@ -4095,6 +4115,99 @@ describe("the sponsor fronts a USDT0 trustline and is repaid in USDT0", () => {
     // and USDT0 lends again once the market can repay
     spend.byCode.set("USDT0", 3_000_000n);
     expect((await settlementInUsdt0(server, user)).operations).toHaveLength(3);
+  });
+
+  const lendsOf = async (server: TestServer): Promise<unknown> =>
+    ((await (await fetch(`${server.url}/health`)).json()) as Body).lends;
+
+  it("lends no USDT0 while its issuer requires authorization, and says so at /health", async () => {
+    const flags = new FixedIssuerFlags();
+    const server = await startLending({ issuerFlags: flags });
+    const user = Keypair.random();
+    flags.required.add("USDT0");
+    const refused = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "42161",
+      asset: "USDT0",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.retryable).toBe(false);
+    expect(refused.body.error).toMatch(/USDT0's issuer/);
+    expect(refused.body.error).toMatch(/authoriz/);
+    expect(await lendsOf(server)).toEqual(["USDC"]);
+    // USDC's issuer is its own, and still lends
+    expect((await server.post("/settlement", { destination: user.publicKey() })).status).toBe(200);
+    // and USDT0 lends again once the issuer turns the flag off
+    flags.required.delete("USDT0");
+    expect(await lendsOf(server)).toEqual(["USDC", "USDT0"]);
+    expect((await settlementInUsdt0(server, user)).operations).toHaveLength(3);
+  });
+
+  it("lends no USDC while Circle's issuer requires authorization", async () => {
+    const flags = new FixedIssuerFlags();
+    flags.required.add("USDC");
+    const server = await startLending({ issuerFlags: flags });
+    const refused = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.retryable).toBe(false);
+    expect(refused.body.error).toMatch(/USDC's issuer/);
+    expect(await lendsOf(server)).toEqual(["USDT0"]);
+  });
+
+  it("stops before the user signs when the issuer turns it on after the settlement is held", async () => {
+    const flags = new FixedIssuerFlags();
+    const server = await startLending({ issuerFlags: flags });
+    const user = Keypair.random();
+    await holdUsdt0(server, user);
+    flags.required.add("USDT0");
+    const refused = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["USDT0"],
+      sourceChainId: "42161",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.retryable).toBe(false);
+    expect(refused.body.error).toMatch(/USDT0's issuer/);
+  });
+
+  it("lends nothing when the issuer turns it on between the signature and the submission", async () => {
+    const flags = new FixedIssuerFlags();
+    const server = await startLending({ issuerFlags: flags });
+    const user = Keypair.random();
+    await holdUsdt0(server, user);
+    const signed = await preparedInUsdt0(server, user);
+    flags.required.add("USDT0");
+    const refused = await server.post("/submit", { signedXdr: signed });
+    expect(refused.status).toBe(409);
+    expect(refused.body.retryable).toBe(false);
+    expect(refused.body.error).toMatch(/USDT0's issuer/);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("does not lend while the issuer's flags cannot be read, and keeps the signed setup for a retry", async () => {
+    const flags = new FixedIssuerFlags();
+    const server = await startLending({ issuerFlags: flags });
+    const user = Keypair.random();
+    await holdUsdt0(server, user);
+    const signed = await preparedInUsdt0(server, user);
+    flags.unreadable.add("USDT0");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const refused = await server.post("/submit", { signedXdr: signed });
+      expect(refused.status).toBe(503);
+      expect(refused.body.retryable).toBe(true);
+      expect(server.rpc.submissions).toEqual([]);
+      // left out of what it offers while it cannot tell, and the operator hears why
+      expect(await lendsOf(server)).toEqual(["USDC"]);
+      expect(logged.mock.calls.map((call) => call.join(" ")).join("\n")).toMatch(/USDT0's issuer/);
+    } finally {
+      logged.mockRestore();
+    }
+    flags.unreadable.delete("USDT0");
+    expect((await server.post("/submit", { signedXdr: signed })).status).toBe(200);
   });
 
   it("lends no USDC either while its direct market could not repay the reserve", async () => {

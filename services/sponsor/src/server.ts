@@ -61,6 +61,7 @@ import {
   DeliveryOutcomeUnknown,
 } from "./deliver.js";
 import { DeliveryBudget } from "./delivery-budget.js";
+import { HorizonIssuerFlags, type IssuerFlags } from "./issuer.js";
 import { clientAddress, RequestLimiter } from "./ratelimit.js";
 import {
   type ChainSponsorshipView,
@@ -155,6 +156,8 @@ export interface SponsorServerOptions {
   readonly watchLimits?: { readonly perClient: number; readonly total: number };
   /** Quotes what a settlement's direct path spends now, for the balance check. */
   readonly spendQuote?: DirectSpendQuote;
+  /** Reads whether a lent asset's issuer requires authorization. Horizon's when not given. */
+  readonly issuerFlags?: IssuerFlags;
   /**
    * Origins allowed to call this from a browser. The app's own origin in
    * production; localhost while developing. Never `*`: this server spends
@@ -1167,6 +1170,30 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       : "https://horizon-testnet.stellar.org";
   const sponsorshipView = options.sponsorshipView ?? new HorizonSponsorshipView(horizonUrl);
   const spendQuote = options.spendQuote ?? new DirectSpendQuote({ horizonUrl });
+  const issuerFlags = options.issuerFlags ?? new HorizonIssuerFlags({ horizonUrl });
+  /**
+   * The lent assets a new trustline can receive right now. One whose issuer
+   * requires authorization, or whose flags cannot be read, is left out, since
+   * /settlement would refuse it.
+   */
+  async function lendingNow(): Promise<string[]> {
+    const open = await Promise.all(
+      lends.map(async (name) => {
+        const asset = lentAsset(name);
+        if (asset === undefined) return false;
+        try {
+          return !(await issuerFlags.authRequired(asset));
+        } catch (cause) {
+          console.error(
+            `[sponsor] /health leaves ${name} out of what it lends:`,
+            cause instanceof Error ? cause.message : cause,
+          );
+          return false;
+        }
+      }),
+    );
+    return lends.filter((_, index) => open[index]);
+  }
   /** When the last cross-check ran, in milliseconds; it runs at most hourly. */
   let reconciledAtMs: number | undefined;
   const prices = options.prices ?? new XlmPriceSource({ horizonUrl });
@@ -1791,7 +1818,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           reserveFunding,
           minDeliveryBaseUnits: minDelivery.toString(),
           // the trustlines a new account can be lent, each repaid in its own asset
-          lends,
+          lends: await lendingNow(),
           // how close the settlement capacity is to full; addresses stay private
           channels: {
             size: channels?.size ?? 0,
@@ -1949,8 +1976,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
     const holder = classified.trustlineHolder ?? body.destination;
-    const created = !(await accountExists(options.rpc, holder));
     const lentLine = assets[0];
+    if (lentLine !== undefined && (await issuerFlags.authRequired(lentLine))) {
+      await answer(res, 409, { error: needsIssuerAuth(lentLine), retryable: false }, origin);
+      return;
+    }
+    const created = !(await accountExists(options.rpc, holder));
     if (
       !created &&
       lentLine !== undefined &&
@@ -2212,6 +2243,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const paying = lentAsset(body.asset ?? "USDC");
     if (paying === undefined) {
       await answer(res, 400, { error: onlyLends(lends), retryable: false }, origin);
+      return;
+    }
+    if (await issuerFlags.authRequired(paying)) {
+      await answer(res, 409, { error: needsIssuerAuth(paying), retryable: false }, origin);
       return;
     }
 
@@ -2978,6 +3013,30 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         // lent once and no longer lent: the operator took it off the list since
         if (line === undefined) {
           await refuse(record, res, origin, 409, onlyLends(lends));
+          return;
+        }
+        // read again here: the issuer may have turned it on since the
+        // settlement was held, and this is the last step before the lend
+        let authRequired: boolean;
+        try {
+          authRequired = await issuerFlags.authRequired(line);
+        } catch (cause) {
+          console.error(
+            "[sponsor] a preparation waits on its issuer's flags:",
+            cause instanceof Error ? cause.message : cause,
+          );
+          await refuse(
+            record,
+            res,
+            origin,
+            503,
+            `The sponsor cannot read ${line.getCode()}'s issuer right now. Try again shortly.`,
+            true,
+          );
+          return;
+        }
+        if (authRequired) {
+          await refuse(record, res, origin, 409, needsIssuerAuth(line));
           return;
         }
         if (
@@ -4048,6 +4107,14 @@ function alreadyHolds(asset: Asset): string {
 }
 
 /** Said when a sponsor-fronted trustline is asked for in an asset this sponsor does not lend. */
+function needsIssuerAuth(asset: Asset): string {
+  return (
+    `${asset.getCode()}'s issuer requires it to authorize every new trustline, so a trustline ` +
+    `the sponsor opens could not receive this transfer. The sponsor does not front a ` +
+    `${asset.getCode()} trustline while that is so.`
+  );
+}
+
 function onlyLends(lends: readonly string[]): string {
   if (lends.length === 0) return "This sponsor fronts no trustlines.";
   if (lends.length === 1) {

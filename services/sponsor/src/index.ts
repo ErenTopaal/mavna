@@ -39,6 +39,8 @@ export {
 export type { BudgetReservation } from "./delivery-budget.js";
 export { DeliveryBudget } from "./delivery-budget.js";
 export { env } from "./env.js";
+export type { HorizonIssuerFlagsOptions, IssuerFlags } from "./issuer.js";
+export { HorizonIssuerFlags } from "./issuer.js";
 export { clientAddress, RequestLimiter } from "./ratelimit.js";
 export type {
   ChainSponsorshipView,

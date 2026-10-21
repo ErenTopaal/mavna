@@ -30,7 +30,10 @@ default, a new account that holds one asset locks 1.5 XLM. The route lists it as
 The sponsor sets up a trustline only to an asset its repayment can be made in: USDC, and on the main
 network USDT0. The repayment spends the asset the trustline was opened for, the one the rail
 delivers, so a USDT0 arrival repays its reserve in USDT0. `GET /health` lists them as `lends`, and
-the widget offers a setup only for a route that delivers one of them.
+the widget offers a setup only for a route that delivers one of them. The sponsor also reads each issuer's
+flags from Horizon and sets up no trustline to an asset whose issuer requires authorization for new
+trustlines (`auth_required`), because that trustline cannot receive the arrival until the issuer
+authorizes it.
 
 The repayment's path payment trades directly between that asset and XLM on Stellar's exchange,
 through no other asset. So when the sponsor builds a repayment it asks Horizon what that direct

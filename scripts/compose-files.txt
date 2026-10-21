@@ -453,6 +453,8 @@ scripts/verify-cctp-solana.mjs
 scripts/verify-cctp-starknet.mjs
 scripts/verify-layerzero.mjs
 services/sponsor/package.json
+services/sponsor/src/__fixtures__/mainnet-usdc-issuer-account.json
+services/sponsor/src/__fixtures__/mainnet-usdt0-issuer-account.json
 services/sponsor/src/assets.test.ts
 services/sponsor/src/assets.ts
 services/sponsor/src/built.test.ts
@@ -473,6 +475,8 @@ services/sponsor/src/delivery-budget.ts
 services/sponsor/src/env.test.ts
 services/sponsor/src/env.ts
 services/sponsor/src/index.ts
+services/sponsor/src/issuer.test.ts
+services/sponsor/src/issuer.ts
 services/sponsor/src/main.ts
 services/sponsor/src/ratelimit.test.ts
 services/sponsor/src/ratelimit.ts
