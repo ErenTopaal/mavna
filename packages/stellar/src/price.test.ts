@@ -109,9 +109,7 @@ describe("the XLM price of an asset", () => {
 describe("the USDT0 order book, as mainnet answered", () => {
   it("prices USDT0 at the mid of its first 1000 XLM a side, wide spread and all", async () => {
     // recorded 2026-10-21: bids near 0.170 and asks near 0.2156 USDT0 per XLM
-    const { urls } = horizonAnswers(
-      () => new Response(JSON.stringify(usdt0Book), { status: 200 }),
-    );
+    const { urls } = horizonAnswers(() => new Response(JSON.stringify(usdt0Book), { status: 200 }));
     const usdt0 = new Asset("USDT0", "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q");
     expect(await source().xlmStroopsPerUnit(usdt0)).toBe(51_876_162n);
     const asked = new URL(urls[0] ?? "");

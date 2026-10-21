@@ -404,11 +404,16 @@ class FixedPrice extends XlmPriceSource {
  */
 class FixedSpend extends DirectSpendQuote {
   quote: bigint | null | undefined = undefined;
+  /** A quote for one asset by code, over `quote`; null for no direct path. */
+  readonly byCode = new Map<string, bigint | null>();
   constructor() {
     super({ horizonUrl: "https://127.0.0.1:9" });
   }
 
-  override async directSpendStroops(_asset: Asset, destXlm: string): Promise<bigint | undefined> {
+  override async directSpendStroops(asset: Asset, destXlm: string): Promise<bigint | undefined> {
+    const own = this.byCode.get(asset.getCode());
+    if (own === null) return undefined;
+    if (own !== undefined) return own;
     if (this.quote === null) return undefined;
     if (this.quote !== undefined) return this.quote;
     const [whole = "0", fraction = ""] = destXlm.split(".");
@@ -2133,10 +2138,11 @@ describe("an arrival below the signed ceiling that still covers the trade", () =
 
   it("does not settle when the market has no direct path, whatever the balance", async () => {
     const spend = new FixedSpend();
-    spend.quote = null;
     const server = await startServer({ spendQuote: spend });
     const user = Keypair.random();
     await preparedWithSettlementHeld(server, user);
+    // the market went away after the loan was made
+    spend.quote = null;
     server.rpc.holding(user, PLENTY);
     const asked = await server.post("/settle", { destination: user.publicKey() });
     expect(asked.body.settled).toBe(false);
@@ -2146,10 +2152,10 @@ describe("an arrival below the signed ceiling that still covers the trade", () =
 
   it("does not settle on a quote above the ceiling the account signed", async () => {
     const spend = new FixedSpend();
-    spend.quote = 7_000_000n;
     const server = await startServer({ spendQuote: spend });
     const user = Keypair.random();
     await preparedWithSettlementHeld(server, user);
+    spend.quote = 7_000_000n;
     server.rpc.holding(user, 6_500_000n);
     expect((await server.post("/settle", { destination: user.publicKey() })).body.settled).toBe(
       false,
@@ -3857,18 +3863,325 @@ describe("with reserve funding set to self, an account can open its own USDT0 tr
       expect(refused.status).toBe(400);
     }
   });
+});
 
-  it("still prepares only USDC when the sponsor fronts the reserve, since it is repaid in USDC", async () => {
-    const server = await startServer({ curatedAssets: { USDC, USDT0 } });
-    const user = Keypair.random();
-    server.rpc.accounts.set(user.publicKey(), 50n);
-    const refused = await server.post("/prepare", {
+describe("the sponsor fronts a USDT0 trustline and is repaid in USDT0", () => {
+  const USDT0 = new Asset("USDT0", Keypair.random().publicKey());
+
+  /** Four XLM to the USDT0, so its ceiling differs from USDC's five. */
+  async function startLending(overrides: Partial<SponsorServerOptions> = {}): Promise<TestServer> {
+    const prices = new FixedPrice();
+    prices.byCode.set("USDT0", 40_000_000n);
+    return startServer({ curatedAssets: { USDC, USDT0 }, prices, ...overrides });
+  }
+
+  async function settlementInUsdt0(server: TestServer, user: Keypair): Promise<Transaction> {
+    const built = await server.post("/settlement", {
+      destination: user.publicKey(),
+      sourceChainId: "42161",
+      asset: "USDT0",
+    });
+    expect(built.status).toBe(200);
+    return TransactionBuilder.fromXdr(built.body.xdr as string, network.passphrase) as Transaction;
+  }
+
+  async function holdUsdt0(server: TestServer, user: Keypair): Promise<void> {
+    const tx = await settlementInUsdt0(server, user);
+    const committed = await server.post("/settlement/commit", {
+      destination: user.publicKey(),
+      signedXdr: signXdr(tx.toXdr(), user),
+    });
+    expect(committed.status).toBe(200);
+  }
+
+  async function preparedInUsdt0(server: TestServer, user: Keypair): Promise<string> {
+    const built = await server.post("/prepare", {
       destination: user.publicKey(),
       assets: ["USDT0"],
       sourceChainId: "42161",
     });
-    expect(refused.status).toBe(400);
-    expect(refused.body.error).toMatch(/only prepares a USDC trustline/);
+    expect(built.status).toBe(200);
+    return signXdr(built.body.xdr as string, user);
+  }
+
+  async function lentInUsdt0(server: TestServer, user: Keypair): Promise<void> {
+    await holdUsdt0(server, user);
+    const submitted = await server.post("/submit", {
+      signedXdr: await preparedInUsdt0(server, user),
+    });
+    expect(submitted.status).toBe(200);
+    server.rpc.submissions.splice(0);
+  }
+
+  it("says at /health which trustlines it lends, and lends none when accounts pay for themselves", async () => {
+    const lendsOf = async (server: TestServer): Promise<unknown> =>
+      ((await (await fetch(`${server.url}/health`)).json()) as Body).lends;
+    expect(await lendsOf(await startLending())).toEqual(["USDC", "USDT0"]);
+    expect(await lendsOf(await startServer())).toEqual(["USDC"]);
+    expect(await lendsOf(await startLending({ reserveFunding: "self" }))).toEqual([]);
+  });
+
+  it("builds a settlement that buys the reserve back with USDT0, priced on USDT0's own market", async () => {
+    const server = await startLending();
+    const user = Keypair.random();
+    const tx = await settlementInUsdt0(server, user);
+    const [buy, ...revokes] = tx.operations;
+    expect(buy?.type).toBe("pathPaymentStrictReceive");
+    const payment = buy as Operation.PathPaymentStrictReceive;
+    expect(payment.sendAsset.toString()).toBe(USDT0.toString());
+    expect(payment.destAmount).toBe("1.5000000");
+    // 1.5 XLM at four XLM a USDT0, twice over
+    expect(payment.sendMax).toBe("0.7500000");
+    expect(payment.path).toEqual([]);
+    expect(revokes.map((op) => op.type)).toEqual([
+      "revokeTrustlineSponsorship",
+      "revokeAccountSponsorship",
+    ]);
+    expect((revokes[0] as Operation.RevokeTrustlineSponsorship).asset.toString()).toBe(
+      USDT0.toString(),
+    );
+  });
+
+  it("sets a new account up with a USDT0 trustline and settles from the USDT0 that arrives", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startLending({ caps });
+    const user = Keypair.random();
+    await holdUsdt0(server, user);
+    const submitted = await server.post("/submit", {
+      signedXdr: await preparedInUsdt0(server, user),
+    });
+    expect(submitted.status).toBe(200);
+    const preparation = server.rpc.submissions[0]?.tx as Transaction;
+    expect(
+      preparation.operations
+        .filter((op): op is Operation.ChangeTrust => op.type === "changeTrust")
+        .map((op) => op.line.toString()),
+    ).toEqual([USDT0.toString()]);
+    // counted against the same daily volume as any other sponsorship
+    const started = (await caps.usage()).started;
+    expect(started["expensive-gas"] + started["cheap-gas"]).toBe(1);
+
+    server.rpc.submissions.splice(0);
+    server.rpc.holdingIn(user, USDT0, PLENTY);
+    const settled = await server.post("/settle", { destination: user.publicKey() });
+    expect(settled.body.settled).toBe(true);
+    const settlement = server.rpc.submissions[0]?.tx as Transaction;
+    const pays = settlement.operations[0] as Operation.PathPaymentStrictReceive;
+    expect(pays.sendAsset.toString()).toBe(USDT0.toString());
+  });
+
+  it("will not settle a USDT0 loan from the account's USDC", async () => {
+    const server = await startLending();
+    const user = Keypair.random();
+    await lentInUsdt0(server, user);
+    server.rpc.holding(user, PLENTY);
+    const asked = await server.post("/settle", { destination: user.publicKey() });
+    expect(asked.body.settled).toBe(false);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("refuses a preparation for the other asset than the held settlement repays", async () => {
+    const MISMATCH = "That preparation does not match the settlement held for this account.";
+    const server = await startLending();
+    const inUsdt0 = Keypair.random();
+    await holdUsdt0(server, inUsdt0);
+    const usdcPrep = await server.post("/submit", {
+      signedXdr: await preparedAndSigned(server, inUsdt0),
+    });
+    expect(usdcPrep.status).toBe(409);
+    expect(usdcPrep.body.error).toBe(MISMATCH);
+
+    // one channel per harness, so the other account asks a sponsor of its own
+    const other = await startLending();
+    const inUsdc = Keypair.random();
+    await holdSettlementFor(other, inUsdc);
+    const usdt0Prep = await other.post("/submit", {
+      signedXdr: await preparedInUsdt0(other, inUsdc),
+    });
+    expect(usdt0Prep.status).toBe(409);
+    expect(usdt0Prep.body.error).toBe(MISMATCH);
+    expect(server.rpc.submissions).toEqual([]);
+    expect(other.rpc.submissions).toEqual([]);
+  });
+
+  it("lends only USDC and USDT0, and only the ones it curates", async () => {
+    const EURC = new Asset("EURC", Keypair.random().publicKey());
+    const server = await startLending({ curatedAssets: { USDC, USDT0, EURC } });
+    const user = Keypair.random();
+    for (const asset of ["EURC", "constructor", "XLM"]) {
+      const refused = await server.post("/settlement", {
+        destination: user.publicKey(),
+        sourceChainId: "1",
+        asset,
+      });
+      expect(refused.status, asset).toBe(400);
+      expect(refused.body.retryable, asset).toBe(false);
+    }
+    const prep = await server.post("/prepare", {
+      destination: user.publicKey(),
+      assets: ["EURC"],
+      sourceChainId: "1",
+    });
+    expect(prep.status).toBe(400);
+
+    // testnet curates no USDT0, so there is none to lend
+    const testnet = await startServer();
+    for (const [path, body] of [
+      ["/settlement", { asset: "USDT0" }],
+      ["/prepare", { assets: ["USDT0"] }],
+    ] as const) {
+      const refused = await testnet.post(path, {
+        destination: user.publicKey(),
+        sourceChainId: "1",
+        ...body,
+      });
+      expect(refused.status, path).toBe(400);
+    }
+  });
+
+  it("declines to build for an account that already holds USDT0", async () => {
+    const server = await startLending();
+    const user = Keypair.random();
+    server.rpc.holdingIn(user, USDT0, 0n);
+    for (const [path, body] of [
+      ["/settlement", { asset: "USDT0" }],
+      ["/prepare", { assets: ["USDT0"] }],
+    ] as const) {
+      const answered = await server.post(path, {
+        destination: user.publicKey(),
+        sourceChainId: "42161",
+        ...body,
+      });
+      expect(answered.status, path).toBe(400);
+      expect(answered.body.error, path).toBe(
+        "That account already holds USDT0, so there is no trustline for this sponsor to open.",
+      );
+    }
+    // its USDC line is still the sponsor's to open
+    expect((await server.post("/settlement", { destination: user.publicKey() })).status).toBe(200);
+  });
+
+  it("will not countersign once the account opened the USDT0 line itself", async () => {
+    const server = await startLending();
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 1n);
+    await holdUsdt0(server, user);
+    const signed = await preparedInUsdt0(server, user);
+    server.rpc.holdingIn(user, USDT0, 0n);
+    const submitted = await server.post("/submit", { signedXdr: signed });
+    expect(submitted.status).toBe(409);
+    expect(submitted.body.error).toMatch(/already holds USDT0/);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("lends nothing while USDT0's direct market could not repay the reserve", async () => {
+    const spend = new FixedSpend();
+    const server = await startLending({ spendQuote: spend });
+    const user = Keypair.random();
+    // no direct USDT0/XLM path at all, then one costing more than the 0.75 ceiling
+    for (const quote of [null, 7_600_000n]) {
+      spend.byCode.set("USDT0", quote);
+      const refused = await server.post("/settlement", {
+        destination: user.publicKey(),
+        sourceChainId: "42161",
+        asset: "USDT0",
+      });
+      expect(refused.status).toBe(503);
+      expect(refused.body.retryable).toBe(true);
+      expect(refused.body.error).toMatch(/USDT0/);
+    }
+    // the USDC market is its own, and still lends
+    expect((await server.post("/settlement", { destination: user.publicKey() })).status).toBe(200);
+    // and USDT0 lends again once the market can repay
+    spend.byCode.set("USDT0", 3_000_000n);
+    expect((await settlementInUsdt0(server, user)).operations).toHaveLength(3);
+  });
+
+  it("lends no USDC either while its direct market could not repay the reserve", async () => {
+    const spend = new FixedSpend();
+    spend.quote = null;
+    const server = await startLending({ spendQuote: spend });
+    const refused = await server.post("/settlement", {
+      destination: Keypair.random().publicKey(),
+      sourceChainId: "1",
+    });
+    expect(refused.status).toBe(503);
+    expect(refused.body.retryable).toBe(true);
+  });
+
+  it("says so when the issuer froze the line, and counts the stranding when the window ends", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startLending({ caps });
+    const user = Keypair.random();
+    await lentInUsdt0(server, user);
+    server.rpc.holdingIn(user, USDT0, PLENTY);
+    server.rpc.freeze(user, USDT0);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const asked = await server.post("/settle", { destination: user.publicKey() });
+      expect(asked.body.settled).toBe(false);
+      expect(server.rpc.submissions).toEqual([]);
+      // said once, not on every ask
+      await server.post("/settle", { destination: user.publicKey() });
+      const frozen = logged.mock.calls
+        .map((call) => call.join(" "))
+        .filter((line) => line.includes("not authorised by its issuer"));
+      expect(frozen).toHaveLength(1);
+      expect(frozen[0]).toContain(user.publicKey());
+      expect(frozen[0]).toContain("USDT0");
+
+      skipPastSettlementWindow();
+      await server.post("/settle", { destination: user.publicKey() });
+      expect((await caps.usage()).stranded).toBe(1);
+      const stranding = logged.mock.calls
+        .map((call) => call.join(" "))
+        .find((line) => line.includes("stranded"));
+      expect(stranding).toContain(user.publicKey());
+      expect(stranding).toMatch(/1\.5 XLM/);
+      expect(stranding).toMatch(/not authorised by its issuer/);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("names a balance short of the repayment when the window ends, clawed back or moved", async () => {
+    const caps = new CapLedger(new InMemoryCapStore());
+    const server = await startLending({ caps });
+    const user = Keypair.random();
+    await lentInUsdt0(server, user);
+    server.rpc.holdingIn(user, USDT0, 1_000_000n);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      skipPastSettlementWindow();
+      await server.post("/settle", { destination: user.publicKey() });
+      expect((await caps.usage()).stranded).toBe(1);
+      const stranding = logged.mock.calls
+        .map((call) => call.join(" "))
+        .find((line) => line.includes("stranded"));
+      expect(stranding).toContain(user.publicKey());
+      expect(stranding).toMatch(/holds 0\.1 USDT0/);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("carries a USDT0 sponsorship in its own records for the cross-check", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const view = new FixedSponsorshipView();
+    const server = await startLending({ sponsorshipView: view });
+    const user = Keypair.random();
+    await lentInUsdt0(server, user);
+    view.slots = 3;
+    view.accounts = [user.publicKey()];
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    server.server.startSweep();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await server.server.stopSweep();
+    const lines = logged.mock.calls.map((call) => call.join(" "));
+    logged.mockRestore();
+    const line = lines.find((text) => text.includes("reconciliation"));
+    expect(line).toMatch(/3 reserve slots on-chain and 3 by its records/);
+    expect(line).toMatch(/untracked: none; stale: none/);
   });
 });
 

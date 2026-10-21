@@ -36,6 +36,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import * as z from "zod";
+import { LENT_ASSETS } from "./assets.js";
 import {
   type BuiltChange,
   BuiltLedger,
@@ -263,6 +264,8 @@ const submitBody = z.object({ signedXdr: xdrField.optional() });
 const settlementBody = z.object({
   destination: addressField.optional(),
   sourceChainId: chainIdField.optional(),
+  /** The curated name of the asset the repayment spends, the one the route delivers. */
+  asset: z.string().min(1).max(12).optional(),
 });
 const settlementCommitBody = z.object({
   destination: addressField.optional(),
@@ -450,6 +453,15 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
   const caps = options.caps ?? new CapLedger(new DocumentCapStore(state));
   const reserveFunding: ReserveFunding = options.reserveFunding ?? "sponsor";
   const minDelivery = options.minDeliveryBaseUnits ?? DEFAULT_MIN_DELIVERY_BASE_UNITS;
+  // own keys only: a plain object answers "constructor" and "toString" too
+  const lentAsset = (name: string): Asset | undefined =>
+    LENT_ASSETS.includes(name) && Object.hasOwn(options.curatedAssets, name)
+      ? options.curatedAssets[name]
+      : undefined;
+  const lends = reserveFunding === "sponsor" ? LENT_ASSETS.filter((name) => lentAsset(name)) : [];
+  /** The curated asset a recorded repayment spends, by its code and issuer. */
+  const lentAssetOf = (id: string): Asset | undefined =>
+    lends.map(lentAsset).find((asset) => asset?.toString() === id);
   if (minDelivery < 0n) {
     throw new Error(`The minimum delivery cannot be negative; got ${minDelivery}.`);
   }
@@ -554,6 +566,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
    * a loan it is owed nor lets a second preparation in against one.
    */
   const heldSettlements = new Map<string, HeldSettlement>();
+  /** Settlements, by hash, already said to sit on a frozen line, so it is said once. */
+  const warnedFrozen = new Set<string>();
 
   /**
    * When each account last had a settlement asked for through /settle. Entries
@@ -653,10 +667,58 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       }
       heldSettlements.delete(destination);
       await persist();
-      if (held.prepared) await caps.recordStranded();
+      if (held.prepared) {
+        await caps.recordStranded();
+        await logStranded(destination, held, "expired before it could settle");
+      }
       return undefined;
     }
     return held;
+  }
+
+  /**
+   * Say which loan was lost and what the account looked like when it was, so
+   * the operator reads a reason rather than only a count: a line its issuer
+   * froze, or a balance that never arrived, was moved out, or was clawed back.
+   */
+  async function logStranded(
+    destination: string,
+    held: HeldSettlement,
+    what: string,
+  ): Promise<void> {
+    warnedFrozen.delete(settlementHash(held));
+    const transaction = TransactionBuilder.fromXdr(held.xdr, options.network.passphrase);
+    const payment =
+      "innerTransaction" in transaction
+        ? undefined
+        : transaction.operations.find(
+            (op): op is Operation.PathPaymentStrictReceive =>
+              op.type === "pathPaymentStrictReceive",
+          );
+    const slots = (held.repays.createdAccount ? 2 : 0) + held.repays.assets.length;
+    const reserve = stroopsToXlm(BigInt(slots) * BigInt(options.network.baseReserveStroops));
+    let why: string;
+    if (payment === undefined) {
+      why = "the held transaction has no repayment in it";
+    } else {
+      const code = payment.sendAsset.getCode();
+      try {
+        const line = await readTrustline(options.rpc, signerFor(destination), payment.sendAsset);
+        why =
+          line === undefined
+            ? `the account has no ${code} trustline`
+            : !line.authorized
+              ? `its ${code} trustline is not authorised by its issuer`
+              : `it holds ${stroopsToXlm(line.balanceStroops - line.sellingStroops)} ${code} it ` +
+                `can spend, against a repayment of up to ${payment.sendMax} ${code}`;
+      } catch (cause) {
+        why = `its ${code} trustline could not be read (${cause instanceof Error ? cause.message : String(cause)})`;
+      }
+    }
+    console.error(
+      `[sponsor] the settlement for ${destination} ${what}, so the ${reserve} XLM reserve it ` +
+        `repays is stranded: ${why}`,
+    );
   }
 
   /**
@@ -1728,6 +1790,8 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
           // be served at all, and the smallest Circle transfer delivered.
           reserveFunding,
           minDeliveryBaseUnits: minDelivery.toString(),
+          // the trustlines a new account can be lent, each repaid in its own asset
+          lends,
           // how close the settlement capacity is to full; addresses stay private
           channels: {
             size: channels?.size ?? 0,
@@ -1831,10 +1895,10 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    // The settlement repays one USDC trustline, so any other set is a
-    // preparation /submit would refuse after the user had already signed it.
-    // An account paying its own reserve borrows nothing, so it may open any one
-    // curated trustline.
+    // The settlement repays one trustline in the asset it opens, so any other
+    // set is a preparation /submit would refuse after the user had already
+    // signed it. An account paying its own reserve borrows nothing, so it may
+    // open any one curated trustline.
     if (reserveFunding === "self" && names.length !== 1) {
       await answer(
         res,
@@ -1844,16 +1908,11 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       );
       return;
     }
-    if (reserveFunding === "sponsor" && (names.length !== 1 || names[0] !== "USDC")) {
-      await answer(
-        res,
-        400,
-        {
-          error: "This sponsor only prepares a USDC trustline, the one its settlement repays.",
-          retryable: false,
-        },
-        origin,
-      );
+    if (
+      reserveFunding === "sponsor" &&
+      (names.length !== 1 || lentAsset(names[0] ?? "") === undefined)
+    ) {
+      await answer(res, 400, { error: onlyLends(lends), retryable: false }, origin);
       return;
     }
 
@@ -1891,13 +1950,13 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     }
     const holder = classified.trustlineHolder ?? body.destination;
     const created = !(await accountExists(options.rpc, holder));
-    const usdcLine = assets[0];
+    const lentLine = assets[0];
     if (
       !created &&
-      usdcLine !== undefined &&
-      (await readTrustline(options.rpc, holder, usdcLine)) !== undefined
+      lentLine !== undefined &&
+      (await readTrustline(options.rpc, holder, lentLine)) !== undefined
     ) {
-      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      await answer(res, 400, { error: alreadyHolds(lentLine), retryable: false }, origin);
       return;
     }
 
@@ -2148,31 +2207,58 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return;
     }
 
-    const usdc = options.curatedAssets.USDC;
-    if (usdc === undefined) {
-      await answer(
-        res,
-        500,
-        { error: "This sponsor curates no settling asset.", retryable: false },
-        origin,
-      );
+    // the asset the route delivers, which the repayment spends; by name from
+    // the curated list, never by issuer from the wire
+    const paying = lentAsset(body.asset ?? "USDC");
+    if (paying === undefined) {
+      await answer(res, 400, { error: onlyLends(lends), retryable: false }, origin);
       return;
     }
 
     const createdAccount = !(await accountExists(options.rpc, account));
     // An account this sponsor already prepared holds the line it sponsored;
     // building again for it is harmless, since nothing can replace a prepared
-    // settlement. Anyone else holding USDC has nothing for the sponsor to open.
+    // settlement. Anyone else holding the asset has nothing for the sponsor to open.
     if (
       !createdAccount &&
       !backed(account) &&
-      (await readTrustline(options.rpc, account, usdc)) !== undefined
+      (await readTrustline(options.rpc, account, paying)) !== undefined
     ) {
-      await answer(res, 400, { error: ALREADY_HOLDS_USDC, retryable: false }, origin);
+      await answer(res, 400, { error: alreadyHolds(paying), retryable: false }, origin);
       return;
     }
 
     if (await busyBuilding(res, origin, client)) return;
+    // Account 2 slots + one trustline = 3, or 1 when the account already exists.
+    const slots = createdAccount ? 3 : 1;
+    const xlmNeededStroops = BigInt(slots) * BigInt(options.network.baseReserveStroops);
+    // The ceiling is twice the reserve at the live rate: generous enough that
+    // ordinary movement between signing and settling is absorbed, bounded enough
+    // that the user's exposure is a number they can read.
+    const stroopsPerUnit = await prices.xlmStroopsPerUnit(paying);
+    const maxSpendBase = (xlmNeededStroops * 2n * 10_000_000n) / stroopsPerUnit;
+    // The repayment buys the XLM on the asset's direct market and nowhere else.
+    // A market that could not do that now within the ceiling would leave the
+    // loan waiting on the market to come back, and a thin one (USDT0's is) can
+    // stay away past the settlement's day, so nothing is lent against it.
+    const cost = await spendQuote.directSpendStroops(paying, stroopsToDecimal(xlmNeededStroops));
+    if (
+      cost === undefined ||
+      (cost * (10_000n + SPEND_MARGIN_BASIS_POINTS)) / 10_000n > maxSpendBase
+    ) {
+      await answer(
+        res,
+        503,
+        {
+          error:
+            `Stellar's market cannot buy back this account's reserve with ${paying.getCode()} ` +
+            "right now, so the sponsor cannot front it. Nothing has been sent. Try again later.",
+          retryable: true,
+        },
+        origin,
+      );
+      return;
+    }
     const noSlot = (): Promise<void> =>
       answer(
         res,
@@ -2317,24 +2403,15 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     if (!leaseClients.has(account)) leaseClients.set(account, client);
     if (!provisionalSince.has(account) && !landed(account)) provisionalSince.set(account, now);
 
-    // Account 2 slots + one trustline = 3, or 1 when the account already exists.
-    const slots = createdAccount ? 3 : 1;
-    const xlmNeededStroops = BigInt(slots) * BigInt(options.network.baseReserveStroops);
-    // The ceiling is twice the reserve at the live rate: generous enough that
-    // ordinary movement between signing and settling is absorbed, bounded enough
-    // that the user's exposure is a number they can read.
-    const stroopsPerUsdc = await prices.xlmStroopsPerUnit(usdc);
-    const maxSpendBase = (xlmNeededStroops * 2n * 10_000_000n) / stroopsPerUsdc;
-
     const transaction = buildSettlement({
       network: options.network,
       channelAccount,
       sponsorAddress: keypair.publicKey(),
       userAddress: body.destination,
-      payingAsset: usdc,
+      payingAsset: paying,
       xlmNeeded: stroopsToDecimal(xlmNeededStroops),
       maxSpend: stroopsToDecimal(maxSpendBase),
-      assets: [usdc],
+      assets: [paying],
       createdAccount,
       validForSeconds: SETTLEMENT_VALIDITY_SECONDS,
     });
@@ -2349,7 +2426,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         // only holdable while the short lease lasts, so not kept past it
         openUntilUnix: now + PROVISIONAL_LEASE_SECONDS + LEASE_RECLAIM_GRACE_SECONDS,
         channel: channel.address,
-        repays: { createdAccount, assets: [usdc.toString()] },
+        repays: { createdAccount, assets: [paying.toString()] },
       },
       nowUnix(),
       client,
@@ -2621,6 +2698,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         heldSettlements.delete(destination);
         pool.release(destination, transaction.source);
         await caps.recordStranded();
+        await logStranded(destination, held, "can never land");
       }
       return { settled: false, settlementRetryable: false };
     };
@@ -2727,7 +2805,22 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     const payment = payments[0];
     if (payments.length !== 1 || payment === undefined) return false;
     const line = await readTrustline(options.rpc, signerFor(destination), payment.sendAsset);
-    if (line === undefined || !line.authorized) return false;
+    if (line === undefined) return false;
+    if (!line.authorized) {
+      // The issuer froze it (USDC's and USDT0's can): nothing on it can pay,
+      // and only the issuer can change that. Said once per settlement, so the
+      // operator knows this loan may not come back long before it strands.
+      const hash = xdr.encodeBytes(transaction.hash(), "hex");
+      if (!warnedFrozen.has(hash)) {
+        warnedFrozen.add(hash);
+        console.error(
+          `[sponsor] ${destination}'s ${payment.sendAsset.getCode()} trustline is not ` +
+            "authorised by its issuer, so the held settlement cannot spend from it; the " +
+            "reserve stays lent until the issuer authorises it again or the settlement expires",
+        );
+      }
+      return false;
+    }
     // what the owner's own offers have promised away cannot pay the settlement
     const spendable = line.balanceStroops - line.sellingStroops;
     // What the trade costs now on the settlement's own direct path, not the
@@ -2879,14 +2972,20 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       // The account may have opened the line itself since it was prepared. The
       // preparation would then sponsor nothing, and the settlement fail on a
       // line the sponsor never sponsored, counted as a stranding.
-      const usdc = options.curatedAssets.USDC;
-      if (
-        usdc !== undefined &&
-        !held.repays.createdAccount &&
-        (await readTrustline(options.rpc, record.signer, usdc)) !== undefined
-      ) {
-        await refuse(record, res, origin, 409, ALREADY_HOLDS_USDC);
-        return;
+      for (const id of held.repays.assets) {
+        const line = lentAssetOf(id);
+        // lent once and no longer lent: the operator took it off the list since
+        if (line === undefined) {
+          await refuse(record, res, origin, 409, onlyLends(lends));
+          return;
+        }
+        if (
+          !held.repays.createdAccount &&
+          (await readTrustline(options.rpc, record.signer, line)) !== undefined
+        ) {
+          await refuse(record, res, origin, 409, alreadyHolds(line));
+          return;
+        }
       }
       const decision = await caps.check(source);
       if (!decision.allowed) {
@@ -3940,8 +4039,19 @@ async function readTrustline(
  * it would sponsor nothing, and the settlement's revoke would then fail on a
  * line the sponsor never sponsored, which reads as a stranding for free.
  */
-const ALREADY_HOLDS_USDC =
-  "That account already holds USDC, so there is no trustline for this sponsor to open.";
+function alreadyHolds(asset: Asset): string {
+  return (
+    `That account already holds ${asset.getCode()}, so there is no trustline for this ` +
+    "sponsor to open."
+  );
+}
+
+/** Said when a sponsor-fronted trustline is asked for in an asset this sponsor does not lend. */
+function onlyLends(lends: readonly string[]): string {
+  return lends.length === 0
+    ? "This sponsor fronts no trustlines."
+    : `This sponsor only fronts a ${lends.join(" or ")} trustline, each repaid in its own asset.`;
+}
 
 /** One burn the sweep keeps asking about, as written down. */
 interface WatchEntry {

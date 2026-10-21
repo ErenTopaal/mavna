@@ -1,3 +1,5 @@
+export type { SpendQuoteOptions } from "@mavna/stellar";
+export { DirectSpendQuote } from "@mavna/stellar";
 export { curatedAssetsFor } from "./assets.js";
 export type { BuiltChange, BuiltKind, BuiltRecord } from "./built.js";
 export { BuiltLedger, signedBy } from "./built.js";
@@ -53,8 +55,6 @@ export type {
   SoroswapProxyOptions,
 } from "./soroswap.js";
 export { createSoroswapProxy } from "./soroswap.js";
-export type { SpendQuoteOptions } from "@mavna/stellar";
-export { DirectSpendQuote } from "@mavna/stellar";
 export type { DocumentStore } from "./state.js";
 export {
   DocumentCapStore,

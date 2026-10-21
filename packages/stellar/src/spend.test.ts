@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import existingAccount from "./__fixtures__/mainnet-usdt0-strict-receive-0.5.json" with {
   type: "json",
 };
-import newAccount from "./__fixtures__/mainnet-usdt0-strict-receive-1.5.json" with {
-  type: "json",
-};
+import newAccount from "./__fixtures__/mainnet-usdt0-strict-receive-1.5.json" with { type: "json" };
 import { DirectSpendQuote } from "./spend.js";
 
 const USDC = new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
