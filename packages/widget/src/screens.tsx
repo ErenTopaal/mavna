@@ -140,7 +140,7 @@ export function renderSend(
             placeholder="0"
             aria-label="Amount to send"
             style={s(
-              "flex:1 1 auto;min-width:0;border:0;padding:0;background:transparent;outline:none;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
+              "flex:1 1 auto;min-width:0;border:0;padding:0;background:transparent;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
             )}
           />
           {c.usdt0Offered() ? (
@@ -677,7 +677,7 @@ export function renderAddress(c: Flow): ReactElement {
         autoComplete="off"
         aria-label="Stellar address"
         style={s(
-          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;outline:none;font-family:var(--mv-font-mono);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
+          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font-mono);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
         )}
       />
       {invalid ? (

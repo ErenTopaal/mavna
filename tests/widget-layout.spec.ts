@@ -143,3 +143,23 @@ test("the playground's controls stay usable once the rail stacks above the stage
   await page.getByRole("button", { name: "Drawer", exact: true }).click();
   await expect(page.getByRole("button", { name: "Bring funds to Stellar" })).toBeVisible();
 });
+
+test("the amount and recipient fields show where keyboard focus is", async ({ page, baseURL }) => {
+  await offline(page, baseURL);
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  const ring = (name: string) =>
+    root.getByRole("textbox", { name }).evaluate((el) => getComputedStyle(el).outlineStyle);
+  const amount = root.getByRole("textbox", { name: "Amount to send" });
+  await root.getByRole("button", { name: /Ethereum Sepolia/ }).focus();
+  await page.keyboard.press("Tab");
+  await expect(amount).toBeFocused();
+  expect(await ring("Amount to send")).not.toBe("none");
+
+  await root.getByRole("button", { name: /Recipient/ }).focus();
+  await page.keyboard.press("Enter");
+  // focus moved to the new screen's back button; the field is next
+  await page.keyboard.press("Tab");
+  await expect(root.getByRole("textbox", { name: "Stellar address" })).toBeFocused();
+  expect(await ring("Stellar address")).not.toBe("none");
+});
