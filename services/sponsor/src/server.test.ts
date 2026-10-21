@@ -5513,3 +5513,85 @@ describe("round 5: a set-aside channel a loan rides on goes back to that loan", 
     );
   });
 });
+
+describe("a muxed or contract recipient at the sponsor", () => {
+  const BURN = `0x${"ab".repeat(32)}`;
+  const ATTESTATION = `0x${"ef".repeat(65)}`;
+  const muxedOf = (user: Keypair): string =>
+    new MuxedAccount(new Account(user.publicKey(), "0"), "11").accountId();
+  const CONTRACT = StrKey.encodeContract(Buffer.alloc(32, 5));
+  const irisReturns = (messageHex: string): void => {
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [{ message: messageHex, attestation: ATTESTATION, status: "complete" }],
+          }),
+          { status: 200 },
+        ),
+    );
+  };
+
+  it("delivers to a contract and settles nothing, since nothing was lent to it", async () => {
+    const server = await startServer({ buildDelivery });
+    irisReturns(cctpMessage(CONTRACT));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(200);
+    expect(response.body.kind).toBe("delivered");
+    expect(response.body.settled).toBeUndefined();
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery"]);
+  });
+
+  it("settles a muxed recipient's delivery against the account it wraps", async () => {
+    const server = await startServer({ buildDelivery });
+    const user = Keypair.random();
+    await preparedWithSettlementHeld(server, user);
+    server.rpc.holding(user, PLENTY);
+    irisReturns(cctpMessage(muxedOf(user)));
+    const response = await server.post("/deliver", { txHash: BURN, domain: 0 });
+    expect(response.status).toBe(200);
+    expect(response.body.settled).toBe(true);
+    expect(server.rpc.submissions.map((s) => s.label)).toEqual(["cctp delivery", "settlement"]);
+  });
+
+  it("prepares nothing and holds no repayment for a contract", async () => {
+    const server = await startServer();
+    const prepared = await server.post("/prepare", {
+      destination: CONTRACT,
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(prepared.status).toBe(400);
+    expect(prepared.body.error).toMatch(/nothing to prepare/);
+    const settlement = await server.post("/settlement", {
+      destination: CONTRACT,
+      sourceChainId: "1",
+    });
+    expect(settlement.status).toBe(400);
+    expect(settlement.body.error).toMatch(/needs no settling/);
+    const settled = await server.post("/settle", { destination: CONTRACT });
+    expect(settled.status).toBe(400);
+    expect(server.rpc.submissions).toEqual([]);
+  });
+
+  it("has the account a muxed address wraps open and pay for its own trustline", async () => {
+    const server = await startServer({ reserveFunding: "self" });
+    const user = Keypair.random();
+    server.rpc.accounts.set(user.publicKey(), 50n);
+    const built = await server.post("/prepare", {
+      destination: muxedOf(user),
+      assets: ["USDC"],
+      sourceChainId: "1",
+    });
+    expect(built.status).toBe(200);
+    const tx = TransactionBuilder.fromXdr(
+      built.body.xdr as string,
+      network.passphrase,
+    ) as Transaction;
+    expect(tx.source).toBe(user.publicKey());
+    const submitted = await server.post("/submit", {
+      signedXdr: signXdr(built.body.xdr as string, user),
+    });
+    expect(submitted.status).toBe(200);
+  });
+});

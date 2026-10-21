@@ -58,6 +58,7 @@ import {
   stepsFor,
   trackDelivery,
 } from "./rails";
+import { signerOf } from "./recipient";
 import { type SponsorDelivery, SponsorRefusal, type SponsorTerms } from "./sponsor";
 import { preparationProblem, readSettlement } from "./sponsored";
 import type { Connection } from "./wallet";
@@ -229,7 +230,7 @@ async function collectSettlement(
   funds = "Nothing has been sent.",
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
   const address = await engine.stellar.connect();
-  if (address !== route.destination) {
+  if (address !== signerFor(route.destination)) {
     throw wrongAccount(
       engine,
       address,
@@ -300,7 +301,7 @@ async function collectSettlement(
 async function prepareOwn(engine: TransferEngine, route: Route, chainId: string): Promise<string> {
   const holds = route.deliveredAtLeast.asset;
   const address = await engine.stellar.connect();
-  if (address !== route.destination) {
+  if (address !== signerFor(route.destination)) {
     throw wrongAccount(
       engine,
       address,
@@ -340,7 +341,8 @@ async function openOwnTrustline(
   // The account pays for this one, and the sponsor names the issuer by its own
   // list, so it is checked against what the rail will deliver before the user
   // is asked to sign: a trustline to anything else lets the delivery fail.
-  if (!opensOnly(preparation.xdr, engine.stellarNetwork.passphrase, route.destination, holds.id)) {
+  const signer = signerFor(route.destination);
+  if (!opensOnly(preparation.xdr, engine.stellarNetwork.passphrase, signer, holds.id)) {
     throw new Error(
       `The sponsor's preparation is not the trustline this transfer needs (${holds.symbol} ` +
         `for the receiving account), so it was not signed. ${funds}`,
@@ -486,7 +488,7 @@ export async function convertOnStellar(
   const asset = swapStep?.from.asset ?? engine.usdcOnStellar;
   const wanted = swapStep?.to.asset ?? route.receivesAtLeast.asset;
   const account = owner ?? (await engine.stellar.connect());
-  if (account !== route.destination) {
+  if (account !== signerFor(route.destination)) {
     throw wrongAccount(
       engine,
       account,
@@ -594,15 +596,35 @@ export function mapEvm(event: ExecutionEvent, count: number, patch: Patch): void
 function wrongAccount(
   engine: Pick<TransferEngine, "stellar">,
   connected: string,
-  needed: string,
+  /** The receiving address as entered; for a muxed one, the account it wraps signs. */
+  receiving: string,
   why: string,
   funds: string,
 ): Error {
   engine.stellar.forget?.();
+  const signer = signerOf(receiving);
+  if (signer === undefined) {
+    return new Error(
+      `${why} The receiving address is a contract, which cannot sign from a wallet. ${funds}`,
+    );
+  }
+  const which =
+    signer === receiving
+      ? short(signer)
+      : `${short(signer)}, the account behind that muxed address`;
   return new Error(
-    `${why} The connected Stellar wallet is ${short(connected)}, not ${short(needed)}. ` +
+    `${why} The connected Stellar wallet is ${short(connected)}, not ${which}. ` +
       `Switch to that account in your wallet and try again, or send to an address that can already receive. ${funds}`,
   );
+}
+
+/**
+ * The account that signs for a receiving address: itself, or the account a
+ * muxed address wraps. A contract has none, so it is compared as itself and
+ * never matches a wallet.
+ */
+function signerFor(receiving: string): string {
+  return signerOf(receiving) ?? receiving;
 }
 
 /** Whether the page went away. Read fresh each time: it can change during any await. */
@@ -773,7 +795,7 @@ export async function finishDelivery(
   if (attested === undefined) return first;
   const { recipient } = attested;
   const address = await engine.stellar.connect();
-  if (address !== recipient) {
+  if (address !== signerFor(recipient)) {
     // remembered from before, maybe for another account: asked afresh next time
     engine.stellar.forget?.();
     return {
@@ -997,7 +1019,7 @@ async function ownWallet(
   pays = "its own delivery on Stellar",
 ): Promise<string> {
   const address = await engine.stellar.connect();
-  if (address !== route.destination) {
+  if (address !== signerFor(route.destination)) {
     throw wrongAccount(
       engine,
       address,

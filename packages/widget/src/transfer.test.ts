@@ -6,6 +6,7 @@ import {
   Account,
   Asset,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   SorobanDataBuilder,
@@ -53,6 +54,8 @@ const HISTORY_KEY = "test.transfers";
 /** A Stellar address other than the one the wallet connects; the sponsor's settlement channel. */
 const SENDER_STELLAR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 const SPONSOR_STELLAR = Keypair.random().publicKey();
+/** The connected account under a sub-account id: its balance, reserve and signer are DESTINATION's. */
+const MUXED = new MuxedAccount(new Account(DESTINATION, "0"), "42").accountId();
 
 /** Everything that crossed a boundary, in the order it crossed. */
 let log: string[];
@@ -217,8 +220,9 @@ beforeEach(() => {
         return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
       }
       case "/settlement/commit": {
+        // a muxed address and the account it wraps are one account to the sponsor
         expect(bodyOf(init)).toEqual({
-          destination: DESTINATION,
+          destination: expect.stringMatching(new RegExp(`^(${DESTINATION}|${MUXED})$`)),
           signedXdr: `signed ${settlementXdr}`,
         });
         const refusal = commitRefusals.shift();
@@ -1974,6 +1978,17 @@ describe("finishing a Circle delivery from Activity", () => {
     ]);
   });
 
+  it("prepares the account a muxed recipient wraps, signed by that account", async () => {
+    attestedTo(MUXED);
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9 }],
+    ];
+    const outcome = await finishDelivery(engineWith(cctp()), SEND_HASH, 3, "arbitrum-sepolia");
+    expect(outcome).toMatchObject({ kind: "delivered", txHash: "d311" });
+    expect(log).toContain("stellar sign PREPARATION");
+  });
+
   it("prepares nothing when the connected wallet is not the account Circle will mint to", async () => {
     attestedTo(SENDER_STELLAR);
     deliverReplies = [
@@ -2342,5 +2357,76 @@ describe("mapEvm, a reset and an approval on one row", () => {
     ).toEqual([
       { id: "approve", patch: { phase: "done", note: "You have already allowed this." } },
     ]);
+  });
+});
+
+describe("a muxed recipient", () => {
+  // the wallet connects as DESTINATION, the account MUXED wraps
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const cctp = () =>
+    new CctpAdapter({ network: "testnet", rpc: stellarNode(), baseReserveStroops: 5_000_000 });
+  const toMuxed = (route: ReturnType<typeof routeFor>) => ({ ...route, destination: MUXED });
+
+  it("has the account it wraps sign the repayment and the setup the sponsor fronts", async () => {
+    deliverReplies = [
+      [409, { kind: "recipient-not-ready", detail: "The account does not exist yet." }],
+      [200, { kind: "delivered", txHash: "d311", ledger: 9, settled: true }],
+    ];
+    await run(cctp(), toMuxed(routeFor("cctp", { newAccount: true })), patches().patch);
+    expect(log).toContain("stellar sign SETTLEMENT");
+    expect(log).toContain("stellar sign PREPARATION");
+    expect(log.at(-1)).toBe("deliver done");
+  });
+
+  it("has the account it wraps deliver and pay for the mint when accounts fund themselves", async () => {
+    funding = "self";
+    await run(cctp(), toMuxed(routeFor("cctp")), patches().patch);
+    expect(log).toContain("stellar sign DELIVERY");
+    expect(log).not.toContain("sponsor /deliver");
+    expect(log.at(-1)).toBe("deliver done");
+  });
+
+  it("has the account it wraps open its own trustline when accounts fund themselves", async () => {
+    funding = "self";
+    await run(cctp(), toMuxed(routeFor("cctp", { newAccount: true })), patches().patch);
+    expect(log).toContain("stellar sign PREPARATION");
+    expect(log.at(-1)).toBe("deliver done");
+  });
+
+  it("has the account it wraps sign the conversion", async () => {
+    const base = routeFor("layerzero", { swap: true });
+    const route = {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.kind === "swap"
+          ? {
+              ...step,
+              from: { asset: STELLAR_USDC, baseUnits: "49000000" },
+              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
+            }
+          : step,
+      ),
+    };
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+      onStatus: () => {
+        usdcHeld = 49_000_000n;
+      },
+    });
+    await run(adapter, toMuxed(route), patches().patch).catch(() => undefined);
+    // the venue is asked only once the connected wallet is known to be the signer
+    expect(conversionAmounts).toEqual(["49000000"]);
+  });
+
+  it("refuses before the burn a wallet that is not the account it wraps, naming that account", async () => {
+    funding = "self";
+    const other = new MuxedAccount(new Account(SENDER_STELLAR, "0"), "42").accountId();
+    const route = { ...routeFor("cctp"), destination: other };
+    await expect(run(cctp(), route, patches().patch)).rejects.toThrow(
+      /GAAZI…CWN7, the account behind that muxed address.*Nothing has been sent/,
+    );
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
   });
 });

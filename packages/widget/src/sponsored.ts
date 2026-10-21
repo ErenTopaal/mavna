@@ -13,6 +13,7 @@ import {
   Asset as StellarAsset,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
+import { signerOf } from "./recipient";
 
 /** What a changeTrust with no limit given reads back as: the largest Int64 in stroops. */
 const DEFAULT_TRUST_LIMIT = "922337203685.4775807";
@@ -87,7 +88,8 @@ export function preparationProblem(
 ): string | undefined {
   const tx = parse(xdr, passphrase);
   if (tx === undefined) return "it could not be read";
-  const account = wanted.destination;
+  // a muxed address is prepared as the account it wraps, which holds the balance
+  const account = signerOf(wanted.destination) ?? wanted.destination;
   const holds = wanted.holds;
   if (tx.source === account) return "it would be paid for by the receiving account";
   if (!boundedBy(tx, PREPARATION_MAX_SECONDS)) return "it is not limited to a few minutes";
@@ -150,7 +152,8 @@ export function readSettlement(
 ): { readonly sendMax: bigint } | { readonly problem: string } {
   const tx = parse(xdr, passphrase);
   if (tx === undefined) return { problem: "it could not be read" };
-  const account = route.destination;
+  // the account a muxed address wraps is the one that repays
+  const account = signerOf(route.destination) ?? route.destination;
   const holds = route.deliveredAtLeast.asset;
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
   if (reserve === undefined) {

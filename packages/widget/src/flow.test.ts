@@ -1173,7 +1173,9 @@ describe("what the recipient screen says is wrong", () => {
   it("tells a mistyped muxed address its checksum is off, and a pool it cannot be paid", () => {
     const muxed = new MuxedAccount(new Account(VALID, "0"), "7").accountId();
     const mistyped = `${muxed.slice(0, 20)}${muxed[20] === "A" ? "B" : "A"}${muxed.slice(21)}`;
-    expect(said(mistyped)).toContain("That is not a Stellar address. Check that it was copied in full.");
+    expect(said(mistyped)).toContain(
+      "That is not a Stellar address. Check that it was copied in full.",
+    );
     expect(said(StrKey.encodeLiquidityPool(Buffer.alloc(32, 3)))).toContain(
       "A liquidity-pool address cannot receive a payment.",
     );
