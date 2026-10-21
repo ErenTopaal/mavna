@@ -742,7 +742,9 @@ export class Flow extends React.Component<FlowProps, State> {
         this.setState({ routesMounted: false });
       }, this.DUR * 2000);
     }
-    const hadFocus = this.rootRef.current?.contains(document.activeElement) === true;
+    const root = this.rootRef.current;
+    // the root's own document, which is the host's, or the iframe's it was mounted in
+    const hadFocus = root?.contains(root.ownerDocument?.activeElement ?? null) === true;
     const cameFrom = way === "pop" ? null : this.state.screen;
     const next = wantPanel
       ? { screen, dir: way, note: null, routesMounted: true, cameFrom }
@@ -771,7 +773,7 @@ export class Flow extends React.Component<FlowProps, State> {
    */
   refocus(): void {
     const root = this.rootRef.current;
-    if (root === null || root.contains(document.activeElement)) return;
+    if (root === null || root.contains(root.ownerDocument.activeElement)) return;
     const card = this.cardRef.current ?? root;
     const first =
       card.querySelector<HTMLElement>('button[aria-label="Back"]') ??
