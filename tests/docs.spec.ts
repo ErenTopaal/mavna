@@ -13,20 +13,22 @@ const PAGES = readdirSync(content, { recursive: true, encoding: "utf8" })
     `/${file.replace(/\.mdx$/, "").replace(/(^|\/)index$/, "")}`.replace(/(.)\/$/, "$1"),
   );
 
-test("every docs page renders without a console error", async ({ page }) => {
-  // a page that hydrates differently from its prerendered html, or throws, says so here
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(`${page.url()}: ${error.message}`));
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(`${page.url()}: ${message.text()}`);
-  });
-  for (const path of PAGES) {
+// one test per page: all of them in one test ran close to its time limit and
+// failed at random under a loaded gate
+for (const path of PAGES) {
+  test(`${path} renders without a console error`, async ({ page }) => {
+    // a page that hydrates differently from its prerendered html, or throws, says so here
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
     const response = await page.goto(`${DOCS}${path}`, { waitUntil: "networkidle" });
-    expect(response?.status(), path).toBe(200);
+    expect(response?.status()).toBe(200);
     await expect(page.locator("h1").first()).toBeVisible();
-  }
-  expect(errors).toEqual([]);
-});
+    expect(errors).toEqual([]);
+  });
+}
 
 test("the docs follow the system theme until the reader picks one", async ({ browser }) => {
   for (const scheme of ["light", "dark"] as const) {
