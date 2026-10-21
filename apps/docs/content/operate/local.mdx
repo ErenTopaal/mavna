@@ -1,0 +1,42 @@
+---
+title: Run it locally
+description: Run the app and the sponsor together with Docker Compose, or run the sponsor on its own.
+---
+
+## The app and the sponsor together
+
+From the repository root:
+
+```sh
+SPONSOR_SECRET_KEY=S... docker compose up
+```
+
+A one-off `build` service copies the repository into a volume, installs and builds there, and two
+services start from that build:
+
+- **app**: the Mavna app at `http://localhost:4319`.
+- **sponsor**: the sponsor service at `http://localhost:8787`, bound to `127.0.0.1` only. Its state
+  lives in a named volume, `sponsor-state`, mounted at `/var/lib/mavna`.
+
+The repository is mounted read-only, so Compose never writes into your checkout. Compose passes the
+sponsor settings described in [Sponsor configuration](/operate/sponsor) through from your shell;
+`SPONSOR_SECRET_KEY` is the only one you must set.
+
+Compose copies the files listed in `scripts/compose-files.txt`. After you add or remove a tracked
+file, run `node scripts/compose-sync.mjs --write-manifest` to update the list.
+
+## The sponsor on its own
+
+```sh
+pnpm install
+pnpm turbo run build --filter=@mavna/sponsor-service...
+SPONSOR_SECRET_KEY=S... node services/sponsor/dist/main.mjs
+```
+
+The trailing `...` builds the packages the sponsor imports first, which a fresh checkout has not
+built. The process logs one line when it is listening, with its port, network, Stellar node and
+reserve funding mode. `GET /health` answers with the network and the sponsor's public address,
+which is the account to fund.
+
+Without `MAVNA_STATE_DIR`, the sponsor keeps its state in memory and says so at every start. Set it
+for anything you keep running; see [Sponsor configuration](/operate/sponsor).
