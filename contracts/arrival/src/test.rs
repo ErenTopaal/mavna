@@ -37,6 +37,13 @@ enum VenueKey {
     // what estimate_swap overstates by, in basis points, so the swap can still
     // refuse after an estimate that cleared the floor
     Optimism,
+    // how many times the arrival contract has called it
+    Calls,
+}
+
+fn count_call(env: &Env) {
+    let calls: u32 = env.storage().instance().get(&VenueKey::Calls).unwrap_or(0);
+    env.storage().instance().set(&VenueKey::Calls, &(calls + 1));
 }
 
 #[contracttype]
@@ -62,6 +69,10 @@ impl Venue {
         env.storage().instance().set(&VenueKey::Optimism, &bps);
     }
 
+    pub fn calls(env: Env) -> u32 {
+        env.storage().instance().get(&VenueKey::Calls).unwrap_or(0)
+    }
+
     pub fn estimate_swap(
         env: Env,
         _tokens: Vec<Address>,
@@ -70,6 +81,7 @@ impl Venue {
         _pool_index: BytesN<32>,
         in_amount: u128,
     ) -> u128 {
+        count_call(&env);
         let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
         let optimism: i128 = env
             .storage()
@@ -91,6 +103,7 @@ impl Venue {
         in_amount: u128,
         out_min: u128,
     ) -> u128 {
+        count_call(&env);
         user.require_auth();
         let me = env.current_contract_address();
         TokenClient::new(&env, &token_in).transfer(&user, &me, &(in_amount as i128));
@@ -145,7 +158,14 @@ fn sac(env: &Env) -> (Address, xdr::Asset) {
     (sac.address(), sac.asset())
 }
 
+/// Larger than any arrival the tests make, so only the tests about the limit meet it.
+const NO_LIMIT: i128 = i64::MAX as i128;
+
 fn setup() -> World {
+    setup_converting_at_most(NO_LIMIT)
+}
+
+fn setup_converting_at_most(largest: i128) -> World {
     let env = Env::default();
     env.cost_estimate().budget().reset_unlimited();
     env.mock_all_auths();
@@ -165,7 +185,7 @@ fn setup() -> World {
             endpoint.clone(),
             venue.clone(),
             vec![&env, (oft.clone(), usdt0.clone())],
-            vec![&env, usdc.clone()],
+            vec![&env, (usdc.clone(), largest)],
             Vec::<Address>::new(&env),
         ),
     );
@@ -909,6 +929,57 @@ fn a_zero_minimum_is_not_a_floor_and_is_not_converted() {
 }
 
 #[test]
+fn an_arrival_larger_than_the_limit_is_delivered_as_it_came_without_calling_the_venue() {
+    let mut w = setup_converting_at_most(1_000_000);
+    let venue = VenueClient::new(&w.env, &w.venue);
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+
+    let (guid, message) = w.arrive(1_000_001, &msg);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_001);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+    assert_eq!(venue.calls(), 0);
+
+    // the limit itself still converts
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("converted"));
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn the_constructor_refuses_a_limit_that_converts_nothing_or_a_repeated_asset() {
+    let env = Env::default();
+    let endpoint = Address::generate(&env);
+    let router = Address::generate(&env);
+    let oft = Address::generate(&env);
+    let token = Address::generate(&env);
+    let wanted = Address::generate(&env);
+    for list in [
+        vec![&env, (wanted.clone(), 0i128)],
+        vec![&env, (wanted.clone(), -1i128)],
+        vec![&env, (wanted.clone(), 5i128), (wanted.clone(), 6i128)],
+    ] {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.register(
+                ArrivalContract,
+                (
+                    endpoint.clone(),
+                    router.clone(),
+                    vec![&env, (oft.clone(), token.clone())],
+                    list.clone(),
+                    Vec::<Address>::new(&env),
+                ),
+            );
+        }));
+        assert!(r.is_err());
+    }
+}
+
+#[test]
 fn a_negative_amount_is_refused_and_stays_queued() {
     let mut w = setup();
     let recipient = Address::generate(&w.env);
@@ -963,7 +1034,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                 endpoint.clone(),
                 router.clone(),
                 empty,
-                vec![&env, token.clone()],
+                vec![&env, (token.clone(), NO_LIMIT)],
                 Vec::<Address>::new(&env),
             ),
         );
@@ -980,7 +1051,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                     (oft.clone(), token.clone()),
                     (oft.clone(), token.clone()),
                 ],
-                vec![&env, token.clone()],
+                vec![&env, (token.clone(), NO_LIMIT)],
                 Vec::<Address>::new(&env),
             ),
         );
@@ -993,7 +1064,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                 endpoint.clone(),
                 router.clone(),
                 vec![&env, (oft.clone(), token.clone())],
-                Vec::<Address>::new(&env),
+                Vec::<(Address, i128)>::new(&env),
                 Vec::<Address>::new(&env),
             ),
         );

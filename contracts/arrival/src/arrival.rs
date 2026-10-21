@@ -27,8 +27,18 @@ pub const MAX_FEE_BPS: u32 = 1_000;
 /// run code of their choosing inside an executor's transaction.
 pub struct Venue {
     pub router: Address,
-    pub wanted: Vec<Address>,
+    /// Each asset it converts into, with the largest arriving amount it converts.
+    pub wanted: Vec<(Address, i128)>,
     pub path_tokens: Vec<Address>,
+}
+
+impl Venue {
+    fn largest(&self, asset: &Address) -> Option<i128> {
+        self.wanted
+            .iter()
+            .find(|(wanted, _)| wanted == asset)
+            .map(|(_, largest)| largest)
+    }
 }
 
 /// Where the funds came from, for the event. Each rail fills in what it has.
@@ -145,11 +155,11 @@ fn path_is_sound(arriving: &Address, conversion: &Conversion) -> bool {
 
 /// Whether every contract the conversion would touch was fixed at construction.
 fn on_lists(venue: &Venue, arriving: &Address, conversion: &Conversion) -> bool {
-    if !venue.wanted.contains(&conversion.wanted) {
+    if venue.largest(&conversion.wanted).is_none() {
         return false;
     }
     let allowed =
-        |t: &Address| t == arriving || venue.wanted.contains(t) || venue.path_tokens.contains(t);
+        |t: &Address| t == arriving || venue.largest(t).is_some() || venue.path_tokens.contains(t);
     conversion
         .path
         .iter()
@@ -225,6 +235,14 @@ fn convert(
     let recipient = &arrival.instructions.recipient;
     if conversion.min_out <= 0 || conversion.fee_bps > MAX_FEE_BPS {
         return None;
+    }
+    // A large swap through a concentrated pool can cost more than a transaction
+    // may spend, and running out of budget aborts the whole call where no try_
+    // can catch it, so the compose would stay queued for good. Above the limit
+    // the venue is never called.
+    match venue.largest(&conversion.wanted) {
+        Some(largest) if arrival.amount <= largest => {}
+        _ => return None,
     }
     if conversion.wanted == arrival.token || !path_is_sound(&arrival.token, conversion) {
         return None;
