@@ -21,18 +21,24 @@ function published(dir: string): string[] {
   });
 }
 
-const packages = [...published("packages"), ...published("packages/adapters")].sort();
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+const packages = [...published("packages"), ...published("packages/adapters")].sort(byCodeUnit);
 
 describe("the package reference", () => {
   it("generates exports for every published package", () => {
     const script = readFileSync(join(docs, "scripts/sync-reference.mjs"), "utf8");
-    const listed = [...script.matchAll(/name: "(@mavna\/[^"]+)"/g)].map((m) => m[1]).sort();
+    const listed = [...script.matchAll(/name: "(@mavna\/[^"]+)"/g)]
+      .map((m) => m[1])
+      .sort(byCodeUnit);
     expect(listed).toEqual(packages);
   });
 
   it("shows every published package on the packages page", () => {
     const page = readFileSync(join(docs, "content/sdk/reference/packages.mdx"), "utf8");
-    const shown = [...page.matchAll(/^## (@mavna\/\S+)$/gm)].map((m) => m[1]).sort();
+    const shown = [...page.matchAll(/^## (@mavna\/\S+)$/gm)].map((m) => m[1]).sort(byCodeUnit);
     expect(shown).toEqual(packages);
   });
 });

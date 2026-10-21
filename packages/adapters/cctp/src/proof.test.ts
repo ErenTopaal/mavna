@@ -60,7 +60,11 @@ describe("deliveredByEvent on stellar-rpc 30", () => {
   // then read as on its way in Activity because the proof required it
   const without = (raw: typeof recent.messageReceived) => ({
     ...raw,
-    events: raw.events.map(({ inSuccessfulContractCall: _, ...event }) => event),
+    events: raw.events.map((event) =>
+      Object.fromEntries(
+        Object.entries(event).filter(([key]) => key !== "inSuccessfulContractCall"),
+      ),
+    ),
   });
   const events = [
     ...rpc.parseRawEvents(without(recent.messageReceived) as never).events,
