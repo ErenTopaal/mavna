@@ -150,6 +150,7 @@ packages/adapters/axelar/src/network.test.ts
 packages/adapters/axelar/src/pinned.ts
 packages/adapters/axelar/src/pinning.test.ts
 packages/adapters/axelar/src/readiness.test.ts
+packages/adapters/axelar/src/recipient.test.ts
 packages/adapters/axelar/src/stellar-its.ts
 packages/adapters/axelar/src/stellar-receipt.ts
 packages/adapters/axelar/src/token.ts
@@ -186,6 +187,7 @@ packages/adapters/cctp/src/nonevm.ts
 packages/adapters/cctp/src/proof.test.ts
 packages/adapters/cctp/src/proof.ts
 packages/adapters/cctp/src/quote-guard.test.ts
+packages/adapters/cctp/src/recipient.test.ts
 packages/adapters/cctp/src/room.test.ts
 packages/adapters/cctp/src/solana.test.ts
 packages/adapters/cctp/src/solana.ts
@@ -219,6 +221,7 @@ packages/adapters/layerzero/src/index.ts
 packages/adapters/layerzero/src/no-buffer.test.ts
 packages/adapters/layerzero/src/oft.test.ts
 packages/adapters/layerzero/src/oft.ts
+packages/adapters/layerzero/src/recipient.test.ts
 packages/adapters/layerzero/src/scan.test.ts
 packages/adapters/layerzero/src/scan.ts
 packages/adapters/layerzero/src/usdt0.test.ts
@@ -238,6 +241,7 @@ packages/adapters/near-intents/src/evm.test.ts
 packages/adapters/near-intents/src/evm.ts
 packages/adapters/near-intents/src/fetch-binding.test.ts
 packages/adapters/near-intents/src/index.ts
+packages/adapters/near-intents/src/recipient.test.ts
 packages/adapters/near-intents/src/status.ts
 packages/adapters/near-intents/tsconfig.json
 packages/adapters/near-intents/tsconfig.test.json
