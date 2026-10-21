@@ -14,6 +14,7 @@
 import { AttestationService, fromHex, parseForwarderHookData, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
+import { conversionRefusal } from "@mavna/routing";
 import {
   type DestinationLane,
   inspectDestination,
@@ -1227,6 +1228,12 @@ export async function runTransfer(given: TransferDeps): Promise<void> {
   // a conversion on Stellar spends what this transfer adds, so the balance is
   // read before anything moves
   const swapFrom = route.steps.find((s) => s.kind === "swap")?.from.asset;
+  // a route is data handed back, so a conversion no recipient of this kind can
+  // take is refused here too, before anything is signed
+  if (swapFrom !== undefined) {
+    const refused = conversionRefusal(route.destination, swapFrom.symbol);
+    if (refused !== undefined) throw new Error(`${refused} Nothing has been sent.`);
+  }
   // and never more than the bridge quoted for it, so a payment from someone else
   // that lands while this one is in transit is not converted along with it
   const bridged = route.steps.find((s) => s.kind === "bridge")?.to;

@@ -17,7 +17,7 @@ import {
   rejectionIsRetryable,
   type TrustModel,
 } from "@mavna/core";
-import { raceAdapters, type SwapAttachment } from "@mavna/routing";
+import { conversionRefusal, raceAdapters, type SwapAttachment } from "@mavna/routing";
 import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
@@ -416,7 +416,7 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     explanation,
     retryable: rejectionIsRetryable(reason),
   });
-  const unsignable = contractBlocker(route, check);
+  const unsignable = recipientBlocker(route, check);
   if (unsignable !== undefined) return decline("destination-unsupported", unsignable);
   if (!circle && !setsUp) {
     // only the conversion's trustline and fee to check; the sponsor is not involved
@@ -507,21 +507,18 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
 }
 
 /**
- * Why a route asks a contract recipient for something only an account can
- * give, or undefined. A contract holds what an asset contract credits it with
- * no account, reserve or trustline, and it cannot sign from a wallet: not a
- * conversion on Stellar, and not a Circle delivery it would pay for itself.
+ * Why a route asks the recipient for something it can never give, or
+ * undefined. A conversion on Stellar is refused for a contract, which cannot
+ * sign it, and for a muxed address, whose id the converted amount would lose.
+ * A contract cannot sign a Circle delivery it would pay for itself either.
  */
-function contractBlocker(route: Route, check: SponsorCheck): string | undefined {
-  if (!isContract(route.destination)) return undefined;
+function recipientBlocker(route: Route, check: SponsorCheck): string | undefined {
   const swap = route.steps.find((s) => s.kind === "swap");
   if (swap !== undefined) {
-    const arrives = swap.from.asset.symbol;
-    return (
-      `Converting on Stellar is a transaction the receiving address signs, and a contract cannot ` +
-      `sign one from a wallet. Receive ${arrives} instead.`
-    );
+    const refused = conversionRefusal(route.destination, swap.from.asset.symbol);
+    if (refused !== undefined) return refused;
   }
+  if (!isContract(route.destination)) return undefined;
   const self = !(check.terms instanceof Error) && check.terms.reserveFunding === "self";
   if (route.source === "cctp" && self) {
     return (

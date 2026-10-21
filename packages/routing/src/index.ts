@@ -6,7 +6,7 @@ export {
   rejectionForDisabled,
 } from "./circuit.js";
 export type { IntegratorFee, SwapAttachment, SwapQuoter } from "./enrich.js";
-export { applyIntegratorFee, attachSwapLeg } from "./enrich.js";
+export { applyIntegratorFee, attachSwapLeg, conversionRefusal } from "./enrich.js";
 export type { DestinationReadiness, PlanInputs, PlannedStep, PlannedStepKind } from "./plan.js";
 export {
   assertPlanIsSound,

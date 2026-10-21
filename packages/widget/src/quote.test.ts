@@ -1493,12 +1493,25 @@ describe("a muxed or contract recipient", () => {
     expect(asked).toContain(wrapped);
   });
 
-  it("declines a muxed recipient's conversion when the account it wraps cannot spare the fee", async () => {
+  it("never offers a muxed recipient a conversion on Stellar, however much XLM it has", async () => {
     const route = to(routeFor("cctp"), muxed);
-    const asked: string[] = [];
-    const set = await quoted(route, "sponsor", asked, 15_000_000n, "XLM");
+    const set = await quoted(route, "sponsor", [], 10_000_000_000n, "XLM");
     expect(set.routes).toEqual([]);
-    expect(set.rejected[0]?.explanation).toMatch(/0 XLM to spare/);
-    expect(asked).toContain(wrapped);
+    expect(set.rejected[0]?.reason).toBe("destination-unsupported");
+    expect(set.rejected[0]?.explanation).toMatch(/muxed address/);
+  });
+
+  it("declines a muxed recipient a conversion carried on a route, on any rail and any terms", () => {
+    for (const source of ["cctp", "layerzero"]) {
+      for (const funding of ["sponsor", "self"] as const) {
+        const set = checked(
+          to(routeFor(source, { swap: true, delivers: STELLAR_XLM }), muxed),
+          funding,
+          10_000_000_000n,
+        );
+        expect(set.routes).toEqual([]);
+        expect(set.rejected[0]?.explanation).toMatch(/muxed address/);
+      }
+    }
   });
 });

@@ -2409,29 +2409,15 @@ describe("a muxed recipient", () => {
     expect(log.at(-1)).toBe("deliver done");
   });
 
-  it("has the account it wraps sign the conversion", async () => {
-    const base = routeFor("layerzero", { swap: true });
-    const route = {
-      ...base,
-      steps: base.steps.map((step) =>
-        step.kind === "swap"
-          ? {
-              ...step,
-              from: { asset: STELLAR_USDC, baseUnits: "49000000" },
-              to: { asset: STELLAR_XLM, baseUnits: "26000000" },
-            }
-          : step,
-      ),
-    };
+  it("refuses a conversion for a muxed recipient before anything is sent", async () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
-      onStatus: () => {
-        usdcHeld = 49_000_000n;
-      },
     });
-    await run(adapter, toMuxed(route), patches().patch).catch(() => undefined);
-    // the venue is asked only once the connected wallet is known to be the signer
-    expect(conversionAmounts).toEqual(["49000000"]);
+    await expect(
+      run(adapter, toMuxed(routeFor("layerzero", { swap: true })), patches().patch),
+    ).rejects.toThrow(/muxed address.*Nothing has been sent/);
+    expect(adapter.built).toBe(0);
+    expect(log.some((l) => l.startsWith("stellar connect"))).toBe(false);
   });
 
   it("refuses before the burn a wallet that is not the account it wraps, naming that account", async () => {

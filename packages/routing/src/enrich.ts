@@ -80,6 +80,31 @@ export function reserveSetAside(
 }
 
 /**
+ * Why a recipient can never be given a conversion on Stellar, or undefined.
+ *
+ * The leg is the recipient's own transaction. A contract cannot sign one from
+ * a wallet, so the money would arrive and stay unconverted. A muxed address
+ * carries the id its receiver credits the deposit by, and the conversion pays
+ * the account behind it with no id, a deposit nobody can attribute.
+ */
+export function conversionRefusal(destination: string, arrives: string): string | undefined {
+  if (destination.startsWith("C")) {
+    return (
+      "Converting on Stellar is a transaction the receiving address signs, and a contract " +
+      `cannot sign one from a wallet. Receive ${arrives} instead.`
+    );
+  }
+  if (destination.startsWith("M")) {
+    return (
+      "A muxed address carries the id its receiver credits the deposit by, and a conversion " +
+      "on Stellar would pay the account behind it without that id, where it cannot be " +
+      `credited. Receive ${arrives} instead.`
+    );
+  }
+  return undefined;
+}
+
+/**
  * Attach the conversion leg to a route that arrives in the wrong asset.
  *
  * The rail was asked to deliver its own asset, so `route.receives` is the
@@ -106,16 +131,13 @@ export async function attachSwapLeg(
         `${attachment.delivered.symbol} the conversion into ${attachment.wanted.symbol} sells.`,
     };
   }
-  // the leg is the recipient's own transaction, and a contract cannot sign one
-  // from a wallet: the money would arrive and stay unconverted
-  if (route.destination.startsWith("C")) {
+  const refused = conversionRefusal(route.destination, attachment.delivered.symbol);
+  if (refused !== undefined) {
     return {
       source: route.source,
       reason: "destination-unsupported",
       retryable: false,
-      explanation:
-        "Converting on Stellar is a transaction the receiving address signs, and a contract " +
-        `cannot sign one from a wallet. Receive ${attachment.delivered.symbol} instead.`,
+      explanation: refused,
     };
   }
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;

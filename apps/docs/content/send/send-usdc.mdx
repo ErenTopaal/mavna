@@ -26,7 +26,9 @@ It takes three kinds of address:
 - **An account address** starts with `G` and is 56 characters long.
 - **A muxed address** starts with `M` and is 69 characters long. It is an account address with an
   id added. The money arrives in the account it is built on, labelled with that id. Anything your
-  Stellar wallet approves for it, you approve with that account.
+  Stellar wallet approves for it, you approve with that account. A muxed address receives the asset
+  the rail delivers: a conversion on Stellar would pay the account without the id, so a route that
+  converts is declined for it, with the reason.
 - **A contract address** starts with `C` and is 56 characters long. The money arrives in the
   contract's own balance. The contract has to exist on the network you send on, and a token's own
   contract is refused, because nothing sent to it can be moved again. A contract cannot approve

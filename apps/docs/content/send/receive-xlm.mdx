@@ -19,9 +19,9 @@ The rate is the market's. The conversion has no fee line of its own.
 ## Approve the conversion
 
 Because the conversion spends from the receiving account, the recipient approves it in a Stellar
-wallet connected to that account. For a muxed address, that is the account the muxed address is
-built on. A contract address receives USDC: it cannot approve a conversion, so the route to XLM is
-declined for it. The step reads **Convert to XLM on Stellar** and comes after the
+wallet connected to that account. A muxed or contract address receives USDC, and the route to XLM
+is declined for it with the reason: the converted XLM would reach a muxed address's account without
+its id, and a contract cannot approve the conversion. The step reads **Convert to XLM on Stellar** and comes after the
 USDC arrives. [Connect your wallets](/send/wallets) covers connecting one.
 
 The conversion spends only what this transfer brought in. Anything the account already held is

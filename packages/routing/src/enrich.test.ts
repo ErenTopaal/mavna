@@ -110,6 +110,25 @@ describe("attaching the conversion leg", () => {
     expect(asked).toBe(0);
   });
 
+  it("refuses a conversion for a muxed recipient, whose id the converted amount would lose", async () => {
+    let asked = 0;
+    const counting: SwapQuoter = {
+      id: "aquarius",
+      quote: () => {
+        asked += 1;
+        return Promise.resolve({ provider: "aquarius", amountOut: "1", amountOutMinimum: "1" });
+      },
+    };
+    const toMuxed = {
+      ...route,
+      destination: "MBM4KX6TWI4GIY2RHT6LVRYCTW4VONGCNSCQVV7PEZVJOHPEI3IDIAAAAAAAAAAD5FW3K",
+    };
+    const out = await attachSwapLeg(toMuxed, attachment(counting), 50);
+    expect(out).toMatchObject({ reason: "destination-unsupported", retryable: false });
+    expect("explanation" in out && out.explanation).toMatch(/muxed address.*Receive USDC instead/);
+    expect(asked).toBe(0);
+  });
+
   it("prices the conversion on what the bridge guarantees, not on its estimate", async () => {
     const asked: string[] = [];
     const recording: SwapQuoter = {
