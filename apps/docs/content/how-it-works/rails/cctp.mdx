@@ -26,8 +26,10 @@ as USDC with six decimals. Run it with `node scripts/verify-cctp-chains.mjs`.
 
 The burn's `mintRecipient` and `destinationCaller` are both Circle's Stellar forwarder contract, not
 the sender's address, and the sender's address travels inside the message as hook data. Circle mints to
-the forwarder, which passes the USDC on to the recipient. The hook data is validated before it is
-encoded, and an address the forwarder cannot deliver to is refused.
+the forwarder, which passes the USDC on to the recipient. The forwarder delivers to an account, a
+muxed address or a contract. For a muxed address it pays the account the address is built on, and
+the token's `transfer` event carries the muxed id as `to_muxed_id`. The hook data is validated
+before it is encoded, and any other address is refused.
 
 Before the burn, the sender approves the exact amount for `TokenMessengerV2`, never an unlimited
 allowance. The approval is skipped when the wallet's allowance already covers the amount.
@@ -41,8 +43,10 @@ The fee is read from Circle's fee service on every quote, for the standard path.
 Circle's own forwarding service does not deliver to Stellar, so someone on Stellar has to submit
 the mint once Circle attests the burn. With a sponsor that covers costs, the
 [sponsor](/operate/api#post-deliver) submits it and pays its fee. With
-`MAVNA_RESERVE_FUNDING=self`, the receiving account signs and pays for it. Either way, the
-recipient is fixed inside the attested message, so whoever submits it cannot redirect anything.
+`MAVNA_RESERVE_FUNDING=self`, the receiving account signs and pays for it: for a muxed address, the
+account it is built on. A contract cannot sign it, so with that setting a Circle route to a contract
+is declined at the quote. Either way, the recipient is fixed inside the attested message, so
+whoever submits it cannot redirect anything.
 
 [Delivery](/how-it-works/delivery) explains how arrival is proven and why a delivery cannot happen
 twice.

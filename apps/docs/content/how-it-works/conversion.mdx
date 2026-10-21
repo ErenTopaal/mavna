@@ -40,6 +40,8 @@ itself.
 
 It turns the route into a refusal, with the reason, when:
 
+- the recipient is a contract, which cannot sign the conversion (`destination-unsupported`); no
+  exchange is asked;
 - no exchange can quote the conversion (`no-liquidity`);
 - nothing priced it within the rail's time budget (`timed-out`);
 - the rail delivers another asset than the conversion sells (`asset-unsupported`);

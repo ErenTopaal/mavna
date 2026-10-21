@@ -25,6 +25,12 @@ const { from, to } = await layerzero.sendableAssets("arbitrum");
 // to.id is "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q" on mainnet
 ```
 
+## Recipients
+
+A route delivers to an account or a contract address. The message carries the recipient as 32
+bytes, which is an account key or a contract id, so a muxed address, whose id does not fit, is
+declined before the quote.
+
 ## Who verifies
 
 The adapter refuses two kinds of verifier set: one with no verifier required, and one the token's
@@ -70,7 +76,6 @@ the [Arrival Contract](/how-it-works/arrival-contract) with a message that names
 asset wanted and the least they accept. The contract converts on Stellar and sends the result on;
 the route adds no step and no signature.
 
-A route that converts on arrival is declined, with the reason, for a muxed address, for a recipient
-that cannot hold the wanted asset or the arriving token, and for a new account, which is left to the
-plain route. An integrator fee from 0 to 1000 basis points is taken only on these routes, by the
+A route that converts on arrival is declined, with the reason, for a recipient that cannot hold the
+wanted asset or the arriving token, and for a new account, which is left to the plain route. An integrator fee from 0 to 1000 basis points is taken only on these routes, by the
 contract, from the converted amount.

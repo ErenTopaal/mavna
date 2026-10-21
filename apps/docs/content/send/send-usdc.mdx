@@ -21,7 +21,21 @@ Stellar. [Receive XLM instead](/send/receive-xlm) covers the second choice. Unde
 receive, **Exact** means that amount arrives in full; **Min** shows the least that arrives.
 
 **Recipient** is the Stellar address the money goes to. Paste it and press **Use this address**.
-An address that is not 56 characters long or does not start with `G` is refused on the spot.
+It takes three kinds of address:
+
+- **An account address** starts with `G` and is 56 characters long.
+- **A muxed address** starts with `M` and is 69 characters long. It is an account address with an
+  id added. The money arrives in the account it is built on, labelled with that id. Anything your
+  Stellar wallet approves for it, you approve with that account.
+- **A contract address** starts with `C` and is 56 characters long. The money arrives in the
+  contract's own balance. The contract has to exist on the network you send on, and a token's own
+  contract is refused, because nothing sent to it can be moved again. A contract cannot approve
+  anything in a Stellar wallet, so a route that needs the recipient's approval on Stellar is
+  declined for a contract, with the reason.
+
+An address with a typo in it, or a secret key, is refused on the spot with the reason. Each rail
+delivers to the kinds of address it supports, and a rail that does not support yours appears as
+**Declined** with the reason.
 
 **Route priority** ranks the routes by **Best return** (the most arriving on Stellar) or
 **Fastest** (the shortest time to arrival).
