@@ -1,4 +1,5 @@
 import { MavnaWidget, type MavnaWidgetConfig } from "@mavna/widget";
+import Lenis from "lenis";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 
 /*
@@ -905,7 +906,19 @@ export function Landing(): ReactNode {
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
 
+    // --- Smooth scroll. Lenis drives the page's own scroll, so sticky, the reveal
+    // and anchors keep working; it stands down for reduced motion on its own. The
+    // widget, drawer included, keeps native scroll for its lists. ---
+    const lenis = new Lenis({
+      autoRaf: true,
+      // the header offset comes from scroll-padding-top in landing.css
+      anchors: true,
+      stopInertiaOnNavigate: true,
+      prevent: (node) => node.closest(".mv-root") !== null,
+    });
+
     return () => {
+      lenis.destroy();
       ro?.disconnect();
       if (raf) cancelAnimationFrame(raf);
       hero?.removeEventListener("pointermove", onPointer);

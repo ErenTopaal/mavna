@@ -9,7 +9,6 @@
  * starts when the reveal adds data-in to it.
  */
 html {
-  scroll-behavior: smooth;
   /* the sticky header is 76px tall; anything scrolled into view clears it */
   scroll-padding-top: 92px;
   -webkit-text-size-adjust: 100%;
@@ -350,9 +349,6 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
   *,
   *::before,
   *::after {
