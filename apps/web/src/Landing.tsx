@@ -426,6 +426,252 @@ function LookPicker(): ReactNode {
   );
 }
 
+// three routes with made-up relative shapes, no real figures: what reaches you
+// (a share of the bar) and how long it takes (a share of the clock)
+const BOARD = [
+  { id: "A", gets: 0.95, time: 0.72 },
+  { id: "B", gets: 0.8, time: 0.22 },
+  { id: "C", gets: 0.88, time: 0.46 },
+] as const;
+const ROW = 76;
+
+/** A small clock whose filled arc is how long a route takes. */
+function Clock({ share, lit }: { share: number; lit: boolean }): ReactNode {
+  const r = 13;
+  const len = 2 * Math.PI * r;
+  return (
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true" style={s("flex: none")}>
+      <circle cx="17" cy="17" r={r} fill="none" stroke={RULE} strokeWidth="4" />
+      <circle
+        cx="17"
+        cy="17"
+        r={r}
+        fill="none"
+        stroke={lit ? INK : FAINT}
+        strokeWidth="4"
+        strokeDasharray={`${len * share} ${len}`}
+        transform="rotate(-90 17 17)"
+        style={s("transition: stroke .5s ease")}
+      />
+    </svg>
+  );
+}
+
+/** The same routes, ranked the two ways the app offers. */
+function RankBoard(): ReactNode {
+  const [by, setBy] = useState<"best" | "fast">("best");
+  const order = [...BOARD].sort((a, b) => (by === "best" ? b.gets - a.gets : a.time - b.time));
+  const place = new Map(order.map((r, i) => [r.id, i]));
+  return (
+    <div style={s("display: grid; gap: clamp(26px, 3vw, 36px); align-content: start")}>
+      <fieldset
+        aria-label="Rank routes by"
+        style={s(
+          `margin: 0; padding: 4px; border: 1px solid ${RULE}; border-radius: 999px; display: inline-flex; justify-self: start; gap: 4px; background: ${GROUND}`,
+        )}
+      >
+        {(
+          [
+            { id: "best", label: "Best return" },
+            { id: "fast", label: "Fastest" },
+          ] as const
+        ).map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={by === o.id}
+            onClick={() => setBy(o.id)}
+            style={s(
+              `min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px; font: inherit; font-size: 15.5px; cursor: pointer; background: ${by === o.id ? INK : "transparent"}; color: ${by === o.id ? GROUND : INK}; transition: background .35s ease, color .35s ease`,
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </fieldset>
+      <div aria-hidden="true" style={s(`position: relative; height: ${ROW * BOARD.length}px`)}>
+        {BOARD.map((r) => {
+          const i = place.get(r.id) ?? 0;
+          const top = i === 0;
+          return (
+            <div
+              key={r.id}
+              style={s(
+                `position: absolute; left: 0; right: 0; top: ${i * ROW}px; height: ${ROW - 14}px; display: flex; align-items: center; gap: 16px; padding: 0 18px; border-radius: 16px; background: ${top ? GROUND : "transparent"}; border: 1px solid ${top ? INK : RULE}; transition: top .7s cubic-bezier(.2,.8,.2,1), background .4s ease, border-color .4s ease`,
+              )}
+            >
+              <span
+                style={s(
+                  `width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-family: 'IBM Plex Mono', monospace; color: ${top ? GROUND : MUTED}; background: ${top ? INK : "transparent"}; border: 1px solid ${top ? INK : RULE}; transition: background .4s ease, color .4s ease`,
+                )}
+              >
+                {r.id}
+              </span>
+              <span
+                style={s(
+                  `flex: 1; height: 10px; border-radius: 99px; background: ${RULE}; overflow: hidden`,
+                )}
+              >
+                <span
+                  style={s(
+                    `display: block; height: 100%; width: ${r.gets * 100}%; border-radius: 99px; background: ${by === "best" ? INK : FAINT}; transition: background .5s ease`,
+                  )}
+                />
+              </span>
+              <Clock share={r.time} lit={by === "fast"} />
+              <span
+                style={s(
+                  `width: 96px; flex: none; text-align: right; font-size: 13px; color: ${SIGNAL}; opacity: ${top ? 1 : 0}; transition: opacity .4s ease .3s`,
+                )}
+              >
+                {by === "best" ? "Best return" : "Fastest"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** A price that keeps moving, and the minimum you drag under it. */
+function FloorTicker(): ReactNode {
+  const [floor, setFloor] = useState(42);
+  const [trades, setTrades] = useState(true);
+  const inkPath = useRef<SVGPathElement>(null);
+  const redPath = useRef<SVGPathElement>(null);
+  const dot = useRef<HTMLSpanElement>(null);
+  const floorRef = useRef(floor);
+  floorRef.current = floor;
+
+  useEffect(() => {
+    const W = 600;
+    const H = 240;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    let last = true;
+    // a few sines at odd rates read as a market without pretending to be one
+    const value = (x: number, t: number): number =>
+      0.55 +
+      0.17 * Math.sin(1.3 * (x * 6 - t * 1.1)) +
+      0.08 * Math.sin(3.1 * (x * 6 - t * 1.7) + 1) +
+      0.04 * Math.sin(7 * (x * 6 - t * 0.9));
+    const draw = (t: number): void => {
+      let d = "";
+      for (let i = 0; i <= 80; i += 1) {
+        const x = i / 80;
+        d += `${i === 0 ? "M" : "L"}${(x * W).toFixed(1)} ${((1 - value(x, t)) * H).toFixed(1)}`;
+      }
+      inkPath.current?.setAttribute("d", d);
+      redPath.current?.setAttribute("d", d);
+      const now = value(1, t);
+      // a circle inside the stretched svg would turn into an oval, so the dot is html
+      if (dot.current) dot.current.style.top = `${((1 - now) * 100).toFixed(2)}%`;
+      const ok = now * 100 >= floorRef.current;
+      if (ok !== last) {
+        last = ok;
+        setTrades(ok);
+      }
+    };
+    const t0 = performance.now();
+    const frame = (n: number): void => {
+      draw((n - t0) / 1000);
+      raf = requestAnimationFrame(frame);
+    };
+    if (still) draw(0);
+    else raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const y = (1 - floor / 100) * 240;
+  return (
+    <div style={s("display: grid; gap: 18px; align-content: start")}>
+      <div
+        style={s(
+          `position: relative; border-radius: 20px; background: ${GROUND}; border: 1px solid ${RULE}; overflow: hidden`,
+        )}
+      >
+        <svg
+          viewBox="0 0 600 240"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          style={s("display: block; width: 100%; height: clamp(180px, 20vw, 240px)")}
+        >
+          <defs>
+            <clipPath id="above-floor">
+              <rect x="0" y="0" width="600" height={y} />
+            </clipPath>
+            <clipPath id="below-floor">
+              <rect x="0" y={y} width="600" height={240 - y} />
+            </clipPath>
+          </defs>
+          <rect x="0" y={y} width="600" height={240 - y} fill="oklch(0.55 0.2 25 / 0.06)" />
+          <path
+            ref={inkPath}
+            clipPath="url(#above-floor)"
+            fill="none"
+            stroke={INK}
+            strokeWidth="2.2"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            ref={redPath}
+            clipPath="url(#below-floor)"
+            fill="none"
+            stroke={SIGNAL}
+            strokeWidth="2.2"
+            vectorEffect="non-scaling-stroke"
+          />
+          <line
+            x1="0"
+            x2="600"
+            y1={y}
+            y2={y}
+            stroke={SIGNAL}
+            strokeWidth="1.5"
+            strokeDasharray="6 6"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        <span
+          ref={dot}
+          aria-hidden="true"
+          style={s(
+            `position: absolute; right: 0; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 0; border-radius: 50%; background: ${trades ? INK : SIGNAL}; transition: background .3s ease`,
+          )}
+        />
+        <span
+          style={s(
+            `position: absolute; left: 16px; top: calc(${(y / 240) * 100}% + 8px); font-size: 13px; color: ${SIGNAL}; pointer-events: none`,
+          )}
+        >
+          Your minimum
+        </span>
+      </div>
+      <label style={s(`display: grid; gap: 10px; font-size: 15px; color: ${MUTED}`)}>
+        Drag your minimum
+        <input
+          data-floor=""
+          type="range"
+          min={20}
+          max={80}
+          value={floor}
+          onChange={(e) => setFloor(Number(e.target.value))}
+        />
+      </label>
+      <p
+        style={s(
+          `margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 300; letter-spacing: -0.02em; line-height: 1.25; color: ${trades ? INK : SIGNAL}; transition: color .3s ease`,
+        )}
+      >
+        {trades
+          ? "Above your minimum, so it goes through."
+          : "Below your minimum, so it does not happen."}
+      </p>
+    </div>
+  );
+}
+
 export function Landing(): ReactNode {
   const shaderRef = useRef<HTMLCanvasElement>(null);
 
@@ -1043,6 +1289,48 @@ export function Landing(): ReactNode {
             </p>
           </div>
           <CoinPicker />
+        </div>
+      </section>
+
+      <section
+        id="choice"
+        data-grid=""
+        style={s(`background: oklch(0.955 0 0); border-bottom: 1px solid ${RULE}`)}
+      >
+        <div
+          data-reveal=""
+          style={s(
+            `${WRAP}; padding-top: clamp(80px, 12vh, 150px); padding-bottom: clamp(80px, 12vh, 150px)`,
+          )}
+        >
+          <div
+            data-row=""
+            style={s(
+              "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 80px); align-items: end; margin-bottom: clamp(48px, 7vw, 88px)",
+            )}
+          >
+            <h2 style={s(`${BIG}; font-size: clamp(34px, 5vw, 72px); max-width: 11ch`)}>
+              You decide what best means.
+            </h2>
+            <p
+              style={s(
+                `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED}; max-width: 42ch`,
+              )}
+            >
+              Rank every route by how much reaches you, or by how soon it gets there. Either way you
+              also set the least you will accept. If the price moves past it, the trade does not
+              happen, and you are never handed a different coin instead.
+            </p>
+          </div>
+          <div
+            data-row=""
+            style={s(
+              "display: grid; grid-template-columns: 1fr 1fr; gap: clamp(36px, 6vw, 90px); align-items: start",
+            )}
+          >
+            <RankBoard />
+            <FloorTicker />
+          </div>
         </div>
       </section>
 

@@ -268,6 +268,19 @@ a {
   transform: scale(1);
 }
 
+/* choice: a faint chart grid behind the board, and a plain red slider */
+[data-grid] {
+  background-image:
+    linear-gradient(oklch(0 0 0 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0 0 0 / 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+[data-floor] {
+  width: 100%;
+  accent-color: oklch(0.55 0.2 25);
+  cursor: ew-resize;
+}
+
 /* widget looks */
 [data-look]:hover {
   transform: translateY(-3px);
