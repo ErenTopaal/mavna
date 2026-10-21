@@ -8,6 +8,9 @@ do not need to buy XLM first. Stellar needs a small XLM reserve before an accoun
 an asset. The sponsor that the app works with covers that reserve up front, and a small part of the money that arrives
 pays it back.
 
+This works for USDC, and on Stellar's main network for USDT0: send USDC to receive USDC, or send
+USDT0 to receive USDT0. The reserve is paid back in the asset that arrives.
+
 ## What you do
 
 Paste the new address as the **Recipient**, exactly as you would any other address. The route
@@ -31,7 +34,9 @@ For a Circle route, the card asks for these, in this order:
 3. **Set the account up**, in your Stellar wallet, once Circle has attested the transfer. This
    creates the account and lets it hold USDC. It costs you nothing.
 
-On other rails the account is set up before the send instead, so both Stellar prompts come first.
+On other rails, LayerZero's USDT0 route among them, the account is set up before the send instead,
+so both Stellar prompts come first, and the setup lets the account hold the asset the rail
+delivers.
 
 Until the account is set up, closing the page pauses the transfer, and the card says so. You can
 finish it later from [Activity](/send/finish).
@@ -40,19 +45,28 @@ If you turn down a Stellar prompt, the card names it and says where your money i
 **Nothing has been sent**; after Circle has attested the transfer, the funds are safe on Circle's
 side and still deliverable.
 
-## Receive USDC at a new address
+## Receive the asset you send
 
-A new account is set up holding exactly its reserve, with no XLM to spare, and the account pays the
+A new address receives the asset you send: USDC for a USDC transfer, USDT0 for a USDT0 transfer. A
+new account is set up holding exactly its reserve, with no XLM to spare, and the account pays the
 network fee of a conversion itself. So when you choose XLM for a new address, the route declines:
 "Converting into XLM is a transaction the receiving account signs and pays a network fee for, up to
 0.1 XLM, and a new account is set up with no XLM to spare. Receive USDC, or add a little XLM to the
-account first."
+account first." For a USDT0 transfer the sentence names USDT0.
 
 ## Small transfers
 
 Setting up an account is only offered when enough arrives to pay the reserve back with room to
 spare. Below that, the route declines with the smallest amount that works, for example "Send at
 least 6 XLM of value, or send to an address that already has one."
+
+## When Stellar's market is thin
+
+The reserve is paid back by trading the arriving asset for XLM on Stellar's exchange. The route is
+offered only while that trade costs less than the most the repayment can take, with 1% to spare.
+When it costs more, or the exchange has no direct trade between the asset and XLM, the route declines and asks
+you to try again later, for example "Stellar's market has no direct trade from USDT0 to XLM right
+now, which repaying the new account's reserve needs."
 
 ## When the sponsor does not cover reserves
 

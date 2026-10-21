@@ -25,6 +25,18 @@ default, a new account that holds one asset locks 1.5 XLM. The route lists it as
 | `needs-account` | no account at all | 3, or 2 when the asset is XLM |
 | `unusable` | cannot receive, with the reason: for example, no contract behind a contract address, or a trustline the issuer has not authorised or that has no room left | 0 |
 
+## The assets it lends
+
+The sponsor sets up a trustline only to an asset its repayment can be made in: USDC, and on the main
+network USDT0. The repayment spends the asset the trustline was opened for, the one the rail
+delivers, so a USDT0 arrival repays its reserve in USDT0. `GET /health` lists them as `lends`, and
+the widget offers a setup only for a route that delivers one of them.
+
+The repayment's path payment trades directly between that asset and XLM on Stellar's exchange,
+through no other asset. So when the sponsor builds a repayment it asks Horizon what that direct
+trade costs for the reserve's XLM, and builds only when it costs less than the most the repayment
+can spend, with 1% to spare. The widget asks the same before it offers the route.
+
 ## The smallest transfer
 
 A transfer that needs sponsoring has a floor, checked at quote time: four times the reserve,
@@ -60,7 +72,17 @@ the money has arrived.
 
 A repayment signed and never sent commits nothing. A delivery that lands while its repayment cannot
 leaves the sender with everything that arrived and the sponsor still carrying the reserve; such a
-sponsorship counts as a stranding. Daily caps on new sponsorships and on strandings bound what the
+sponsorship counts as a stranding.
+
+An issuer can stop a repayment. The USDC and USDT0 issuers can both freeze a trustline
+(`auth_revocable`), and USDT0's can also claw a balance back (`auth_clawback_enabled`), so every
+USDT0 trustline the sponsor opens is one its issuer can claw back from. A frozen trustline, or a
+balance clawed back below what the repayment needs, cannot pay it. The sponsor then submits
+nothing, so the repayment stays usable, and its log says once that the trustline is not authorised
+by its issuer. It settles if the issuer authorises the trustline again or more of the asset
+arrives. If the repayment's one-day limit passes first, it is a stranding, and the log names the
+account, the reserve and why: a trustline its issuer froze, or what the account held against what
+the repayment needed. Daily caps on new sponsorships and on strandings bound what the
 sponsor can lose; [Capacity and caps](/operate/capacity) describes them.
 
 ## Where it runs

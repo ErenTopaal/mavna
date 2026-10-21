@@ -23,10 +23,14 @@ things change:
 
 ## The receiving account
 
-To receive USDT0, the Stellar account has to exist. If it cannot hold USDT0 yet, the quote does one
-of two things before you sign anything: it adds a step in which the account allows USDT0, paid
-from the account's own XLM, or it declines the route and says what to do, such as adding USDT0 to
-the account in its own wallet or sending USDC instead.
+A Stellar address that does not exist yet can receive USDT0. The sponsor covers the account's
+reserve and a small part of the arriving USDT0 pays it back, as
+[Send to a new Stellar address](/send/new-address) describes.
+
+An account that exists and cannot hold USDT0 yet gets a step, before the send, in which it allows
+USDT0. The sponsor covers that reserve the same way, paid back from the USDT0 that
+arrives. On a deployment whose sponsor covers no reserves, the account pays it from its own XLM
+instead, and an address that does not exist yet is declined with how much XLM to send it first.
 
 ## Fees and time
 

@@ -83,5 +83,7 @@ comes from this list.
 | testnet | USDC issued by `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` |
 | mainnet | USDC issued by `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`, and USDT0 issued by `GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q` |
 
-A setup the sponsor pays for opens only USDC, the asset its repayment is made in. USDT0 is opened
-only for an account that pays its own reserve.
+A setup the sponsor pays for opens one trustline, to USDC or to USDT0, and its repayment is made
+in that same asset. An account that pays its own reserve can open either one.
+[Sponsorship](/how-it-works/sponsorship#the-assets-it-lends) explains the market check each
+repayment passes first.
