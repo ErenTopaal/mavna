@@ -106,6 +106,18 @@ export async function attachSwapLeg(
         `${attachment.delivered.symbol} the conversion into ${attachment.wanted.symbol} sells.`,
     };
   }
+  // the leg is the recipient's own transaction, and a contract cannot sign one
+  // from a wallet: the money would arrive and stay unconverted
+  if (route.destination.startsWith("C")) {
+    return {
+      source: route.source,
+      reason: "destination-unsupported",
+      retryable: false,
+      explanation:
+        "Converting on Stellar is a transaction the receiving address signs, and a contract " +
+        `cannot sign one from a wallet. Receive ${attachment.delivered.symbol} instead.`,
+    };
+  }
   let quote: Awaited<ReturnType<SwapQuoter["quote"]>>;
   const ask = (amountIn: bigint) =>
     untilAborted(
@@ -114,7 +126,7 @@ export async function attachSwapLeg(
         assetOut: attachment.wantedContract,
         amountIn: amountIn.toString(),
         maxSlippageBps,
-        destinationKind: route.destination.startsWith("C") ? "contract" : "account",
+        destinationKind: "account",
         signal,
       }),
       signal,

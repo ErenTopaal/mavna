@@ -87,6 +87,29 @@ describe("attaching the conversion leg", () => {
     expect(out.signaturesRequired).toBe(3);
   });
 
+  it("refuses a conversion for a contract recipient, which cannot sign it, and asks no exchange", async () => {
+    let asked = 0;
+    const counting: SwapQuoter = {
+      id: "aquarius",
+      quote: () => {
+        asked += 1;
+        return Promise.resolve({ provider: "aquarius", amountOut: "1", amountOutMinimum: "1" });
+      },
+    };
+    const toContract = {
+      ...route,
+      destination: "CAQ2NUOZYV6TQ3V55RQV2J3UTRPJWAW2ICF6NYMRLXS3MEGFEWBKC5WW",
+    };
+    const out = await attachSwapLeg(toContract, attachment(counting), 50);
+    expect(out).toMatchObject({
+      source: "cctp",
+      reason: "destination-unsupported",
+      retryable: false,
+    });
+    expect("explanation" in out && out.explanation).toMatch(/contract cannot sign/);
+    expect(asked).toBe(0);
+  });
+
   it("prices the conversion on what the bridge guarantees, not on its estimate", async () => {
     const asked: string[] = [];
     const recording: SwapQuoter = {
