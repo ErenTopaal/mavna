@@ -149,7 +149,12 @@ interface State {
   finishTries: number;
   history: readonly TransferRecord[];
   /** What arrived when a transfer landed unconverted, for the flight's headline. */
-  arrivedAs: { readonly amount: number; readonly symbol: string } | null;
+  arrivedAs: {
+    readonly amount: number;
+    readonly symbol: string;
+    /** Why it was not converted, said on the flight where it can be read. */
+    readonly reason: string;
+  } | null;
   /** The route the flight is for. The form's own routes are gone once it ends. */
   flying: RouteView | null;
   /** A new send repeats one that may still arrive; it waits for an explicit yes. */
@@ -1262,6 +1267,7 @@ export class Flow extends React.Component<FlowProps, State> {
           arrivedAs: {
             amount: fromBaseUnits(error.baseUnits, error.decimals),
             symbol: error.asset,
+            reason: error.message,
           },
           steps: st.steps.map((step) =>
             step.phase === "blocked" || step.phase === "pending"

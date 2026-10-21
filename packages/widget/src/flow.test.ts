@@ -432,6 +432,24 @@ describe("an arrival that stayed as it came", () => {
     expect(html).toContain("4.00");
     expect(html).toContain("USDC");
   });
+
+  it("says why it was not converted, on the screen and not only in a hidden note", () => {
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero", { swap: true, delivers: STELLAR_XLM }));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.endWith(
+      new DeliveredAsCame(
+        "It was not converted: the account has no XLM to pay the conversion's network fee.",
+        "USDC",
+        "40000000",
+        7,
+      ),
+    );
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM", arrived: true }),
+    );
+    expect(html).toContain("the account has no XLM to pay the conversion&#x27;s network fee.");
+  });
 });
 
 describe("how long an arrived transfer took", () => {

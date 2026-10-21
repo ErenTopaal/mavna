@@ -1188,6 +1188,11 @@ export function renderFlight(
               {flightSym}
             </span>
           </p>
+          {asCame !== null ? (
+            <p style={s("margin:10px 0 0;font-size:12.5px;line-height:1.5;color:var(--mv-muted)")}>
+              {asCame.reason}
+            </p>
+          ) : null}
         </div>
         <div style={s("height:1px;background:var(--mv-rule-hair)")} />
         <div style={s("display:flex;flex-direction:column;gap:9px;padding:14px 16px 15px")}>
