@@ -10,6 +10,8 @@
  */
 html {
   scroll-behavior: smooth;
+  /* the sticky header is 76px tall; anything scrolled into view clears it */
+  scroll-padding-top: 92px;
   -webkit-text-size-adjust: 100%;
 }
 body {
@@ -30,9 +32,6 @@ a {
 }
 ::selection {
   background: oklch(0.55 0.2 25 / 0.18);
-}
-section[id] {
-  scroll-margin-top: 92px;
 }
 :focus-visible {
   outline: 2px solid oklch(0.55 0.2 25);
