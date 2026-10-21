@@ -43,13 +43,14 @@ export function short(address: string): string {
 }
 
 /**
- * The design's `destValid`: a Stellar account, G and 56 characters, with its
- * checksum checked too. A mistyped one has the right shape, so a shape check
- * passed it here while every rail refused it as not an address.
+ * The design's `destValid`: an address value can be paid to, an account (G), a
+ * muxed account (M) or a contract (C), with its checksum checked too. A
+ * mistyped one has the right shape, so a shape check passed it here while
+ * every rail refused it as not an address. What each rail can deliver to is
+ * that rail's answer, given when it quotes.
  */
 export function destValid(address: string): boolean {
-  const text = address.trim();
-  return text.startsWith("G") && stellarAddress.safeParse(text).success;
+  return stellarAddress.safeParse(address.trim()).success;
 }
 
 /**

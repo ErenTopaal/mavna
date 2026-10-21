@@ -11,9 +11,15 @@ import {
 import { createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
 import { RpcClient } from "@mavna/stellar";
 import { SdexProvider } from "@mavna/swap";
-import { Keypair, xdr } from "@stellar/stellar-sdk";
+import { Account, Keypair, MuxedAccount, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
-import { routeFor, ScriptedAdapter, SOURCE_USDC, STELLAR_XLM } from "./__fixtures__/scripted";
+import {
+  DESTINATION,
+  routeFor,
+  ScriptedAdapter,
+  SOURCE_USDC,
+  STELLAR_XLM,
+} from "./__fixtures__/scripted";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import {
   applySponsorTerms,
@@ -1344,5 +1350,155 @@ describe("approvalsLabel", () => {
     expect(approvalsLabel({ sigs: 1, sigsUpTo: false })).toBe("1 step");
     expect(approvalsLabel({ sigs: 1, sigsUpTo: true })).toBe("Up to 1 step");
     expect(approvalsLabel({ sigs: 3, sigsUpTo: false })).toBe("3 steps");
+  });
+});
+
+describe("a muxed or contract recipient", () => {
+  // the account a muxed address wraps holds its balance, reserve and trustline
+  const muxed = new MuxedAccount(new Account(DESTINATION, "0"), "42").accountId();
+  const contract = StrKey.encodeContract(Buffer.alloc(32, 7));
+  const to = (route: ReturnType<typeof routeFor>, destination: string) => ({
+    ...route,
+    destination,
+  });
+  const terms = (reserveFunding: "sponsor" | "self") => ({
+    network: "testnet",
+    reserveFunding,
+    minDeliveryBaseUnits: 0n,
+  });
+  const checked = (
+    route: ReturnType<typeof routeFor>,
+    reserveFunding: "sponsor" | "self",
+    spareStroops?: bigint,
+  ) =>
+    applySponsorTerms(
+      { routes: [route], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms: terms(reserveFunding),
+        destination: "exists",
+        spareStroops,
+        baseReserveStroops: 5_000_000,
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
+    );
+
+  it("offers a contract a Circle transfer the sponsor delivers", () => {
+    const route = to(routeFor("cctp"), contract);
+    expect(checked(route, "sponsor").routes).toEqual([route]);
+  });
+
+  it("declines a contract a Circle transfer it would have to sign and pay for itself", () => {
+    const set = checked(to(routeFor("cctp"), contract), "self");
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ source: "cctp", reason: "destination-unsupported" });
+    expect(set.rejected[0]?.explanation).toMatch(/contract/);
+    expect(set.rejected[0]?.explanation).not.toMatch(/G account/);
+  });
+
+  it("declines a contract a conversion on Stellar, on any rail and any terms", () => {
+    for (const source of ["cctp", "layerzero"]) {
+      for (const funding of ["sponsor", "self"] as const) {
+        const set = checked(
+          to(routeFor(source, { swap: true, delivers: STELLAR_XLM }), contract),
+          funding,
+        );
+        expect(set.routes).toEqual([]);
+        expect(set.rejected[0]?.reason).toBe("destination-unsupported");
+        expect(set.rejected[0]?.explanation).toMatch(/contract cannot sign/);
+      }
+    }
+  });
+
+  it("leaves a contract's plain route on a rail that delivers by itself alone", () => {
+    const route = to(routeFor("layerzero"), contract);
+    expect(checked(route, "self").routes).toEqual([route]);
+  });
+
+  const atFive = {
+    id: "venue",
+    quote: async (q: { amountIn: string }) => {
+      const out = (BigInt(q.amountIn) * 5n).toString();
+      return { provider: "venue", amountOut: out, amountOutMinimum: out };
+    },
+  };
+  // the ledger key for the wrapped account, the one whose entry must be read
+  const wrapped = xdr.LedgerKey.account(
+    new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(DESTINATION).xdrAccountId() }),
+  ).toXDR("base64");
+  const quoted = (
+    route: ReturnType<typeof routeFor>,
+    reserveFunding: "sponsor" | "self",
+    asked: string[],
+    balance: bigint,
+    wanted: "USDC" | "XLM",
+  ) => {
+    const rpc = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    vi.spyOn(rpc.server, "getLedgerEntries").mockImplementation((async (
+      ...keys: xdr.LedgerKey[]
+    ) => {
+      for (const key of keys) asked.push(key.toXDR("base64"));
+      // an account with a usdc trustline, one subentry: a minimum of 1.5 XLM
+      return { entries: [accountLedger(balance, 1)], latestLedger: 1 };
+    }) as never);
+    return new Promise<RouteSet>((resolve) => {
+      runQuote(
+        {
+          ...engine,
+          adapters: [quotingOnce(route)],
+          breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
+          xlmSwap: {
+            provider: atFive,
+            delivered: engine.usdcOnStellar,
+            deliveredContract: engine.usdcOnStellar.id,
+            wanted: engine.xlmOnStellar,
+            wantedContract: "native",
+          },
+          integratorFee: undefined,
+          rpc,
+          usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+          sponsorTerms: async () => terms(reserveFunding),
+          usdt0Assets: async () => {
+            throw new Error("a USDC send never asks for USDT0");
+          },
+          usdt0Swap: () => {
+            throw new Error("a USDC send never converts USDT0");
+          },
+        },
+        {
+          chainId: "arbitrum-sepolia",
+          wanted,
+          amount: "5",
+          destination: route.destination,
+          priority: "best",
+          rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+        },
+        () => {},
+        resolve,
+      );
+    });
+  };
+
+  it("reads a muxed recipient's own delivery fee from the account it wraps", async () => {
+    const route = to(routeFor("cctp"), muxed);
+    const asked: string[] = [];
+    const enough = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS;
+    const set = await quoted(route, "self", asked, enough, "USDC");
+    expect(set.rejected).toEqual([]);
+    expect(set.routes).toHaveLength(1);
+    expect(asked).toContain(wrapped);
+  });
+
+  it("declines a muxed recipient's conversion when the account it wraps cannot spare the fee", async () => {
+    const route = to(routeFor("cctp"), muxed);
+    const asked: string[] = [];
+    const set = await quoted(route, "sponsor", asked, 15_000_000n, "XLM");
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/0 XLM to spare/);
+    expect(asked).toContain(wrapped);
   });
 });

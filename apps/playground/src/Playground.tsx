@@ -302,7 +302,7 @@ export function Playground(): ReactElement {
                 className="pg-input"
                 value={toAddress}
                 onChange={(e) => setToAddress(e.target.value)}
-                placeholder="G…"
+                placeholder="G…, M… or C…"
                 spellCheck={false}
               />
             </div>

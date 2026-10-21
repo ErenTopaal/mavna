@@ -677,8 +677,9 @@ function chainCount(c: Flow): string {
  * uses for the same input; anything else is told the shape it needs.
  */
 function addressHint(destination: string): string {
-  const shape = "A Stellar address is 56 characters and starts with G.";
-  if (/^[GS][A-Z2-7]{55}$/.test(destination)) return recipientRefusal(destination) ?? shape;
+  const shape =
+    "A Stellar address starts with G or C and is 56 characters, or starts with M and is 69.";
+  if (/^[A-Z2-7]{56,69}$/.test(destination)) return recipientRefusal(destination) ?? shape;
   return shape;
 }
 
@@ -693,7 +694,7 @@ export function renderAddress(c: Flow): ReactElement {
         value={st.destination}
         onChange={(e) => c.setDestination(e.target.value.trim())}
         ref={c.destRef}
-        placeholder="G…"
+        placeholder="G…, M… or C…"
         spellCheck={false}
         autoComplete="off"
         aria-label="Stellar address"

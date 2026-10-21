@@ -18,8 +18,14 @@ import {
   type TrustModel,
 } from "@mavna/core";
 import { raceAdapters, type SwapAttachment } from "@mavna/routing";
-import { inspectDestination, readAccountEntry, spareStroops, stroopsToXlm } from "@mavna/stellar";
-import { Asset as StellarAsset, StrKey } from "@stellar/stellar-sdk";
+import {
+  classifyAddress,
+  inspectDestination,
+  readAccountEntry,
+  spareStroops,
+  stroopsToXlm,
+} from "@mavna/stellar";
+import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { amountValue, fmtUnits, fromBaseUnits, toBaseUnits } from "./format";
 import { OWN_DELIVERY_FEE_BUDGET_STROOPS, OWN_TRUSTLINE_FEE_STROOPS } from "./own-delivery";
@@ -415,6 +421,8 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     explanation,
     retryable: rejectionIsRetryable(reason),
   });
+  const unsignable = contractBlocker(route, check);
+  if (unsignable !== undefined) return decline("destination-unsupported", unsignable);
   if (!circle && !setsUp) {
     // only the conversion's trustline and fee to check; the sponsor is not involved
     const holds = convertBlocker(route, check) ?? conversionFeeBlocker(route, check);
@@ -501,6 +509,57 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     }
   }
   return undefined;
+}
+
+/**
+ * The account that signs for a recipient: itself, or for a muxed address the
+ * account it wraps, which holds the balance. A contract has none, and an
+ * address that is not one has none either.
+ */
+export function signerOf(destination: string): string | undefined {
+  try {
+    const classified = classifyAddress(destination);
+    return classified.kind === "account" || classified.kind === "muxed"
+      ? classified.trustlineHolder
+      : undefined;
+  } catch {
+    // not an address at all: every rail declines it with its own reason
+    return undefined;
+  }
+}
+
+/**
+ * Why a route asks a contract recipient for something only an account can
+ * give, or undefined. A contract holds what an asset contract credits it with
+ * no account, reserve or trustline, and it cannot sign from a wallet: not a
+ * conversion on Stellar, and not a Circle delivery it would pay for itself.
+ */
+function contractBlocker(route: Route, check: SponsorCheck): string | undefined {
+  if (!isContract(route.destination)) return undefined;
+  const swap = route.steps.find((s) => s.kind === "swap");
+  if (swap !== undefined) {
+    const arrives = swap.from.asset.symbol;
+    return (
+      `Converting on Stellar is a transaction the receiving address signs, and a contract cannot ` +
+      `sign one from a wallet. Receive ${arrives} instead.`
+    );
+  }
+  const self = !(check.terms instanceof Error) && check.terms.reserveFunding === "self";
+  if (route.source === "cctp" && self) {
+    return (
+      "Right now the receiving address pays for Circle's delivery on Stellar and signs it, and " +
+      "a contract cannot sign one from a wallet. Pick another route, or send to an account."
+    );
+  }
+  return undefined;
+}
+
+function isContract(destination: string): boolean {
+  try {
+    return classifyAddress(destination).kind === "contract";
+  } catch {
+    return false;
+  }
 }
 
 /** The non-XLM asset this route converts into on Stellar, when the quote asked for one. */
@@ -823,6 +882,7 @@ async function checkSponsor(
   }
   let found: SponsorCheck["destination"] = "exists";
   let spare: bigint | undefined;
+  const signer = signerOf(destination);
   let price: bigint | Error | undefined;
   const { baseReserveStroops } = engine;
   if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
@@ -835,8 +895,8 @@ async function checkSponsor(
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
       // the recipient pays its own conversion's fee, from XLM it can spare
-      if (converts && found === "exists" && StrKey.isValidEd25519PublicKey(destination)) {
-        const entry = await readAccountEntry(engine.rpc, destination);
+      if (converts && found === "exists" && signer !== undefined) {
+        const entry = await readAccountEntry(engine.rpc, signer);
         if (entry !== undefined) spare = spareStroops(entry, baseReserveStroops);
       }
       // something will be set up, and repaid from the arrival at this price
@@ -859,9 +919,10 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
-      // Only an ordinary account can sign for and pay its own delivery.
-      if (found === "exists" && StrKey.isValidEd25519PublicKey(destination)) {
-        const entry = await readAccountEntry(engine.rpc, destination);
+      // Only an account can sign for and pay its own delivery: for a muxed
+      // address, the account it wraps, which holds its XLM.
+      if (found === "exists" && signer !== undefined) {
+        const entry = await readAccountEntry(engine.rpc, signer);
         if (entry === undefined) found = "missing";
         else spare = spareStroops(entry, baseReserveStroops);
       }

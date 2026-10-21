@@ -1,3 +1,4 @@
+import { Account, MuxedAccount, StrKey } from "@stellar/stellar-sdk";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -1102,6 +1103,31 @@ describe("the recipient check", () => {
     expect(flow.destValid()).toBe(true);
   });
 
+  it("takes a muxed address and a contract address, checksum and all", () => {
+    const muxed = new MuxedAccount(new Account(VALID, "0"), "7").accountId();
+    const contract = StrKey.encodeContract(Buffer.alloc(32, 9));
+    for (const destination of [muxed, contract]) {
+      const flow = new Flow({ engine });
+      flow.state = { ...flow.state, destination };
+      expect(flow.destValid()).toBe(true);
+      const mistyped = `${destination.slice(0, 20)}${destination[20] === "A" ? "B" : "A"}${destination.slice(21)}`;
+      flow.state = { ...flow.state, destination: mistyped };
+      expect(flow.destValid()).toBe(false);
+    }
+  });
+
+  it("does not take a secret key, or an address nothing can be paid to", () => {
+    for (const destination of [
+      "SBSYRVZXRGKITFCQCLN7DZWTRDMYXIANCHTDNP53KEQWPO4H7U6XB377",
+      StrKey.encodeLiquidityPool(Buffer.alloc(32, 3)),
+      StrKey.encodeClaimableBalance(Buffer.alloc(33, 0)),
+    ]) {
+      const flow = new Flow({ engine });
+      flow.state = { ...flow.state, destination };
+      expect(flow.destValid()).toBe(false);
+    }
+  });
+
   it("does not take a mistyped one that every rail would refuse", () => {
     const flow = new Flow({ engine });
     flow.state = { ...flow.state, destination: MISTYPED };
@@ -1133,9 +1159,24 @@ describe("what the recipient screen says is wrong", () => {
 
   it("still gives the shape for something that is not one", () => {
     expect(said("not-an-address")).toContain(
-      "A Stellar address is 56 characters and starts with G.",
+      "A Stellar address starts with G or C and is 56 characters, or starts with M and is 69.",
     );
-    expect(said(VALID)).not.toContain("Stellar address is");
+    expect(said(VALID)).not.toContain("<p");
+  });
+
+  it("says nothing is wrong with a muxed or contract address", () => {
+    const muxed = new MuxedAccount(new Account(VALID, "0"), "7").accountId();
+    expect(said(muxed)).not.toContain("<p");
+    expect(said(StrKey.encodeContract(Buffer.alloc(32, 9)))).not.toContain("<p");
+  });
+
+  it("tells a mistyped muxed address its checksum is off, and a pool it cannot be paid", () => {
+    const muxed = new MuxedAccount(new Account(VALID, "0"), "7").accountId();
+    const mistyped = `${muxed.slice(0, 20)}${muxed[20] === "A" ? "B" : "A"}${muxed.slice(21)}`;
+    expect(said(mistyped)).toContain("That is not a Stellar address. Check that it was copied in full.");
+    expect(said(StrKey.encodeLiquidityPool(Buffer.alloc(32, 3)))).toContain(
+      "A liquidity-pool address cannot receive a payment.",
+    );
   });
 });
 
