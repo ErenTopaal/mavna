@@ -668,14 +668,35 @@ function FloorTicker(): ReactNode {
           Quoted
         </span>
       </div>
+      {/* both lines sit in one cell, so the box is always as tall as the longer one
+          and the page never jumps when the price crosses the minimum */}
       <p
         style={s(
-          `margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 300; letter-spacing: -0.02em; line-height: 1.25; color: ${trades ? INK : SIGNAL}; transition: color .3s ease`,
+          "margin: 0; display: grid; font-size: clamp(20px, 2vw, 26px); font-weight: 300; letter-spacing: -0.02em; line-height: 1.25",
         )}
       >
-        {trades
-          ? "Above the minimum, so it converts into the coin you asked for."
-          : "Below the minimum, so the swap does not happen and what you sent arrives as it came."}
+        {[
+          {
+            on: trades,
+            color: INK,
+            text: "Above the minimum, so it converts into the coin you asked for.",
+          },
+          {
+            on: !trades,
+            color: SIGNAL,
+            text: "Below the minimum, so the swap does not happen and what you sent arrives as it came.",
+          },
+        ].map((line) => (
+          <span
+            key={line.text}
+            aria-hidden={line.on ? undefined : true}
+            style={s(
+              `grid-area: 1 / 1; color: ${line.color}; opacity: ${line.on ? 1 : 0}; visibility: ${line.on ? "visible" : "hidden"}; transition: opacity .3s ease, visibility .3s`,
+            )}
+          >
+            {line.text}
+          </span>
+        ))}
       </p>
     </div>
   );
