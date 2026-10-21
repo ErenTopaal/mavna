@@ -21,4 +21,11 @@ pub enum Error {
     NoWayBack = 7,
     /// The compose stated a negative amount, which no OFT credits.
     BadAmount = 8,
+    /// note() was given a compose the endpoint is not holding for this contract
+    /// with exactly these bytes.
+    NotQueued = 9,
+    /// deliver_overdue() for a compose nobody has noted.
+    NotNoted = 10,
+    /// deliver_overdue() before the delay since the note has passed.
+    NotOverdue = 11,
 }

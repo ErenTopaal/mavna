@@ -42,6 +42,13 @@ pub trait Endpoint {
         message: Bytes,
     );
     fn native_token(env: Env) -> Address;
+    fn compose_queue(
+        env: Env,
+        from: Address,
+        to: Address,
+        guid: BytesN<32>,
+        index: u32,
+    ) -> Option<BytesN<32>>;
 }
 
 #[contracttype]
@@ -64,7 +71,16 @@ pub struct Config {
 #[contracttype]
 enum Key {
     Config,
+    /// The ledger a still-queued compose was first noted at, by (OFT, guid, index).
+    /// Removed when that compose completes, by either path.
+    Noted(Address, BytesN<32>, u32),
 }
+
+/// How long a noted compose waits before anyone may deliver it as it came: 7 days
+/// at 5 second ledgers. LayerZero's executor runs a compose within seconds of the
+/// credit and the sponsor or the sender can finish one at any time, so this only
+/// ever pays out a compose the conversion has been unable to complete for a week.
+pub const OVERDUE_AFTER_LEDGERS: u32 = 17_280 * 7;
 
 // about 30 days at 5 second ledgers; extended on every arrival so a live contract
 // does not get archived between transfers
@@ -140,34 +156,20 @@ impl ArrivalContract {
         // here, so this is required for the hosted executor to work at all
         executor.require_auth();
 
-        let config = Self::config(env.clone());
-        env.storage()
-            .instance()
-            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        let token = match config.ofts.iter().find(|(oft, _)| *oft == from) {
-            Some((_, token)) => token,
-            None => panic_with_error!(&env, Error::NotAllowlisted),
-        };
+        let config = Self::live_config(&env);
+        let token = Self::token_from(&env, &config, &from);
 
         let me = env.current_contract_address();
         EndpointClient::new(&env, &config.endpoint)
             .clear_compose(&me, &from, &guid, &index, &message);
+        env.storage()
+            .persistent()
+            .remove(&Key::Noted(from.clone(), guid.clone(), index));
 
-        let compose = match codec::decode_oft_compose(&env, &message) {
-            Some(c) => c,
-            None => panic_with_error!(&env, Error::BadComposeMessage),
-        };
-        let instructions = match codec::decode_instructions(&env, &compose.compose_msg) {
-            Some(i) => i,
-            None => panic_with_error!(&env, Error::BadRecipient),
-        };
+        let (compose, instructions) = Self::read(&env, &message);
 
         if value < 0 {
             panic_with_error!(&env, Error::BadValue);
-        }
-        if compose.amount_ld < 0 {
-            panic_with_error!(&env, Error::BadAmount);
         }
         if value > 0 {
             // never requested by Mavna; passed straight through so nothing stays here
@@ -196,5 +198,109 @@ impl ArrivalContract {
                 instructions,
             },
         );
+    }
+
+    /// Records that a compose is still waiting, starting its overdue delay. Anyone
+    /// may call it, but only for a compose the endpoint holds for this contract
+    /// with exactly these bytes, from an OFT on the list; noting it again keeps
+    /// the first ledger.
+    pub fn note(env: Env, from: Address, guid: BytesN<32>, index: u32, message: Bytes) {
+        let config = Self::live_config(&env);
+        Self::token_from(&env, &config, &from);
+        let me = env.current_contract_address();
+        let queued =
+            EndpointClient::new(&env, &config.endpoint).compose_queue(&from, &me, &guid, &index);
+        if queued != Some(env.crypto().keccak256(&message).to_bytes()) {
+            panic_with_error!(&env, Error::NotQueued);
+        }
+        let key = Key::Noted(from, guid, index);
+        if !env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .set(&key, &env.ledger().sequence());
+        }
+    }
+
+    /// The ledger a compose was noted at, while it is still waiting.
+    pub fn noted(env: Env, from: Address, guid: BytesN<32>, index: u32) -> Option<u32> {
+        env.storage()
+            .persistent()
+            .get(&Key::Noted(from, guid, index))
+    }
+
+    /// Delivers a compose that has waited `OVERDUE_AFTER_LEDGERS` since it was
+    /// noted, as it came: the arriving token, exactly the message's amount, to the
+    /// message's own recipient, with no venue call. So a conversion that can never
+    /// complete, whatever the reason, cannot hold the funds for good.
+    ///
+    /// clear_compose spends the endpoint's slot here exactly as in lz_compose, so
+    /// a compose is paid once, by whichever path runs first.
+    pub fn deliver_overdue(env: Env, from: Address, guid: BytesN<32>, index: u32, message: Bytes) {
+        let config = Self::live_config(&env);
+        let token = Self::token_from(&env, &config, &from);
+        let key = Key::Noted(from.clone(), guid.clone(), index);
+        let since: u32 = match env.storage().persistent().get(&key) {
+            Some(since) => since,
+            None => panic_with_error!(&env, Error::NotNoted),
+        };
+        if env.ledger().sequence() < since.saturating_add(OVERDUE_AFTER_LEDGERS) {
+            panic_with_error!(&env, Error::NotOverdue);
+        }
+
+        let me = env.current_contract_address();
+        EndpointClient::new(&env, &config.endpoint)
+            .clear_compose(&me, &from, &guid, &index, &message);
+        env.storage().persistent().remove(&key);
+
+        let (compose, instructions) = Self::read(&env, &message);
+        arrival::deliver_as_came(
+            &env,
+            arrival::Arrival {
+                identity: arrival::Identity {
+                    rail: Symbol::new(&env, "layerzero"),
+                    source: from,
+                    guid,
+                    nonce: compose.nonce,
+                    src_eid: compose.src_eid,
+                    sender: compose.compose_from,
+                },
+                token,
+                amount: compose.amount_ld,
+                instructions,
+            },
+        );
+    }
+}
+
+impl ArrivalContract {
+    fn live_config(env: &Env) -> Config {
+        let config = Self::config(env.clone());
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        config
+    }
+
+    /// The token `from` credits, or a trap when it is not on the list.
+    fn token_from(env: &Env, config: &Config, from: &Address) -> Address {
+        match config.ofts.iter().find(|(oft, _)| oft == from) {
+            Some((_, token)) => token,
+            None => panic_with_error!(env, Error::NotAllowlisted),
+        }
+    }
+
+    fn read(env: &Env, message: &Bytes) -> (codec::OftComposeMsg, codec::Instructions) {
+        let compose = match codec::decode_oft_compose(env, message) {
+            Some(c) => c,
+            None => panic_with_error!(env, Error::BadComposeMessage),
+        };
+        let instructions = match codec::decode_instructions(env, &compose.compose_msg) {
+            Some(i) => i,
+            None => panic_with_error!(env, Error::BadRecipient),
+        };
+        if compose.amount_ld < 0 {
+            panic_with_error!(env, Error::BadAmount);
+        }
+        (compose, instructions)
     }
 }

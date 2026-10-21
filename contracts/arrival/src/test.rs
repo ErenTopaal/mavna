@@ -14,14 +14,14 @@ extern crate std;
 use soroban_sdk::{
     address_payload::AddressPayload,
     contract, contractimpl, contracttype,
-    testutils::{Address as _, BytesN as _, Events as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, BytesN as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
     vec, xdr, Address, Bytes, BytesN, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
 
 use crate::{
     codec::MESSAGE_VERSION, fee_of, venue_floor, ArrivalContract, ArrivalContractClient, Arrived,
-    Error,
+    Error, OVERDUE_AFTER_LEDGERS,
 };
 
 mod endpoint {
@@ -498,6 +498,49 @@ impl World {
         message: &Bytes,
     ) -> Result<(), Option<soroban_sdk::Error>> {
         self.compose_from(&self.oft, guid, message)
+    }
+
+    /// note(), with nothing mocked: it needs no one's signature.
+    fn note(&self, guid: &BytesN<32>, message: &Bytes) -> Result<(), Option<soroban_sdk::Error>> {
+        match self.client().try_note(&self.oft, guid, &0, message) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => panic!("conversion error {e:?}"),
+            Err(Ok(e)) => Err(Some(e)),
+            Err(Err(_)) => Err(None),
+        }
+    }
+
+    /// deliver_overdue(), with nothing mocked.
+    fn overdue(
+        &self,
+        guid: &BytesN<32>,
+        message: &Bytes,
+    ) -> Result<(), Option<soroban_sdk::Error>> {
+        let r = self
+            .client()
+            .try_deliver_overdue(&self.oft, guid, &0, message);
+        *self.last_events.borrow_mut() = self.read_events();
+        match r {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => panic!("conversion error {e:?}"),
+            Err(Ok(e)) => Err(Some(e)),
+            Err(Err(_)) => Err(None),
+        }
+    }
+
+    fn queued(&self, guid: &BytesN<32>) -> Option<BytesN<32>> {
+        endpoint::Client::new(&self.env, &self.endpoint).compose_queue(
+            &self.oft,
+            &self.arrival,
+            guid,
+            &0,
+        )
+    }
+
+    fn wait(&self, ledgers: u32) {
+        self.env
+            .ledger()
+            .set_sequence_number(self.env.ledger().sequence() + ledgers);
     }
 
     fn arrived_events(&self) -> std::vec::Vec<Arrived> {
@@ -1587,4 +1630,176 @@ fn a_fee_named_for_the_contract_itself_is_not_charged() {
     let e = &w.arrived_events()[0];
     assert_eq!(e.fee, 0);
     assert_eq!(e.fee_recipient, None);
+}
+
+// ---------------------------------------------------------------- overdue delivery
+
+/// A compose the conversion can never complete while this holds: the recipient
+/// refuses the converted amount and the venue will not take it back.
+fn stuck(w: &mut World) -> (Address, BytesN<32>, Bytes) {
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&100);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    (recipient, guid, message)
+}
+
+#[test]
+fn an_overdue_compose_is_delivered_as_it_came_exactly_once() {
+    let mut w = setup();
+    let (recipient, guid, message) = stuck(&mut w);
+    let (other, other_message) = w.arrive(700, &encode(&w.env, &w.ask(&recipient)));
+
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    w.overdue(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.held(), (700, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.outcome, w.sym("as_came"));
+    assert_eq!(e.guid, guid);
+    assert_eq!(e.amount, 1_000_000);
+    assert_eq!(e.arrived_amount, 1_000_000);
+    assert_eq!(e.recipient, recipient);
+    // the endpoint's slot is spent, so neither path can pay it again
+    assert_ne!(
+        w.queued(&guid),
+        Some(w.env.crypto().keccak256(&message).to_bytes())
+    );
+    assert!(w.overdue(&guid, &message).is_err());
+    trust(&w.env, &recipient, &w.usdc_asset);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&0);
+    assert!(w.compose(&guid, &message).is_err());
+    assert_eq!(w.held(), (700, 0));
+    // the other arrival is untouched and still completes
+    w.compose(&other, &other_message).unwrap();
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn an_overdue_delivery_waits_the_full_delay_from_the_note() {
+    let mut w = setup();
+    let (_, guid, message) = stuck(&mut w);
+
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::NotNoted)))
+    );
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS - 1);
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::NotOverdue)))
+    );
+    // noting again does not restart or shorten the wait
+    w.note(&guid, &message).unwrap();
+    w.wait(1);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn only_a_compose_still_waiting_on_the_endpoint_can_be_noted() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    // other bytes than the ones queued
+    let mut forged = message.clone();
+    forged.set(20, forged.get(20).unwrap() ^ 1);
+    assert_eq!(
+        w.note(&guid, &forged),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+    // a guid nothing was queued under
+    assert_eq!(
+        w.note(&BytesN::random(&w.env), &message),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+    // a compose queued by a sender not on the list
+    let stranger = Address::generate(&w.env);
+    let (sguid, smessage) = w.arrive_from(&stranger, 5, &msg);
+    assert_eq!(
+        w.client().try_note(&stranger, &sguid, &0, &smessage),
+        Err(Ok(contract_error(Error::NotAllowlisted)))
+    );
+    // a compose already completed
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(
+        w.note(&guid, &message),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+}
+
+#[test]
+fn completing_a_noted_compose_removes_its_note() {
+    let mut w = setup();
+    let (recipient, guid, message) = stuck(&mut w);
+    w.note(&guid, &message).unwrap();
+    assert!(w.client().noted(&w.oft, &guid, &0).is_some());
+
+    trust(&w.env, &recipient, &w.usdc_asset);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&0);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.client().noted(&w.oft, &guid, &0), None);
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    assert!(w.overdue(&guid, &message).is_err());
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn an_overdue_delivery_removes_its_note() {
+    let mut w = setup();
+    let (_, guid, message) = stuck(&mut w);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.client().noted(&w.oft, &guid, &0), None);
+}
+
+#[test]
+fn an_overdue_delivery_the_recipient_cannot_take_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+
+    assert!(w.overdue(&guid, &message).is_err());
+    assert_eq!(w.held(), (1_000_000, 0));
+    assert_eq!(
+        w.queued(&guid),
+        Some(w.env.crypto().keccak256(&message).to_bytes())
+    );
+    // and runs once it can
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+}
+
+#[test]
+fn an_overdue_delivery_refuses_a_negative_amount() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.queue_only(-5, &msg);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::BadAmount)))
+    );
 }

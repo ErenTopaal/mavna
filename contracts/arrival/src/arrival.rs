@@ -77,26 +77,35 @@ pub fn arrive(env: &Env, venue: &Venue, arrival: Arrival) -> Outcome {
     };
     let delivery = match converted {
         Some(delivery) => delivery,
-        None => {
-            if arrival.amount > 0 {
-                TokenClient::new(env, &arrival.token).transfer(
-                    &env.current_contract_address(),
-                    &recipient,
-                    &arrival.amount,
-                );
-            }
-            Delivery {
-                outcome: Outcome::AsCame,
-                asset: arrival.token.clone(),
-                amount: arrival.amount,
-                fee: 0,
-                fee_recipient: None,
-                unconverted: 0,
-            }
-        }
+        None => as_came(env, &arrival),
     };
     publish(env, &arrival, &recipient, &delivery);
     delivery.outcome
+}
+
+/// Delivers the arrival as it came, without calling the venue. For a compose that
+/// has waited past the overdue delay, whatever its instructions ask for.
+pub fn deliver_as_came(env: &Env, arrival: Arrival) {
+    let delivery = as_came(env, &arrival);
+    publish(env, &arrival, &arrival.instructions.recipient, &delivery);
+}
+
+fn as_came(env: &Env, arrival: &Arrival) -> Delivery {
+    if arrival.amount > 0 {
+        TokenClient::new(env, &arrival.token).transfer(
+            &env.current_contract_address(),
+            &arrival.instructions.recipient,
+            &arrival.amount,
+        );
+    }
+    Delivery {
+        outcome: Outcome::AsCame,
+        asset: arrival.token.clone(),
+        amount: arrival.amount,
+        fee: 0,
+        fee_recipient: None,
+        unconverted: 0,
+    }
 }
 
 struct Delivery {
