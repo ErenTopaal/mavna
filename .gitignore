@@ -23,3 +23,9 @@ test_snapshots/
 
 # type probes the browser-types test writes and removes
 .probe-*/
+
+# left in older checkouts by the docs' former next.js build; lint reads them if present
+apps/docs/.next/
+apps/docs/.next-test/
+apps/docs/next-env.d.ts
+apps/docs/public/_pagefind/
