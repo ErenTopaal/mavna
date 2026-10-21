@@ -534,8 +534,7 @@ function repaymentBlocker(
     return ["temporarily-unavailable", "This route does not say what reserve it sets up."];
   }
   const arrives = route.deliveredAtLeast;
-  const scale = 10n ** BigInt(arrives.asset.decimals);
-  const mostItMayTake = (BigInt(reserve.total.baseUnits) * 2n * scale) / price;
+  const mostItMayTake = repaymentCeiling(BigInt(reserve.total.baseUnits), arrives, price);
   if (BigInt(arrives.baseUnits) > mostItMayTake) return undefined;
   const symbol = arrives.asset.symbol;
   return [
@@ -545,6 +544,51 @@ function repaymentBlocker(
       `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
       "may not cover it. Send more, or send to an account that can already receive it.",
   ];
+}
+
+/** Twice the reserve at the mid price, in the arriving asset: the settlement's ceiling. */
+function repaymentCeiling(
+  reserveStroops: bigint,
+  arrives: Route["deliveredAtLeast"],
+  price: bigint,
+) {
+  return (reserveStroops * 2n * 10n ** BigInt(arrives.asset.decimals)) / price;
+}
+
+/**
+ * A route whose new account the sponsor fronts, delivering what the user keeps
+ * as it is, with the most the repayment may take of the arrival as a line of
+ * its own. A conversion already leaves this aside and carries it; without one
+ * nothing said the arrival is not all the user's to keep.
+ */
+function withRepayment(route: Route, check: SponsorCheck): Route {
+  const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  const price = check.xlmStroopsPerUsdc;
+  if (
+    reserve === undefined ||
+    typeof price !== "bigint" ||
+    price <= 0n ||
+    !route.steps.some((s) => s.kind === "settle-account") ||
+    route.steps.some((s) => s.kind === "swap") ||
+    route.fees.some((f) => f.kind === "reserve-repayment")
+  ) {
+    return route;
+  }
+  const arrives = route.deliveredAtLeast;
+  const most = repaymentCeiling(BigInt(reserve.total.baseUnits), arrives, price);
+  return {
+    ...route,
+    fees: [
+      ...route.fees,
+      {
+        kind: "reserve-repayment",
+        total: { asset: arrives.asset, baseUnits: most.toString() },
+        recipients: [],
+        // taken after arrival, and only what the settlement needs
+        includedInQuote: false,
+      },
+    ],
+  };
 }
 
 /**
@@ -725,11 +769,12 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
         : 0);
     // a preparation the sponsor has to build again is signed once more, at most
     const again = funding === "sponsor" && route.steps.some((s) => s.kind === "settle-account");
+    const shown = funding === "sponsor" ? withRepayment(route, check) : route;
     routes.push(
       extra === 0 && !again
-        ? route
+        ? shown
         : {
-            ...route,
+            ...shown,
             signaturesRequired: route.signaturesRequired + extra + (again ? 1 : 0),
             ...(again ? { optionalSignatures: (route.optionalSignatures ?? 0) + 1 } : {}),
           },

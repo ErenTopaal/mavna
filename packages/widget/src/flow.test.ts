@@ -368,6 +368,33 @@ describe("an integrator fee on a route", () => {
   });
 });
 
+describe("a review of a new account the sponsor sets up, arriving as USDC", () => {
+  it("says the reserve's repayment comes out of what arrives, and at most how much", () => {
+    const base = routeFor("cctp", { newAccount: true });
+    const route = {
+      ...base,
+      fees: [
+        ...base.fees,
+        {
+          kind: "reserve-repayment" as const,
+          total: { asset: base.deliveredAtLeast.asset, baseUnits: "3000000" },
+          recipients: [],
+          includedInQuote: false,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      renderReview(quotedFlow({ terms: 0 }), {
+        r: toRouteView(route),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+      }),
+    );
+    expect(html).toContain("Repays the reserve, from what arrives");
+    expect(html).toContain("Up to 0.30 USDC");
+  });
+});
+
 describe("fees and rates on a route", () => {
   const ETH = {
     chainId: "arbitrum-sepolia",

@@ -959,8 +959,11 @@ export function renderReview(
             ? [
                 {
                   key: "repay",
-                  name: "Left unconverted to repay the reserve",
-                  value: `${fmt(r.repaymentSetAside.amount)} ${r.repaymentSetAside.symbol}`,
+                  name:
+                    r.swapVenue === undefined
+                      ? "Repays the reserve, from what arrives"
+                      : "Left unconverted to repay the reserve",
+                  value: `${r.swapVenue === undefined ? "Up to " : ""}${fmt(r.repaymentSetAside.amount)} ${r.repaymentSetAside.symbol}`,
                 },
               ]
             : []),

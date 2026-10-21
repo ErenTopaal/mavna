@@ -217,6 +217,16 @@ describe("applySponsorTerms", () => {
     expect(set.routes).toEqual([
       {
         ...fresh,
+        // the most the repayment may take of what arrives, shown on its own line
+        fees: [
+          ...fresh.fees,
+          {
+            kind: "reserve-repayment",
+            total: { asset: fresh.deliveredAtLeast.asset, baseUnits: "3000000" },
+            recipients: [],
+            includedInQuote: false,
+          },
+        ],
         signaturesRequired: fresh.signaturesRequired + 2,
         optionalSignatures: (fresh.optionalSignatures ?? 0) + 1,
       },
@@ -1278,5 +1288,34 @@ describe("a conversion the recipient pays the network fee for", () => {
     );
     expect(set.routes).toEqual([]);
     expect(set.rejected[0]?.explanation).toMatch(/network fee/);
+  });
+});
+
+describe("a new account's reserve repaid from USDC that arrives as USDC", () => {
+  // a live Sepolia transfer to a new account was reviewed as "You receive 1.50
+  // USDC"; the settlement then took 0.37875 USDC of it to repay the reserve
+  const fresh = routeFor("cctp", { newAccount: true });
+  const set = applySponsorTerms(
+    { routes: [fresh], rejected: [], complete: true },
+    {
+      network: "testnet",
+      terms: { network: "testnet", reserveFunding: "sponsor", minDeliveryBaseUnits: 0n },
+      destination: "missing",
+      // 10 XLM to the USDC: the 1.5 XLM reserve may take up to 0.3 USDC
+      xlmStroopsPerUsdc: 100_000_000n,
+    },
+  );
+
+  it("carries the most the repayment may take of the arrival", () => {
+    const repayment = set.routes[0]?.fees.find((f) => f.kind === "reserve-repayment");
+    expect(repayment?.total).toEqual({ asset: fresh.deliveredAtLeast.asset, baseUnits: "3000000" });
+    expect(repayment?.includedInQuote).toBe(false);
+  });
+
+  it("is shown on the review as taken from what arrives", () => {
+    const route = set.routes[0];
+    if (route === undefined) throw new Error("declined");
+    const view = toRouteView(route);
+    expect(view.repaymentSetAside).toEqual({ amount: 0.3, symbol: "USDC" });
   });
 });
