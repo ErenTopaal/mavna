@@ -53,8 +53,8 @@ export type {
   SoroswapProxyOptions,
 } from "./soroswap.js";
 export { createSoroswapProxy } from "./soroswap.js";
-export type { SpendQuoteOptions } from "./spend.js";
-export { DirectSpendQuote } from "./spend.js";
+export type { SpendQuoteOptions } from "@mavna/stellar";
+export { DirectSpendQuote } from "@mavna/stellar";
 export type { DocumentStore } from "./state.js";
 export {
   DocumentCapStore,

@@ -19,6 +19,7 @@ import { composeMessageHash } from "@mavna/adapter-layerzero";
 import { MavnaError } from "@mavna/core";
 import {
   createNetworkConfig,
+  DirectSpendQuote,
   InclusionUnknown,
   PUBLIC_TESTNET_RPC_URL,
   RpcClient,
@@ -52,7 +53,6 @@ import { ChannelPool } from "./channels.js";
 import type { ChainSponsorshipView } from "./reconcile.js";
 import { createSponsorServer, type SponsorServer, type SponsorServerOptions } from "./server.js";
 import { createSoroswapProxy } from "./soroswap.js";
-import { DirectSpendQuote } from "./spend.js";
 import { DocumentCapStore, FileDocumentStore, MemoryDocumentStore } from "./state.js";
 
 /**
@@ -110,6 +110,10 @@ class RecordingRpc extends RpcClient {
   readonly sellingLiabilities = new Map<string, bigint>();
   /** XLM balances in stroops, by account; ten XLM when not set. */
   readonly nativeBalances = new Map<string, bigint>();
+  /** Trustline balances in stroops for any asset but USDC, by account and asset. */
+  readonly otherLines = new Map<string, bigint>();
+  /** Trustlines whose issuer has revoked the holder's authorisation, by account and asset. */
+  readonly frozen = new Set<string>();
 
   private readonly landed = new Map<string, rpc.Api.GetSuccessfulTransactionResponse>();
   private readonly pending = new Map<string, Transaction | FeeBumpTransaction>();
@@ -208,18 +212,19 @@ class RecordingRpc extends RpcClient {
     }
     if (key.type === "trustline") {
       const line = key.trustLine;
-      if (line.asset.toXdr("hex") !== USDC.toTrustLineXdrObject().toXdr("hex")) return undefined;
       const holder = StrKey.encodeEd25519PublicKey(line.accountId.ed25519.toBytes());
-      const balance = this.trustlines.get(holder);
+      const isUsdc = line.asset.toXdr("hex") === USDC.toTrustLineXdrObject().toXdr("hex");
+      const lineKey = `${holder} ${line.asset.toXdr("hex")}`;
+      const balance = isUsdc ? this.trustlines.get(holder) : this.otherLines.get(lineKey);
       if (balance === undefined) return undefined;
-      const selling = this.sellingLiabilities.get(holder);
+      const selling = isUsdc ? this.sellingLiabilities.get(holder) : undefined;
       return xdr.LedgerEntryData.trustline(
         new xdr.TrustLineEntry({
           accountId: line.accountId,
           asset: line.asset,
           balance: xdr.Int64.fromString(balance.toString()),
           limit: xdr.Int64.fromString("9223372036854775807"),
-          flags: 1,
+          flags: this.frozen.has(lineKey) ? 0 : 1,
           ext:
             selling === undefined
               ? xdr.TrustLineEntryExt.v0()
@@ -242,6 +247,17 @@ class RecordingRpc extends RpcClient {
   holding(user: Keypair, usdcStroops: bigint): void {
     if (!this.accounts.has(user.publicKey())) this.accounts.set(user.publicKey(), 1n);
     this.trustlines.set(user.publicKey(), usdcStroops);
+  }
+
+  /** The user's account holding `stroops` of an asset other than USDC. */
+  holdingIn(user: Keypair, asset: Asset, stroops: bigint): void {
+    if (!this.accounts.has(user.publicKey())) this.accounts.set(user.publicKey(), 1n);
+    this.otherLines.set(lineKeyOf(user.publicKey(), asset), stroops);
+  }
+
+  /** The issuer revokes the account's authorisation to hold the asset. */
+  freeze(user: Keypair, asset: Asset): void {
+    this.frozen.add(lineKeyOf(user.publicKey(), asset));
   }
 
   /** Simulation is a network call; what it would add does not matter to these tests. */
@@ -362,14 +378,22 @@ class RecordingRpc extends RpcClient {
   }
 }
 
-/** One XLM for half a USDC, so the settlement ceiling is a fixed number. */
+function lineKeyOf(holder: string, asset: Asset): string {
+  return `${holder} ${asset.toTrustLineXdrObject().toXdr("hex")}`;
+}
+
+/**
+ * Five XLM to the USDC, so the settlement ceiling is a fixed number; another
+ * asset can be given its own price by code.
+ */
 class FixedPrice extends XlmPriceSource {
+  readonly byCode = new Map<string, bigint>();
   constructor() {
     super({ horizonUrl: NOWHERE });
   }
 
-  override async xlmStroopsPerUnit(): Promise<bigint> {
-    return 50_000_000n;
+  override async xlmStroopsPerUnit(asset: Asset): Promise<bigint> {
+    return this.byCode.get(asset.getCode()) ?? 50_000_000n;
   }
 }
 

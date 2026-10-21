@@ -35,5 +35,7 @@ export {
   SubmitRejected,
 } from "./rpc.js";
 export { readAccountEntry, spareStroops } from "./spare.js";
+export type { SpendQuoteOptions } from "./spend.js";
+export { DirectSpendQuote } from "./spend.js";
 export type { PreparationInputs, SettlementInputs } from "./sponsorship.js";
 export { buildPreparation, buildSettlement, buildSettlementLadder } from "./sponsorship.js";

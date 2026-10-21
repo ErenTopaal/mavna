@@ -1,6 +1,7 @@
 import { MavnaError } from "@mavna/core";
 import { Asset } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import usdt0Book from "./__fixtures__/mainnet-usdt0-order-book.json" with { type: "json" };
 import { XlmPriceSource } from "./price.js";
 
 const usdc = new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
@@ -102,5 +103,19 @@ describe("the XLM price of an asset", () => {
     const { urls } = horizonAnswers(() => book([], []));
     expect(await source().xlmStroopsPerUnit(Asset.native())).toBe(10_000_000n);
     expect(urls).toHaveLength(0);
+  });
+});
+
+describe("the USDT0 order book, as mainnet answered", () => {
+  it("prices USDT0 at the mid of its first 1000 XLM a side, wide spread and all", async () => {
+    // recorded 2026-10-21: bids near 0.170 and asks near 0.2156 USDT0 per XLM
+    const { urls } = horizonAnswers(
+      () => new Response(JSON.stringify(usdt0Book), { status: 200 }),
+    );
+    const usdt0 = new Asset("USDT0", "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q");
+    expect(await source().xlmStroopsPerUnit(usdt0)).toBe(51_876_162n);
+    const asked = new URL(urls[0] ?? "");
+    expect(asked.searchParams.get("buying_asset_type")).toBe("credit_alphanum12");
+    expect(asked.searchParams.get("buying_asset_code")).toBe("USDT0");
   });
 });

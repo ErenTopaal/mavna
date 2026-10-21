@@ -18,6 +18,7 @@ import {
   buildPreparation,
   buildSettlement,
   classifyAddress,
+  DirectSpendQuote,
   readAccountEntry,
   SubmitRejected,
   spareStroops,
@@ -67,7 +68,6 @@ import {
   type SponsoredRecord,
 } from "./reconcile.js";
 import type { SoroswapProxy } from "./soroswap.js";
-import { DirectSpendQuote } from "./spend.js";
 import {
   DocumentCapStore,
   type DocumentStore,
