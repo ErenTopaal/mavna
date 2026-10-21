@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// 56 characters, G then base32: what the widget's address check accepts.
+// an account, a muxed account on it, and a contract: each kind the address check accepts
 const VALID_ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const MUXED_ADDRESS = "MBM4KX6TWI4GIY2RHT6LVRYCTW4VONGCNSCQVV7PEZVJOHPEI3IDIAAAAAAAAAAD5FW3K";
+const CONTRACT_ADDRESS = "CD4WSUP2DK5Q7KJNZYFSJVUCBQQ6PLWW27LQP67UNO3CQMC4ITO6I5CS";
 
 test("the app renders the widget and validates a recipient address", async ({ page, baseURL }) => {
   const origin = new URL(baseURL ?? "http://localhost:4319").origin;
@@ -25,10 +27,19 @@ test("the app renders the widget and validates a recipient address", async ({ pa
 
   await root.getByRole("button", { name: /Recipient/ }).click();
   const address = root.getByRole("textbox", { name: "Stellar address" });
-  const hint = root.getByText("A Stellar address is 56 characters and starts with G.");
+  const hint = root.getByText(
+    "A Stellar address starts with G or C and is 56 characters, or starts with M and is 69.",
+  );
 
   await address.fill("not-an-address");
   await expect(hint).toBeVisible();
+
+  for (const accepted of [MUXED_ADDRESS, CONTRACT_ADDRESS]) {
+    await address.fill(accepted);
+    await expect(hint).toBeHidden();
+    await address.fill("not-an-address");
+    await expect(hint).toBeVisible();
+  }
 
   await address.fill(VALID_ADDRESS);
   await expect(hint).toBeHidden();
