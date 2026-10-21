@@ -232,23 +232,45 @@ describe("execute", () => {
     allowance?: bigint;
     reject?: boolean;
     receipt?: (hash: Hash, onReplaced?: (r: { reason: string }) => void) => Promise<unknown>;
+    /** Reads of the allowance after the approval lands that still show the old one: a lagging node. */
+    lagReads?: number;
+    /** What the wallet throws when asked to send, as viem wraps a reverted estimate. */
+    sendFails?: Error;
   }) {
     const seen: string[] = [];
     const waits: Array<{ timeout: number | undefined }> = [];
+    // where in `seen` each allowance read happened
+    const reads: number[] = [];
+    // what the last approval set, once one has landed
+    let approved: bigint | undefined;
+    let lag = script.lagReads ?? 0;
     const connection = {
       address: SENDER,
       chainId: 421_614,
       wallet: {
-        writeContract: async (call: { functionName: string }) => {
+        writeContract: async (call: { functionName: string; args: readonly unknown[] }) => {
           seen.push(`sign ${call.functionName}`);
           if (script.reject === true) throw Object.assign(new Error("denied"), { code: 4001 });
-          return call.functionName === "approve" ? APPROVE_HASH : SEND;
+          if (call.functionName === "approve") {
+            approved = BigInt(call.args[1] as bigint);
+            return APPROVE_HASH;
+          }
+          if (script.sendFails !== undefined) throw script.sendFails;
+          return SEND;
         },
       },
       reader: {
         getBalance: async () => 10n ** 18n,
-        readContract: async (call: { functionName: string }) =>
-          call.functionName === "allowance" ? (script.allowance ?? 0n) : 10n ** 12n,
+        readContract: async (call: { functionName: string }) => {
+          if (call.functionName !== "allowance") return 10n ** 12n;
+          reads.push(seen.length);
+          if (approved === undefined) return script.allowance ?? 0n;
+          if (lag > 0) {
+            lag -= 1;
+            return script.allowance ?? 0n;
+          }
+          return approved;
+        },
         waitForTransactionReceipt: async (args: {
           hash: Hash;
           timeout?: number;
@@ -262,7 +284,7 @@ describe("execute", () => {
         },
       },
     } as unknown as Connection;
-    return { connection, seen, waits };
+    return { connection, seen, waits, reads };
   }
 
   function run(
@@ -284,9 +306,43 @@ describe("execute", () => {
         onEvent?.(event);
       },
       ...(signal === undefined ? {} : { signal }),
+      pause: async () => {},
     });
     return { done, events };
   }
+
+  it("waits for a lagging node to show the approval before it sends", async () => {
+    const { connection, seen, reads } = wallet({ lagReads: 3 });
+    const { done } = run(connection, [approve(), send]);
+    await expect(done).resolves.toEqual([APPROVE_HASH, SEND]);
+    // one read to decide the approval is needed, three stale ones, then the approval
+    expect(reads).toHaveLength(5);
+    expect(seen.indexOf("sign send")).toBeGreaterThanOrEqual(reads.at(-1) ?? 0);
+  });
+
+  it("sends nothing, and says so plainly, when the approval never shows on the node", async () => {
+    const { connection, seen } = wallet({ lagReads: 1_000 });
+    const { done } = run(connection, [approve(), send]);
+    await expect(done).rejects.toThrow(
+      "Your approval went through, but the chain has not shown it yet, so the transfer was not sent. Nothing was burned or sent; start the transfer again in a moment.",
+    );
+    expect(seen).not.toContain("sign send");
+  });
+
+  it("turns a send refused for its allowance into a plain sentence, not the raw error", async () => {
+    const raw = new Error(
+      'The contract function "depositForBurnWithHook" reverted with the following reason: ' +
+        "ERC20: transfer amount exceeds allowance. Contract Call: address: 0x8FE6 Docs: " +
+        "https://viem.sh/docs/contract/writeContract Version: viem@2.57.7",
+    );
+    const { connection } = wallet({ sendFails: raw });
+    const { done } = run(connection, [approve(), send]);
+    const error = await done.catch((e: unknown) => e as Error);
+    expect(error.message).toBe(
+      "Your approval went through, but the chain has not shown it yet, so the transfer was not sent. Nothing was burned or sent; start the transfer again in a moment.",
+    );
+    expect(error.message).not.toMatch(/viem|0x8FE6/);
+  });
 
   it("approves, waits for it, then sends, and tells each step as it happens", async () => {
     const { connection, seen } = wallet({});
@@ -373,7 +429,16 @@ describe("execute", () => {
   });
 
   describe("a page closed partway, said by what actually confirmed", () => {
-    const reset = () => approve({ skipAlsoWhenExactly: "0" });
+    // a reset approves zero, which is what the chain then shows
+    const reset = () => ({
+      ...approve({ skipAlsoWhenExactly: "0" }),
+      payload: JSON.stringify({
+        to: TOKEN,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [SPENDER, "0"],
+      }),
+    });
 
     it("says nothing was approved when only a reset with nothing to reset went by", async () => {
       const gone = new AbortController();

@@ -509,13 +509,20 @@ function connection(
     }) => Promise<unknown>;
   } = {},
 ): Connection {
+  // what an approval that landed set, which the chain then shows
+  let approved: bigint | undefined;
   return {
     address: SENDER,
     chainId: ARBITRUM_SEPOLIA,
     wallet: {
-      writeContract: async (call: { functionName: string; value?: bigint }) => {
+      writeContract: async (call: {
+        functionName: string;
+        value?: bigint;
+        args?: readonly unknown[];
+      }) => {
         log.push(`evm ${call.functionName} value=${String(call.value)}`);
         if (options.reject === true) throw Object.assign(new Error("denied"), { code: 4001 });
+        if (call.functionName === "approve") approved = BigInt(call.args?.[1] as bigint);
         return SEND_HASH as Hash;
       },
     },
@@ -523,7 +530,8 @@ function connection(
       getBalance: async () => 10n ** 18n,
       readContract: async (call: { functionName: string }) => {
         log.push(`evm read ${call.functionName}`);
-        return call.functionName === "allowance" ? (options.allowance ?? 0n) : 10n ** 12n;
+        if (call.functionName !== "allowance") return 10n ** 12n;
+        return approved ?? options.allowance ?? 0n;
       },
       waitForTransactionReceipt: async (args: {
         hash: Hash;
@@ -887,6 +895,8 @@ describe("runTransfer over Circle", () => {
       "evm read balanceOf",
       "evm read allowance",
       "evm approve value=undefined",
+      // the approval is read back before the burn spends it
+      "evm read allowance",
       "evm depositForBurnWithHook value=undefined",
       `history ${SEND_HASH}`,
       "sponsor /deliver",
@@ -1220,6 +1230,8 @@ describe("runTransfer when the account pays its own reserve", () => {
       "evm read balanceOf",
       "evm read allowance",
       "evm approve value=undefined",
+      // the approval is read back before the burn spends it
+      "evm read allowance",
       "evm depositForBurnWithHook value=undefined",
       `history ${SEND_HASH}`,
       "iris /v2/messages/3",
@@ -1327,6 +1339,8 @@ describe("runTransfer when the account pays its own reserve", () => {
       "evm read balanceOf",
       "evm read allowance",
       "evm approve value=undefined",
+      // the approval is read back before the burn spends it
+      "evm read allowance",
       "evm depositForBurnWithHook value=undefined",
       `history ${SEND_HASH}`,
       "iris /v2/messages/3",

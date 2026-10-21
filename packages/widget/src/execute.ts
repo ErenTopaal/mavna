@@ -46,7 +46,22 @@ export interface ExecuteOptions {
   readonly onEvent: (event: ExecutionEvent) => void;
   /** Aborted when the page goes away: nothing more is put to the wallet after that. */
   readonly signal?: AbortSignal;
+  /** How the wait for a lagging node pauses between reads. A test passes one that does not. */
+  readonly pause?: (ms: number) => Promise<void>;
 }
+
+/**
+ * How long a node may lag behind the approval's receipt before the send is
+ * given up: the receipt can come from one node and the send's gas estimate
+ * from another that has not seen the block yet, and that estimate reverts.
+ */
+const ALLOWANCE_READS = 20;
+const ALLOWANCE_READ_GAP_MS = 1_500;
+
+/** Said when the send would spend an allowance the chain does not show yet. */
+export const ALLOWANCE_NOT_SEEN =
+  "Your approval went through, but the chain has not shown it yet, so the transfer was not " +
+  "sent. Nothing was burned or sent; start the transfer again in a moment.";
 
 /**
  * How long a transaction is waited for. viem gives up after three minutes, and a
@@ -114,6 +129,11 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
     }
 
     const call = parseCall(transaction.payload, connection.address);
+    const last = index === transactions.length - 1;
+    // an approval sent just now has to be visible before the send spends it
+    if (last && hashes.length > 0) {
+      await allowanceSeen(transactions, connection, options.pause ?? sleep, options.signal);
+    }
     if (options.signal?.aborted === true) {
       throw new Error(closedMessage(index, transactions.length, hashes.length));
     }
@@ -136,6 +156,11 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
         // whether their money moved will try again, and trying again is how one
         // payment becomes two.
         throw new Error(declinedMessage(index, transactions.length, hashes.length));
+      }
+      // viem's own text carries calldata and its version; the user needs what happened
+      if (last && hashes.length > 0 && refusedForAllowance(cause)) {
+        console.warn("[mavna] the send was refused for its allowance:", cause);
+        throw new Error(ALLOWANCE_NOT_SEEN);
       }
       throw cause;
     }
@@ -193,6 +218,40 @@ export async function execute(options: ExecuteOptions): Promise<readonly Hash[]>
 
   return hashes;
 }
+
+/**
+ * Wait until the node shows the allowance the send needs, a bounded number of
+ * reads apart, or refuse before anything is signed.
+ */
+async function allowanceSeen(
+  transactions: readonly UnsignedTransaction[],
+  connection: Connection,
+  pause: (ms: number) => Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const condition = transactions
+    .map((t) => t.unnecessaryWhen)
+    .find((c) => c?.kind === "erc20-allowance");
+  if (condition === undefined) return;
+  const needed = BigInt(condition.atLeastBaseUnits);
+  for (let read = 0; read < ALLOWANCE_READS; read += 1) {
+    if (signal?.aborted === true) return;
+    if ((await readAllowance(condition, connection)) >= needed) return;
+    await pause(ALLOWANCE_READ_GAP_MS);
+  }
+  throw new Error(ALLOWANCE_NOT_SEEN);
+}
+
+/** Whether a refused send names its allowance, in the words ERC-20 tokens revert with. */
+function refusedForAllowance(cause: unknown): boolean {
+  for (let at = cause, depth = 0; at instanceof Error && depth < 8; depth += 1) {
+    if (/exceeds allowance|insufficient allowance/i.test(at.message)) return true;
+    at = (at as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * What a declined signature means, said by position: the send is always last,
