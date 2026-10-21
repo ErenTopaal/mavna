@@ -79,14 +79,18 @@ export const PUBLIC_TESTNET_RPC_URL = "https://soroban-testnet.stellar.org";
  * resolved both a classic account and a Soroban contract. One other candidate
  * returned malformed responses on two calls in eight and was dropped for it.
  *
- * Ordered by measured latency. An integrator can and should point at their own.
+ * Ordered by measured latency, last on 2026-10-21 over ten ledger reads each:
+ * gateway.fm 0.2 to 0.3 s, Lightsail 2.9 to 4.1 s, sorobanrpc.com 0.3 to 6.5 s
+ * with one read past 10 s. Lightsail had been first, and at its pace every
+ * route that reads Stellar ran out of the race's time. An integrator can and
+ * should point at their own.
  *
  * Mainnet showed no backwards drift across repeated calls, unlike testnet. That
  * is a reason to expect fewer retries, not to trust a single read: a provider can
  * change its topology without telling anyone, so the read guard still applies.
  */
 export const PUBLIC_MAINNET_RPC_URLS: readonly string[] = [
-  "https://rpc.lightsail.network",
   "https://soroban-rpc.mainnet.stellar.gateway.fm",
+  "https://rpc.lightsail.network",
   "https://mainnet.sorobanrpc.com",
 ];

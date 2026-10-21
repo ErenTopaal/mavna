@@ -1625,11 +1625,14 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
     agreed ??= options.rpc.server.getNetwork().then(
       (node) => {
         if (node.passphrase !== options.network.passphrase) {
-          throw new Error(
+          const mismatch = new Error(
             `The Stellar node this sponsor uses serves ${node.passphrase}, and the sponsor is ` +
               `set up for ${options.network.passphrase} (MAVNA_NETWORK and STELLAR_RPC_URL ` +
               "disagree).",
           );
+          // main exits on a failed ready() trusting the reason is already on stderr
+          console.error(`[sponsor] ${mismatch.message}`);
+          throw mismatch;
         }
       },
       (cause: unknown) => {
