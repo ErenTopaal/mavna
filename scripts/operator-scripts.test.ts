@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak256, toBytes } from "viem";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 /*
  * The operator scripts, run as an operator runs them, in a scratch copy of the
@@ -23,6 +23,10 @@ import { afterEach, describe, expect, it } from "vitest";
  */
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const scratch: string[] = [];
+
+// every test here starts node on a script, and a cold start on a busy ci runner
+// can take longer than the default 5s, so the test gets what the spawn gets
+vi.setConfig({ testTimeout: 60_000 });
 
 afterEach(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
