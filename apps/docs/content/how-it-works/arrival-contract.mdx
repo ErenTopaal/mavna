@@ -54,3 +54,20 @@ shasum -a 256 deployed.wasm
 
 The hash `build.sh` prints for a commit matches the deployed one. `contracts/arrival/README.md` in
 the repository has the full detail, including what has to be true before a mainnet deployment.
+
+## Deploying on mainnet
+
+The mainnet deployment uses the same bytes as testnet. `scripts/arrival-mainnet.mjs` holds the lists
+the mainnet contract is built with and checks every entry against mainnet, read-only, before
+anything is signed:
+
+```sh
+pnpm --filter @mavna/swap build
+node scripts/arrival-mainnet.mjs --wasm=<built wasm> --source=<deployer key name>
+```
+
+It exits non-zero on any failed check and ends with the two commands to sign: the upload and the
+deploy. The contract has no admin, so the key that signs them holds no power over it afterwards.
+After the deploy, the same script checks the new instance with `--contract=<new contract id>`. The
+[deploying section of the contract README](https://github.com/ErenTopaal/mavna/blob/main/contracts/arrival/README.md#deploying)
+has the lists, the measured fees and the trust each listed party carries.
