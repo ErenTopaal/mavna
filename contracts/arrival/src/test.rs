@@ -14,7 +14,9 @@ extern crate std;
 use soroban_sdk::{
     address_payload::AddressPayload,
     contract, contractimpl, contracttype,
-    testutils::{Address as _, BytesN as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    testutils::{
+        Address as _, BytesN as _, Events as _, IssuerFlags, Ledger as _, MockAuth, MockAuthInvoke,
+    },
     token::{StellarAssetClient, TokenClient},
     vec, xdr, Address, Bytes, BytesN, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
@@ -196,7 +198,14 @@ fn setup_converting_at_most(largest: i128) -> World {
 
     let (native, _) = sac(&env);
     let endpoint = env.register(endpoint::WASM, (Address::generate(&env), 40600u32, native));
-    let (usdt0, usdt0_asset) = sac(&env);
+    // as USDT0's issuer is on mainnet: its holders' balances can be clawed back
+    // and frozen, the Arrival Contract's included
+    let usdt0_sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    usdt0_sac.issuer().set_flag(IssuerFlags::RevocableFlag);
+    usdt0_sac
+        .issuer()
+        .set_flag(IssuerFlags::ClawbackEnabledFlag);
+    let (usdt0, usdt0_asset) = (usdt0_sac.address(), usdt0_sac.asset());
     let (usdc, usdc_asset) = sac(&env);
     let oft = Address::generate(&env);
     let venue = env.register(Venue, ());
@@ -1631,6 +1640,10 @@ fn a_fee_named_for_the_contract_itself_is_not_charged() {
     assert_eq!(e.fee, 0);
     assert_eq!(e.fee_recipient, None);
 }
+
+mod funds;
+mod integrations;
+mod math;
 
 // ---------------------------------------------------------------- overdue delivery
 
