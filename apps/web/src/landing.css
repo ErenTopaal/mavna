@@ -268,6 +268,14 @@ a {
   transform: scale(1);
 }
 
+/* choice: a faint chart grid behind the board */
+[data-grid] {
+  background-image:
+    linear-gradient(oklch(0 0 0 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0 0 0 / 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
 /* widget looks */
 [data-look]:hover {
   transform: translateY(-3px);
