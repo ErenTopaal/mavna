@@ -237,7 +237,7 @@ async function checkManager(server, horizonUrl, manager, token) {
     )}`,
   );
   check(
-    account !== undefined && account.signers.every((signer) => signer.weight === 0),
+    account?.signers.every((signer) => signer.weight === 0) === true,
     "the issuer account can no longer sign, so it cannot claw back around the manager",
   );
 }
