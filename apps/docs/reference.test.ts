@@ -31,14 +31,16 @@ describe("the package reference", () => {
   it("generates exports for every published package", () => {
     const script = readFileSync(join(docs, "scripts/sync-reference.mjs"), "utf8");
     const listed = [...script.matchAll(/name: "(@mavna\/[^"]+)"/g)]
-      .map((m) => m[1])
+      .flatMap((m) => (m[1] === undefined ? [] : [m[1]]))
       .sort(byCodeUnit);
     expect(listed).toEqual(packages);
   });
 
   it("shows every published package on the packages page", () => {
     const page = readFileSync(join(docs, "content/sdk/reference/packages.mdx"), "utf8");
-    const shown = [...page.matchAll(/^## (@mavna\/\S+)$/gm)].map((m) => m[1]).sort(byCodeUnit);
+    const shown = [...page.matchAll(/^## (@mavna\/\S+)$/gm)]
+      .flatMap((m) => (m[1] === undefined ? [] : [m[1]]))
+      .sort(byCodeUnit);
     expect(shown).toEqual(packages);
   });
 });
