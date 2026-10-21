@@ -266,6 +266,11 @@
   outline: 2px solid var(--mv-signal);
   outline-offset: 2px;
 }
+/* a field shows its ring for a click as well as a tab, and red there reads as the
+   invalid-address border; ink keeps the ring visible without saying wrong */
+.mv-root input:focus-visible {
+  outline-color: var(--mv-ink-3);
+}
 
 /* Screen-reader-only, for the phase word that colour and position convey
    visually. Sighted users should not have to read it. */

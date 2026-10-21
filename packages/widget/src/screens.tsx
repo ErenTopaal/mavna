@@ -1578,7 +1578,7 @@ export function renderRoutes(
           embed
             ? s("display:flex;flex-direction:column;gap:8px")
             : s(
-                "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:hidden;padding-right:9px;margin-right:-13px;scrollbar-gutter:stable",
+                "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:hidden;padding-left:4px;margin-left:-4px;padding-right:9px;margin-right:-13px;scrollbar-gutter:stable",
               )
         }
       >

@@ -233,3 +233,25 @@ test("hover and focus styles show over the inline styles they are written agains
   await lookup.focus();
   await expect.poll(border).not.toBe(blurred);
 });
+
+test("a focus ring on a full-width row is not clipped by the scrolling body", async ({
+  page,
+  baseURL,
+}) => {
+  await offline(page, baseURL);
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  const row = root.getByRole("button", { name: /Recipient/ });
+  await expect(row).toBeVisible();
+  // the ring is 2px wide and sits 2px off the element; the clipping box must leave room for it
+  const room = await row.evaluate((el) => {
+    let clip: Element | null = el.parentElement;
+    while (clip !== null && getComputedStyle(clip).overflowX === "visible")
+      clip = clip.parentElement;
+    if (clip === null) return Number.POSITIVE_INFINITY;
+    const a = el.getBoundingClientRect();
+    const b = clip.getBoundingClientRect();
+    return Math.min(a.left - b.left, b.right - a.right);
+  });
+  expect(room).toBeGreaterThanOrEqual(4);
+});

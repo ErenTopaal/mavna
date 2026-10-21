@@ -1774,7 +1774,8 @@ function renderApp(c: Flow): ReactNode {
             <div
               ref={c.bodyRef}
               style={s(
-                `flex:1 1 auto;min-height:0;overflow-x:hidden;padding-right:9px;margin-right:-13px;scrollbar-gutter:stable;overflow-y:${st.screen === "flight" ? "hidden" : "auto"}`,
+                // the left padding, given back by the margin, is room for a focus ring the clip would cut
+                `flex:1 1 auto;min-height:0;overflow-x:hidden;padding-left:4px;margin-left:-4px;padding-right:9px;margin-right:-13px;scrollbar-gutter:stable;overflow-y:${st.screen === "flight" ? "hidden" : "auto"}`,
               )}
             >
               <div
