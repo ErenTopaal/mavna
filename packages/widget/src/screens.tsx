@@ -137,6 +137,8 @@ export function renderSend(
           </button>
         </div>
         <div style={s("display:flex;align-items:baseline;gap:10px;margin-top:12px")}>
+          {/* width 0, grown by flex: an input's own width is its 20-character size,
+              which at this type size held the whole widget at 440px in a host that sizes to content */}
           <input
             value={st.amount}
             onChange={(e) => c.setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
@@ -146,7 +148,7 @@ export function renderSend(
             placeholder="0"
             aria-label="Amount to send"
             style={s(
-              "flex:1 1 auto;min-width:0;border:0;padding:0;background:transparent;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
+              "flex:1 1 auto;width:0;min-width:0;border:0;padding:0;background:transparent;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
             )}
           />
           {c.usdt0Offered() ? (
@@ -510,7 +512,7 @@ export function renderChains(c: Flow): ReactElement {
           autoComplete="off"
           aria-label="Search chains"
           style={s(
-            "flex:1 1 auto;min-width:0;border:0;padding:0;background:transparent;outline:none;font-size:13.5px",
+            "flex:1 1 auto;width:0;min-width:0;border:0;padding:0;background:transparent;outline:none;font-size:13.5px",
           )}
         />
         <span
@@ -1017,7 +1019,7 @@ export function renderReview(
             </span>
             <span
               style={s(
-                "display:block;margin-top:9px;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
+                "display:block;margin-top:9px;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
               )}
             >
               {reviewSend}
@@ -1045,7 +1047,7 @@ export function renderReview(
             </span>
             <span
               style={s(
-                "display:block;margin-top:9px;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
+                "display:block;margin-top:9px;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
               )}
             >
               {reviewGet}
@@ -1334,7 +1336,7 @@ export function renderActivity(c: Flow): ReactElement {
           aria-label="Transaction or address"
           className={pseudo({ focus: "border-color:var(--mv-focus)" })}
           style={s(
-            "flex:1 1 auto;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font-mono);font-size:11.5px;letter-spacing:0.03em",
+            "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font-mono);font-size:11.5px;letter-spacing:0.03em",
           )}
         />
         <button

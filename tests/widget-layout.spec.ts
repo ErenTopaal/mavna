@@ -255,3 +255,21 @@ test("a focus ring on a full-width row is not clipped by the scrolling body", as
   });
   expect(room).toBeGreaterThanOrEqual(4);
 });
+
+test("the compact widget can be as narrow as a small phone's column", async ({ page }) => {
+  const url = `http://localhost:${PORTS.playground}/`;
+  await offline(page, url);
+  await page.goto(url);
+  const widget = page.locator(".pg-stage > .mv-root");
+  await expect(widget).toBeVisible();
+  // a host that sizes to content (a grid track, a shrink-to-fit box) gets this width,
+  // so it has to fit a 360px screen less a 20px gutter each side
+  const narrowest = await widget.evaluate((el) => {
+    const box = el as HTMLElement;
+    box.style.width = "min-content";
+    const width = box.getBoundingClientRect().width;
+    box.style.width = "";
+    return width;
+  });
+  expect(narrowest).toBeLessThanOrEqual(320);
+});

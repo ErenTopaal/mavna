@@ -940,6 +940,7 @@ describe("a figure too long for its card", () => {
       renderToStaticMarkup(renderFlight(flow, { r: big, chain, sym: "USDC", arrived: true })),
       figure,
     );
+    wraps(renderToStaticMarkup(renderReview(flow, { r: big, chain, sym: "USDC" })), figure);
   });
 });
 
