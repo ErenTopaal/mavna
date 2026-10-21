@@ -126,6 +126,15 @@ button {
   color: var(--pg-ink);
   border-color: var(--pg-rule-2);
 }
+/* a phone has no room for the links beside the brand, so they take a second row */
+@media (max-width: 560px) {
+  .pg-header {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 14px 24px;
+    row-gap: 10px;
+  }
+}
 .pg-header-link {
   font-size: 12.5px;
   color: var(--pg-muted);
@@ -145,6 +154,13 @@ button {
   .pg-body {
     grid-template-columns: 1fr;
     overflow-y: auto;
+  }
+  /* stacked, the rail takes its full height and the page scrolls; scrolling on
+     its own it would be squeezed to a strip with its controls out of reach */
+  .pg-body > .pg-rail {
+    overflow-y: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--pg-rule);
   }
 }
 

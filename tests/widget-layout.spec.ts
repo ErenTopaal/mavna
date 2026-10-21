@@ -20,19 +20,29 @@ test("the routes panel keeps its size after a quick trip away from the form", as
   const root = page.locator(".mv-root");
   const panel = root.getByRole("heading", { name: "Receive" }).locator("..").locator("..");
   await expect(panel).toBeVisible();
-  // past the entrance, which slides everything up into place
-  await page.waitForTimeout(1500);
-  const before = await panel.boundingBox();
+  // the panel's resting place: beside the card, top aligned, at its own size
+  const card = root.getByRole("heading", { name: "Send to Stellar" }).locator("..").locator("..");
+  const place = async () => {
+    const [p, c] = [await panel.boundingBox(), await card.boundingBox()];
+    return p === null || c === null
+      ? null
+      : {
+          width: p.width,
+          height: p.height,
+          top: Math.round(p.y - c.y),
+          beside: p.x > c.x + c.width,
+        };
+  };
+  const resting = { width: 380, height: 624, top: 0, beside: true };
+  await expect.poll(place).toEqual(resting);
 
   // back before the panel has finished leaving, so it is put back rather than remounted
   await root.getByRole("button", { name: "Settings" }).click();
   await root.getByRole("button", { name: "Back" }).click();
-  await page.waitForTimeout(1500);
-
-  const after = await panel.boundingBox();
-  expect(after?.width).toBe(before?.width);
-  expect(after?.height).toBe(before?.height);
-  expect(after?.y).toBe(before?.y);
+  await expect.poll(place).toEqual(resting);
+  // and it stays there once every animation has run out
+  await page.waitForTimeout(1000);
+  expect(await place()).toEqual(resting);
 });
 
 for (const width of [360, 390]) {
@@ -98,4 +108,38 @@ test("Escape in the drawer closes what is open inside it before the drawer itsel
   await dialog.getByRole("button", { name: "Settings" }).focus();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+});
+
+test("the playground header keeps every link on screen on a phone", async ({ page }) => {
+  const url = `http://localhost:${PORTS.playground}/`;
+  await offline(page, url);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(url);
+  const header = page.locator(".pg-header");
+  await expect(header).toBeVisible();
+  for (const name of ["Home", "App", "Docs", "GitHub ↗"]) {
+    const box = await header.getByRole("link", { name }).boundingBox();
+    if (box === null) throw new Error(`${name} is not laid out`);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+  }
+});
+
+test("the playground's controls stay usable once the rail stacks above the stage", async ({
+  page,
+}) => {
+  const url = `http://localhost:${PORTS.playground}/`;
+  await offline(page, url);
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.goto(url);
+  const rail = page.locator(".pg-rail");
+  await expect(rail).toBeVisible();
+  // the whole rail is laid out, not squeezed into a strip that scrolls on its own
+  const { height, content } = await rail.evaluate((el) => ({
+    height: el.clientHeight,
+    content: el.scrollHeight,
+  }));
+  expect(height).toBe(content);
+  await page.getByRole("button", { name: "Drawer", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Bring funds to Stellar" })).toBeVisible();
 });
