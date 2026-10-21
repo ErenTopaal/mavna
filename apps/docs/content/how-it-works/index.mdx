@@ -14,7 +14,7 @@ server process, the sponsor.
 | `@mavna/routing`, `@mavna/stellar`, `@mavna/status` | racing and ranking, Stellar reads and transaction builders, transfer tracking | core |
 | `@mavna/swap` | Stellar exchanges behind one interface | core, stellar |
 | the four adapters | one rail each: CCTP, Axelar, LayerZero, NEAR Intents | core, routing, stellar |
-| `@mavna/widget` | the whole flow as a React component, and the one place transactions are signed, through the user's wallets | all of the above |
+| `@mavna/widget` | the whole flow as a React component, and the one place transactions are signed, through the sender's wallets | all of the above |
 | `apps/app` | the Mavna app: the widget in its full-page layout | widget |
 | `services/sponsor` | the server that sets up new accounts, delivers Circle transfers and finishes conversions | core, stellar, swap, the CCTP and LayerZero adapters |
 
@@ -31,12 +31,12 @@ what it signs.
    setting the account up. With a sponsor that covers reserves, the account first signs the
    repayment of the reserve, and only then is the account set up. See
    [Sponsorship](/how-it-works/sponsorship).
-3. **Send.** The rail that quoted the route builds the transactions; the user's wallet signs and
+3. **Send.** The rail that quoted the route builds the transactions; the sender's wallet signs and
    sends them. See [Build and sign transactions](/sdk/transactions).
 4. **Deliver.** The rail carries the money to Stellar. For Circle, the sponsor or the receiving
    account submits the mint once Circle attests the transfer. See
    [Delivery](/how-it-works/delivery).
-5. **Convert.** When the user asked for another asset than the rail delivers, a conversion on a
+5. **Convert.** When the sender asked for another asset than the rail delivers, a conversion on a
    Stellar exchange follows, or the Arrival Contract converts on arrival. See
    [Conversion on Stellar](/how-it-works/conversion).
 6. **Track.** The widget reads each step's state from the chains, and any browser can find the

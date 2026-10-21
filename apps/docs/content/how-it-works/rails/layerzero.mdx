@@ -18,7 +18,7 @@ On the main network the adapter sends USDT0 from 12 chains. Each chain is only a
 quote reads the chain's endpoint, its OFT contract, the OFT's peer on Stellar and its verifier set,
 and declines when any of them is missing.
 
-`sendableAssets(chainId)` answers what a quote request should name, read from the deployment:
+`sendableAssets(chainId)` answers which assets a quote request names, read from the deployment:
 
 ```ts
 const { from, to } = await layerzero.sendableAssets("arbitrum");
@@ -59,7 +59,7 @@ description states the most it attaches.
 
 ## The minimum
 
-What arrives can be less than what is sent, because a token can take a fee in transit. The user's
+What arrives can be less than what is sent, because a token can take a fee in transit. The sender's
 minimum is enforced on-chain through `minAmountLD`, derived from their slippage, so
 `receivesAtLeast` is a real floor.
 

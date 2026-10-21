@@ -13,7 +13,7 @@ repayment is signed before the loan is made.**
 Stellar locks a reserve per unit of ledger space: an account takes two units and each trustline one.
 At the base reserve of 0.5 XLM per unit that `@mavna/stellar`'s network configuration uses by
 default, a new account that holds one asset locks 1.5 XLM. The route lists it as an
-`account-reserve` fee, a kind of its own, because the XLM ends up locked in the user's own account.
+`account-reserve` fee, a kind of its own, because the XLM ends up locked in the sender's own account.
 
 `inspectDestination` in `@mavna/stellar` reads in one pass what a destination needs:
 
@@ -35,13 +35,13 @@ XLM of value, or send to an address that already has one."
 
 ## The order
 
-1. **The repayment, first.** While the user is present, the receiving account signs a repayment
+1. **The repayment, first.** While the sender is present, the receiving account signs a repayment
    transaction, built by the sponsor on one of its channel accounts. Its path payment buys back
    exactly the XLM the reserve needs from the arriving asset, and spends at most twice its value at
    the current price, so the account's exposure is a number it sees before signing. The signed
    repayment is held, unsubmitted, because the money it spends has not arrived. The sponsor refuses
    to set up any account it holds no repayment for.
-2. **The send.** The user signs the source-chain transactions.
+2. **The send.** The sender signs the source-chain transactions.
 3. **The setup, as late as possible.** One transaction, sourced and paid by the sponsor, creates the
    account with a zero starting balance and adds the trustline, wrapped in sponsorship operations.
    The account co-signs it, at no cost. On the Circle rail this happens after Circle attests the
@@ -59,7 +59,7 @@ the money has arrived.
 ## What a failure costs
 
 A repayment signed and never sent commits nothing. A delivery that lands while its repayment cannot
-leaves the user with everything that arrived and the sponsor still carrying the reserve; such a
+leaves the sender with everything that arrived and the sponsor still carrying the reserve; such a
 sponsorship counts as a stranding. Daily caps on new sponsorships and on strandings bound what the
 sponsor can lose; [Capacity and caps](/operate/capacity) describes them.
 

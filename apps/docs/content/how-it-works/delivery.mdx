@@ -60,7 +60,7 @@ Contract than the configured one is reported as stalled, with its explorer link.
 With no event yet, the check reads the endpoint's compose queue for the message. A queued step is
 `delivered-conversion-pending`, and its `finish` carries the exact queued message, rebuilt from
 LayerZero's record and checked against the hash the endpoint holds. Anyone can run an overdue
-step; the contract runs only the queued message, with the user's minimum enforced inside it.
+step; the contract runs only the queued message, with the sender's minimum enforced inside it.
 
 ## NEAR Intents
 

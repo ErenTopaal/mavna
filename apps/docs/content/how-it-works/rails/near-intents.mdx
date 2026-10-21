@@ -1,9 +1,9 @@
 ---
 title: NEAR Intents
-description: NEAR Intents through the 1Click API as a rail. Solvers fill a deposit the user pays into an address 1Click hands out, and the HOT Bridge pays out on Stellar.
+description: NEAR Intents through the 1Click API as a rail. Solvers fill a deposit the sender pays into an address 1Click hands out, and the HOT Bridge pays out on Stellar.
 ---
 
-`@mavna/adapter-near-intents`, adapter id `near-intents`, trust model `solver-network`. The user
+`@mavna/adapter-near-intents`, adapter id `near-intents`, trust model `solver-network`. The sender
 pays an ordinary ERC-20 transfer into a deposit address, a market of solvers competes to fill the
 trade, and NEAR Intents settles it. The adapter talks only to NEAR Intents'
 [1Click API](https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api).
@@ -47,7 +47,7 @@ const transactions = await nearIntents.buildTransactions(route, { sender: wallet
 It asks 1Click for the real quote with that wallet as the refund address and returns one `evm-tx`:
 a transfer of the amount to the deposit address. It refuses to build when the sender is missing,
 when 1Click records a different refund address, or when the new quote's minimum is below the
-route's: a price that moved is a new quote for the user to see.
+route's: a price that moved is a new quote for the sender to see.
 
 ## Status
 

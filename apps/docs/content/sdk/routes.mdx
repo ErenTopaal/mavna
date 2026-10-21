@@ -15,7 +15,7 @@ const set = await raceAdapters([cctp, axelar, layerzero, nearIntents], request, 
 ```
 
 `request` is a `QuoteRequest`: the asset sent (`from`), the asset wanted (`to`), the amount
-(`sends`), the Stellar `destination`, and `maxSlippageBps`, the most the user accepts to lose to
+(`sends`), the Stellar `destination`, and `maxSlippageBps`, the most your user accepts to lose to
 price movement, in basis points. The [quickstart](/sdk/quickstart) builds one.
 
 ## Show answers as they arrive
@@ -52,12 +52,12 @@ interface RouteRejection {
 }
 ```
 
-- `explanation` is a sentence for the user: what happened and what to do.
+- `explanation` is a sentence for your user: what happened and what to do.
 - `retryable` says whether asking again can change the answer. It is `true` for
   `temporarily-unavailable`, `timed-out`, `no-liquidity` and `errored`, and `false` for the reasons
   that describe the request itself. `rejectionIsRetryable` in `@mavna/core` makes that decision.
 - `detail`, when present, carries a node's or a service's own words, which can include raw protocol
-  text and URLs. Log it for yourself; show the user `explanation`.
+  text and URLs. Log it for yourself; show your user `explanation`.
 
 ## Ranking
 
@@ -90,7 +90,7 @@ quote, so a change takes effect on the next quote.
 
 Two more options change the routes after a rail quotes them:
 
-- `swap` attaches a conversion on Stellar, so the user can receive another asset than the one the
+- `swap` attaches a conversion on Stellar, so your user can receive another asset than the one the
   rail delivers. [Conversion on Stellar](/how-it-works/conversion) explains it.
 - `integratorFee` takes your fee, `{ bps, recipient, recipientName, collects }`, from the routes
   that `collects` accepts, and lists it on each such route as an `integrator` fee. `bps` must be an

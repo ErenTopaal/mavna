@@ -1,9 +1,9 @@
 ---
 title: Build and sign transactions
-description: Turn a route into unsigned transactions, skip the ones that are not needed, and count signatures before the user starts.
+description: Turn a route into unsigned transactions, skip the ones that are not needed, and count signatures before your user starts.
 ---
 
-Quoting and building are separate steps. For the route the user picks, call `buildTransactions` on
+Quoting and building are separate steps. For the route your user picks, call `buildTransactions` on
 the adapter that quoted it. What comes back is a list of unsigned transactions, in the order they
 must be signed and sent. The SDK never signs and never submits them.
 
@@ -24,7 +24,7 @@ deposit address.
 | `chainId` | the chain it is sent on |
 | `format` | how to read `payload`: `"evm-tx"`, `"stellar-xdr"`, `"solana-instruction"`, `"starknet-invoke"` or `"cosmos-msg"` |
 | `payload` | what to sign, as a string your wallet code reads according to `format` |
-| `describes` | a sentence for the user that says what signing it does |
+| `describes` | a sentence for your user that says what signing it does |
 | `unnecessaryWhen` | when the transaction can be skipped, or `undefined` to always send it |
 | `ephemeralSigners` | accounts you must create a fresh keypair for and sign with |
 
@@ -63,9 +63,9 @@ clear.
 adapter lists that account here, and you generate a keypair for it and sign with it. The SDK creates
 no keys.
 
-## Counting signatures before the user starts
+## Counting signatures before your user starts
 
-`route.signaturesRequired` is the number of times the user is asked to sign, stated on the quote.
+`route.signaturesRequired` is the number of times your user is asked to sign, stated on the quote.
 It can differ from the number of transactions `buildTransactions` returns: an approval that turns
 out unnecessary is skipped, and steps such as setting up a new Stellar account are signed in a
 Stellar wallet rather than built here. `route.optionalSignatures`, when set, says how many of the

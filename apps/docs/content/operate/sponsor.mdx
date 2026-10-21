@@ -20,7 +20,7 @@ value counts as unset, because Docker Compose passes an unset `${NAME:-}` as an 
 | `MAVNA_NETWORK` | `testnet` | `testnet` or `mainnet`. |
 | `STELLAR_RPC_URL` | the public testnet endpoint; on mainnet, the first entry of `PUBLIC_MAINNET_RPC_URLS` in `@mavna/stellar` | The Stellar RPC the sponsor reads and submits through. At start, the sponsor refuses a node that serves another network than `MAVNA_NETWORK`. |
 | `MAVNA_IRIS_URL` | `https://iris-api-sandbox.circle.com` on testnet, `https://iris-api.circle.com` on mainnet | Circle's attestation service. |
-| `MAVNA_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4319` | Comma-separated browser origins that may call the sponsor. List every page whose widget uses it. |
+| `MAVNA_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4319` | Comma-separated browser origins allowed to call the sponsor. List every page whose widget uses it. |
 | `PORT` | `8787` | The port the sponsor listens on. |
 
 ## Who pays

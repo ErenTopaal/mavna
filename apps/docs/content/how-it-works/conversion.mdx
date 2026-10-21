@@ -3,14 +3,14 @@ title: Conversion on Stellar
 description: How a transfer arrives as another asset than the one a rail carries, through Stellar exchanges in a fixed order of preference.
 ---
 
-A rail delivers what it carries: Circle delivers USDC, LayerZero delivers USDT0. When the user wants
+A rail delivers what it carries: Circle delivers USDC, LayerZero delivers USDT0. When the sender wants
 to end up with another asset, such as XLM, a conversion on a Stellar exchange is added to the route
 as the last step of the same transfer.
 
 ## The exchanges
 
 `@mavna/swap` puts every exchange behind one `SwapProvider` interface: `quote` prices a conversion,
-and `build` turns the quote into the unsigned transaction that runs it, with the user's minimum
+and `build` turns the quote into the unsigned transaction that runs it, with the sender's minimum
 after slippage as a hard floor. If the market moves past the floor, the conversion fails whole and
 the account keeps what arrived.
 
@@ -22,7 +22,7 @@ the account keeps what arrived.
    [Soroswap proxy](/operate/api#soroswap-proxy). A sponsor without a key has no proxy, and the list
    starts at the next exchange. Before the account signs what Soroswap built, the provider checks
    that it is a single call of the expected kind with the quoted amounts, the quoted tokens, the
-   account as the one paid, and a minimum no lower than the user's floor.
+   account as the one paid, and a minimum no lower than the sender's floor.
 2. **SushiSwap**, on the main network, for pairs that include USDT0.
 3. **Aquarius**, on both networks. It routes through Soroban pools, so it can deliver to a contract
    address.
@@ -51,12 +51,12 @@ An exchange's own error text can carry raw node output, so it goes only into the
 never its `explanation`.
 
 When the transfer reaches the conversion, the widget asks the exchanges for a fresh price, refuses
-to continue if it is below the minimum the user was shown, and has the account sign the transaction
+to continue if it is below the minimum the sender was shown, and has the account sign the transaction
 the winning exchange builds.
 
 ## Converting on arrival
 
 A LayerZero route can convert on arrival instead: the money is delivered to the
-[Arrival Contract](/how-it-works/arrival-contract), which converts through Aquarius with the user's
+[Arrival Contract](/how-it-works/arrival-contract), which converts through Aquarius with the sender's
 minimum enforced inside the contract. This adds no step and no signature. If the minimum cannot be
 met, the contract sends the arriving token on as it came.

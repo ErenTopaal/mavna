@@ -33,7 +33,7 @@ Which field a rail can find a transfer by:
 A handle with only `destinationAddress` answers `idle` on every rail: a Stellar address alone does
 not identify one transfer.
 
-## Turn what the user pasted into a handle
+## Turn what your user pasted into a handle
 
 `parseLookupKey` classifies a pasted string, and `toHandle` turns the result into a handle:
 
@@ -51,7 +51,7 @@ const handle = toHandle(parseLookupKey(pasted));
 | any other `0x` hex value of up to 64 digits | source transaction (a Starknet hash without leading zeros) |
 | 64 to 88 base58 characters | source transaction (a Solana signature) |
 
-Anything else throws a `MavnaError` with a sentence to show the user. `toHandle` leaves
+Anything else throws a `MavnaError` with a sentence to show your user. `toHandle` leaves
 `sourceChainId` empty unless you pass it, so a rail that serves many chains searches them all.
 
 ## Phases
@@ -61,7 +61,7 @@ Anything else throws a `MavnaError` with a sentence to show the user. `toHandle`
 | Phase | Meaning |
 | --- | --- |
 | `idle` | nothing found, or not started |
-| `blocked` | waiting on the user, with a `Blocked` reason |
+| `blocked` | waiting on your user, with a `Blocked` reason |
 | `pending` | moving, with an on-chain reference and when it is expected |
 | `stalled` | overdue, with how long and a `Remedy` that says what to do |
 | `done` | arrived, with the amount received |
@@ -85,13 +85,13 @@ duration and when it started.
 
 - `applyUpdate(state, stepId, next, nowUnix)` applies a new phase only when `canAdvance` allows it:
   a finished step never changes, and an unfinished one never moves back. The one exception is a
-  `stalled` step that a new transaction set moving again, which may go back to `pending`. A late
+  `stalled` step that a new transaction set moving again, which can go back to `pending`. A late
   answer therefore cannot turn a delivered transfer back into a pending one.
 - `escalateIfOverdue(step, nowUnix, remedyFor)` turns a `pending` step into `stalled` once it is
   past its start plus its expected duration, with the seconds it is overdue and the remedy your
   `remedyFor` returns.
 - `progressOf(state)` says how many steps are done, which step is current, whether the transfer
-  needs the user, and whether it has finished.
+  needs your user, and whether it has finished.
 - `outcomeOf(state)` sums up the transfer as `failed`, `refunded`, `partial`, `delivered-as-came`,
   `delivered-unverified`, `succeeded` or `in-flight`, checked in that order. `succeeded` needs every
   step to be `done` or `delivered-and-converted`.

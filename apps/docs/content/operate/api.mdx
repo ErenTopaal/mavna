@@ -69,7 +69,7 @@ Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
 | `200` | `{ "xdr": "...", "channel": "G..." }` |
 | `400` | the destination is missing, not a usable Stellar address, needs no setup, or already holds USDC |
 | `409` | retryable: the account's previous repayment is still landing |
-| `429` | retryable: a daily cap refuses; this client already has as many repayments waiting as it may; the account's last window lapsed moments ago; or this client has many builds it has not signed |
+| `429` | retryable: a daily cap refuses; this client already has as many repayments waiting as it is allowed; the account's last window lapsed moments ago; or this client has many builds it has not signed |
 | `503` | retryable: every slot for unbacked repayments is in use, no channel can be added right now, or the cap counts cannot be read |
 
 ### `POST /settlement/commit`

@@ -9,7 +9,7 @@ is enforced, for you to check in the code.
 ## Nothing in the SDK signs
 
 The SDK packages build transactions and return them unsigned. Outside `@mavna/widget`, no package
-calls a signing function. The widget signs through the user's own wallets, in
+calls a signing function. The widget signs through the sender's own wallets, in
 `packages/widget/src/execute.ts` for the sending chain. A secret key handed where an address belongs
 is refused outright (`classifyAddress` in `@mavna/stellar`).
 
@@ -35,7 +35,7 @@ Quotes, fee estimates and registries from other services are validated before th
 transaction. Axelar's fee estimate of zero is refused as an unrecognised chain; LayerZero's OFT is
 refused when it is registered on another endpoint than the current one; Stellar answers from a node
 behind a ledger already seen are rejected by `RpcClient`. Where a value can move between the quote
-and settlement, the user's exposure is bounded by a number they chose: the minimum received, and
+and settlement, the sender's exposure is bounded by a number they chose: the minimum received, and
 the most a repayment can spend.
 
 ## Asset identity
@@ -43,7 +43,7 @@ the most a repayment can spend.
 An asset is identified by its code and issuer on Stellar and by its contract elsewhere, never by its
 symbol. See [Assets and amounts](/how-it-works/assets-and-amounts).
 
-## What the user signs
+## What the sender signs
 
 Every transaction comes with a sentence that says what signing it does. Approvals are for the exact
 amount, never unlimited. The number of signatures is stated on the quote, before anything moves.
@@ -51,13 +51,13 @@ amount, never unlimited. The number of signatures is stated on the quote, before
 ## Failing safely
 
 An undelivered Circle mint stays deliverable, and delivering again never mints twice. A conversion
-that cannot meet the user's minimum leaves the arrived asset in the account. A repayment that cannot
-land leaves the user with everything that arrived. A status that has no evidence of failure is
+that cannot meet the sender's minimum leaves the arrived asset in the account. A repayment that cannot
+land leaves the sender with everything that arrived. A status that has no evidence of failure is
 reported as pending, never failed.
 
 ## Turning a dependency off
 
-Any rail can be taken out of rotation without a release, and users see the operator's reason
+Any rail can be taken out of rotation without a release, and senders see the operator's reason
 instead of a missing route. See [Turn off a rail](/operate/turn-off-a-rail).
 
 ## The widget's dependencies

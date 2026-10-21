@@ -20,7 +20,7 @@ interface Asset {
 An asset's identity is `chainId` plus `id`. On Stellar, `id` is `CODE:ISSUER`, or `native` for XLM;
 on an EVM chain it is the token's contract address. Anyone can issue a Stellar asset with the code
 USDC, so the issuer is part of the identity. `symbol` is for display, and nothing is decided from
-it. `curatedBy` names who vouches for the asset appearing in a list a user picks from.
+it. `curatedBy` names who vouches for the asset appearing in a list a sender picks from.
 
 `sameAsset(a, b)` from `@mavna/core` compares `chainId` and `id`, never symbols.
 

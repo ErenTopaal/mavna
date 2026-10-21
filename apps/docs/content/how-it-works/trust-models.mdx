@@ -1,10 +1,10 @@
 ---
 title: Trust models
-description: Who a user trusts to deliver a transfer is a field on every route, so routes can be compared by it.
+description: Who a sender trusts to deliver a transfer is a field on every route, so routes can be compared by it.
 ---
 
-Every adapter and every route carries a `trustModel`: who the user trusts to deliver the transfer.
-The widget shows it on each route in plain words, beside the amount and the time.
+Every adapter and every route carries a `trustModel`. The widget shows it on each route in plain
+words, beside the amount and the time.
 
 ```ts
 type TrustModel = "native-mint" | "validator-set" | "solver-network" | "liquidity-pool" | "dvn-stack";

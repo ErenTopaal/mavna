@@ -61,7 +61,7 @@ Run one sponsor per network, each with its own key, state directory and hostname
   read. A mainnet sponsor, or one with `MAVNA_PRODUCTION=true`, refuses to start without it.
   Without it, a restart loses the held repayments, the channel keys and the day's caps.
 - **Bind the port to loopback and set `MAVNA_TRUST_PROXY=true`** when a reverse proxy is the only
-  way in. Otherwise every request arrives from the proxy's address and all users share one rate
+  way in. Otherwise every request arrives from the proxy's address and all clients share one rate
   limit.
 - **List every page that calls it in `MAVNA_ALLOWED_ORIGINS`**, the docs included.
 - **Set `SOROSWAP_API_KEY`** to keep Soroswap among the exchanges the conversion can use.

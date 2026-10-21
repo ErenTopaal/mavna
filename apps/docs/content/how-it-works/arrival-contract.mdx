@@ -1,12 +1,12 @@
 ---
 title: Arrival Contract
-description: The Soroban contract that receives a LayerZero transfer with instructions, converts it on Stellar with the user's minimum enforced, and sends the result on.
+description: The Soroban contract that receives a LayerZero transfer with instructions, converts it on Stellar with the sender's minimum enforced, and sends the result on.
 ---
 
 The Mavna Arrival Contract (`contracts/arrival`) receives a LayerZero OFT transfer that carries a
 compose message, and completes the arrival on Stellar in the same flow: it converts through
-Aquarius with the user's minimum as a hard floor, takes the integrator fee if one is set, and sends
-the result to the recipient the user signed for. When the minimum cannot be met, it sends the
+Aquarius with the sender's minimum as a hard floor, takes the integrator fee if one is set, and sends
+the result to the recipient the sender signed for. When the minimum cannot be met, it sends the
 arriving token on as it came. It has no administrator and no upgrade path.
 
 ## What it accepts

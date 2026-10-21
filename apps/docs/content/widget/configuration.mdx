@@ -6,7 +6,7 @@ description: Every field of the widget's config object, what it changes, and wha
 The widget takes one object, `config`. `integrator` is the only required field. A configuration
 mistake, such as an empty endpoint or a network without a sponsor, stops the widget when it
 mounts, with a message that starts with `Mavna widget configuration:`, rather than later in front of
-a user.
+your users.
 
 ## Network and endpoints
 
@@ -73,7 +73,7 @@ offered only while the LayerZero rail is on.
 
 **`fromAmount`**. The amount the form starts with.
 
-**`toAddress`**. The recipient, prefilled. With `requiredUI: ["destination"]` the user cannot
+**`toAddress`**. The recipient, prefilled. With `requiredUI: ["destination"]` your user cannot
 change it.
 
 ## What the widget shows
@@ -97,7 +97,7 @@ integrations on one website keep separate lists. The history is also kept separa
 
 **`walletConfig`**. Use your app's own wallet connection instead of the widget's:
 
-- `onConnect`: called when the user presses the widget's connect button with no wallet connected,
+- `onConnect`: called when your user presses the widget's connect button with no wallet connected,
   in place of the widget's own wallet menu.
 - `evm`: an EVM connection your app already holds.
 - `stellar`: your own Stellar signer.
