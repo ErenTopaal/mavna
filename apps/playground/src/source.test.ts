@@ -40,6 +40,6 @@ describe("the config the playground prints", () => {
       .split("\n")
       .find((text) => text.includes("sponsorUrl"));
     expect(line).toMatch(/\/\/ .*your own sponsor/);
-    expect(line).toContain("https://docs.mavna.app/developers/sponsor");
+    expect(line).toContain("https://docs.mavna.app/operate");
   });
 });

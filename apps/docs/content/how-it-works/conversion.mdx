@@ -1,0 +1,62 @@
+---
+title: Conversion on Stellar
+description: How a transfer arrives as another asset than the one a rail carries, through Stellar exchanges in a fixed order of preference.
+---
+
+A rail delivers what it carries: Circle delivers USDC, LayerZero delivers USDT0. When the user wants
+to end up with another asset, such as XLM, a conversion on a Stellar exchange is added to the route
+as the last step of the same transfer.
+
+## The exchanges
+
+`@mavna/swap` puts every exchange behind one `SwapProvider` interface: `quote` prices a conversion,
+and `build` turns the quote into the unsigned transaction that runs it, with the user's minimum
+after slippage as a hard floor. If the market moves past the floor, the conversion fails whole and
+the account keeps what arrived.
+
+`createSwapVenues` builds the list of exchanges for a network, in this order of preference:
+
+1. **Soroswap**, wherever it serves. It aggregates Soroswap, Phoenix, Aquarius, SushiSwap and Comet
+   pools, and Stellar's order book when the money goes to an account. Its API needs a key that must
+   never reach a browser, so `SoroswapProvider` calls the sponsor's
+   [Soroswap proxy](/operate/api#soroswap-proxy). A sponsor without a key has no proxy, and the list
+   starts at the next exchange. Before the account signs what Soroswap built, the provider checks
+   that it is a single call of the expected kind with the quoted amounts, the quoted tokens, the
+   account as the one paid, and a minimum no lower than the user's floor.
+2. **SushiSwap**, on the main network, for pairs that include USDT0.
+3. **Aquarius**, on both networks. It routes through Soroban pools, so it can deliver to a contract
+   address.
+
+The exchanges are asked at the same time, and the answers are read in this order: the first that
+is usable and quotes wins, even when a later one would quote more. The order is a preference, not
+a price race.
+
+## How a conversion joins a route
+
+`attachSwapLeg` in `@mavna/routing` runs after a rail quotes. It prices the conversion on what the
+rail guarantees to deliver, rewrites the route's `receives` and `receivesAtLeast` in the wanted
+asset, appends a `swap` step, and adds one signature, because the account signs the conversion
+itself.
+
+It turns the route into a refusal, with the reason, when:
+
+- no exchange can quote the conversion (`no-liquidity`);
+- nothing priced it within the rail's time budget (`timed-out`);
+- the rail delivers another asset than the conversion sells (`asset-unsupported`);
+- a new account's reserve is repaid from the arrival and the wanted asset is not XLM
+  (`asset-unsupported`), because the repayment is priced in XLM;
+- too little would be left to convert after the repayment (`amount-too-small`).
+
+An exchange's own error text can carry raw node output, so it goes only into the refusal's `detail`,
+never its `explanation`.
+
+When the transfer reaches the conversion, the widget asks the exchanges for a fresh price, refuses
+to continue if it is below the minimum the user was shown, and has the account sign the transaction
+the winning exchange builds.
+
+## Converting on arrival
+
+A LayerZero route can convert on arrival instead: the money is delivered to the
+[Arrival Contract](/how-it-works/arrival-contract), which converts through Aquarius with the user's
+minimum enforced inside the contract. This adds no step and no signature. If the minimum cannot be
+met, the contract sends the arriving token on as it came.

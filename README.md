@@ -23,7 +23,7 @@ Requires Node 24 and pnpm.
 
 ```bash
 pnpm install
-export VITE_MAVNA_SPONSOR_URL=http://localhost:8787 NEXT_PUBLIC_MAVNA_SPONSOR_URL=http://localhost:8787
+export VITE_MAVNA_SPONSOR_URL=http://localhost:8787
 pnpm build       # build everything; the apps import the packages from their dist/
 pnpm --filter @mavna/app dev   # also @mavna/web, @mavna/playground, @mavna/docs
 pnpm test        # unit tests
