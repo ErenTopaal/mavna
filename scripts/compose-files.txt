@@ -290,6 +290,7 @@ packages/stellar/src/destination.test.ts
 packages/stellar/src/destination.ts
 packages/stellar/src/failure-paths.live.test.ts
 packages/stellar/src/index.ts
+packages/stellar/src/network.live.test.ts
 packages/stellar/src/network.ts
 packages/stellar/src/no-buffer.test.ts
 packages/stellar/src/price.test.ts
@@ -391,6 +392,8 @@ packages/widget/tsconfig.test.json
 packages/widget/tsdown.config.ts
 pnpm-lock.yaml
 pnpm-workspace.yaml
+scripts/arrival-mainnet.mjs
+scripts/arrival-mainnet.test.ts
 scripts/browser-test-build.mjs
 scripts/browser-test-guard.mjs
 scripts/browser-test-guard.test.ts
