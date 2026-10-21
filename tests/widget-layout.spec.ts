@@ -1,9 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
+import { PORTS } from "./env.js";
 
 // layout regressions that only show in a real browser, found by looking at the widget
 
-async function offline(page: Page, baseURL: string | undefined): Promise<void> {
-  const origin = new URL(baseURL ?? "http://localhost:4319").origin;
+async function offline(page: Page, base: string | undefined): Promise<void> {
+  const origin = new URL(base ?? "http://localhost:4319").origin;
   await page.route(
     (url) => url.origin !== origin,
     (route) => route.abort(),
@@ -62,3 +63,39 @@ for (const width of [360, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   });
 }
+
+test("Escape in the drawer closes what is open inside it before the drawer itself", async ({
+  page,
+}) => {
+  await offline(page, `http://localhost:${PORTS.playground}/`);
+  await page.goto(`http://localhost:${PORTS.playground}/`);
+  await page.getByRole("button", { name: "Drawer", exact: true }).click();
+  await page.getByRole("button", { name: "Bring funds to Stellar" }).click();
+  const dialog = page.getByRole("dialog", { name: "Bring funds to Stellar" });
+  await expect(dialog).toBeVisible();
+
+  // the wallet menu closes, the drawer stays
+  const wallet = dialog.getByRole("button", { name: /Connect/ }).first();
+  await wallet.click();
+  await expect(dialog.getByText("Source wallet")).toBeVisible();
+  await wallet.focus();
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByText("Source wallet")).toBeHidden();
+  await page.waitForTimeout(600);
+  await expect(dialog).toBeVisible();
+
+  // a screen inside goes back, the drawer stays
+  await dialog.getByRole("button", { name: "Settings" }).click();
+  await expect(dialog.getByRole("heading", { name: "Settings" })).toBeVisible();
+  // the button that opened it is gone with the form, so focus moves to the new screen
+  await expect(dialog.getByRole("button", { name: "Back" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("heading", { name: "Send to Stellar" })).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(dialog).toBeVisible();
+
+  // with nothing left to close, Escape closes the drawer
+  await dialog.getByRole("button", { name: "Settings" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});

@@ -35,9 +35,12 @@ export interface DrawerChromeProps {
  * dismisses the picker must not take the drawer, and the transfer, with it.
  */
 export function dismissesOnKey(
-  e: { readonly key: string; readonly target: unknown },
+  e: { readonly key: string; readonly target: unknown; readonly defaultPrevented?: boolean },
   overlay: { contains(node: never): boolean } | null,
 ): boolean {
+  // the flow inside takes an Escape first, to close its own menu or go back a
+  // screen, and marks it used; only one it left alone closes the drawer
+  if (e.defaultPrevented === true) return false;
   return e.key === "Escape" && overlay !== null && overlay.contains(e.target as never);
 }
 

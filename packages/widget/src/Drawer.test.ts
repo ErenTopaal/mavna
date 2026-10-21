@@ -16,6 +16,12 @@ describe("dismissesOnKey", () => {
     expect(dismissesOnKey({ key: "Escape", target: kitModal }, overlay([field]))).toBe(false);
   });
 
+  it("leaves an Escape the flow inside already used, to close a menu or go back", () => {
+    expect(
+      dismissesOnKey({ key: "Escape", target: field, defaultPrevented: true }, overlay([field])),
+    ).toBe(false);
+  });
+
   it("ignores other keys", () => {
     expect(dismissesOnKey({ key: "Enter", target: field }, overlay([field]))).toBe(false);
   });

@@ -172,6 +172,19 @@ function applied(flow: Flow): Flow {
   return flow;
 }
 
+/** An Escape keydown from a target, remembering whether it was marked used. */
+function escapeKey(target: unknown): KeyboardEvent {
+  const e = {
+    key: "Escape",
+    target,
+    defaultPrevented: false,
+    preventDefault: () => {
+      e.defaultPrevented = true;
+    },
+  };
+  return e as unknown as KeyboardEvent;
+}
+
 function quotedFlow(asked: { terms: number }, emit?: (event: MavnaWidgetEvent) => void): Flow {
   const quoting = {
     ...engine,
@@ -337,10 +350,29 @@ describe("the host page around the widget", () => {
     flow.state = { ...flow.state, screen: "chains", cameFrom: "send" };
     const inside = {};
     (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
-    flow.handleKey({ key: "Escape", target: {} } as unknown as KeyboardEvent);
+    flow.handleKey(escapeKey({}));
     expect(flow.state.screen).toBe("chains");
-    flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
+    flow.handleKey(escapeKey(inside));
     expect(flow.state.screen).toBe("send");
+  });
+
+  it("marks an Escape it used, so a drawer around it stays open", () => {
+    const flow = applied(new Flow({ engine }));
+    const inside = {};
+    (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
+    flow.state = { ...flow.state, screen: "chains", cameFrom: "send" };
+    const back = escapeKey(inside);
+    flow.handleKey(back);
+    expect(back.defaultPrevented).toBe(true);
+    flow.state = { ...flow.state, screen: "send", walletOpen: true };
+    const wallet = escapeKey(inside);
+    flow.handleKey(wallet);
+    expect(wallet.defaultPrevented).toBe(true);
+    // on the form with nothing open there is nothing for it to do: the drawer closes
+    flow.state = { ...flow.state, screen: "send", walletOpen: false, menuOpen: false };
+    const left = escapeKey(inside);
+    flow.handleKey(left);
+    expect(left.defaultPrevented).toBe(false);
   });
 });
 
@@ -642,7 +674,7 @@ describe("a transfer that ended without arriving", () => {
       flow.state = { ...flow.state, cameFrom: "review" };
       const inside = {};
       (flow.rootRef as { current: unknown }).current = { contains: (n: unknown) => n === inside };
-      flow.handleKey({ key: "Escape", target: inside } as unknown as KeyboardEvent);
+      flow.handleKey(escapeKey(inside));
       // never back to the review of the quote that was sent: the form, quoting afresh
       expect(flow.state.screen).toBe("send");
       flow.setAmount("2");

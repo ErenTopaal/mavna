@@ -353,6 +353,7 @@ export class Flow extends React.Component<FlowProps, State> {
   private panelStyle: Partial<Record<(typeof PANEL_OWN)[number], string>> | undefined;
   private onDown = (_e: MouseEvent): void => {};
   private onKey = (_e: KeyboardEvent): void => {};
+  private keyRoot: HTMLElement | null = null;
 
   // ---------------------------------------------------------------- helpers ---
 
@@ -433,7 +434,9 @@ export class Flow extends React.Component<FlowProps, State> {
     };
     this.onKey = (e) => this.handleKey(e);
     document.addEventListener("mousedown", this.onDown);
-    document.addEventListener("keydown", this.onKey);
+    // on the widget's own root, so it hears an Escape before a drawer around it does
+    this.keyRoot = this.rootRef.current;
+    this.keyRoot?.addEventListener("keydown", this.onKey);
     this.stopWallets = watchWallets((wallets) => this.setState({ discovered: [...wallets] }));
     this.setState({ history: readHistory(this.engine.historyKey) });
     this.followStellar();
@@ -441,19 +444,27 @@ export class Flow extends React.Component<FlowProps, State> {
     this.runQuote();
   }
 
-  /** Escape closes a popover or goes back, but only when it was pressed in the widget. */
+  /**
+   * Escape closes a popover or goes back, but only when it was pressed in the
+   * widget. One it uses is marked so, which tells a drawer around it to stay open.
+   */
   handleKey(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
     if (this.rootRef.current === null || !this.rootRef.current.contains(e.target as Node)) return;
     if (this.state.menuOpen) {
+      e.preventDefault();
       this.setState({ menuOpen: false });
       return;
     }
     if (this.state.walletOpen) {
+      e.preventDefault();
       this.closeWallet();
       return;
     }
-    if (this.state.screen !== "send" && this.state.phase !== "sending") this.back();
+    if (this.state.screen !== "send" && this.state.phase !== "sending") {
+      e.preventDefault();
+      this.back();
+    }
   }
 
   private stopStellar: (() => void) | undefined;
@@ -470,7 +481,7 @@ export class Flow extends React.Component<FlowProps, State> {
     this.unmounted.abort();
     this.stopStellar?.();
     document.removeEventListener("mousedown", this.onDown);
-    document.removeEventListener("keydown", this.onKey);
+    this.keyRoot?.removeEventListener("keydown", this.onKey);
     this.timers.forEach(clearTimeout);
     if (this.debounce !== undefined) clearTimeout(this.debounce);
     this.currentQuote?.cancel();
@@ -731,6 +742,7 @@ export class Flow extends React.Component<FlowProps, State> {
         this.setState({ routesMounted: false });
       }, this.DUR * 2000);
     }
+    const hadFocus = this.rootRef.current?.contains(document.activeElement) === true;
     const cameFrom = way === "pop" ? null : this.state.screen;
     const next = wantPanel
       ? { screen, dir: way, note: null, routesMounted: true, cameFrom }
@@ -738,6 +750,7 @@ export class Flow extends React.Component<FlowProps, State> {
     this.setState(
       next as Pick<State, "screen" | "dir" | "note" | "cameFrom" | "routesMounted">,
       () => {
+        if (hadFocus) this.refocus();
         this.animateHeight(cap);
         this.mergePanel();
         if (showing) this.showRoutesPanel(cap.card === undefined ? null : cap.card.x);
@@ -748,6 +761,22 @@ export class Flow extends React.Component<FlowProps, State> {
         this.anim(pane, { opacity: [0, 1], x: [way === "pop" ? -14 : 14, 0] });
       },
     );
+  }
+
+  /**
+   * The control that moved the screen is usually gone with the screen it was
+   * on, which leaves focus on the page body: outside the widget, where Escape
+   * and the drawer's Tab trap no longer reach it. So focus moves to the new
+   * screen's first control, its back button when it has one.
+   */
+  refocus(): void {
+    const root = this.rootRef.current;
+    if (root === null || root.contains(document.activeElement)) return;
+    const card = this.cardRef.current ?? root;
+    const first =
+      card.querySelector<HTMLElement>('button[aria-label="Back"]') ??
+      card.querySelector<HTMLElement>("button");
+    first?.focus({ preventScroll: true });
   }
 
   /** The logo: the form, quoting afresh when a transfer has just ended. */
