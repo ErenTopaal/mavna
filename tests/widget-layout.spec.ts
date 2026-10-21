@@ -191,3 +191,23 @@ test("Escape from inside a header popover hands focus back to its button", async
   await expect(root.getByRole("link", { name: "Home" })).toBeHidden();
   await expect(more).toBeFocused();
 });
+
+test("Tab in the drawer never stops on the invisible backdrop", async ({ page }) => {
+  const url = `http://localhost:${PORTS.playground}/`;
+  await offline(page, url);
+  await page.goto(url);
+  await page.getByRole("button", { name: "Drawer", exact: true }).click();
+  await page.getByRole("button", { name: "Bring funds to Stellar" }).click();
+  const dialog = page.getByRole("dialog", { name: "Bring funds to Stellar" });
+  await expect(dialog).toBeVisible();
+  const scrim = page.locator(".mv-overlay-scrim");
+  // round the whole trap twice, forwards and back
+  for (const key of ["Tab", "Shift+Tab"]) {
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press(key);
+      await expect(scrim).not.toBeFocused();
+    }
+  }
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".mv-overlay").locator(":focus")).toHaveCount(1);
+});

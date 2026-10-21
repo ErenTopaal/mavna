@@ -80,8 +80,9 @@ export function hostWants(state: {
   return "close";
 }
 
+// anything taken out of the tab order, like the backdrop, is not a place to wrap to
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+  'a[href]:not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
 
 export function DrawerChrome(props: DrawerChromeProps): ReactNode {
   const { mounted, closing, showTrigger, onOpen, onClose } = props;
@@ -142,10 +143,12 @@ export function DrawerChrome(props: DrawerChromeProps): ReactNode {
               data-mv-closing={closing ? "true" : undefined}
               style={props.themeStyle}
             >
+              {/* a pointer target only: the close button is the one keyboard and screen reader users get */}
               <button
                 type="button"
                 className="mv-overlay-scrim"
-                aria-label="Close"
+                aria-hidden="true"
+                tabIndex={-1}
                 onClick={onClose}
               />
               <button
