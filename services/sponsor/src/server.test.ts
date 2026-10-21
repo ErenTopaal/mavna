@@ -4592,7 +4592,7 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
         JSON.stringify({
           messages: [
             message === undefined
-              ? { message: "0x", attestation: "PENDING" }
+              ? { message: null, attestation: "PENDING", status: "pending_confirmations" }
               : { message, attestation: ATTESTATION },
           ],
         }),
@@ -4767,7 +4767,7 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
             JSON.stringify({
               messages: [
                 message === "pending"
-                  ? { message: "0x", attestation: "PENDING" }
+                  ? { message: null, attestation: "PENDING", status: "pending_confirmations" }
                   : { message, attestation: ATTESTATION },
               ],
             }),
@@ -5113,9 +5113,14 @@ describe("round 3: the widget reads the watching flag exactly as the sponsor sen
     // one Circle has, pending, is
     stubIris(
       () =>
-        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            messages: [{ message: null, attestation: "PENDING", status: "pending_confirmations" }],
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
     expect(await client.requestDelivery(`0x${"a1".repeat(32)}`, 0)).toEqual({
       kind: "not-attested-yet",
@@ -5203,7 +5208,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
           messages: [
             attested
               ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
-              : { message: "0x", attestation: "PENDING" },
+              : { message: null, attestation: "PENDING", status: "pending_confirmations" },
           ],
         }),
         { status: 200 },
@@ -5240,7 +5245,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
             messages: [
               attested && url.searchParams.get("transactionHash") === real
                 ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
-                : { message: "0x", attestation: "PENDING" },
+                : { message: null, attestation: "PENDING", status: "pending_confirmations" },
             ],
           }),
           { status: 200 },
@@ -5268,9 +5273,14 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
   it("keeps each client's share across a restart", async () => {
     stubIris(
       () =>
-        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            messages: [{ message: null, attestation: "PENDING", status: "pending_confirmations" }],
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
     const state = new MemoryDocumentStore();
     const limits = { perClient: 2, total: 1_000 };
