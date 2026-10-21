@@ -68,7 +68,10 @@ too. [Send to a new address](/guides/new-account) walks through those prompts.
 The page narrates the wait step by step: sent, then Circle attests the transfer,
 then Mavna delivers it on Stellar. (On a deployment where the sponsor funds nothing,
 that last step is a prompt in the receiving wallet, which pays the delivery's small
-XLM fee. mavna.app's sponsor delivers it for you.) Attestation takes a few minutes.
+XLM fee. mavna.app's sponsor delivers it for you.) Attestation waits for the source
+chain to finalise, which Circle publishes per chain: seconds from Avalanche or Arc,
+around twenty minutes from Ethereum and its rollups, hours from Linea or Starknet. The
+quote and the step both say how long for the chain you send from.
 Every on-chain step links to the block explorer for the chain it happened on.
 
 While Circle attests, the page first says **Keep this page open until the sponsor
