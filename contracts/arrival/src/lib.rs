@@ -154,6 +154,9 @@ impl ArrivalContract {
         if value < 0 {
             panic_with_error!(&env, Error::BadValue);
         }
+        if compose.amount_ld < 0 {
+            panic_with_error!(&env, Error::BadAmount);
+        }
         if value > 0 {
             // never requested by Mavna; passed straight through so nothing stays here
             let native = EndpointClient::new(&env, &config.endpoint).native_token();

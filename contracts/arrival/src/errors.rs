@@ -19,4 +19,6 @@ pub enum Error {
     /// The recipient refused the converted asset and the venue would not take it
     /// back, so nothing can be delivered yet. The compose stays queued.
     NoWayBack = 7,
+    /// The compose stated a negative amount, which no OFT credits.
+    BadAmount = 8,
 }

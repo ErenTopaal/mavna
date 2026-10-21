@@ -374,6 +374,24 @@ impl World {
         (guid, message)
     }
 
+    /// Queues a compose whose envelope states `amount_ld` without crediting
+    /// anything, as only a misbehaving OFT could.
+    fn queue_only(&mut self, amount_ld: i128, compose_msg: &Bytes) -> (BytesN<32>, Bytes) {
+        self.nonce += 1;
+        let guid = BytesN::random(&self.env);
+        let message = envelope(&self.env, self.nonce, amount_ld, compose_msg);
+        self.env.mock_all_auths();
+        endpoint::Client::new(&self.env, &self.endpoint).send_compose(
+            &self.oft,
+            &self.arrival,
+            &guid,
+            &0,
+            &message,
+        );
+        self.env.set_auths(&[]);
+        (guid, message)
+    }
+
     fn arrive(&mut self, amount: i128, compose_msg: &Bytes) -> (BytesN<32>, Bytes) {
         let oft = self.oft.clone();
         self.arrive_from(&oft, amount, compose_msg)
@@ -888,6 +906,26 @@ fn a_zero_minimum_is_not_a_floor_and_is_not_converted() {
 
     assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
     assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+}
+
+#[test]
+fn a_negative_amount_is_refused_and_stays_queued() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (other, other_message) = w.arrive(500, &msg);
+    for amount_ld in [-1, i128::MIN] {
+        let (guid, message) = w.queue_only(amount_ld, &msg);
+        assert_eq!(
+            w.compose(&guid, &message),
+            Err(Some(contract_error(Error::BadAmount)))
+        );
+        let slot =
+            endpoint::Client::new(&w.env, &w.endpoint).compose_queue(&w.oft, &w.arrival, &guid, &0);
+        assert_eq!(slot, Some(w.env.crypto().keccak256(&message).to_bytes()));
+    }
+    assert_eq!(w.held(), (500, 0));
+    w.compose(&other, &other_message).unwrap();
 }
 
 #[test]
