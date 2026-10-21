@@ -54,6 +54,36 @@ describe("deliveredByEvent", () => {
   });
 });
 
+describe("deliveredByEvent on stellar-rpc 30", () => {
+  // stellar-rpc 30.0.0 stopped returning inSuccessfulContractCall, deprecated
+  // since protocol 23 when only successful calls emit events; a live delivery
+  // then read as on its way in Activity because the proof required it
+  const without = (raw: typeof recent.messageReceived) => ({
+    ...raw,
+    events: raw.events.map(({ inSuccessfulContractCall: _, ...event }) => event),
+  });
+  const events = [
+    ...rpc.parseRawEvents(without(recent.messageReceived) as never).events,
+    ...rpc.parseRawEvents(without(recent.mintAndForward) as never).events,
+  ];
+
+  it("finds the delivery when the node no longer says the call succeeded", () => {
+    expect(deliveredByEvent(events, identifyMessage(recent.iris.message), "testnet")).toEqual({
+      txHash: "5821d6b37277c11a3f85320a93bb90bd36e4c8aa0a88a48dcde0b6d103467eae",
+      ledger: 5261151,
+      amount: 10_000_000n,
+      recipient: "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO",
+    });
+  });
+
+  it("still refuses an event an older node says came from a failed call", () => {
+    const failed = recentEvents.map((event) => ({ ...event, inSuccessfulContractCall: false }));
+    expect(
+      deliveredByEvent(failed, identifyMessage(recent.iris.message), "testnet"),
+    ).toBeUndefined();
+  });
+});
+
 describe("deliveredByEvent against look-alike events", () => {
   const id = identifyMessage(recent.iris.message);
 

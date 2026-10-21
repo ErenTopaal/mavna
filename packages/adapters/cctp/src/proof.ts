@@ -91,7 +91,7 @@ export function deliveredByEvent(
 
   const receipt = events.find(
     (event) =>
-      event.inSuccessfulContractCall &&
+      fromSuccessfulCall(event) &&
       event.contractId?.contractId() === messageTransmitter &&
       isReceiptOf(event, message, cctpForwarder),
   );
@@ -99,7 +99,7 @@ export function deliveredByEvent(
 
   for (const event of events) {
     if (
-      !event.inSuccessfulContractCall ||
+      !fromSuccessfulCall(event) ||
       event.txHash !== receipt.txHash ||
       event.operationIndex !== receipt.operationIndex ||
       event.contractId?.contractId() !== cctpForwarder ||
@@ -123,6 +123,15 @@ export function deliveredByEvent(
     };
   }
   return undefined;
+}
+
+/**
+ * Whether an event came from a call that succeeded. Since protocol 23 only
+ * successful calls emit events, and stellar-rpc 30 stopped sending the flag
+ * that said so; an older node that still sends it is still believed.
+ */
+function fromSuccessfulCall(event: rpc.Api.EventResponse): boolean {
+  return (event as { inSuccessfulContractCall?: boolean }).inSuccessfulContractCall !== false;
 }
 
 /**
