@@ -980,7 +980,7 @@ export function renderReview(
               ]
             : []),
           { key: "sig", name: "Approvals", value: approvalsLabel(r) },
-          { key: "eta", name: "Estimated time", value: `About ${r.minutes} minutes` },
+          { key: "eta", name: "Estimated time", value: `About ${r.minutes} min` },
         ];
   return (
     <div style={s("display:flex;flex-direction:column;gap:10px")}>

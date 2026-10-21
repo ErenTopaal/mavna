@@ -973,3 +973,21 @@ describe("the form while a quote is on its way", () => {
     expect(floorRow(html)).toBe(0);
   });
 });
+
+describe("the estimated time", () => {
+  it("reads the same on review as in the flight and the route detail, one minute included", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const view = { ...toRouteView(routeFor("layerzero")), minutes: 1 };
+    const chain = { id: "x", name: "X" };
+    const review = renderToStaticMarkup(renderReview(flow, { r: view, chain, sym: "USDC" }));
+    const flight = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain, sym: "USDC", arrived: false }),
+    );
+    expect(review).toContain("About 1 min<");
+    expect(review).not.toContain("minutes");
+    expect(flight).toContain("About 1 min<");
+    expect(routeDetail(view, "USDC", false).find((row) => row.key === "eta")?.value).toBe(
+      "About 1 min",
+    );
+  });
+});
