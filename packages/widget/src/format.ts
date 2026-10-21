@@ -18,6 +18,25 @@ export function fmt(value: number): string {
   return FIGURE.format(value);
 }
 
+/**
+ * An amount read straight from its base units, so nothing passes through a
+ * float: grouped, at least two places, and cut toward zero past `places`. The
+ * sent amount takes every place it has, which is what the wallet is asked to
+ * sign; a minimum takes seven and can only read lower than it is, never higher.
+ */
+export function fmtAmount(amount: Amount, places = Number.POSITIVE_INFINITY): string {
+  const value = BigInt(amount.baseUnits);
+  const decimals = amount.asset.decimals;
+  const scale = 10n ** BigInt(decimals);
+  const whole = (value / scale).toLocaleString("en-US");
+  const fraction = (value % scale)
+    .toString()
+    .padStart(decimals, "0")
+    .slice(0, Math.min(decimals, places))
+    .replace(/0+$/, "");
+  return `${whole}.${fraction.padEnd(2, "0")}`;
+}
+
 /** The design's `short`: a 5…4 elision for anything longer than 12 characters. */
 export function short(address: string): string {
   return address.length <= 12 ? address : `${address.slice(0, 5)}…${address.slice(-4)}`;

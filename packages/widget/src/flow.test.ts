@@ -11,7 +11,7 @@ import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { fmt } from "./format";
-import { toRouteView } from "./quote";
+import { type RouteView, toRouteView } from "./quote";
 import {
   renderAddress,
   renderChains,
@@ -1045,14 +1045,13 @@ describe("what the recipient screen says is wrong", () => {
 describe("an amount with more decimals than two", () => {
   it("is shown as it is on review, never rounded up past what is sent or guaranteed", () => {
     const flow = quotedFlow({ terms: 0 });
-    const base = toRouteView(routeFor("layerzero"));
-    const view = {
-      ...base,
-      route: { ...base.route, sends: { ...base.route.sends, baseUnits: "10126789" } },
-      receives: 10.126789,
-      floor: 10.126785,
-      exact: false,
-    };
+    const route = routeFor("layerzero");
+    const view = toRouteView({
+      ...route,
+      sends: { ...route.sends, baseUnits: "10126789" },
+      receives: { asset: STELLAR_USDC, baseUnits: "101267890" },
+      receivesAtLeast: { asset: STELLAR_USDC, baseUnits: "101267850" },
+    });
     const html = renderToStaticMarkup(
       renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC" }),
     );
@@ -1065,5 +1064,47 @@ describe("an amount with more decimals than two", () => {
     expect(fmt(10)).toBe("10.00");
     expect(fmt(1234.5)).toBe("1,234.50");
     expect(fmt(0.000001)).toBe("0.000001");
+  });
+});
+
+describe("what review says is sent and guaranteed", () => {
+  // an 18-decimal source token, as USDC is on some chains, and a minimum with
+  // more precision than seven places
+  const view = (): RouteView => {
+    const base = toRouteView(routeFor("layerzero"));
+    const sends = { asset: { ...SOURCE_USDC, decimals: 18 }, baseUnits: "10123456789012345678" };
+    const atLeast = { asset: { ...STELLAR_USDC, decimals: 8 }, baseUnits: "999999999" };
+    return toRouteView({ ...base.route, sends, receivesAtLeast: atLeast });
+  };
+
+  it("shows the sent amount exactly as the wallet is asked to sign it", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const html = renderToStaticMarkup(
+      renderReview(flow, { r: view(), chain: { id: "x", name: "X" }, sym: "USDC" }),
+    );
+    expect(html).toContain("10.123456789012345678 USDC");
+  });
+
+  it("cuts a minimum toward zero, never rounding it up past the guarantee", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const r = view();
+    const html = renderToStaticMarkup(
+      renderReview(flow, { r, chain: { id: "x", name: "X" }, sym: "USDC" }),
+    );
+    expect(html).toContain("9.9999999 USDC");
+    expect(html).not.toContain(">10.00 USDC");
+    expect(routeDetail(r, "USDC", false).find((row) => row.key === "min")?.value).toBe(
+      "9.9999999 USDC",
+    );
+    const form = renderToStaticMarkup(
+      renderSend(flow, {
+        r,
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+        xlm: false,
+        resting: false,
+      }),
+    );
+    expect(form).toContain("Min 9.9999999 USDC");
   });
 });

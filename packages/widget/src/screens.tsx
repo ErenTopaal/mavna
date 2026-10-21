@@ -9,7 +9,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
-import { amountValue, fmt, fromBaseUnits, short } from "./format";
+import { fmt, fmtAmount, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
@@ -93,7 +93,12 @@ export function renderSend(
   const segX = `${Math.max(0, receiveChoices.indexOf(st.wanted)) * 52}px`;
   const receiveFigure = r === undefined ? "0" : fmt(r.receives);
   const figureInk = r === undefined ? "var(--mv-faintest)" : "var(--mv-ink)";
-  const floorLine = r === undefined ? "" : r.exact ? "Exact" : `Min ${fmt(r.floor)} ${sym}`;
+  const floorLine =
+    r === undefined
+      ? ""
+      : r.exact
+        ? "Exact"
+        : `Min ${fmtAmount(r.route.receivesAtLeast, 7)} ${sym}`;
   const destShort = st.destination === "" ? "Not set" : short(st.destination);
   const destInk = c.destValid() ? "var(--mv-ink-2)" : "var(--mv-signal)";
   const priorityLabel = st.priority === "best" ? "Best return" : "Fastest";
@@ -926,7 +931,7 @@ export function renderRails(c: Flow): ReactElement {
 // ----------------------------------------------------------------- review ---
 
 function sentLabel(r: RouteView): string {
-  return `${fmt(amountValue(r.route.sends))} ${r.route.sends.asset.symbol}`;
+  return `${fmtAmount(r.route.sends)} ${r.route.sends.asset.symbol}`;
 }
 
 export function renderReview(
@@ -980,7 +985,7 @@ export function renderReview(
           {
             key: "min",
             name: r.exact ? "You receive" : "Minimum received",
-            value: `${fmt(r.floor)} ${sym}`,
+            value: `${fmtAmount(r.route.receivesAtLeast, 7)} ${sym}`,
           },
           ...(c.state.reserveFunding === "self" && r.compose?.finishXlm !== undefined
             ? [
@@ -1993,7 +1998,7 @@ export function routeDetail(
     {
       key: "min",
       name: x.exact ? "You receive" : "Minimum received",
-      value: `${fmt(x.floor)} ${sym}`,
+      value: `${fmtAmount(x.route.receivesAtLeast, 7)} ${sym}`,
     },
     ...(xlm
       ? [
