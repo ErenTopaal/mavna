@@ -348,6 +348,7 @@ packages/widget/src/chain-icon.tsx
 packages/widget/src/compose.test.ts
 packages/widget/src/config.test.ts
 packages/widget/src/config.ts
+packages/widget/src/contrast.test.ts
 packages/widget/src/convert.test.ts
 packages/widget/src/css.d.ts
 packages/widget/src/domains.test.ts
