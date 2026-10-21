@@ -1641,7 +1641,8 @@ function renderApp(c: Flow): ReactNode {
       <div className="mv-grain" aria-hidden="true" />
       <header
         style={s(
-          "flex:0 0 auto;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px",
+          // wraps on a phone, where the controls do not fit beside the wordmark
+          "flex:0 0 auto;padding:18px 24px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px",
         )}
       >
         <button
@@ -1670,7 +1671,7 @@ function renderApp(c: Flow): ReactNode {
           </span>
         </button>
 
-        <div style={s("display:flex;align-items:center;gap:12px;flex:0 0 auto")}>
+        <div style={s("display:flex;align-items:center;gap:12px;flex:0 0 auto;margin-left:auto")}>
           {c.hidden("networkToggle") ? null : renderNetworkToggle(c)}
           {renderWallet(c)}
           {renderMenu(c)}

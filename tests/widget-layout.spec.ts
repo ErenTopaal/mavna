@@ -33,3 +33,32 @@ test("the routes panel keeps its size after a quick trip away from the form", as
   expect(after?.height).toBe(before?.height);
   expect(after?.y).toBe(before?.y);
 });
+
+for (const width of [360, 390]) {
+  test(`the app header does not lay its controls over the wordmark at ${width}px`, async ({
+    page,
+    baseURL,
+  }) => {
+    await offline(page, baseURL);
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/");
+    const root = page.locator(".mv-root");
+    await expect(root.getByText("Send to Stellar")).toBeVisible();
+    await page.waitForTimeout(1200);
+    const mark = await root.getByRole("button", { name: "Mavna home" }).boundingBox();
+    const toggle = await root.getByRole("button", { name: "TESTNET" }).boundingBox();
+    if (mark === null || toggle === null) throw new Error("header not laid out");
+    const overlaps =
+      mark.x < toggle.x + toggle.width &&
+      toggle.x < mark.x + mark.width &&
+      mark.y < toggle.y + toggle.height &&
+      toggle.y < mark.y + mark.height;
+    expect(overlaps).toBe(false);
+    // and the wordmark is not squeezed narrower than it is
+    const word = root.getByText("MAVNA", { exact: true });
+    expect(
+      await word.evaluate((el) => el.scrollWidth <= (el.parentElement?.clientWidth ?? 0)),
+    ).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  });
+}
