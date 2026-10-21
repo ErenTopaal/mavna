@@ -1,7 +1,8 @@
-import { RpcClient } from "@mavna/stellar";
+import { createNetworkConfig, RpcClient } from "@mavna/stellar";
 import { createSwapVenues } from "@mavna/swap";
 import {
   Address,
+  Keypair,
   Networks,
   nativeToScVal,
   rpc,
@@ -57,9 +58,30 @@ function usdcIntoXlm() {
 
 /** What Aquarius quotes for an input; a flat 26 XLM unless a test prices by size. */
 let quoteOut: (amountIn: number) => number;
+/** The receiving account's XLM balance on the node, in stroops, beside one trustline. */
+let balanceStroops: bigint;
 beforeEach(() => {
   quoteOut = () => 26_000_000;
+  balanceStroops = 100_000_000_000n;
 });
+
+/** The receiving account's ledger entry as the node returns it: one subentry, no sponsorship. */
+function accountEntry(id: string): xdr.LedgerEntryData {
+  return xdr.LedgerEntryData.account(
+    new xdr.AccountEntry({
+      accountId: Keypair.fromPublicKey(id).xdrAccountId(),
+      balance: xdr.Int64.fromString(balanceStroops.toString()),
+      seqNum: xdr.Int64.fromString("7"),
+      numSubEntries: 1,
+      inflationDest: null,
+      flags: 0,
+      homeDomain: "",
+      thresholds: Buffer.from([1, 0, 0, 0]),
+      signers: [],
+      ext: xdr.AccountEntryExt.v0(),
+    }),
+  );
+}
 
 describe("converting on Stellar", () => {
   /** When set, the node's simulation of the swap fails with this host error. */
@@ -162,6 +184,19 @@ describe("converting on Stellar", () => {
       const { Account } = await import("@stellar/stellar-sdk");
       return new Account(id, "7");
     });
+    vi.spyOn(node.server, "getLedgerEntries").mockImplementation(async () => ({
+      latestLedger: 10,
+      entries: [
+        {
+          key: xdr.LedgerKey.account(
+            new xdr.LedgerKeyAccount({
+              accountId: Keypair.fromPublicKey(DESTINATION).xdrAccountId(),
+            }),
+          ),
+          val: accountEntry(DESTINATION),
+        } as never,
+      ],
+    }));
     const sent: string[] = [];
     vi.spyOn(node.server, "sendTransaction").mockImplementation(async (tx) => {
       sent.push(tx.toXdr());
@@ -180,7 +215,7 @@ describe("converting on Stellar", () => {
     const signed: string[] = [];
     const engine: Pick<
       TransferEngine,
-      "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar"
+      "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar" | "stellarNetwork"
     > = {
       network: "testnet",
       stellar: {
@@ -194,6 +229,7 @@ describe("converting on Stellar", () => {
       swapVenues: createSwapVenues({ network: "testnet", soroswapProxyUrl: SPONSOR, rpcUrl: RPC }),
       rpc: node,
       usdcOnStellar: STELLAR_USDC,
+      stellarNetwork: createNetworkConfig({ id: "testnet", rpcUrl: RPC }),
     };
 
     return { engine, simulated, signed, sent, pathsAsked, amountsAsked };
@@ -243,6 +279,19 @@ describe("converting on Stellar", () => {
     const run = setUp();
     await expect(convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "0")).rejects.toThrow(
       /nothing.*arrived/i,
+    );
+    expect(run.signed).toEqual([]);
+  });
+
+  it("does not ask for a signature the account cannot pay the fee of", async () => {
+    // a live conversion from a zero-XLM account was signed and then refused by
+    // the network with txINSUFFICIENT_BALANCE; 1.5 XLM is exactly its minimum
+    balanceStroops = 15_000_000n;
+    const run = setUp();
+    await expect(
+      convertOnStellar(run.engine, usdcIntoXlm(), DESTINATION, "50000000"),
+    ).rejects.toThrow(
+      /^Converting into XLM is a transaction the receiving account signs and pays a network fee for, 0\.00002 XLM here, and it has 0 XLM to spare\. Receive USDC, or add a little XLM to the account first\.$/,
     );
     expect(run.signed).toEqual([]);
   });

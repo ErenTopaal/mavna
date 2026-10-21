@@ -679,17 +679,36 @@ function conversionFeeBlocker(
       ? OWN_DELIVERY_FEE_BUDGET_STROOPS
       : 0n;
   if (spare >= CONVERSION_FEE_BUDGET_STROOPS + delivery) return undefined;
-  const arrives = swap.from.asset.symbol;
-  const has = spare > 0n ? spare : 0n;
   return [
     "destination-unsupported",
-    `Converting into ${swap.to.asset.symbol} is a transaction the receiving account signs and ` +
-      `pays a network fee for, up to ${stroopsToXlm(CONVERSION_FEE_BUDGET_STROOPS)} XLM, and ` +
-      (check.destination === "missing"
-        ? "a new account is set up with no XLM to spare. "
-        : `it has ${stroopsToXlm(has)} XLM to spare. `) +
-      `Receive ${arrives}, or add a little XLM to the account first.`,
+    conversionFeeRefusal(
+      swap.to.asset.symbol,
+      swap.from.asset.symbol,
+      `up to ${stroopsToXlm(CONVERSION_FEE_BUDGET_STROOPS)} XLM`,
+      check.destination === "missing" ? undefined : spare,
+    ),
   ];
+}
+
+/**
+ * Why the receiving account cannot convert: it pays the fee and cannot spare
+ * it. Said the same way when quoting and when the built fee is known.
+ */
+export function conversionFeeRefusal(
+  into: string,
+  arrives: string,
+  fee: string,
+  /** What the account can spare, in stroops; undefined for one not set up yet. */
+  spare: bigint | undefined,
+): string {
+  return (
+    `Converting into ${into} is a transaction the receiving account signs and pays a network ` +
+    `fee for, ${fee}, and ` +
+    (spare === undefined
+      ? "a new account is set up with no XLM to spare. "
+      : `it has ${stroopsToXlm(spare > 0n ? spare : 0n)} XLM to spare. `) +
+    `Receive ${arrives}, or add a little XLM to the account first.`
+  );
 }
 
 /**

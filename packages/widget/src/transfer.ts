@@ -14,7 +14,13 @@
 import { AttestationService, fromHex, parseForwarderHookData, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import {
+  type DestinationLane,
+  inspectDestination,
+  readAccountEntry,
+  spareStroops,
+  stroopsToXlm,
+} from "@mavna/stellar";
 import { detailOf } from "@mavna/swap";
 import {
   FeeBumpTransaction,
@@ -32,7 +38,13 @@ import {
   OWN_TRUSTLINE_FEE_STROOPS,
   type OwnDelivery,
 } from "./own-delivery";
-import { type RouteView, settlementBlocker, trustlineNameOf, type Wanted } from "./quote";
+import {
+  conversionFeeRefusal,
+  type RouteView,
+  settlementBlocker,
+  trustlineNameOf,
+  type Wanted,
+} from "./quote";
 import {
   adapterFor,
   attestationWait,
@@ -455,7 +467,10 @@ function withFunds(cause: unknown, funds: string): unknown {
 
 /** Convert the arrived USDC into XLM through the first venue that serves the pair. */
 export async function convertOnStellar(
-  engine: Pick<TransferEngine, "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar">,
+  engine: Pick<
+    TransferEngine,
+    "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar" | "stellarNetwork"
+  >,
   route: Route,
   owner: string | undefined,
   /**
@@ -523,6 +538,17 @@ export async function convertOnStellar(
     // the host's own text is for whoever runs the page
     console.warn("[mavna] the conversion could not be built:", detailOf(cause));
     throw cause;
+  }
+  // the account pays this fee itself: one it cannot spare would be signed and
+  // then refused by the network, so it is checked against the ledger first
+  const entry = await readAccountEntry(engine.rpc, account);
+  const spare =
+    entry === undefined ? 0n : spareStroops(entry, engine.stellarNetwork.baseReserveStroops);
+  const fee = BigInt(unsigned.fee);
+  if (spare < fee) {
+    throw new Error(
+      conversionFeeRefusal(wanted.symbol, asset.symbol, `${stroopsToXlm(fee)} XLM here`, spare),
+    );
   }
   const signed = await engine.stellar.sign(unsigned.toXdr(), account);
   const parsed = TransactionBuilder.fromXdr(signed, unsigned.networkPassphrase);
