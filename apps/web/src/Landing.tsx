@@ -432,8 +432,8 @@ export function Landing(): ReactNode {
   useEffect(() => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    // --- Hero shader: a plate refracted through slanted glass slats, with a red
-    // light behind the glass that follows the pointer and bends the slats near it. ---
+    // --- Hero shader: a plate refracted through slanted glass slats, with a light
+    // behind the glass that follows the pointer and bends the slats near it. ---
     let plate: HTMLCanvasElement | null = null;
     let markImg: HTMLImageElement | null = null;
     let ro: ResizeObserver | null = null;
@@ -513,10 +513,10 @@ export function Landing(): ReactNode {
           "    col += texture2D(u_tex, tuv + offs + o).rgb;",
           "  }",
           "  col /= 5.0;",
-          // a red light behind the glass, broken up by the same refraction
+          // a soft white light behind the glass, broken up by the same refraction
           "  vec2 gl2 = dm + offs * vec2(ar, 1.0) * 9.0;",
           "  float glow = exp(-dot(gl2, gl2) * 7.0);",
-          "  col = mix(col, vec3(0.86, 0.30, 0.22), glow * 0.17);",
+          "  col = mix(col, vec3(1.0), glow * 0.35);",
           "  float hi = smoothstep(0.55, 1.0, 1.0 - abs(c + 0.52)) * (0.6 + 0.4 * hash(ii + 9.0));",
           "  col += hi * 0.05;",
           "  col -= smoothstep(0.82, 1.0, abs(c)) * 0.05;",
