@@ -59,6 +59,11 @@ interface RouteRejection {
 - `detail`, when present, carries a node's or a service's own words, which can include raw protocol
   text and URLs. Log it for yourself; show your user `explanation`.
 
+Every rail checks `destination` before it asks any network. An empty destination, a secret key, or
+text that is not a Stellar address is refused as `destination-unsupported` with the same
+`explanation` on every rail, the sentence `recipientRefusal` in `@mavna/stellar` returns. That
+sentence never repeats the input, so nothing pasted is echoed back into your page.
+
 ## Ranking
 
 `ranking` orders the routes:

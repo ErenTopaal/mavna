@@ -33,6 +33,12 @@ Which field a rail can find a transfer by:
 A handle with only `destinationAddress` answers `idle` on every rail: a Stellar address alone does
 not identify one transfer.
 
+Circle CCTP, Axelar and LayerZero also answer `idle` for a `sourceTxHash` their index has no record
+of. Each index answers the same for a hash it has never seen and for one it has not listed yet, so
+`idle` claims neither failure nor progress. When you watch a transfer you
+sent, keep asking; when you look up a pasted hash, `idle` means no rail lists it. A Circle burn that
+Circle has observed and is still confirming answers `pending`.
+
 ## Turn what your user pasted into a handle
 
 `parseLookupKey` classifies a pasted string, and `toHandle` turns the result into a handle:

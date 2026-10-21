@@ -25,7 +25,10 @@ the account keeps what arrived.
    account as the one paid, and a minimum no lower than the sender's floor.
 2. **SushiSwap**, on the main network, for pairs that include USDT0.
 3. **Aquarius**, on both networks. It routes through Soroban pools, so it can deliver to a contract
-   address.
+   address. Aquarius's routing service finds the path, and the provider prices that same path again
+   with the router's `estimate_swap`, hop by hop, against the pools as they are now. The quote is
+   the lower of the two figures, because the service's figure can lag a pool a recent swap moved,
+   and a floor set from it would fail. A path the router will not price is a retryable refusal.
 
 The exchanges are asked at the same time, and the answers are read in this order: the first that
 is usable and quotes wins, even when a later one would quote more. The order is a preference, not
@@ -50,9 +53,15 @@ It turns the route into a refusal, with the reason, when:
 An exchange's own error text can carry raw node output, so it goes only into the refusal's `detail`,
 never its `explanation`.
 
+The account that signs the conversion pays its network fee. When it quotes, the widget declines a
+route that converts unless the receiving account has 0.1 XLM to spare above its minimum balance,
+and 0.1 XLM more when it also pays for its own Circle delivery. An account the sponsor sets up holds
+exactly its minimum, so a route that converts to a new account is declined.
+
 When the transfer reaches the conversion, the widget asks the exchanges for a fresh price, refuses
-to continue if it is below the minimum the sender was shown, and has the account sign the transaction
-the winning exchange builds.
+to continue if it is below the minimum the sender was shown, builds the transaction, and refuses
+again if its fee is more than the account can spare. Only then does the account sign the
+transaction the winning exchange built.
 
 ## Converting on arrival
 

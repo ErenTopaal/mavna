@@ -21,8 +21,9 @@ the page.
 
 `variant: "drawer"` puts the compact card in a popup that rises from the bottom over a dimmed page.
 By default it comes with its own button, labelled **Bring funds to Stellar**. It closes on its close
-button, the dimmed backdrop, or the Escape key. While your user's wallet is showing a prompt, the
-drawer stays open.
+button, the dimmed backdrop, or the Escape key. Escape first closes a menu open inside the widget,
+or goes back from a screen such as the chain picker, and closes the drawer only when there is
+neither. While your user's wallet is showing a prompt, the drawer stays open.
 
 <LiveWidget variant="drawer" />
 

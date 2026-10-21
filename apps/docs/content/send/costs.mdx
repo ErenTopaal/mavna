@@ -25,16 +25,29 @@ reserve. The sponsor provides it up front, and part of the arriving money pays i
 an amount you approve before anything is sent. See
 [Send to a new Stellar address](/send/new-address).
 
-When the transfer also converts to another asset, the review adds
-**Left unconverted to repay the reserve**: the part of the arrival kept back for that repayment.
+The review also shows the most the repayment can take of what arrives:
 
-On a deployment whose sponsor covers no reserves, an existing account pays its own reserve, shown
-as **Reserve, from your own XLM**.
+- **Repays the reserve, from what arrives**, as **Up to** an amount, when the money arrives as the
+  asset you sent. The repayment takes only what buying back the reserve costs, never more than this.
+- **Left unconverted to repay the reserve**, when the transfer also converts to another asset: the
+  part of the arrival kept back for that repayment.
+
+## When the account pays its own way
+
+On a deployment whose sponsor covers no costs, the receiving account pays from its own XLM, and the
+review lists each cost:
+
+- **Reserve, from your own XLM**: the reserve of an existing account that cannot hold the asset
+  yet.
+- **Delivery fee, from your own XLM**, shown as **Up to 0.1 XLM** on a Circle route: the account
+  signs and pays the delivery on Stellar itself.
 
 ## Conversion
 
-When you [receive XLM instead](/send/receive-xlm), the conversion runs at the exchange's price. It
-has no fee line of its own; the route shows the **Conversion rate** and the minimum you receive.
+When you [receive XLM instead](/send/receive-xlm), the conversion runs at the exchange's price, and
+the route shows the **Conversion rate** and the minimum you receive. The conversion is a
+transaction the receiving account signs, so the account pays its network fee in XLM. The quote
+checks that the account can spare 0.1 XLM for it.
 
 ## Integrator fee
 
