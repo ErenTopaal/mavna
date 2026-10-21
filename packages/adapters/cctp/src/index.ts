@@ -37,7 +37,7 @@ export {
   localToCanonical,
   MAX_FEE_IS_IN_LOCAL_DECIMALS,
 } from "./delivery.js";
-export { standardAttestationSeconds } from "./finality.js";
+export { expectedBridgeSeconds, standardAttestationSeconds } from "./finality.js";
 export type { ForwardRecipientKind } from "./hook.js";
 export {
   buildForwarderHookData,

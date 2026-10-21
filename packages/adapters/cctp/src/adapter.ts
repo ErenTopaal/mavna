@@ -38,7 +38,7 @@ import { buildApproval, buildBurn, ERC20_ABI, FINALITY, TOKEN_MESSENGER_ABI } fr
 import { deploymentFor, EVM_DEPLOYMENTS, explorerTxUrl, sourceChainsFor } from "./chains.js";
 import { CCTP_CONTRACTS, STELLAR_DOMAIN } from "./config.js";
 import { canonicalToLocal } from "./delivery.js";
-import { standardAttestationSeconds } from "./finality.js";
+import { expectedBridgeSeconds } from "./finality.js";
 import { fromHex, parseForwarderHookData } from "./hook.js";
 import { nonEvmChainFor, nonEvmChainsFor, nonEvmExplorerTxUrl } from "./nonevm.js";
 import { DeliveryProof } from "./proof.js";
@@ -286,10 +286,9 @@ export class CctpAdapter implements BridgeAdapter {
     });
 
     const receives: Amount = { asset: request.to, baseUnits: delivered };
-    // the bridge step waits out the source chain's finality before Circle
-    // attests, plus a little for Circle's own polling and the mint
+    // the bridge step waits out the source chain's finality before Circle attests
     const stepSeconds = (kind: string): number =>
-      kind === "bridge" ? standardAttestationSeconds(domain) + 60 : 30;
+      kind === "bridge" ? expectedBridgeSeconds(domain) : 30;
 
     return {
       id: `cctp-${request.from.chainId}-stellar`,

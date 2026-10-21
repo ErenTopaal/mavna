@@ -39,6 +39,14 @@ const STANDARD_SECONDS: Readonly<Record<number, number>> = {
   37: 19 * 60, // x layer
 };
 
+/**
+ * The bridge step from this domain: the attestation, plus a minute for Circle's
+ * polling and the mint on Stellar.
+ */
+export function expectedBridgeSeconds(domain: number): number {
+  return standardAttestationSeconds(domain) + 60;
+}
+
 export function standardAttestationSeconds(domain: number): number {
   const seconds = STANDARD_SECONDS[domain];
   if (seconds === undefined) {

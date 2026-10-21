@@ -11,7 +11,7 @@
  * hover/active/focus go through `pseudo(...)`; the FLIP and panel choreography are
  * the design's own methods, unchanged.
  */
-import { ERC20_ABI } from "@mavna/adapter-cctp";
+import { ERC20_ABI, expectedBridgeSeconds } from "@mavna/adapter-cctp";
 import { escalateIfOverdue, parseLookupKey, toHandle } from "@mavna/status";
 import { stroopsToXlm } from "@mavna/stellar";
 import React, { type ReactNode } from "react";
@@ -45,7 +45,7 @@ import {
   toRouteView,
   type Wanted,
 } from "./quote";
-import { lookupAcross } from "./rails";
+import { lookupAcross, waitPhrase } from "./rails";
 import {
   onPrimary,
   onPrimaryCompact,
@@ -1606,7 +1606,9 @@ export class Flow extends React.Component<FlowProps, State> {
         });
       } else if (outcome.kind === "not-attested-yet") {
         this.setState({
-          lookupNote: "Circle has not attested it yet. Nothing is wrong; try again in a minute.",
+          lookupNote:
+            "Circle has not attested it yet. Nothing is wrong: from this chain that usually " +
+            `takes ${waitPhrase(expectedBridgeSeconds(domain))}.`,
           lookupNoteKind: "quiet",
           finishTries: this.state.finishTries + 1,
         });

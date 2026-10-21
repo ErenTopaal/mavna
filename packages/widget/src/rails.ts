@@ -24,10 +24,15 @@ export type StepTemplate = Omit<FlightStep, "phase">;
  * adapter's bridge step carries it.
  */
 export function attestationWait(route: Route): string {
-  const seconds = route.steps.find((s) => s.kind === "bridge")?.estimatedSeconds ?? 0;
-  if (seconds < 90) return "About a minute.";
-  if (seconds < 5400) return `About ${Math.round(seconds / 60)} minutes.`;
-  return `About ${Math.round(seconds / 3600)} hours.`;
+  const phrase = waitPhrase(route.steps.find((s) => s.kind === "bridge")?.estimatedSeconds ?? 0);
+  return `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
+}
+
+/** A wait in the largest unit that reads naturally: "about 20 minutes". */
+export function waitPhrase(seconds: number): string {
+  if (seconds < 90) return "about a minute";
+  if (seconds < 5400) return `about ${Math.round(seconds / 60)} minutes`;
+  return `about ${Math.round(seconds / 3600)} hours`;
 }
 
 /** The adapter that quoted a route, which is the only one that can build it. */
