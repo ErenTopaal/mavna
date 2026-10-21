@@ -337,7 +337,7 @@ describe("execute", () => {
     );
     const { connection } = wallet({ sendFails: raw });
     const { done } = run(connection, [approve(), send]);
-    const error = await done.catch((e: unknown) => e as Error);
+    const error = (await done.catch((e: unknown) => e)) as Error;
     expect(error.message).toBe(
       "Your approval went through, but the chain has not shown it yet, so the transfer was not sent. Nothing was burned or sent; start the transfer again in a moment.",
     );
