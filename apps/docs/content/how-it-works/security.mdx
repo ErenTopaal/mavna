@@ -1,0 +1,68 @@
+---
+title: Security model
+description: The properties Mavna holds, and the place in the code that enforces each one.
+---
+
+Most mistakes in moving money across chains cannot be undone, so each property below names where it
+is enforced, for you to check in the code.
+
+## Nothing in the SDK signs
+
+The SDK packages build transactions and return them unsigned. Outside `@mavna/widget`, no package
+calls a signing function. The widget signs through the sender's own wallets, in
+`packages/widget/src/execute.ts` for the sending chain. A secret key handed where an address belongs
+is refused outright (`classifyAddress` in `@mavna/stellar`).
+
+## The one key is bounded
+
+The sponsor service is the only process that holds a key. It signs only the transactions listed in
+[Run Mavna](/operate#what-the-sponsor-signs), each checked in `services/sponsor/src/server.ts`
+before it signs: an allowlist of operations per endpoint, a source check on account setups, and a
+held, signed repayment before any setup. Daily caps bound what it can lose
+([Capacity and caps](/operate/capacity)), and the assets it lets accounts hold come from its own
+list, never from a request.
+
+## Paths that can destroy funds validate first
+
+A wrong CCTP hook encoding mints to an address that can never move the funds. The adapter validates
+the recipient and both the `mintRecipient` and `destinationCaller` fields before it builds anything,
+and throws rather than produce a plausible wrong transaction (`packages/adapters/cctp/src/hook.ts`).
+A route carries its own destination, so it cannot be built for another address.
+
+## Remote answers are checked before they move money
+
+Quotes, fee estimates and registries from other services are validated before they shape a
+transaction. Axelar's fee estimate of zero is refused as an unrecognised chain; LayerZero's OFT is
+refused when it is registered on another endpoint than the current one; Stellar answers from a node
+behind a ledger already seen are rejected by `RpcClient`. Where a value can move between the quote
+and settlement, the sender's exposure is bounded by a number they chose: the minimum received, and
+the most a repayment can spend.
+
+## Asset identity
+
+An asset is identified by its code and issuer on Stellar and by its contract elsewhere, never by its
+symbol. See [Assets and amounts](/how-it-works/assets-and-amounts).
+
+## What the sender signs
+
+Every transaction comes with a sentence that says what signing it does. Approvals are for the exact
+amount, never unlimited. The number of signatures is stated on the quote, before anything moves.
+
+## Failing safely
+
+An undelivered Circle mint stays deliverable, and delivering again never mints twice. A conversion
+that cannot meet the sender's minimum leaves the arrived asset in the account. A repayment that cannot
+land leaves the sender with everything that arrived. A status that has no evidence of failure is
+reported as pending, never failed.
+
+## Turning a dependency off
+
+Any rail can be taken out of rotation without a release, and senders see the operator's reason
+instead of a missing route. See [Turn off a rail](/operate/turn-off-a-rail).
+
+## The widget's dependencies
+
+The widget runs inside other products' pages. React and React DOM are its only peer dependencies.
+The workspace pins every dependency to an exact version behind a lockfile, installs no release
+younger than one day, blocks exotic sub-dependencies, and runs install scripts only for packages it
+names (`pnpm-workspace.yaml`).

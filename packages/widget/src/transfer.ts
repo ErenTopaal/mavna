@@ -14,7 +14,13 @@
 import { AttestationService, fromHex, parseForwarderHookData, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter, NetworkId, Route, TransferHandle } from "@mavna/core";
 import { isSuccess } from "@mavna/core";
-import { type DestinationLane, inspectDestination, stroopsToXlm } from "@mavna/stellar";
+import {
+  type DestinationLane,
+  inspectDestination,
+  readAccountEntry,
+  spareStroops,
+  stroopsToXlm,
+} from "@mavna/stellar";
 import { detailOf } from "@mavna/swap";
 import {
   FeeBumpTransaction,
@@ -32,9 +38,16 @@ import {
   OWN_TRUSTLINE_FEE_STROOPS,
   type OwnDelivery,
 } from "./own-delivery";
-import { type RouteView, settlementBlocker, trustlineNameOf, type Wanted } from "./quote";
+import {
+  conversionFeeRefusal,
+  type RouteView,
+  settlementBlocker,
+  trustlineNameOf,
+  type Wanted,
+} from "./quote";
 import {
   adapterFor,
+  attestationWait,
   destinationBlocker,
   endedNote,
   pollSettlement,
@@ -272,7 +285,7 @@ async function collectSettlement(
   });
   // a conversion has to leave the repayment its share
   const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
-  const signed = await engine.stellar.sign(built.xdr, address);
+  const signed = await signing(engine, built.xdr, address, "the repayment", funds);
   await engine.sponsor.commitSettlement(route.destination, signed).catch((cause: unknown) => {
     throw withFunds(cause, funds);
   });
@@ -333,7 +346,7 @@ async function openOwnTrustline(
         `for the receiving account), so it was not signed. ${funds}`,
     );
   }
-  const signed = await engine.stellar.sign(preparation.xdr, address);
+  const signed = await signing(engine, preparation.xdr, address, "the trustline", funds);
   await engine.sponsor.submitPreparation(signed).catch((cause: unknown) => {
     throw withFunds(cause, funds);
   });
@@ -414,7 +427,7 @@ async function prepareSponsored(
     if (problem !== undefined) {
       throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
     }
-    const signed = await engine.stellar.sign(preparation.xdr, address);
+    const signed = await signing(engine, preparation.xdr, address, "the account's setup", funds);
     try {
       await engine.sponsor.submitPreparation(signed);
       return;
@@ -426,6 +439,27 @@ async function prepareSponsored(
   }
 }
 
+/**
+ * Ask the Stellar wallet to sign, and when it does not, say which signature it
+ * was and what that means for the funds. Wallets in the kit share no code for a
+ * refusal, so whatever the reason, the wallet's own words go in brackets.
+ */
+async function signing(
+  engine: Pick<TransferEngine, "stellar">,
+  xdr: string,
+  address: string,
+  what: string,
+  funds: string,
+): Promise<string> {
+  try {
+    return await engine.stellar.sign(xdr, address);
+  } catch (cause) {
+    throw new Error(
+      `Your Stellar wallet did not sign ${what} (${asError(cause).message}). ${funds}`,
+    );
+  }
+}
+
 /** A sponsor's refusal, with what it means for the user's funds said after it. */
 function withFunds(cause: unknown, funds: string): unknown {
   return cause instanceof SponsorRefusal ? new Error(`${cause.message} ${funds}`) : cause;
@@ -433,7 +467,10 @@ function withFunds(cause: unknown, funds: string): unknown {
 
 /** Convert the arrived USDC into XLM through the first venue that serves the pair. */
 export async function convertOnStellar(
-  engine: Pick<TransferEngine, "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar">,
+  engine: Pick<
+    TransferEngine,
+    "network" | "stellar" | "swapVenues" | "rpc" | "usdcOnStellar" | "stellarNetwork"
+  >,
   route: Route,
   owner: string | undefined,
   /**
@@ -501,6 +538,17 @@ export async function convertOnStellar(
     // the host's own text is for whoever runs the page
     console.warn("[mavna] the conversion could not be built:", detailOf(cause));
     throw cause;
+  }
+  // the account pays this fee itself: one it cannot spare would be signed and
+  // then refused by the network, so it is checked against the ledger first
+  const entry = await readAccountEntry(engine.rpc, account);
+  const spare =
+    entry === undefined ? 0n : spareStroops(entry, engine.stellarNetwork.baseReserveStroops);
+  const fee = BigInt(unsigned.fee);
+  if (spare < fee) {
+    throw new Error(
+      conversionFeeRefusal(wanted.symbol, asset.symbol, `${stroopsToXlm(fee)} XLM here`, spare),
+    );
   }
   const signed = await engine.stellar.sign(unsigned.toXdr(), account);
   const parsed = TransactionBuilder.fromXdr(signed, unsigned.networkPassphrase);
@@ -598,17 +646,18 @@ async function deliverToStellar(
   // said once, and said again only to upgrade: a later answer that the sponsor is
   // watching makes closing safe after all, while nothing ever downgrades it
   let told: "nothing" | "paused" | "settled" = ownDelivery ? "settled" : "nothing";
+  const attesting = attestationWait(route);
   const tellClosing = (watching: boolean): void => {
     if (told === "settled" || (told === "paused" && !watching)) return;
     told = watching ? "settled" : "paused";
     patch("attest", {
       phase: "pending",
       note: !watching
-        ? "A few minutes. Closing this page pauses the delivery; you can finish it under Activity."
+        ? `${attesting} Closing this page pauses the delivery; you can finish it under Activity.`
         : !prepared && route.steps.some((s) => s.kind === "prepare-account")
-          ? "A few minutes. Closing this page pauses setting up the new account, which your " +
+          ? `${attesting} Closing this page pauses setting up the new account, which your ` +
             "wallet signs once Circle attests; you can finish it under Activity."
-          : "A few minutes. Safe to close this page: the sponsor delivers it when Circle attests.",
+          : `${attesting} Safe to close this page: the sponsor delivers it when Circle attests.`,
     });
   };
   for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -887,6 +936,7 @@ async function send(
         decimals: route.sends.asset.decimals,
         startedAtUnix,
         explorerUrl: route.fromChain.explorerTxUrl(hash),
+        expectedSeconds: route.estimatedSeconds,
       },
       engine.historyKey,
     );

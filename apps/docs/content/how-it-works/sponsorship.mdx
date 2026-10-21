@@ -1,0 +1,70 @@
+---
+title: Sponsorship
+description: How a Stellar address with no XLM receives a transfer. The reserve is a loan, and its repayment is signed before the loan is made.
+---
+
+A Stellar account needs XLM locked as a reserve before it can exist and hold an asset, and someone
+arriving from another chain has no XLM. Sponsorship covers that: the sponsor provides the reserve,
+and the arriving money pays it back. One rule shapes the mechanism: **the reserve is a loan, and its
+repayment is signed before the loan is made.**
+
+## What it costs
+
+Stellar locks a reserve per unit of ledger space: an account takes two units and each trustline one.
+At the base reserve of 0.5 XLM per unit that `@mavna/stellar`'s network configuration uses by
+default, a new account that holds one asset locks 1.5 XLM. The route lists it as an
+`account-reserve` fee, a kind of its own, because the XLM ends up locked in the sender's own account.
+
+`inspectDestination` in `@mavna/stellar` reads in one pass what a destination needs:
+
+| Lane | Meaning | Reserve units |
+| --- | --- | --- |
+| `ready` | an account that can take the asset now | 0 |
+| `contract-ready` | a contract that exists on this network | 0 |
+| `needs-trustline` | an account that cannot hold the asset yet | 1 |
+| `needs-account` | no account at all | 3, or 2 when the asset is XLM |
+| `unusable` | cannot receive, with the reason: for example, no contract behind a contract address, or a trustline the issuer has not authorised or that has no room left | 0 |
+
+## The smallest transfer
+
+A transfer that needs sponsoring has a floor, checked at quote time: four times the reserve,
+valued at the current XLM price. The price is read from Stellar's own order book through Horizon,
+as the average over the first 1,000 XLM of bids and of asks, so a single small order cannot move it.
+Below the floor the route declines with the smallest amount that works, for example "Send at least 6
+XLM of value, or send to an address that already has one."
+
+## The order
+
+1. **The repayment, first.** While the sender is present, the receiving account signs a repayment
+   transaction, built by the sponsor on one of its channel accounts. Its path payment buys back
+   exactly the XLM the reserve needs from the arriving asset, and spends at most twice its value at
+   the current price, so the account's exposure is a number it sees before signing. The signed
+   repayment is held, unsubmitted, because the money it spends has not arrived. The sponsor refuses
+   to set up any account it holds no repayment for.
+2. **The send.** The sender signs the source-chain transactions.
+3. **The setup, as late as possible.** One transaction, sourced and paid by the sponsor, creates the
+   account with a zero starting balance and adds the trustline, wrapped in sponsorship operations.
+   The account co-signs it, at no cost. On the Circle rail this happens after Circle attests the
+   transfer, so the sponsor puts its XLM out only for a burn Circle has confirmed; on rails that deliver by themselves it happens
+   before the send, because they cannot deliver to an account that does not exist. A setup adds at
+   most two trustlines.
+4. **The repayment lands.** Once the money arrives, the held repayment is countersigned by the
+   channel and the sponsor and submitted. Its operations hand the reserves over to the account, so
+   the account holds its own reserve and owes nothing.
+
+For Circle, the sponsor submits the repayment together with the delivery. For LayerZero and Axelar,
+which deliver without the sponsor, `POST /settle` and the sponsor's background sweep submit it once
+the money has arrived.
+
+## What a failure costs
+
+A repayment signed and never sent commits nothing. A delivery that lands while its repayment cannot
+leaves the sender with everything that arrived and the sponsor still carrying the reserve; such a
+sponsorship counts as a stranding. Daily caps on new sponsorships and on strandings bound what the
+sponsor can lose; [Capacity and caps](/operate/capacity) describes them.
+
+## Where it runs
+
+`buildPreparation` and `buildSettlement` in `@mavna/stellar` build the two transactions and return
+them unsigned. The key, the held repayments, the caps and the delivery live in the
+[sponsor service](/operate), which you can run yourself.

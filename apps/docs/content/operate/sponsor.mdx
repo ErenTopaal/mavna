@@ -1,0 +1,87 @@
+---
+title: Sponsor configuration
+description: Every environment variable the sponsor service reads, its default, and what it changes.
+---
+
+The sponsor reads its settings from environment variables once, at start. It checks every setting
+before it listens, and a mistake stops the process with a message that names the variable. An empty
+value counts as unset, because Docker Compose passes an unset `${NAME:-}` as an empty string.
+
+## Required
+
+| Variable | What it is |
+| --- | --- |
+| `SPONSOR_SECRET_KEY` | The secret key of the funded Stellar account the sponsor pays from. The process exits without it, and the message never repeats the value. Keep it out of the repository, client bundles and logs. |
+
+## Network and endpoints
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `MAVNA_NETWORK` | `testnet` | `testnet` or `mainnet`. |
+| `STELLAR_RPC_URL` | the public testnet endpoint; on mainnet, the first entry of `PUBLIC_MAINNET_RPC_URLS` in `@mavna/stellar` | The Stellar RPC the sponsor reads and submits through. At start, the sponsor refuses a node that serves another network than `MAVNA_NETWORK`. |
+| `MAVNA_IRIS_URL` | `https://iris-api-sandbox.circle.com` on testnet, `https://iris-api.circle.com` on mainnet | Circle's attestation service. |
+| `MAVNA_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4319` | Comma-separated browser origins allowed to call the sponsor. List every page whose widget uses it. |
+| `PORT` | `8787` | The port the sponsor listens on. |
+
+## Who pays
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `MAVNA_RESERVE_FUNDING` | `sponsor` | `sponsor`: the sponsor provides a new account's reserve, is repaid from the arrival, and pays for Circle deliveries on Stellar. `self`: each account pays its own reserve and its own Circle delivery, an address that does not exist yet is declined at the quote, and `/deliver` and `/compose` answer `409`. |
+| `MAVNA_MIN_DELIVERY_USDC` | `1` | The smallest Circle transfer, in USDC with up to six decimals, the sponsor pays to deliver. `0` delivers any amount. |
+| `MAVNA_DELIVERY_BUDGET_XLM` | `25` | The most the sponsor spends on delivery fees in one UTC day, in XLM with up to seven decimals. Past it, `/deliver` answers `503` until the next day. |
+
+## State
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `MAVNA_STATE_DIR` | none: state in memory, lost on restart | The directory for the caps, the held repayments, the transactions built and the channel keys. Holds secret keys, so keep it on a private volume. |
+| `MAVNA_PRODUCTION` | `false` | `true` marks a production sponsor on any network; a mainnet sponsor always is one. A production sponsor refuses to start without `MAVNA_STATE_DIR`. |
+
+The state records the network it was written for, and the sponsor refuses to start on another
+network against it. Give each network its own directory.
+
+## Limits
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `MAVNA_CAP_STRANDING_PER_DAY` | `75` | Sponsorships that can strand in a UTC day before sponsorship pauses. |
+| `MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY` | `300` | Sponsorships a day from chains where gas is expensive. |
+| `MAVNA_CAP_VOLUME_CHEAP_PER_DAY` | `200` | Sponsorships a day from chains where gas is cheap. |
+| `MAVNA_PROVISIONAL_SETTLEMENTS` | `16` | Repayments not yet backed by an account setup that can hold a channel at once, across all clients. At least 1. |
+| `MAVNA_SETTLEMENTS_PER_CLIENT` | `2` | Such repayments one client address can have at once. `0` turns this limit off. |
+| `MAVNA_CHANNEL_FLOOR` | `4` | Channels the sponsor keeps however long they sit idle. |
+| `MAVNA_RATE_LIMIT_PER_MINUTE` | `120` | Requests per client address per minute, on every endpoint. `0` turns it off. |
+| `MAVNA_SETTLE_SWEEP_SECONDS` | `120` | How often the background sweep runs. `0` turns it off. |
+
+[Capacity and caps](/operate/capacity) explains how these work together.
+
+## Behind a proxy
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `MAVNA_TRUST_PROXY` | `false` | `true` when the sponsor runs behind a reverse proxy: the client address is then the last entry of `X-Forwarded-For`, the one the proxy added. Set it only when the proxy is the only way to reach the sponsor's port; otherwise anyone can send their own `X-Forwarded-For` and choose their rate-limit identity. |
+
+An IPv6 client is counted by its /64 network for every per-address limit.
+
+## Optional services
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `SOROSWAP_API_KEY` | none: no Soroswap proxy | Soroswap's API key. With it, the sponsor serves `/swap/soroswap/*` so the key never reaches a browser. A secret, like the sponsor key. |
+| `MAVNA_ARRIVAL_CONTRACT` | none: `/compose` answers `404` | The Arrival Contract whose overdue conversions the sponsor finishes and whose storage it renews daily. |
+| `MAVNA_ARRIVAL_EXECUTOR_SECRET` | none | A separate key, never the sponsor key, that signs only the authorization each finish needs. Required with `MAVNA_ARRIVAL_CONTRACT` when reserves are funded by the sponsor; the process exits without it. |
+
+## Curated assets
+
+The assets the sponsor lets an account hold are fixed per network in
+`services/sponsor/src/assets.ts`, not accepted from requests: a client asks by name, and the issuer
+comes from this list.
+
+| Network | Assets |
+| --- | --- |
+| testnet | USDC issued by `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` |
+| mainnet | USDC issued by `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`, and USDT0 issued by `GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q` |
+
+A setup the sponsor pays for opens only USDC, the asset its repayment is made in. USDT0 is opened
+only for an account that pays its own reserve.

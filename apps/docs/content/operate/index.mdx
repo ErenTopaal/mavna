@@ -1,0 +1,47 @@
+---
+title: Run Mavna
+description: What a Mavna deployment consists of, and the one process in it that holds a key.
+---
+
+A Mavna deployment is a set of static pages and one service:
+
+- **The pages**: the app (`apps/app`), the landing page (`apps/web`), the playground
+  (`apps/playground`) and these docs (`apps/docs`). Each builds to static files that any web
+  server can serve.
+- **The sponsor service** (`services/sponsor`): a Node process with a funded Stellar key. It sets up
+  new Stellar accounts, delivers Circle transfers on Stellar, and finishes overdue conversions on
+  arrival. A sponsor serves one network, so each network you offer needs its own.
+
+The sponsor is the only process in Mavna that holds a key. You can run every part yourself, with
+your own key.
+
+## What the sponsor signs
+
+The sponsor signs only these transactions, and each is checked in `services/sponsor/src/server.ts`
+before it is signed:
+
+1. **Account setups it built itself.** It countersigns and pays for a preparation only when the
+   sponsor is its source, its operations are only `beginSponsoringFutureReserves`,
+   `endSponsoringFutureReserves`, `createAccount` and `changeTrust`, the account has signed it, and
+   the account's signed repayment is already held.
+2. **Circle deliveries.** It submits the mint for an attested Circle transfer. The recipient is read
+   from Circle's attested message, so the caller cannot choose it.
+3. **Its part of a repayment.** The account signs the repayment when the transfer starts; the
+   sponsor adds the channel's and its own signatures only when it submits it.
+4. **Finishes of a conversion on arrival.** It pays the fee for a conversion the Arrival Contract has
+   queued, and a separate executor key signs the one authorization the run needs.
+5. **Its own upkeep**: funding its settlement channels, creating the executor account, and renewing
+   the Arrival Contract's storage once a day.
+
+With `MAVNA_RESERVE_FUNDING=self`, the sponsor pays for none of these: each account pays its own
+reserve and its own delivery, and the sponsor only builds the account's own trustline transaction
+for it to sign and relays it.
+
+## Where to go next
+
+- [Run it locally](/operate/local) with Docker Compose, or the sponsor on its own.
+- [Sponsor configuration](/operate/sponsor): every environment variable.
+- [Capacity and caps](/operate/capacity): what limits the sponsor's spending.
+- [Sponsor HTTP API](/operate/api): every endpoint.
+- [Deploy to production](/operate/deploy): the build, the settings and the proxy.
+- [Turn off a rail](/operate/turn-off-a-rail) during an incident.

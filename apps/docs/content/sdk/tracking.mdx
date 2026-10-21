@@ -1,0 +1,100 @@
+---
+title: Track and resume a transfer
+description: Read a transfer's state from the chain with a lookup key, keep it moving forward only, and tell a slow transfer from a stalled one.
+---
+
+`@mavna/status` holds the functions for tracking a transfer and finding it again. Everything is read
+from the chains: local storage is a convenience, never the record. Reading a transfer's state needs
+no wallet; only acting on it, such as finishing a delivery, needs a signature.
+
+## Ask a rail where a transfer is
+
+Every adapter has `status(handle)`, which returns the transfer's current `StepPhase`. A
+`TransferHandle` carries what you know about the transfer:
+
+```ts
+const phase = await cctp.status({
+  sourceTxHash: "0x...",
+  depositAddress: undefined,
+  destinationAddress: undefined,
+  sourceChainId: undefined,
+});
+```
+
+Which field a rail can find a transfer by:
+
+| Rail | Finds a transfer by |
+| --- | --- |
+| Circle CCTP | `sourceTxHash`, searching every source chain when `sourceChainId` is absent |
+| Axelar | `sourceTxHash` |
+| LayerZero | `sourceTxHash` |
+| NEAR Intents | `depositAddress`, or `sourceTxHash`, from which it reads the deposit address |
+
+A handle with only `destinationAddress` answers `idle` on every rail: a Stellar address alone does
+not identify one transfer.
+
+## Turn what your user pasted into a handle
+
+`parseLookupKey` classifies a pasted string, and `toHandle` turns the result into a handle:
+
+```ts
+import { parseLookupKey, toHandle } from "@mavna/status";
+
+const handle = toHandle(parseLookupKey(pasted));
+```
+
+| Input | Read as |
+| --- | --- |
+| 64 hex digits, with or without `0x` | source transaction |
+| a Stellar address starting with `G`, `M` or `C` | destination address |
+| `0x` and 40 hex digits | deposit address |
+| any other `0x` hex value of up to 64 digits | source transaction (a Starknet hash without leading zeros) |
+| 64 to 88 base58 characters | source transaction (a Solana signature) |
+
+Anything else throws a `MavnaError` with a sentence to show your user. `toHandle` leaves
+`sourceChainId` empty unless you pass it, so a rail that serves many chains searches them all.
+
+## Phases
+
+`StepPhase` is one of these, by its `phase` field:
+
+| Phase | Meaning |
+| --- | --- |
+| `idle` | nothing found, or not started |
+| `blocked` | waiting on your user, with a `Blocked` reason |
+| `pending` | moving, with an on-chain reference and when it is expected |
+| `stalled` | overdue, with how long and a `Remedy` that says what to do |
+| `done` | arrived, with the amount received |
+| `refunded` | returned, with the address and the amount |
+| `partial` | part of it arrived, with what was received and what was expected |
+| `failed` | ended without arriving, with the cause and a remedy |
+| `delivered-conversion-pending` | delivered to the Arrival Contract, with the conversion still to run |
+| `delivered-and-converted` | delivered and converted on arrival |
+| `delivered-as-came` | delivered without conversion, because the conversion could not meet the minimum |
+| `delivered-unverified` | the rail records it as executed on Stellar, and the amount can no longer be read back |
+
+`isTerminal` in `@mavna/core` is true for `done`, `refunded`, `partial`, `failed`,
+`delivered-and-converted`, `delivered-as-came` and `delivered-unverified`. `isSuccess` is true only
+for `done` and `delivered-and-converted`. The full declarations are in
+[Core types](/sdk/reference/core-types).
+
+## Keep the state moving forward
+
+A `TransferState` holds a transfer's steps, each a `TrackedStep` with its phase, its expected
+duration and when it started.
+
+- `applyUpdate(state, stepId, next, nowUnix)` applies a new phase only when `canAdvance` allows it:
+  a finished step never changes, and an unfinished one never moves back. The one exception is a
+  `stalled` step that a new transaction set moving again, which can go back to `pending`. A late
+  answer therefore cannot turn a delivered transfer back into a pending one.
+- `escalateIfOverdue(step, nowUnix, remedyFor)` turns a `pending` step into `stalled` once it is
+  past its start plus its expected duration, with the seconds it is overdue and the remedy your
+  `remedyFor` returns.
+- `progressOf(state)` says how many steps are done, which step is current, whether the transfer
+  needs your user, and whether it has finished.
+- `outcomeOf(state)` sums up the transfer as `failed`, `refunded`, `partial`, `delivered-as-came`,
+  `delivered-unverified`, `succeeded` or `in-flight`, checked in that order. `succeeded` needs every
+  step to be `done` or `delivered-and-converted`.
+
+To keep handles across page loads, implement `TransferStore` (`remember`, `forget`, `all`) over
+whatever storage you use. `InMemoryTransferStore` is the in-memory version.

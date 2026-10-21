@@ -1,0 +1,33 @@
+---
+title: Install
+description: Build the Mavna packages from a checkout of the repository.
+---
+
+The packages are a pnpm workspace that you build from a checkout of the repository. The app, the
+widget, the sponsor service and the examples on these pages all build from it.
+
+## Requirements
+
+- Node 24.22.0, the version in `.nvmrc`.
+- pnpm 12.14.0. The workspace declares this version and refuses any other.
+
+## Build
+
+```sh
+git clone https://github.com/ErenTopaal/mavna.git
+cd mavna
+pnpm install
+export VITE_MAVNA_SPONSOR_URL=http://localhost:8787
+pnpm build
+```
+
+`VITE_MAVNA_SPONSOR_URL` names the sponsor that the app, the landing page, the playground and
+these docs call. Their production builds stop without it, so a hosted page never falls back to a
+sponsor on the reader's own machine. For a local build, name the sponsor you run yourself, as here.
+[Deploy to production](/operate/deploy) has the hosted values.
+
+`pnpm build` builds every package through Turbo. Each package writes ESM and its type declarations
+to its own `dist/` directory, and the workspace resolves `@mavna/core` and the other packages to
+those builds.
+
+After you change a package, run `pnpm build` again before an app that imports it sees the change.

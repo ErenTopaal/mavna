@@ -1,0 +1,32 @@
+---
+title: Receive XLM instead
+description: Send USDC and have the recipient end up holding XLM, converted on a Stellar exchange in the same transfer.
+---
+
+XLM is Stellar's own currency. The money crosses as USDC and is converted to XLM on a Stellar
+exchange as the last step of the same transfer.
+
+## Switch to XLM
+
+Under **Receive on Stellar**, switch from `USDC` to `XLM`. The routes update and show:
+
+- the amount of XLM you receive, and under it the **Min**: the least XLM the conversion delivers;
+- **Conversion rate**, the XLM that one USDC buys at the quoted price;
+- **Converted on**, the Stellar exchange that quoted the conversion.
+
+The rate is the market's. The conversion has no fee line of its own.
+
+## Approve the conversion
+
+Because the conversion spends from the receiving account, the recipient approves it in a Stellar
+wallet connected to that account. The step reads **Convert to XLM on Stellar** and comes after the
+USDC arrives. [Connect your wallets](/send/wallets) covers connecting one.
+
+The conversion spends only what this transfer brought in. Anything the account already held is
+left alone.
+
+## If the price moves
+
+Before you approve, the app asks the exchange for a fresh price. If converting now would deliver
+less XLM than the minimum you were shown, the app stops before asking for your signature and the
+USDC stays in the account. It is yours either way, and you can convert it later.

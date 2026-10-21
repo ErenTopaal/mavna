@@ -1,19 +1,20 @@
 ---
 title: Theming
-description: Every theme token the widget defines, read out of the stylesheet that defines them, plus light, dark, and system.
+description: Light, dark or the reader's system setting, and every colour, font and radius as a CSS custom property.
 ---
 
-import Tokens from "../../generated/widget-tokens.mdx";
+The widget is styled entirely by CSS custom properties declared on its root element, `.mv-root`.
+You change how it looks by setting those properties, through the config or through your own CSS.
 
-# Theming
+## Light, dark and system
 
-The widget is styled by CSS custom properties, all declared on its `.mv-root`. You
-change how it looks by setting those tokens, and you have two ways to do it.
+`appearance` takes `"system"`, `"light"` or `"dark"`. The default, `"system"`, follows the reader's
+operating system setting. `"light"` and `"dark"` override that setting in both directions. The
+widget writes an explicit choice to a `data-mv-theme` attribute on its root.
 
 ## Through the config
 
-The `theme` field applies overrides as inline custom properties on the root, which
-beat any stylesheet, so this is the way that always wins:
+`theme` sets properties as inline styles on the root, which take precedence over any stylesheet:
 
 ```tsx
 <MavnaWidget
@@ -28,15 +29,14 @@ beat any stylesheet, so this is the way that always wins:
 />
 ```
 
-`theme` carries `tokens` (any custom property), `font`, `fontMono`, `radius`, and
-`radiusLg`.
+`tokens` takes any of the properties listed below. `font`, `fontMono`, `radius` and `radiusLg` set
+`--mv-font`, `--mv-font-mono`, `--mv-radius` and `--mv-radius-lg`.
 
 ## Through CSS
 
-You can also override tokens in your own stylesheet. The widget declares them on
-`.mv-root`, so a plain `.mv-root` rule of yours ties on specificity and which one
-wins depends on the order your bundler emits the stylesheets. Doubling the class
-outranks it outright:
+The widget declares its properties on `.mv-root`, so a `.mv-root` rule in your stylesheet ties with
+it on specificity and the order your bundler emits the stylesheets decides which wins. Doubling the
+class wins outright:
 
 ```css
 .mv-root.mv-root {
@@ -45,45 +45,24 @@ outranks it outright:
 }
 ```
 
-Setting the tokens on an ancestor does not work: custom properties inherit, but the
-widget redeclares them on `.mv-root`, and a declaration on the element beats a value
-inherited into it.
+Setting the properties on an ancestor element has no effect, because the widget declares them on
+its own root.
 
-## Light, dark, and system
+To change the dark theme as well, set your properties in a rule for
+`.mv-root[data-mv-theme="dark"]` too.
 
-`appearance` chooses the theme, and there are three states:
+## The signal colour
 
-```tsx
-appearance: "system"   // follows the OS preference. The default.
-appearance: "light"
-appearance: "dark"     // wins over the OS in both directions.
-```
+`--mv-signal` and the properties derived from it are the widget's only colour. The widget uses it
+for problems: error notes, an address that is not valid, the warning before sending the same
+transfer again, and the button that finishes a delayed delivery.
 
-The widget writes the choice to a `data-mv-theme` attribute on its root, and leaving
-it on `system` follows the reader's machine, which is the right default inside
-someone else's page: a light host on a dark OS is a real and common case, so an
-explicit instruction has to win rather than merely be considered. If you retheme,
-set your tokens in both the light and the dark case, or your dark theme is a light
-theme with two colours changed.
+## Every property
 
-## The one colour to leave alone
+Read from the widget's stylesheet, `packages/widget/src/widget.css`, when this site is built. The
+values are shown as declared; you can set any value CSS accepts.
 
-`--mv-signal` is the only chromatic token in the widget, and it means something has
-gone wrong. It is deliberately not used for "approve this in your wallet", a normal
-thing to be asked. If you retheme it to your brand colour, every error state becomes
-a button.
+<include>../../generated/widget-tokens.mdx</include>
 
-## Every token
-
-Read out of the widget's stylesheet when this page is built. Values are shown as
-declared, which is why the colours read as `oklch`; you can set them to anything CSS
-accepts.
-
-<Tokens />
-
-## What you cannot restyle
-
-Class names and the DOM structure are not API. They are prefixed `mv-` so they
-cannot collide with your page, and reaching into them with descendant selectors will
-break on a patch release. If a token you need does not exist, that is a gap in the
-list rather than an invitation to select the internals.
+Class names and the structure of the widget's HTML are not part of its interface. They start with
+`mv-` so they cannot collide with yours, and they can change in any release.

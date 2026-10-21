@@ -1,0 +1,16 @@
+{
+  "title": "Build with the SDK",
+  "description": "Quote, build and track transfers in your own interface",
+  "root": true,
+  "pages": [
+    "index",
+    "install",
+    "quickstart",
+    "---Guides---",
+    "routes",
+    "transactions",
+    "tracking",
+    "---Reference---",
+    "reference"
+  ]
+}

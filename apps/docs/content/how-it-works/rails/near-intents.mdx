@@ -1,0 +1,70 @@
+---
+title: NEAR Intents
+description: NEAR Intents through the 1Click API as a rail. Solvers fill a deposit the sender pays into an address 1Click hands out, and the HOT Bridge pays out on Stellar.
+---
+
+`@mavna/adapter-near-intents`, adapter id `near-intents`, trust model `solver-network`. The sender
+pays an ordinary ERC-20 transfer into a deposit address, a market of solvers competes to fill the
+trade, and NEAR Intents settles it. The adapter talks only to NEAR Intents'
+[1Click API](https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api).
+
+```ts
+const nearIntents = new NearIntentsAdapter({ network, rpc, baseReserveStroops });
+```
+
+1Click has no test network, so on the test network this rail declines every quote with a sentence
+that says so.
+
+## Who you trust
+
+1Click's Stellar assets are HOT Omni tokens inside NEAR Intents (asset ids that start with
+`nep245:v2_1.omni.hot.tg:`), so solvers settle in HOT's wrapped token and the payout on Stellar is a
+HOT Bridge withdrawal. The adapter offers only Stellar assets with that prefix, so the bridge it
+names is the one a transfer uses: the solvers, NEAR Intents' settlement, and the HOT Bridge.
+
+## What it carries
+
+The deposit is an ERC-20 transfer, so the source is an EVM chain: Ethereum, Arbitrum One, Base,
+OP Mainnet, Polygon, Avalanche, BNB Smart Chain, Gnosis, Berachain, Monad, X Layer, Plasma and
+Scroll, each only while 1Click lists a token on it. The token is matched to 1Click's list by
+contract address, never by symbol.
+
+On Stellar, the adapter offers the assets 1Click lists for Stellar whose identity it can check: a
+code and an issuer, or XLM. On 21 October 2026, 1Click listed two: USDC issued by
+`GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`, and XLM. It delivers only to a plain
+`G` account; contract and muxed addresses are refused before a quote is asked for.
+
+## Quoting and building
+
+A quote is a dry request to 1Click: it reserves nothing and hands out no deposit address. The
+deposit address exists only once the transfer is built, because it is tied to a refund address. So
+`buildTransactions` needs the sending wallet:
+
+```ts
+const transactions = await nearIntents.buildTransactions(route, { sender: walletAddress });
+```
+
+It asks 1Click for the real quote with that wallet as the refund address and returns one `evm-tx`:
+a transfer of the amount to the deposit address. It refuses to build when the sender is missing,
+when 1Click records a different refund address, or when the new quote's minimum is below the
+route's: a price that moved is a new quote for the sender to see.
+
+## Status
+
+1Click knows a transfer by its deposit address. With only the source transaction, the adapter reads
+the deposit address from the transaction on the source chain.
+
+| 1Click status | Phase |
+| --- | --- |
+| `PENDING_DEPOSIT` | `pending` once a deposit transaction is known, otherwise `idle` |
+| `KNOWN_DEPOSIT_TX`, `PROCESSING` | `pending` |
+| `INCOMPLETE_DEPOSIT` | `stalled` |
+| `SUCCESS` | `done`, with the amount 1Click reports, or the quote's minimum when it reports none |
+| `REFUNDED` | `refunded`, with the amount that came back |
+| `FAILED` | `failed`, with the deposit address as the reference NEAR Intents support asks for |
+
+## API key
+
+Without an API key, 1Click adds 25 basis points to every quote. A partner key moves quotes to the
+partner schedule; pass it as `apiKey`. The key is a secret, so it belongs in a server-side
+integration, and the widget does not take one.

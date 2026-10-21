@@ -61,7 +61,7 @@ let settleReplies: Array<[number, unknown]>;
 /** Status 0 is no answer at all: the connection dropped. */
 let deliverReplies: Array<[number, unknown]>;
 /** What the Stellar wallet refuses to sign, the way the wallet kit refuses: a plain object. */
-let refuses: "PREPARATION" | "CONVERSION" | "DELIVERY" | undefined;
+let refuses: "PREPARATION" | "CONVERSION" | "DELIVERY" | "SETTLEMENT" | undefined;
 /** A signed transaction lands as failed on Stellar. */
 let sendFails: boolean;
 /** Horizon's order-book mid for USDC, in stroops per whole USDC: 5 XLM to the USDC. */
@@ -459,6 +459,9 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
         const kind =
           xdr === preparation || xdr === sponsoredPreparation ? "PREPARATION" : "CONVERSION";
         if (refuses === kind) throw { code: -4, message: "The user rejected this request." };
+        if (refuses === "SETTLEMENT" && xdr === settlementXdr) {
+          throw { code: -4, message: "The user rejected this request." };
+        }
         if (refuses === "DELIVERY" && xdr.startsWith("AAAA") && xdr !== settlementXdr) {
           log.push("stellar refuse DELIVERY");
           throw { code: -4, message: "The user rejected this request." };
@@ -564,6 +567,26 @@ function run(
     ...extra,
   });
 }
+
+describe("a repayment the Stellar wallet will not sign", () => {
+  it("says which signature it was and that nothing was sent", async () => {
+    // a live new-account transfer refused at the repayment showed only the
+    // wallet's own words, with nothing on whether money had moved
+    refuses = "SETTLEMENT";
+    const adapter = new ScriptedAdapter("layerzero", [], { transactions: [layerZeroSend("777")] });
+    const error = await run(
+      adapter,
+      routeFor("layerzero", { newAccount: true }),
+      patches().patch,
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Your Stellar wallet did not sign the repayment (The user rejected this request.). " +
+        "Nothing has been sent.",
+    );
+    expect(log.some((l) => l.startsWith("evm"))).toBe(false);
+  });
+});
 
 describe("runTransfer over a relayed rail", () => {
   it("settles, prepares, sends, records, tracks and then settles the account, in that order", async () => {
@@ -747,6 +770,18 @@ describe("runTransfer over a relayed rail", () => {
       "Axelar could not deliver this transfer.",
     );
     expect(stored.get(HISTORY_KEY)).toContain(SEND_HASH);
+  });
+
+  it("keeps the route's own estimate with the send, for Activity to judge it by", async () => {
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("1")],
+    });
+    const route = { ...routeFor("layerzero"), estimatedSeconds: 1230 };
+    await run(adapter, route, patches().patch);
+    const [kept] = JSON.parse(stored.get(HISTORY_KEY) ?? "[]") as Array<{
+      expectedSeconds?: number;
+    }>;
+    expect(kept?.expectedSeconds).toBe(1230);
   });
 
   it("says plainly that a declined single send moved nothing", async () => {

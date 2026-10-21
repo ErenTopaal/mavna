@@ -1,26 +1,25 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["node", "vite/client"],
     "noEmit": true,
-    // A site emits pages, not declarations. The base config's declaration
+    "allowImportingTsExtensions": true,
+    // a site emits pages, not declarations. the base config's declaration
     // settings exist for published packages and mean nothing here.
     "isolatedDeclarations": false,
     "declaration": false,
-    "allowJs": true,
-    "incremental": true,
-    "plugins": [{ "name": "next" }]
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": { "@/*": ["./app/*"] }
   },
   "include": [
-    "next-env.d.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
-    "components/**/*.tsx",
     "examples/**/*.ts",
     "examples/**/*.tsx",
-    "mdx-components.tsx",
-    ".next/types/**/*.ts"
+    "*.ts",
+    ".react-router/types/**/*"
   ],
   "exclude": ["node_modules"]
 }

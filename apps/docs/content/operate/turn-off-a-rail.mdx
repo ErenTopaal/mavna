@@ -1,0 +1,34 @@
+---
+title: Turn off a rail
+description: Stop routing through a rail during an incident, with a sentence your users see in its place.
+---
+
+When a rail is degraded, you can stop new transfers from using it without changing any code. The
+rail then appears as declined, with your sentence as the reason, instead of disappearing. Transfers
+already under way are not touched.
+
+The setting is a comma-separated list of `id:reason` pairs. The ids are the adapters' own:
+
+| Rail | id |
+| --- | --- |
+| Circle CCTP | `cctp` |
+| Axelar | `axelar` |
+| LayerZero | `layerzero` |
+| NEAR Intents | `near-intents` |
+
+The reason is shown to the people sending, so write it for them:
+
+```txt
+cctp:Circle is not available right now
+```
+
+An entry without a reason uses "This route is turned off right now."
+
+## Where to set it
+
+- **The Mavna app**: `VITE_MAVNA_DISABLED_SOURCES`, at build time. Rebuild the app and copy the new
+  `apps/app/dist` to the server.
+- **The widget**: the `disabledSources` field of the config. See
+  [Configuration](/widget/configuration#what-the-widget-offers).
+- **The SDK**: a circuit breaker passed to `raceAdapters`, which reads the list on every quote. See
+  [Quote and rank routes](/sdk/routes#turn-a-rail-off).

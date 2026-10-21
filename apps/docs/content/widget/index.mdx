@@ -1,52 +1,37 @@
 ---
-title: For integrators
-description: One React component that renders the whole transfer, connects both wallets itself, and is styled by CSS custom properties.
+title: Embed the widget
+description: One React component that quotes, connects both wallets, runs the transfer and tracks it, styled through CSS custom properties.
 ---
 
-import { LiveWidget } from "../../components/LiveWidget";
+`@mavna/widget` holds the whole Mavna transfer flow: the quote, the route choice with each rail's
+trust model in plain words, wallet connection on both sides, the review, live progress, and finding
+and finishing transfers later. The Mavna app is this same component in its full-page layout.
 
-# The widget
-
-You have a wallet, an exchange, or any product whose users hold funds on other
-chains, and you want cross-chain deposits into Stellar without building routing,
-wallet connection, status tracking, and failure recovery yourself. The widget is
-that whole flow as one React component.
-
-`@mavna/widget` renders the whole thing. It is built on the routing engine, all
-four [rails](/developers/rails), the Stellar SDK, the EVM client, and the Stellar
-wallet kit, and it connects both wallets itself, so you render one component and
-pass one config object. React and React-DOM are its only peers, both version 19;
-everything else it needs comes as its dependencies.
+You render one component and pass one configuration object. React and React DOM, version 19 or
+later, are its only peer dependencies.
 
 <LiveWidget />
 
-The widget above is the real component against the test network, the same code the
-app at mavna.app runs.
+The widget above is the real component, running against Stellar's test network from this page.
 
-## What you get
+## What you can change
 
-- **The whole flow in one component.** Quote, route choice with trust models in
-  plain words, wallet connection, confirmation, live progress, and recovery, from
-  the same engine the SDK exposes.
-- **[Three layouts](/widget/variants).** An inline card, a full-page app, and a
-  drawer that rises from the bottom.
-- **[Theming through CSS custom properties](/widget/theming)** and a config field:
-  no theme object to learn, no CSS-in-JS, no build-tool adoption on your side.
-- **[Configuration for what it offers](/widget/configuration):** restrict chains
-  and rails, prefill and lock the form, take an integrator fee, point at your own
-  sponsor, hand wallet connection to your app, and receive events.
-
-Start with the [quickstart](/widget/quickstart), or open the full configurator in
-the [playground](/widget/playground).
+- [Configuration](/widget/configuration): the network, your own sponsor and Stellar node, which
+  chains and rails to offer, a prefilled or locked recipient, an integrator fee, and your own wallet
+  connection.
+- [Events](/widget/events): what the widget reports back to your app.
+- [Layouts](/widget/layouts): an inline card, a full page, or a drawer that rises from the bottom.
+- [Theming](/widget/theming): light, dark or the reader's system setting, and every colour, font and
+  radius as a CSS custom property.
 
 ## What it does to your page
 
-The inline card is a guest. It is scoped entirely under its own `.mv-root` class,
-every class name is prefixed `mv-` so it cannot collide with yours, and it paints no
-background of its own, sitting on whatever surface you place it on. Every dimension
-is in pixels rather than `rem`, so a host page that scales its root font size does
-not rescale the widget's geometry.
+Everything the widget renders sits inside one element with the class `mv-root`, and every class it
+uses starts with `mv-`, so its styles do not reach your page and yours do not collide with its
+class names. Its sizes are set in pixels, so a page that changes its root font size does not
+resize the widget.
 
-The drawer layout is an overlay by design: it is a popup, so it dims the page behind
-it and closes on its own button or the Escape key. You choose the layout, so you
-choose whether the widget is inline or takes over the viewport.
+The drawer layout is a popup by design: it dims the page behind it and closes on its close button,
+the dimmed backdrop, or the Escape key.
+
+Start with the [quickstart](/widget/quickstart).

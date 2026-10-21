@@ -1,0 +1,61 @@
+---
+title: Rails and networks
+description: What each rail carries into Stellar on each network, and every chain the widget can send from.
+---
+
+Every rail is one adapter package behind the same interface, and the same adapters run on Stellar's
+test network and main network. The network is one value in the configuration; what differs between
+networks is what each rail's own deployment carries.
+
+| Rail | Adapter id | Trust model | Carries into Stellar |
+| --- | --- | --- | --- |
+| [Circle CCTP](/how-it-works/rails/cctp) | `cctp` | `native-mint` | USDC, from 26 chains on each network |
+| [Axelar ITS](/how-it-works/rails/axelar) | `axelar` | `validator-set` | tokens registered with Axelar's Interchain Token Service, resolved from Axelar's registry at quote time |
+| [LayerZero OFT](/how-it-works/rails/layerzero) | `layerzero` | `dvn-stack` | USDT0 on the main network, from 12 chains; routes that convert on arrival through the Arrival Contract |
+| [NEAR Intents](/how-it-works/rails/near-intents) | `near-intents` | `solver-network` | on the main network, ERC-20 deposits from 13 EVM chains, delivered as the Stellar asset requested |
+
+[Trust models](/how-it-works/trust-models) explains the trust model column.
+
+## On the test network
+
+Circle's rail is complete on the test network: USDC moves from 26 source chains, and a new Stellar
+account is set up as part of the transfer. On the test network the other three decline, each with a
+reason the sender sees. These are the answers they gave to a 25 USDC quote from Ethereum Sepolia on
+21 October 2026:
+
+| Rail | Answer |
+| --- | --- |
+| Axelar | That token has not been set up to travel to Stellar on this route. |
+| LayerZero | This route carries no token on the test network. It works on the main network, where it is the only way to bring USDT to Stellar. Another route may work here. |
+| NEAR Intents | NEAR Intents runs on Stellar's main network only, so it has no route on the test network. |
+
+## On the main network
+
+Circle carries USDC from 26 chains. LayerZero carries USDT0 from 12 chains, arriving as USDT0 on
+Stellar. NEAR Intents takes a deposit on 13 EVM chains and pays out USDC or XLM on Stellar. Axelar
+carries the Interchain Token Service tokens linked to Stellar; Ethereum's USDC arrives through it as
+`USDC.axl`, a different token from Circle's USDC.
+
+The Mavna Arrival Contract is deployed on the test network only, so routes that convert on arrival
+are offered only there. See [Arrival Contract](/how-it-works/arrival-contract).
+
+## The Arrival Contract is never a destination
+
+The Arrival Contract only acts on what LayerZero delivers with conversion instructions. Every rail
+refuses it as a plain destination, at quote time and again when it builds, with a sentence that
+says to send to your own address. The deployed contract for each network is listed as
+`ARRIVAL_CONTRACT_IDS` in `@mavna/core`; an adapter's `arrivalContract` option adds another one to
+refuse.
+
+## Source chains
+
+The chains the widget's picker offers, by the slug a widget config or the SDK names them with. USDC
+is carried by Circle; USDT0 by LayerZero. Read from the adapters when this site is built.
+
+### Main network
+
+<include>../../generated/chains-mainnet.mdx</include>
+
+### Test network
+
+<include>../../generated/chains-testnet.mdx</include>

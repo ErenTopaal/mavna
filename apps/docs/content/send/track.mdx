@@ -1,0 +1,37 @@
+---
+title: Find a transfer
+description: Find any transfer from the transaction you sent, in any browser, with nothing saved. No wallet needed.
+---
+
+A transfer is not tied to the browser you started it in. With the transaction you sent, you can see
+where it stands from any browser, and you do not need to connect a wallet to look.
+
+## Look it up
+
+1. On the **Send to Stellar** card, press **Activity** (the clock button).
+2. Paste the transaction you sent from the source chain. For a NEAR Intents transfer, you can paste
+   its deposit address instead.
+3. Press **Find**.
+
+The card then says where the transfer is, for example:
+
+- **Delivered on Stellar**, with the amount that arrived.
+- **On its way to Stellar.**
+- **Taking longer than usual**, with what to do next.
+- **Returned**, with the address and the amount that came back.
+- **Part of this arrived**, with how much of the expected amount.
+- **Nothing has been found for this transaction yet**, when no rail knows the transaction.
+
+When a rail records a transfer as delivered on Stellar but the amount can no longer be read back
+from the network, the card says so and links **See the Stellar transaction** so you can check it
+yourself. If a rail could not be asked, the card names it under **Not every rail answered**.
+
+A Stellar address alone does not identify a transfer: the card asks for the transaction instead.
+
+## Transfers from this browser
+
+Under **From this browser**, Activity lists the transfers you started in this browser. Each one has
+**Check**, which looks it up as above, and a link to the transaction you sent. **Clear** empties the
+list. The list is a convenience: every transfer in it can still be found from its transaction.
+
+If a transfer is taking long, you can [finish the delivery yourself](/send/finish).

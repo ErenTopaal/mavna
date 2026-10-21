@@ -1,0 +1,58 @@
+---
+title: Assets and amounts
+description: An asset is a chain plus an identifier, never a symbol. An amount is an integer string in base units, never a number.
+---
+
+Two rules hold in every package.
+
+## An asset is a chain plus an identifier
+
+```ts
+interface Asset {
+  readonly chainId: string;
+  readonly id: string;
+  readonly symbol: string;
+  readonly decimals: number;
+  readonly curatedBy: string | undefined;
+}
+```
+
+An asset's identity is `chainId` plus `id`. On Stellar, `id` is `CODE:ISSUER`, or `native` for XLM;
+on an EVM chain it is the token's contract address. Anyone can issue a Stellar asset with the code
+USDC, so the issuer is part of the identity. `symbol` is for display, and nothing is decided from
+it. `curatedBy` names who vouches for the asset appearing in a list a sender picks from.
+
+`sameAsset(a, b)` from `@mavna/core` compares `chainId` and `id`, never symbols.
+
+## An amount is an integer string in base units
+
+```ts
+interface Amount {
+  readonly asset: Asset;
+  readonly baseUnits: string;
+}
+```
+
+The asset and the quantity travel together, so they cannot drift apart. `baseUnits` is an integer
+in the asset's smallest unit, carried as a string: 25 USDC at six decimals is `"25000000"`. A string
+keeps every digit exact, which a JavaScript number cannot promise for large seven-decimal amounts.
+`amountOf(asset, baseUnits)` builds an `Amount` and
+throws a `TypeError` for anything that is not a non-negative integer.
+
+Decimals differ across a transfer: USDC has six decimals on EVM chains and seven on Stellar.
+
+## Fees are itemised
+
+Every route lists its fees, each with a `kind`, a `total`, its recipients, and `includedInQuote`,
+which is `true` when the fee is already taken out of the amount the route says arrives.
+
+| Kind | What it is |
+| --- | --- |
+| `bridge` | what the rail charges to carry the transfer |
+| `gas` | a fee paid in the sending chain's currency, separately from the amount, such as LayerZero's or Axelar's delivery fee |
+| `swap` | a conversion's fee |
+| `integrator` | a fee an integrating product takes |
+| `account-reserve` | the XLM a new Stellar account locks as its own reserve; not a fee anyone keeps |
+| `reserve-repayment` | the most a held repayment can take of the arrival to repay a reserve the sponsor provided |
+
+The exact declarations are in [Core types](/sdk/reference/core-types).

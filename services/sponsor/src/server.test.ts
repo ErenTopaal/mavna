@@ -4603,7 +4603,7 @@ describe("round 3: a burn asked about before Circle attested it is delivered by 
         JSON.stringify({
           messages: [
             message === undefined
-              ? { message: "0x", attestation: "PENDING" }
+              ? { message: null, attestation: "PENDING", status: "pending_confirmations" }
               : { message, attestation: ATTESTATION },
           ],
         }),
@@ -4778,7 +4778,7 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
             JSON.stringify({
               messages: [
                 message === "pending"
-                  ? { message: "0x", attestation: "PENDING" }
+                  ? { message: null, attestation: "PENDING", status: "pending_confirmations" }
                   : { message, attestation: ATTESTATION },
               ],
             }),
@@ -4803,6 +4803,38 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
     expect(answered.body.kind).toBe("not-attested-yet");
     expect(answered.body.watching).toBe(true);
     expect(await watched(state)).toEqual([burn(1)]);
+  });
+
+  it("watches a burn Circle has indexed but not confirmed, which has no message yet", async () => {
+    // what Iris answered for a real Sepolia burn while it waited out finality:
+    // the record exists, its message does not
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              {
+                attestation: "PENDING",
+                message: null,
+                eventNonce: `0x${"32".repeat(32)}`,
+                cctpVersion: 2,
+                status: "pending_confirmations",
+                decodedMessage: null,
+                delayReason: null,
+              },
+            ],
+            sourceTxHash: burn(7),
+          }),
+          { status: 200 },
+        ),
+    );
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const answered = await server.post("/deliver", { txHash: burn(7), domain: 0 });
+    expect(answered.status).toBe(200);
+    expect(answered.body.kind).toBe("not-attested-yet");
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(7)]);
   });
 
   it("says nothing of watching on a 404 for a burn Circle has never heard of", async () => {
@@ -5092,9 +5124,14 @@ describe("round 3: the widget reads the watching flag exactly as the sponsor sen
     // one Circle has, pending, is
     stubIris(
       () =>
-        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            messages: [{ message: null, attestation: "PENDING", status: "pending_confirmations" }],
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
     expect(await client.requestDelivery(`0x${"a1".repeat(32)}`, 0)).toEqual({
       kind: "not-attested-yet",
@@ -5182,7 +5219,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
           messages: [
             attested
               ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
-              : { message: "0x", attestation: "PENDING" },
+              : { message: null, attestation: "PENDING", status: "pending_confirmations" },
           ],
         }),
         { status: 200 },
@@ -5219,7 +5256,7 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
             messages: [
               attested && url.searchParams.get("transactionHash") === real
                 ? { message: cctpMessage(recipient.publicKey()), attestation: ATTESTATION }
-                : { message: "0x", attestation: "PENDING" },
+                : { message: null, attestation: "PENDING", status: "pending_confirmations" },
             ],
           }),
           { status: 200 },
@@ -5247,9 +5284,14 @@ describe("round 4: only burns Circle knows are watched, and the oldest due goes 
   it("keeps each client's share across a restart", async () => {
     stubIris(
       () =>
-        new Response(JSON.stringify({ messages: [{ message: "0x", attestation: "PENDING" }] }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            messages: [{ message: null, attestation: "PENDING", status: "pending_confirmations" }],
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
     const state = new MemoryDocumentStore();
     const limits = { perClient: 2, total: 1_000 };

@@ -1,0 +1,50 @@
+---
+title: Axelar ITS
+description: Axelar's Interchain Token Service as a rail. A validator set attests; every address is resolved at quote time and checked against the chains.
+---
+
+`@mavna/adapter-axelar`, adapter id `axelar`, trust model `validator-set`. A named set of Axelar
+validators attests to a transfer, which moves through Axelar's Interchain Token Service by way of
+its hub, so a transfer has two legs.
+
+```ts
+const axelar = new AxelarAdapter({ network, rpc, baseReserveStroops });
+```
+
+## Where the addresses come from
+
+No chain name, contract address or token id is a constant in the adapter. Axelar's deployment
+configuration is read at a pinned commit of `axelarnetwork/axelar-contract-deployments`, recorded in
+`packages/adapters/axelar/src/pinned.ts`, rather than from the main branch.
+`scripts/verify-axelar-deployments.mjs` checks each chain on the chain itself before it is
+accepted.
+
+Axelar registers Stellar under a versioned chain name, so the adapter resolves it from Axelar's
+registry and stops unless exactly one Stellar chain is listed.
+
+Both sides have to agree: the sending chain's token service and Stellar's token service must each
+say the other chain is trusted before the adapter quotes.
+
+## What arrives
+
+The route names what arrives by what the Stellar token is. A token linked to a classic Stellar asset
+arrives as that asset, `CODE:ISSUER`, and needs a trustline, so a new account is set up exactly as
+on the Circle rail. A token Axelar deployed itself is a Soroban contract named by its contract id.
+
+A contract token is labelled with the symbol in Axelar's token list. Ethereum's USDC arrives on the
+main network as a contract whose `symbol()` answers `USDC`, and the route names it `USDC.axl`,
+because it is not Circle's USDC. A contract token Axelar's list does not carry and that calls itself
+USDC is declined.
+
+## Fees
+
+The fee comes from Axelar's own estimator, in the sending chain's currency, and is paid with the
+send transaction. A zero estimate means Axelar did not recognise the chain, and the adapter refuses
+it rather than send an unpaid message.
+
+## Delivery
+
+The status check follows the transfer through both legs and reports it delivered only when the
+second leg has executed on Stellar. What arrived is read from Stellar, not from Axelar's record.
+Axelar's `refunded` flag describes leftover gas, so the adapter never reads it as a returned
+transfer. [Delivery](/how-it-works/delivery) has the details.

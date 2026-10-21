@@ -4,13 +4,14 @@
  * through s(); every hover/active/focus is pseudo(). All the bound values are
  * computed from the real component state, never from demo constants.
  */
-import { recipientRefusal } from "@mavna/stellar";
+import { recipientRefusal, stroopsToXlm } from "@mavna/stellar";
 import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
 import { fmt, fmtAmount, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
+import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { pseudo } from "./pseudo";
 import {
   approvalsLabel,
@@ -975,12 +976,26 @@ export function renderReview(
                 },
               ]
             : []),
+          // the account signs and pays Circle's mint itself; the budget is what
+          // this page will let that transaction cost
+          ...(c.state.reserveFunding === "self" && r.route.source === "cctp"
+            ? [
+                {
+                  key: "delivery",
+                  name: "Delivery fee, from your own XLM",
+                  value: `Up to ${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM`,
+                },
+              ]
+            : []),
           ...(r.repaymentSetAside !== undefined
             ? [
                 {
                   key: "repay",
-                  name: "Left unconverted to repay the reserve",
-                  value: `${fmt(r.repaymentSetAside.amount)} ${r.repaymentSetAside.symbol}`,
+                  name:
+                    r.swapVenue === undefined
+                      ? "Repays the reserve, from what arrives"
+                      : "Left unconverted to repay the reserve",
+                  value: `${r.swapVenue === undefined ? "Up to " : ""}${fmt(r.repaymentSetAside.amount)} ${r.repaymentSetAside.symbol}`,
                 },
               ]
             : []),
@@ -1137,6 +1152,16 @@ function flightAnnouncement(steps: readonly FlightStep[], eyebrow: string): stri
   return [`${lead}: ${now.label}.`, now.note ?? ""].join(" ").trim();
 }
 
+/** How long a transfer took, said in the largest unit that reads naturally. */
+function tookLabel(seconds: number): string {
+  if (seconds < 60) return "Under a minute";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
 export function renderFlight(
   c: Flow,
   d: {
@@ -1170,11 +1195,9 @@ export function renderFlight(
           { key: "sent", name: "Sent", value: sentLabel(r) },
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "to", name: "Recipient", value: short(r.route.destination) },
-          {
-            key: "eta",
-            name: arrived ? "Took" : "Estimated time",
-            value: `About ${r.minutes} min`,
-          },
+          arrived && c.state.tookSeconds !== null
+            ? { key: "eta", name: "Took", value: tookLabel(c.state.tookSeconds) }
+            : { key: "eta", name: "Estimated time", value: `About ${r.minutes} min` },
         ];
   const { stepEyebrow, stepCount, stepRows } = c.flightVals(arrived);
   return (
@@ -1204,6 +1227,11 @@ export function renderFlight(
               {flightSym}
             </span>
           </p>
+          {asCame !== null ? (
+            <p style={s("margin:10px 0 0;font-size:12.5px;line-height:1.5;color:var(--mv-muted)")}>
+              {asCame.reason}
+            </p>
+          ) : null}
         </div>
         <div style={s("height:1px;background:var(--mv-rule-hair)")} />
         <div style={s("display:flex;flex-direction:column;gap:9px;padding:14px 16px 15px")}>

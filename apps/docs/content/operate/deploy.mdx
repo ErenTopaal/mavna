@@ -1,0 +1,113 @@
+---
+title: Deploy to production
+description: The build, the settings each page and the sponsor need, a reverse proxy that serves them, and the checks to run once it is up.
+---
+
+## Build
+
+The workspace needs Node 24.22.0 and pnpm 12.14.0. Set the page variables below, then build the
+four pages and the sponsor:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm turbo run build --filter=@mavna/app... --filter=@mavna/web... \
+  --filter=@mavna/playground... --filter=@mavna/docs... --filter=@mavna/sponsor-service...
+```
+
+Turbo builds the packages first, because the pages and the sponsor import them from their `dist/`
+directories.
+
+## The pages
+
+All four pages build to static files:
+
+| Page | Directory to serve |
+| --- | --- |
+| App | `apps/app/dist` |
+| Landing page | `apps/web/dist` |
+| Playground | `apps/playground/dist` |
+| Docs | `apps/docs/dist/client` |
+
+The app, the landing page and the playground route in the browser, so a path that is not a file is
+answered with `index.html`. The docs have an HTML file for every page; a path that is neither a
+file nor a page's folder is answered with `__spa-fallback.html` and status `404`, which renders the
+not-found page.
+
+Each page writes the sponsor it calls into its build. A production build stops with the variable's
+name when it is missing, so a hosted page never calls `http://localhost:8787`.
+
+| Page | Variable | What it is |
+| --- | --- | --- |
+| App, landing page, playground, docs | `VITE_MAVNA_SPONSOR_URL` | The sponsor the page's widget calls |
+| App | `VITE_MAVNA_NETWORK` | `testnet` (the default) or `mainnet` |
+| App | `VITE_STELLAR_RPC_URL` | The Stellar RPC; empty uses the widget's default for the network |
+| App | `VITE_MAVNA_DISABLED_SOURCES` | Rails turned off, as `id:reason` pairs; see [Turn off a rail](/operate/turn-off-a-rail) |
+
+The landing page, the playground and the docs run their widgets on the test network, so their
+sponsor is a testnet sponsor.
+
+To offer both networks behind the app's network toggle, set `VITE_MAVNA_NETWORKS=testnet,mainnet`
+and give each network its own sponsor with `VITE_MAVNA_TESTNET_SPONSOR_URL` and
+`VITE_MAVNA_MAINNET_SPONSOR_URL` (and, if you want, `VITE_MAVNA_TESTNET_RPC_URL` and
+`VITE_MAVNA_MAINNET_RPC_URL`). The build refuses a listed network without a sponsor.
+`apps/app/.env.example` lists these variables.
+
+## The sponsor
+
+Run one sponsor per network, each with its own key, state directory and hostname.
+[Sponsor configuration](/operate/sponsor) describes every variable. For production:
+
+- **Set `MAVNA_STATE_DIR`** on a volume that outlives the process and that only the sponsor can
+  read. A mainnet sponsor, or one with `MAVNA_PRODUCTION=true`, refuses to start without it.
+  Without it, a restart loses the held repayments, the channel keys and the day's caps.
+- **Bind the port to loopback and set `MAVNA_TRUST_PROXY=true`** when a reverse proxy is the only
+  way in. Otherwise every request arrives from the proxy's address and all clients share one rate
+  limit.
+- **List every page that calls it in `MAVNA_ALLOWED_ORIGINS`**, the docs included.
+- **Set `SOROSWAP_API_KEY`** to keep Soroswap among the exchanges the conversion can use.
+- **For the Arrival Contract**, set `MAVNA_ARRIVAL_CONTRACT` and a separate
+  `MAVNA_ARRIVAL_EXECUTOR_SECRET`. The testnet contract is
+  `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ`.
+
+Start it with `node services/sponsor/dist/main.mjs` from the built repository, with its variables
+in the environment. It listens on `PORT` (8787 by default).
+
+## A reverse proxy
+
+An example for [Caddy](https://caddyserver.com) (checked with Caddy 2.11.7), with the sponsor on a
+loopback port and the pages copied to `/var/www`. Replace the hostnames and paths with yours:
+
+```txt
+sponsor.example.com {
+	reverse_proxy 127.0.0.1:8787
+}
+
+app.example.com {
+	root * /var/www/mavna-app
+	try_files {path} /index.html
+	file_server
+}
+
+docs.example.com {
+	root * /var/www/mavna-docs
+	try_files {path} {path}/index.html
+	file_server
+	handle_errors 404 {
+		rewrite * /__spa-fallback.html
+		file_server {
+			status 404
+		}
+	}
+}
+```
+
+The landing page and the playground take the same block as the app. Caddy replaces any
+`X-Forwarded-For` a client sends with its own, which is what `MAVNA_TRUST_PROXY=true` relies on.
+
+## Check it once it is up
+
+- The sponsor's start-up log has no line that says `MAVNA_STATE_DIR is not set`.
+- `curl https://<your sponsor>/health` shows the `network` and `reserveFunding` you intended.
+- After a restart, the log still has no such line, and the state directory holds the files the
+  sponsor wrote.
+- Open each page, enter a real Stellar address and an amount, and see a Circle route quote.

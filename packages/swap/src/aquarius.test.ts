@@ -62,15 +62,28 @@ const found = {
   amount_with_fee: 52_000_000,
 };
 
+/** The router pricing the chain as the service did, as it does when nothing moved the pools. */
+const agreeing = (amount = 52_000_000n) =>
+  sorobanNode(
+    (call) =>
+      call.method === "estimate_swap"
+        ? nativeToScVal(amount, { type: "u128" })
+        : { error: `unexpected ${call.method}` },
+    Networks.TESTNET,
+  );
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("aquarius quotes", () => {
   it("asks for the asset contracts and floors the output by the user's slippage", async () => {
-    const net = routedFetch({ [`${API}/api/external/v1/find-path/`]: () => json(found) });
+    const net = routedFetch({
+      [`${API}/api/external/v1/find-path/`]: () => json(found),
+      [RPC]: agreeing(),
+    });
     vi.stubGlobal("fetch", net.fetch);
-    const quote = await new AquariusProvider("testnet").quote(request);
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quote(request);
     expect(bodyOf(net.calls[0])).toEqual({
       token_in_address: USDC,
       token_out_address: XLM,
@@ -129,15 +142,73 @@ describe("aquarius quotes", () => {
   });
 });
 
+describe("an aquarius quote checked against the router", () => {
+  /** A router that prices every hop of the chain at `out`, recording what it was asked. */
+  function routerPricing(out: (amountIn: bigint) => bigint | { error: string }, asked: string[]) {
+    return sorobanNode((call) => {
+      asked.push(`${call.contract} ${call.method}`);
+      if (call.method !== "estimate_swap") return { error: `unexpected ${call.method}` };
+      const priced = out(BigInt(scValToNative(call.args[4] as xdr.ScVal) as bigint));
+      return typeof priced === "bigint" ? nativeToScVal(priced, { type: "u128" }) : priced;
+    }, Networks.TESTNET);
+  }
+
+  it("quotes what the router gives now when the service's figure is stale", async () => {
+    // measured on testnet: the service went on quoting 7.0099329 XLM for 2 USDC
+    // after a swap had moved the pool to 6.9361326, so the floor it set reverted
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(found),
+        [RPC]: routerPricing(() => 50_000_000n, asked),
+      }).fetch,
+    );
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quote(request);
+    expect(asked).toEqual([`${ROUTER} estimate_swap`]);
+    expect(quote.amountOut).toBe("50000000");
+    expect(quote.amountOutMinimum).toBe("49500000");
+  });
+
+  it("keeps the service's figure when the router would give more", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(found),
+        [RPC]: routerPricing(() => 60_000_000n, []),
+      }).fetch,
+    );
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quote(request);
+    expect(quote.amountOut).toBe("52000000");
+  });
+
+  it("refuses a path the router will not price", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(found),
+        [RPC]: routerPricing(() => ({ error: "HostError: Error(Contract, #2006)" }), []),
+      }).fetch,
+    );
+    const error = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC })
+      .quote(request)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MavnaError);
+  });
+});
+
 describe("the swap chain Aquarius sends back", () => {
   const quoting = (chain: string) => {
     vi.stubGlobal(
       "fetch",
       routedFetch({
         [`${API}/api/external/v1/find-path/`]: () => json({ ...found, swap_chain_xdr: chain }),
+        [RPC]: agreeing(),
       }).fetch,
     );
-    return new AquariusProvider("testnet").quote(request).catch((e: unknown) => e);
+    return new AquariusProvider("testnet", undefined, { rpcUrl: RPC })
+      .quote(request)
+      .catch((e: unknown) => e);
   };
 
   it("is taken when it starts at the asked token and ends at the asked one, over hops that connect", async () => {
@@ -162,7 +233,10 @@ describe("the swap chain Aquarius sends back", () => {
   it("is checked again at build, so a quote carrying another chain is not built", async () => {
     vi.stubGlobal(
       "fetch",
-      routedFetch({ [`${API}/api/external/v1/find-path/`]: () => json(found) }).fetch,
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(found),
+        [RPC]: agreeing(),
+      }).fetch,
     );
     const provider = new AquariusProvider("testnet", undefined, { rpcUrl: RPC });
     const quote = await provider.quote(request);
@@ -185,6 +259,8 @@ describe("aquarius builds", () => {
     const net = routedFetch({
       [`${API}/api/external/v1/find-path/`]: () => json(found),
       [RPC]: sorobanNode((call) => {
+        // the quote prices the chain on the router first
+        if (call.method === "estimate_swap") return nativeToScVal(52_000_000n, { type: "u128" });
         seen.push(call);
         return xdr.ScVal.scvU64(xdr.Uint64.fromString("52000000"));
       }, Networks.TESTNET),
@@ -216,7 +292,10 @@ describe("aquarius builds", () => {
     const net = routedFetch({
       [`${API}/api/external/v1/find-path/`]: () => json(found),
       [RPC]: sorobanNode(
-        () => ({ error: "HostError: Error(Contract, #2006)\nmore" }),
+        (call) =>
+          call.method === "estimate_swap"
+            ? nativeToScVal(52_000_000n, { type: "u128" })
+            : { error: "HostError: Error(Contract, #2006)\nmore" },
         Networks.TESTNET,
       ),
     });
@@ -251,8 +330,14 @@ describe("Aquarius's swap chain as router hops", () => {
   });
 
   it("quotes a path that runs from what is sold to what is bought", async () => {
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(findPath)));
-    const quote = await new AquariusProvider("testnet").quotePath({
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(findPath),
+        [RPC]: agreeing(BigInt(findPath.amount)),
+      }).fetch,
+    );
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quotePath({
       assetIn: XLM,
       assetOut: USDC,
       amountIn: "100000000",
@@ -411,9 +496,12 @@ describe("aquarius paths in a browser, where there is no Buffer", () => {
 
   it("quotes a path through the find-path service", async () => {
     const { AquariusProvider: Provider } = await loadInBrowser<Aquarius>(entry, {
-      fetch: async () => new Response(JSON.stringify(findPath)),
+      fetch: routedFetch({
+        [`${API}/api/external/v1/find-path/`]: () => json(findPath),
+        [RPC]: agreeing(BigInt(findPath.amount)),
+      }).fetch,
     });
-    const quote = await new Provider("testnet").quotePath({
+    const quote = await new Provider("testnet", undefined, { rpcUrl: RPC }).quotePath({
       assetIn: XLM,
       assetOut: USDC,
       amountIn: "100000000",

@@ -11,7 +11,7 @@
  * hover/active/focus go through `pseudo(...)`; the FLIP and panel choreography are
  * the design's own methods, unchanged.
  */
-import { ERC20_ABI } from "@mavna/adapter-cctp";
+import { ERC20_ABI, expectedBridgeSeconds } from "@mavna/adapter-cctp";
 import { escalateIfOverdue, parseLookupKey, toHandle } from "@mavna/status";
 import { stroopsToXlm } from "@mavna/stellar";
 import React, { type ReactNode } from "react";
@@ -27,7 +27,7 @@ import type { Engine, SourceDetail } from "./engine";
 import { destValid, fromBaseUnits, toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
-import { forgetHistory, readHistory, type TransferRecord } from "./history";
+import { forgetHistory, overdueAfterSeconds, readHistory, type TransferRecord } from "./history";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { box, DUR, EASE, mo } from "./motion";
 import { type FinishAnswer, finishCompose } from "./own-compose";
@@ -45,7 +45,7 @@ import {
   toRouteView,
   type Wanted,
 } from "./quote";
-import { lookupAcross } from "./rails";
+import { lookupAcross, waitPhrase } from "./rails";
 import {
   onPrimary,
   onPrimaryCompact,
@@ -149,11 +149,20 @@ interface State {
   finishTries: number;
   history: readonly TransferRecord[];
   /** What arrived when a transfer landed unconverted, for the flight's headline. */
-  arrivedAs: { readonly amount: number; readonly symbol: string } | null;
+  arrivedAs: {
+    readonly amount: number;
+    readonly symbol: string;
+    /** Why it was not converted, said on the flight where it can be read. */
+    readonly reason: string;
+  } | null;
   /** The route the flight is for. The form's own routes are gone once it ends. */
   flying: RouteView | null;
   /** A new send repeats one that may still arrive; it waits for an explicit yes. */
   askAgain: boolean;
+  /** When the flight started, so an arrival can say how long it really took. */
+  flightStartedAtMs: number | null;
+  /** Seconds from start to arrival, once arrived. */
+  tookSeconds: number | null;
 }
 
 export interface FlowProps {
@@ -309,6 +318,8 @@ export class Flow extends React.Component<FlowProps, State> {
     arrivedAs: null,
     flying: null,
     askAgain: false,
+    flightStartedAtMs: null,
+    tookSeconds: null,
   };
 
   /** The widget's own outermost element; nothing outside it is the widget's to touch. */
@@ -1202,10 +1213,22 @@ export class Flow extends React.Component<FlowProps, State> {
     // sets an account up was offered, which is the only kind it changes.
     const steps = buildSteps(view, this.state.reserveFunding);
     this.emit({ type: "transferStarted" });
-    this.setState({ phase: "sending", steps, flying: view, askAgain: false }, () => {
-      this.go("flight", "push");
-      this.timers.push(setTimeout(() => void this.runTransfer(view, chain), this.DUR * 1000 + 20));
-    });
+    this.setState(
+      {
+        phase: "sending",
+        steps,
+        flying: view,
+        askAgain: false,
+        flightStartedAtMs: Date.now(),
+        tookSeconds: null,
+      },
+      () => {
+        this.go("flight", "push");
+        this.timers.push(
+          setTimeout(() => void this.runTransfer(view, chain), this.DUR * 1000 + 20),
+        );
+      },
+    );
   }
 
   async runTransfer(view: RouteView, chain: SourceDetail): Promise<void> {
@@ -1301,6 +1324,7 @@ export class Flow extends React.Component<FlowProps, State> {
           arrivedAs: {
             amount: fromBaseUnits(error.baseUnits, error.decimals),
             symbol: error.asset,
+            reason: error.message,
           },
           steps: st.steps.map((step) =>
             step.phase === "blocked" || step.phase === "pending"
@@ -1383,8 +1407,19 @@ export class Flow extends React.Component<FlowProps, State> {
    * What every ending clears: the quote that was sent is spent, so the form's
    * routes go and nothing leads back to its review.
    */
-  private afterEnding(): Pick<State, "routes" | "selected" | "picked" | "complete" | "cameFrom"> {
-    return { routes: [], selected: null, picked: false, complete: false, cameFrom: null };
+  private afterEnding(): Pick<
+    State,
+    "routes" | "selected" | "picked" | "complete" | "cameFrom" | "tookSeconds"
+  > {
+    const started = this.state.flightStartedAtMs;
+    return {
+      routes: [],
+      selected: null,
+      picked: false,
+      complete: false,
+      cameFrom: null,
+      tookSeconds: started === null ? null : Math.round((Date.now() - started) / 1000),
+    };
   }
 
   /** Remember a transfer whose money moved, so sending it again is asked about first. */
@@ -1515,7 +1550,7 @@ export class Flow extends React.Component<FlowProps, State> {
             id: "bridge",
             label: "",
             phase,
-            expectedSeconds: 2400,
+            expectedSeconds: overdueAfterSeconds(rec),
             startedAtUnix: rec.startedAtUnix,
           },
           Math.floor(Date.now() / 1000),
@@ -1641,7 +1676,9 @@ export class Flow extends React.Component<FlowProps, State> {
         });
       } else if (outcome.kind === "not-attested-yet") {
         this.setState({
-          lookupNote: "Circle has not attested it yet. Nothing is wrong; try again in a minute.",
+          lookupNote:
+            "Circle has not attested it yet. Nothing is wrong: from this chain that usually " +
+            `takes ${waitPhrase(expectedBridgeSeconds(domain))}.`,
           lookupNoteKind: "quiet",
           finishTries: this.state.finishTries + 1,
         });

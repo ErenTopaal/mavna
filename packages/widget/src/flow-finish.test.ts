@@ -168,6 +168,57 @@ describe("pressing twice, or looking up twice", () => {
   });
 });
 
+describe("finishing a Circle delivery before Circle has attested it", () => {
+  it("says how long attestation takes from the chain it left, not a minute", async () => {
+    // a live Sepolia finish pressed early was told to try again in a minute,
+    // with about fifteen minutes of Ethereum finality still to go
+    const asked: Array<[string, number]> = [];
+    const engine = {
+      network: "testnet",
+      defaultSourceChain: "arbitrum-sepolia",
+      ranking: "best-received",
+      historyKey: "test.transfers",
+      sourceChainDetail: () => ({ kind: "other", name: "Somewhere", family: "move" }),
+      sourceDomain: () => 0,
+      sponsorTerms: async () => ({ network: "testnet", reserveFunding: "sponsor" }),
+      sponsor: {
+        requestDelivery: async (hash: string, domain: number) => {
+          asked.push([hash, domain]);
+          return { kind: "not-attested-yet" as const };
+        },
+      },
+    } as unknown as Engine;
+    const flow = new Flow({ engine });
+    flow.setState = ((patch: object) => {
+      flow.state = { ...flow.state, ...patch };
+    }) as never;
+    const hash = `0x${"fb".repeat(32)}`;
+    flow.state = {
+      ...flow.state,
+      lookup: hash,
+      history: [
+        {
+          sourceTxHash: hash,
+          sourceChainId: "ethereum-sepolia",
+          sourceChainName: "Ethereum Sepolia",
+          destination: "GBM4KX6TWI4GIY2RHT6LVRYCTW4VONGCNSCQVV7PEZVJOHPEI3IDIAT6",
+          sendsBaseUnits: "1500000",
+          symbol: "USDC",
+          decimals: 6,
+          startedAtUnix: 1_792_592_571,
+          explorerUrl: undefined,
+        },
+      ],
+    };
+    await flow.onFinish();
+    expect(asked).toEqual([[hash, 0]]);
+    expect(flow.state.lookupNote).toBe(
+      "Circle has not attested it yet. Nothing is wrong: from this chain that usually takes " +
+        "about 20 minutes.",
+    );
+  });
+});
+
 describe("looking up a hash the rails have no record of", () => {
   const HASH = `0x${"ab".repeat(32)}`;
   // every rail answers what its indexer answers for a hash it has not listed

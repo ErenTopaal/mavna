@@ -1,0 +1,36 @@
+---
+title: Adapter contract
+description: The BridgeAdapter interface a rail implements, copied from @mavna/core when this site is built.
+---
+
+A rail is one package that implements `BridgeAdapter`. Nothing in the interface names a bridge, a
+chain or another SDK, so a new rail needs no change elsewhere: pass it to `raceAdapters` with the
+others. The declarations below are copied from `packages/core/src/adapter.ts` when this site is
+built.
+
+## BridgeAdapter
+
+`quote` returns a route or a refusal; a refusal is a normal answer, not an error. `buildTransactions`
+builds and never signs or submits. `status` reads where a transfer is. `recover` and `quoteCompose`
+are optional.
+
+<include>../../../generated/source-adapter-interface.mdx</include>
+
+## What a quote is asked
+
+<include>../../../generated/source-adapter-request.mdx</include>
+
+## What a build returns
+
+<include>../../../generated/source-adapter-transaction.mdx</include>
+
+`unnecessaryWhen` says when a transaction can be skipped and how the caller checks:
+
+<include>../../../generated/source-adapter-unnecessary.mdx</include>
+
+## What a transfer is found by
+
+<include>../../../generated/source-adapter-handle.mdx</include>
+
+`@mavna/core` also exports `ReferenceAdapter`, a rail that touches no network. It shows that the
+interface can be implemented without reaching outside the package.

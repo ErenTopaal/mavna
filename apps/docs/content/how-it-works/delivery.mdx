@@ -1,0 +1,68 @@
+---
+title: Delivery
+description: How each rail proves a transfer arrived on Stellar, and why delivering a Circle transfer twice is impossible.
+---
+
+A transfer is done when the money is on Stellar, not when the source chain confirms. Each rail
+proves arrival its own way, and none reads the recipient's balance and calls it delivered: a
+balance cannot tell this transfer's money from money the account already held.
+
+A transfer that has not been indexed yet, or whose delivery cannot be found yet, stays `pending`.
+No rail reports `failed` without evidence of a failure.
+
+## Circle CCTP
+
+Circle's attestation service observes the burn and signs a message that authorises the mint on
+Stellar. Someone on Stellar then submits the mint: the sponsor, or the receiving account when the
+sponsor covers no costs. The recipient is inside the attested message, so whoever submits it cannot
+redirect anything.
+
+The status check starts from the burn transaction, reads the attested message from Circle, and
+looks on Stellar for the delivery of that exact message: the message transmitter's
+`message_received` event, which carries the message's nonce, together with the forwarder's own
+event in the same operation, which says how much was forwarded and to whom. When Stellar RPC no
+longer has the events, the check reads the recipient's operations from Horizon instead.
+
+A Stellar address alone does not identify a Circle transfer, so a lookup without the burn
+transaction answers `idle`.
+
+Circle's message transmitter records each message's nonce once it is used, and refuses a second
+delivery of the same message. Delivering again is therefore always safe: it delivers what has not
+been delivered and changes nothing otherwise. That is why
+[finishing a delivery](/send/finish) can be retried.
+
+## Axelar ITS
+
+A transfer crosses Axelar's hub in two legs, and the first leg executing only means it reached the
+hub. The status check finds the second leg from the first and reports arrival only when the second
+has executed on Stellar. Either leg running short of gas is `stalled` with an `add-gas` remedy.
+
+What arrived is read from the Stellar transaction that executed the message, not from Axelar's own
+record. When Stellar RPC no longer has that transaction, the check reads Horizon. For a token linked
+to a classic Stellar asset, Horizon still shows the amount, and the transfer is `done`. For a token
+that is its own contract it does not, and the transfer is reported as `delivered-unverified`, with
+the Stellar transaction to check, never as `done`.
+
+## LayerZero OFT
+
+A LayerZero delivery is read from LayerZero's own message index together with the amount decoded
+from the message itself, which is the amount credited. A message the index holds without that
+amount stays `pending` rather than reported with a number nobody read.
+
+## LayerZero with conversion on arrival
+
+A route that converts on arrival is delivered to the
+[Arrival Contract](/how-it-works/arrival-contract). The check reads LayerZero's record of the
+message and the contract's own event for it: a conversion is `delivered-and-converted`, and
+delivering the arriving token unconverted is `delivered-as-came`. A message sent to another Arrival
+Contract than the configured one is reported as stalled, with its explorer link.
+
+With no event yet, the check reads the endpoint's compose queue for the message. A queued step is
+`delivered-conversion-pending`, and its `finish` carries the exact queued message, rebuilt from
+LayerZero's record and checked against the hash the endpoint holds. Anyone can run an overdue
+step; the contract runs only the queued message, with the sender's minimum enforced inside it.
+
+## NEAR Intents
+
+A NEAR Intents transfer is found by its deposit address, and 1Click's status for that address
+decides the phase. The table is on [NEAR Intents](/how-it-works/rails/near-intents#status).

@@ -1,0 +1,89 @@
+---
+title: Send USDC to Stellar
+description: Every control on the Send to Stellar card, each wallet prompt, and what the card tells you while the transfer moves.
+---
+
+This page walks through the **Send to Stellar** card in the Mavna app from top to bottom. For the
+short version, see [Get started](/send).
+
+## Fill in the form
+
+**Send** is the chain your USDC is on. Press the chain name to open the list, or type in
+**Search chains** to filter it. Chains you can sign from in your browser come first. Chains listed
+under **Quoted, not signable here yet** show routes, and sending from them needs a wallet for that
+chain's family, which the app does not connect.
+
+**The amount** is how much USDC you send. Routes update as you type. Once your wallet is connected
+to the chain you picked, the card shows your balance and a **Max** button that fills in all of it.
+
+**Receive on Stellar** is the asset you end up holding: `USDC`, or `XLM` through a conversion on
+Stellar. [Receive XLM instead](/send/receive-xlm) covers the second choice. Under the amount you
+receive, **Exact** means that amount arrives in full; **Min** shows the least that arrives.
+
+**Recipient** is the Stellar address the money goes to. Paste it and press **Use this address**.
+An address that is not 56 characters long or does not start with `G` is refused on the spot.
+
+**Route priority** ranks the routes by **Best return** (the most arriving on Stellar) or
+**Fastest** (the shortest time to arrival).
+
+**Rails** turns individual rails on and off for this transfer. At least one rail stays on.
+
+**You will approve** counts the wallet prompts the selected route asks for. **Up to** in front of
+the number means some of them are skipped when they are not needed, such as an approval your
+wallet already gave.
+
+## Compare the routes
+
+Each rail answers on its own, and each answer appears under **Receive** as it lands. A route shows
+the amount that arrives, the rail, who you trust to deliver it, the transfer fee, the estimated
+time, and the number of prompts. The best-returning route carries a **Best return** badge, and a
+faster route, when there is one, carries **Fastest**. Open a route to see every line, including
+the minimum you receive and, for a new address, the account reserve.
+
+A rail that cannot carry your transfer appears as **Declined** with a sentence that says why. When
+asking again can change the answer, the decline offers **Try again**. To hide declined rails,
+turn off **Show rails that declined** under **Settings**.
+
+## Send it
+
+1. Press **Connect a wallet** and choose your wallet from the list. The button then reads
+   **Review transfer**.
+2. Press **Review transfer**. The summary shows what you send and receive, the recipient, the rail,
+   the transfer fee, the minimum you receive, the number of approvals and the estimated time.
+3. Press **Start transfer**.
+
+Your wallet then asks you to approve each step, and the card names each one as it runs:
+
+1. **Allow Circle to move your USDC.** This approves exactly the amount you send, once. The app
+   skips this prompt when your wallet has already approved at least that amount.
+2. **Send from** the chain you picked. This is the transaction that moves the money.
+
+Before the first prompt, the app checks that your wallet holds enough USDC and stops with the
+amounts if it does not. If your wallet is on a different network, it asks you to switch first.
+
+If you decline any prompt, the card says exactly what happened, for example "You did not confirm
+the transfer, so nothing was sent." Sending to an address that does not exist yet adds Stellar
+prompts, described in [Send to a new Stellar address](/send/new-address).
+
+## While it moves
+
+The card lists the steps of the transfer and marks each one as it finishes. The send from your
+chain and the delivery on Stellar link to their transactions on a block explorer once they land.
+
+**Circle attests the transfer** waits for your chain to finalise, and the card says how long for
+the chain you sent from: about a minute from Arc or Avalanche, about 20 minutes from Ethereum,
+Base or Arbitrum, about 4 hours from Starknet, about 32 hours from Linea. During that step the card first says
+**Keep this page open until the sponsor has the transfer**. Once the sponsor confirms it is
+watching the transfer, the note changes to **Safe to close this page: the sponsor delivers it when
+Circle attests**. From then on the sponsor delivers it without the page, for up to two days.
+
+In some cases closing the page pauses the transfer instead, and the card says so. You then finish
+it later from **Activity**, as described in [Finish a delivery](/send/finish).
+
+## When it arrives
+
+The card shows **Arrived on Stellar** with the amount, and the funds are in the recipient's account.
+Press **Send another** to start a new transfer.
+
+The app remembers the transfer in this browser under **Activity**. You can also find it from any
+browser with the transaction you sent: see [Find a transfer](/send/track).

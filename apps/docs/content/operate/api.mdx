@@ -1,0 +1,227 @@
+---
+title: Sponsor HTTP API
+description: Every endpoint the sponsor serves, with its request, its answers, and the checks it makes.
+---
+
+The widget calls these endpoints itself; you call them directly only when you build your own
+client. Every answer is JSON.
+
+## Conventions
+
+**Errors** share one shape:
+
+```json
+{ "error": "a sentence for a person", "retryable": true }
+```
+
+`retryable` says whether asking again can change the answer. No internal detail reaches the
+answer: the operator reads it in the process log.
+
+**Requests.** Every `POST` takes a JSON object of at most 64 KiB. A larger body answers `413`, a
+body that is not a JSON object answers `400`, and a field of the wrong shape answers `400` naming
+the field. An unexpected failure answers `500` with `retryable: true`: it could have failed after
+something was sent, so the answer says no more than that, and asking again is safe.
+
+**Rate limit.** Every endpoint counts requests per client address over one-minute windows
+(`MAVNA_RATE_LIMIT_PER_MINUTE`). Past the limit it answers `429` with `retryable: true`.
+
+**Browsers.** Only the origins in `MAVNA_ALLOWED_ORIGINS` receive CORS headers, so a page on any
+other origin cannot read the answers. A preflight `OPTIONS` request from another origin answers
+`403`.
+
+## `GET /health`
+
+```json
+{
+  "ok": true,
+  "network": "testnet",
+  "sponsor": "G...",
+  "reserveFunding": "sponsor",
+  "minDeliveryBaseUnits": "1000000",
+  "channels": { "size": 0, "leased": 0, "maxSize": 416 }
+}
+```
+
+`sponsor` is the account to fund. `reserveFunding` is `sponsor` or `self` (see
+[Sponsor configuration](/operate/sponsor#who-pays)). `minDeliveryBaseUnits` is the smallest Circle
+delivery the sponsor pays for, in USDC base units at six decimals. `channels` is the channel pool's
+current size, how many channels are in use, and its limit (see
+[Capacity and caps](/operate/capacity#channels)). The widget reads this before it quotes, so a
+route the sponsor cannot carry is declined before anyone signs.
+
+## Setting up a new account
+
+A new account takes four calls, in this order: `/settlement` builds the repayment,
+`/settlement/commit` holds the signed repayment, `/prepare` builds the account setup, and `/submit`
+sends the signed setup. [Sponsorship](/how-it-works/sponsorship) explains why the repayment comes
+first.
+
+### `POST /settlement`
+
+Builds the repayment for the account to sign: a transaction on one of the sponsor's channel
+accounts that buys back the reserve's XLM from the arriving funds, spending at most twice its value
+at the current order book price.
+
+Request: `{ "destination": "G...", "sourceChainId": "ethereum-sepolia" }`.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "xdr": "...", "channel": "G..." }` |
+| `400` | the destination is missing, not a usable Stellar address, needs no setup, or already holds USDC |
+| `409` | retryable: the account's previous repayment is still landing |
+| `429` | retryable: a daily cap refuses; this client already has as many repayments waiting as it is allowed; the account's last window lapsed moments ago; or this client has many builds it has not signed |
+| `503` | retryable: every slot for unbacked repayments is in use, no channel can be added right now, or the cap counts cannot be read |
+
+### `POST /settlement/commit`
+
+Holds the signed repayment until the money arrives. The sponsor signs nothing here. It holds only a
+repayment it built, signed by the account it was built for, whose operations are only
+`pathPaymentStrictReceive` and sponsorship revocations.
+
+Request: `{ "destination": "G...", "signedXdr": "..." }`. `destination` is optional and is only
+checked against the account the repayment was built for.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "held": true }` |
+| `400` | no transaction, a fee bump, an operation outside the list, a different account, or a missing or invalid signature from the account |
+| `409` | the repayment was not built here or has expired; the account's setup has already landed against, or is being submitted against, the repayment held for it; or the repayment's channel slot lapsed or passed to someone else |
+
+### `POST /prepare`
+
+Builds the account setup, unsigned. Nothing is spent here.
+
+Request: `{ "destination": "G...", "assets": ["USDC"], "sourceChainId": "ethereum-sepolia" }`.
+`assets` defaults to `["USDC"]`, and with reserves funded by the sponsor `["USDC"]` is the only set
+accepted.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "xdr": "...", "sponsor": "G..." }` |
+| `400` | the destination is missing, not usable, or can already receive; an asset is not curated; the set is not `["USDC"]`; or the account already holds USDC |
+| `429` | a daily cap refuses, or this client has many builds it has not signed (retryable) |
+| `503` | the cap counts cannot be read, or the sponsor is building too much at once (retryable) |
+
+### `POST /submit`
+
+Takes the signed setup back; the sponsor countersigns, pays and submits it. Before it does, it
+checks that:
+
+- the sponsor built this transaction, has not submitted it before, and it has not expired;
+- the sponsor is its source and its operations are only `beginSponsoringFutureReserves`,
+  `endSponsoringFutureReserves`, `createAccount` and `changeTrust`, and it is not a fee bump;
+- the account being set up has signed it;
+- a signed repayment is held for the account, and the setup sponsors exactly what that repayment
+  pays back;
+- no other setup has been submitted against that repayment;
+- the daily caps still allow it.
+
+Request: `{ "signedXdr": "..." }`.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "txHash": "...", "ledger": 123 }` |
+| `400` | no transaction, a fee bump, another source, an operation outside the list, or a missing or invalid signature from the account |
+| `409` | not built here or expired; no repayment held; the setup does not match the repayment; a setup was already submitted against it; the account already holds USDC; or the repayment lost its slot |
+| `409` with `"prepareAgain": true` | retryable: another transaction of the sponsor's took this setup's sequence number while the account was signing. Ask `/prepare` for a new one and sign that |
+| `429` | retryable: a daily cap refuses |
+| `502` | Stellar did not accept the submission |
+
+### `POST /settle`
+
+Submits the repayment held for an account, for rails that deliver without the sponsor (LayerZero
+and Axelar). It submits only once the account's setup has landed and the account holds enough of
+the arriving asset to pay what the repayment costs at the current price, plus 1%, never more than
+the most the account signed for. The sweep does the same for every held repayment, so a closed page
+does not leave a reserve unpaid.
+
+Request: `{ "destination": "G..." }`.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "settled": true, "settlementTxHash": "..." }`: submitted now, or already landed |
+| `200` | `{ "settled": false, "settlementRetryable": true }`: not yet; ask again later |
+| `200` | `{ "settled": false, "settlementRetryable": false }`: it can never land; it counts as a stranding and is no longer held |
+| `400` | the destination is not a usable Stellar address |
+| `404` | no repayment is held for the account and none landed recently |
+| `429` | retryable: the same account was asked about within the last 30 seconds |
+
+## `POST /deliver`
+
+Triggers the Stellar mint for an attested Circle transfer. Each Circle transfer is delivered once,
+so asking again never mints twice.
+
+Request: `{ "txHash": "0x...", "domain": 0 }`. `txHash` is the transfer's transaction on the source
+chain: an EVM hash, a Solana signature or a Starknet hash. `domain` is Circle's domain number for
+the source chain, and must be one the sponsor delivers from. Either one malformed answers `400`
+before Circle is asked. A `destination` field is accepted and ignored: the recipient is read from
+Circle's attested message.
+
+With `MAVNA_RESERVE_FUNDING=self` it answers `409` before anything else.
+
+The sponsor checks the amount minted against `MAVNA_MIN_DELIVERY_USDC`, simulates the delivery, and
+submits it within the day's delivery budget. When the delivery lands, or had already landed, it also
+submits the repayment held for the attested recipient, and the answer carries that result in the
+same `settled`, `settlementTxHash` and `settlementRetryable` fields as `/settle`.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "kind": "delivered", "txHash": "...", "ledger": 123 }` |
+| `200` | `{ "kind": "already-delivered" }` |
+| `200` | `{ "kind": "not-attested-yet" }` |
+| `400` | not retryable: the amount is below the minimum, or cannot be read |
+| `404` | retryable: Circle has no record of the transaction yet |
+| `409` | `{ "kind": "recipient-not-ready", ... }`: the recipient cannot receive USDC yet; in the new-account flow, the cue to set it up |
+| `502` | retryable: Circle's attestation service did not answer usefully, the delivery failed on Stellar, or it was sent and its outcome is not known yet (with `deliveryTxHash`) |
+| `503` | retryable: the day's delivery budget is spent |
+
+**Watching.** A transfer Circle knows and has not attested yet, or whose recipient is not ready, is
+written to the sponsor's watch list, and every answer then carries `"watching": true`. The sweep
+asks about it again, after a minute at first and doubling up to half an hour between tries, and
+delivers it once Circle attests it, through the same checks. It stops after delivery, when the
+transfer can never be paid for, or two days after it was first asked about. The sponsor watches at
+most 8 transfers per client address and 1,000 in all. With `MAVNA_RESERVE_FUNDING=self` nothing is
+watched.
+
+## `POST /compose`
+
+Finishes an overdue conversion on arrival: it runs `lz_compose` on the
+[Arrival Contract](/how-it-works/arrival-contract) for a message LayerZero delivered and queued.
+Only a sponsor started with `MAVNA_ARRIVAL_CONTRACT` and its executor key serves it; any other
+answers `404`. With `MAVNA_RESERVE_FUNDING=self` it answers `409`.
+
+Request: `{ "from": "C...", "guid": "...", "index": 0, "message": "0x..." }`, as carried by a
+`delivered-conversion-pending` status in `finish`.
+
+The sponsor checks the message against the hash LayerZero's endpoint holds for it before it submits,
+so nothing in the request can change where the money goes. The run must ask for exactly one
+authorization, the executor's, for `lz_compose` on the configured contract with these arguments.
+
+| Status | When |
+| --- | --- |
+| `200` | `{ "kind": "composed", "txHash": "...", "ledger": 123 }` or `{ "kind": "already-composed" }` |
+| `400` | malformed input, bytes that do not match the queued message, or a run that asks for more than that one authorization |
+| `404` | `{ "kind": "not-queued" }`: the endpoint holds nothing for that message yet |
+| `429` | retryable: the same message was asked about within 30 seconds, this client asked for three finishes in the last minute, or ten finishes were tried in the last minute in all |
+
+## Soroswap proxy
+
+Served only when the sponsor has `SOROSWAP_API_KEY`; otherwise these paths answer `404` and the
+widget's conversion moves on to the next exchange. The proxy adds the key on the way to Soroswap;
+the key never appears in an answer.
+
+Because every call spends the operator's key, a request from an origin not in
+`MAVNA_ALLOWED_ORIGINS` answers `403` without reaching Soroswap. Each client can make 30 calls a
+minute and all clients together 300; past either, `429`.
+
+- `GET /swap/soroswap/health`: whether Soroswap can be used on the sponsor's network, cached for 30
+  seconds.
+- `POST /swap/soroswap/quote`: `{ network, assetIn, assetOut, amount, slippageBps, protocols, feeBps? }`
+  with contract addresses for the assets. Answers Soroswap's quote, checked against the shape the
+  widget expects.
+- `POST /swap/soroswap/build`: `{ network, quote, from, to }` with a quote from the endpoint above.
+  Answers `{ "xdr": "..." }`, unsigned.
+
+Refusals: `400` for a request that fails validation or names another network, `422` when Soroswap
+has no route, `409` when Soroswap's fee rate changed since the quote, `429` when Soroswap is busy,
+and `502` when it could not be reached or answered with something unusable.

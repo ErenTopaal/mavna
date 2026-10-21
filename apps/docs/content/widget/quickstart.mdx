@@ -1,47 +1,37 @@
 ---
 title: Quickstart
-description: Render the whole transfer flow, starting with the one line that is easy to miss.
+description: Build the widget from the repository, import its stylesheet, and render it with one config object.
 ---
 
-import ExamplePanel from "../../generated/example-panel.mdx";
+## Build it
 
-# Widget quickstart
+`@mavna/widget` is part of the Mavna repository and is built from a checkout along with the packages
+it uses. [Install](/sdk/install) covers building the workspace. Your app needs React and React DOM,
+version 19 or later.
 
-`@mavna/widget` is a workspace package, built from a checkout alongside the SDK it
-uses; [Install](/developers/install) covers building the workspace. React 19 is a
-peer dependency.
-
-## The one line that is easy to miss
+## Import the stylesheet
 
 ```ts
 import "@mavna/widget/widget.css";
 ```
 
-Once, anywhere in your app. The build extracts the stylesheet into a file of its own
-and strips this import from the emitted JavaScript, so importing only the component
-renders every state completely unstyled and throws nothing: no error, no warning, no
-console entry. It looks like a broken component rather than a missing import. In
-development the widget warns about it, by reading back a custom property that only
-the stylesheet defines; that check compiles away in production.
+Import it once, anywhere in your app. The build writes the widget's styles to this separate file,
+so importing only the component renders the widget without any styling.
 
 ## Render it
 
-<ExamplePanel />
+<include lang="tsx" meta='title="apps/docs/examples/Panel.tsx"'>../../examples/Panel.tsx</include>
 
-One component and one config object. `integrator` is the only required field; it
-identifies you and attributes an [integrator fee](/widget/configuration) if you set
-one. The network defaults to the test network.
+`integrator` is the one required field: a name for your integration. The network defaults to
+Stellar's test network.
 
-The `sponsorUrl` above points at a sponsor you run. On testnet its default is a
-local development sponsor (`http://localhost:8787`), so [zero-XLM
-arrival](/developers/concepts/sponsorship) to brand-new accounts works out of the box
-only against a local sponsor. On mainnet there is no default: point it at your own
-[sponsor service](/developers/sponsor), or the widget will not mount.
+`sponsorUrl` points at the [sponsor service](/operate) you run. On the test network it defaults to
+`http://localhost:8787`, a sponsor on the reader's own machine, so a page you host needs your own.
+On the main network there is no default, and the widget refuses to mount without one.
 
 ## Next
 
-- Every configuration field, generated from the source:
-  [configuration](/widget/configuration).
-- Inline, full-page, or a drawer: [variants](/widget/variants).
-- Making it look like your product: [theming](/widget/theming).
-- The full configurator against a live quote: [playground](/widget/playground).
+- Every field: [Configuration](/widget/configuration).
+- Reacting to what your user does: [Events](/widget/events).
+- Inline, full page or drawer: [Layouts](/widget/layouts).
+- Matching your product: [Theming](/widget/theming).

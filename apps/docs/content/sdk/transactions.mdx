@@ -1,0 +1,81 @@
+---
+title: Build and sign transactions
+description: Turn a route into unsigned transactions, skip the ones that are not needed, and count signatures before your user starts.
+---
+
+Quoting and building are separate steps. For the route your user picks, call `buildTransactions` on
+the adapter that quoted it. What comes back is a list of unsigned transactions, in the order they
+must be signed and sent. The SDK never signs and never submits them.
+
+```ts
+const adapter = adapters.find((a) => a.id === route.source);
+const transactions = await adapter.buildTransactions(route, { sender: walletAddress });
+```
+
+Only the adapter whose `id` matches the route's `source` can build it. The second argument tells
+the rail the sending wallet's address. Most rails do not need it; NEAR Intents refuses to build
+without it, because its service needs to know where to refund a deposit before it hands out a
+deposit address.
+
+## What each transaction holds
+
+| Field | What it is |
+| --- | --- |
+| `chainId` | the chain it is sent on |
+| `format` | how to read `payload`: `"evm-tx"`, `"stellar-xdr"`, `"solana-instruction"`, `"starknet-invoke"` or `"cosmos-msg"` |
+| `payload` | what to sign, as a string your wallet code reads according to `format` |
+| `describes` | a sentence for your user that says what signing it does |
+| `unnecessaryWhen` | when the transaction can be skipped, or `undefined` to always send it |
+| `ephemeralSigners` | accounts you must create a fresh keypair for and sign with |
+
+An `evm-tx` payload is JSON with `to`, `abi`, `functionName`, `args` and, when the call carries the
+chain's currency, `value`. Where a payload must name the sending wallet, such as a refund address,
+it holds `SENDER_ADDRESS` from `@mavna/core` (the string `"mavna:sender"`), and you replace it with
+the connected address before signing.
+
+Send the transactions one at a time and wait for each to confirm. An approval has to land before
+the transfer that relies on it.
+
+## Skip what is not needed
+
+`unnecessaryWhen` has one form today, an ERC-20 allowance check:
+
+```ts
+interface AllowanceCheck {
+  readonly kind: "erc20-allowance";
+  readonly token: string;
+  readonly spender: string;
+  readonly atLeastBaseUnits: string;
+  readonly skipAlsoWhenExactly?: string;
+}
+```
+
+The transaction is unnecessary when the wallet's allowance for `spender` on `token` is at least
+`atLeastBaseUnits`. Read the allowance from the source chain with the wallet you already have, and
+skip the transaction when the condition holds. When `skipAlsoWhenExactly` is set, the transaction is
+also unnecessary when the allowance is exactly that value. The LayerZero rail uses it for a reset to
+zero that USDT requires before an allowance can change, which is skipped when there is nothing to
+clear.
+
+## Ephemeral signers
+
+`ephemeralSigners` is empty on most chains. A Solana CCTP burn writes into a new account, so the
+adapter lists that account here, and you generate a keypair for it and sign with it. The SDK creates
+no keys.
+
+## Counting signatures before your user starts
+
+`route.signaturesRequired` is the number of times your user is asked to sign, stated on the quote.
+It can differ from the number of transactions `buildTransactions` returns: an approval that turns
+out unnecessary is skipped, and steps such as setting up a new Stellar account are signed in a
+Stellar wallet rather than built here. `route.optionalSignatures`, when set, says how many of the
+signatures can be skipped, so you can show the count as "up to".
+
+`planTransfer` and `signatureCount` in `@mavna/routing` are how the adapters arrive at the count:
+`planTransfer` lists the steps a transfer needs, each with `needsUserSignature`, and
+`signatureCount` adds them up. `optionalSignatureCount` counts the ones that can be skipped.
+
+The Stellar transactions for a new account come from `@mavna/stellar`: `buildPreparation` creates
+the account and lets it hold the asset, and `buildSettlement` repays the reserve from the arriving
+funds. Both return unsigned transactions. [Sponsorship](/how-it-works/sponsorship) explains the
+order in which they are signed.
