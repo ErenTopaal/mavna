@@ -79,6 +79,26 @@ describe("stepsFor", () => {
     expect(steps.find((s) => s.id === "attest")?.actor).toBe("Circle");
   });
 
+  it("says how long Circle takes from the route's own source chain, not a few minutes", () => {
+    const withBridge = (seconds: number) => {
+      const route = routeFor("cctp", { newAccount: true });
+      return {
+        ...route,
+        steps: route.steps.map((step) =>
+          step.kind === "bridge" ? { ...step, estimatedSeconds: seconds } : step,
+        ),
+      };
+    };
+    const attest = (seconds: number, funding: "sponsor" | "self" = "sponsor") =>
+      stepsFor(withBridge(seconds), funding).find((s) => s.id === "attest")?.note ?? "";
+    // ethereum's finality, measured at nineteen minutes on a sepolia burn
+    expect(attest(1200)).toMatch(/^About 20 minutes\. /);
+    expect(attest(1200, "self")).toMatch(/^About 20 minutes\. /);
+    expect(attest(68)).toMatch(/^About a minute\. /);
+    expect(attest(32 * 3600 + 60)).toMatch(/^About 32 hours\. /);
+    expect(attest(1200)).not.toMatch(/few minutes/);
+  });
+
   it("names the rail for layerzero and axelar, and never Circle", () => {
     for (const [source, rail] of [
       ["layerzero", "LayerZero"],

@@ -35,6 +35,7 @@ import {
 import { type RouteView, settlementBlocker, trustlineNameOf, type Wanted } from "./quote";
 import {
   adapterFor,
+  attestationWait,
   destinationBlocker,
   endedNote,
   pollSettlement,
@@ -598,17 +599,18 @@ async function deliverToStellar(
   // said once, and said again only to upgrade: a later answer that the sponsor is
   // watching makes closing safe after all, while nothing ever downgrades it
   let told: "nothing" | "paused" | "settled" = ownDelivery ? "settled" : "nothing";
+  const attesting = attestationWait(route);
   const tellClosing = (watching: boolean): void => {
     if (told === "settled" || (told === "paused" && !watching)) return;
     told = watching ? "settled" : "paused";
     patch("attest", {
       phase: "pending",
       note: !watching
-        ? "A few minutes. Closing this page pauses the delivery; you can finish it under Activity."
+        ? `${attesting} Closing this page pauses the delivery; you can finish it under Activity.`
         : !prepared && route.steps.some((s) => s.kind === "prepare-account")
-          ? "A few minutes. Closing this page pauses setting up the new account, which your " +
+          ? `${attesting} Closing this page pauses setting up the new account, which your ` +
             "wallet signs once Circle attests; you can finish it under Activity."
-          : "A few minutes. Safe to close this page: the sponsor delivers it when Circle attests.",
+          : `${attesting} Safe to close this page: the sponsor delivers it when Circle attests.`,
     });
   };
   for (let attempt = 0; attempt < 90; attempt += 1) {

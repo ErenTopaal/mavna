@@ -18,6 +18,18 @@ import type { FlightStep, Patch } from "./transfer";
 
 export type StepTemplate = Omit<FlightStep, "phase">;
 
+/**
+ * How long Circle's attestation should take for this route, as a sentence.
+ * The wait is the source chain's finality, from seconds to hours, and the
+ * adapter's bridge step carries it.
+ */
+export function attestationWait(route: Route): string {
+  const seconds = route.steps.find((s) => s.kind === "bridge")?.estimatedSeconds ?? 0;
+  if (seconds < 90) return "About a minute.";
+  if (seconds < 5400) return `About ${Math.round(seconds / 60)} minutes.`;
+  return `About ${Math.round(seconds / 3600)} hours.`;
+}
+
 /** The adapter that quoted a route, which is the only one that can build it. */
 export function adapterFor(engine: Pick<Engine, "adapters">, route: Route): BridgeAdapter {
   const adapter = engine.adapters.find((a) => a.id === route.source);
@@ -112,7 +124,7 @@ export function stepsFor(
         label: "Circle attests the transfer",
         // the account's own wallet signs the delivery, and only an open page can ask it
         note:
-          "A few minutes. Your wallet signs the delivery next, so closing this page pauses it; " +
+          `${attestationWait(route)} Your wallet signs the delivery next, so closing this page pauses it; ` +
           "you can finish it under Activity.",
         user: false,
         actor: "Circle",
@@ -138,7 +150,7 @@ export function stepsFor(
         id: "attest",
         label: "Circle attests the transfer",
         // safe to close only once the sponsor says it is watching the burn
-        note: "A few minutes. Keep this page open until the sponsor has the transfer.",
+        note: `${attestationWait(route)} Keep this page open until the sponsor has the transfer.`,
         user: false,
         actor: "Circle",
       },
