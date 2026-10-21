@@ -273,7 +273,7 @@ async function collectSettlement(
   });
   // a conversion has to leave the repayment its share
   const repaysAtMost = route.steps.some((s) => s.kind === "swap") ? read.sendMax : 0n;
-  const signed = await engine.stellar.sign(built.xdr, address);
+  const signed = await signing(engine, built.xdr, address, "the repayment", funds);
   await engine.sponsor.commitSettlement(route.destination, signed).catch((cause: unknown) => {
     throw withFunds(cause, funds);
   });
@@ -334,7 +334,7 @@ async function openOwnTrustline(
         `for the receiving account), so it was not signed. ${funds}`,
     );
   }
-  const signed = await engine.stellar.sign(preparation.xdr, address);
+  const signed = await signing(engine, preparation.xdr, address, "the trustline", funds);
   await engine.sponsor.submitPreparation(signed).catch((cause: unknown) => {
     throw withFunds(cause, funds);
   });
@@ -415,7 +415,7 @@ async function prepareSponsored(
     if (problem !== undefined) {
       throw new Error(`The sponsor's preparation was not signed: ${problem}. ${funds}`);
     }
-    const signed = await engine.stellar.sign(preparation.xdr, address);
+    const signed = await signing(engine, preparation.xdr, address, "the account's setup", funds);
     try {
       await engine.sponsor.submitPreparation(signed);
       return;
@@ -424,6 +424,27 @@ async function prepareSponsored(
         throw withFunds(cause, funds);
       }
     }
+  }
+}
+
+/**
+ * Ask the Stellar wallet to sign, and when it does not, say which signature it
+ * was and what that means for the funds. Wallets in the kit share no code for a
+ * refusal, so whatever the reason, the wallet's own words go in brackets.
+ */
+async function signing(
+  engine: Pick<TransferEngine, "stellar">,
+  xdr: string,
+  address: string,
+  what: string,
+  funds: string,
+): Promise<string> {
+  try {
+    return await engine.stellar.sign(xdr, address);
+  } catch (cause) {
+    throw new Error(
+      `Your Stellar wallet did not sign ${what} (${asError(cause).message}). ${funds}`,
+    );
   }
 }
 
