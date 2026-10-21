@@ -24,10 +24,15 @@ export {
 export type { ArrivalSetup, ComposeContext, PathVenue } from "./compose-route.js";
 export {
   assertArrivalServes,
+  COMPOSE_BUDGET_SHARE_PCT,
+  COMPOSE_INSTRUCTIONS_PER_ESTIMATE,
+  COMPOSE_MAX_ESTIMATE_INSTRUCTIONS,
+  COMPOSE_OWN_INSTRUCTIONS,
   composeOptionsFor,
   composePhase,
   composeSendFor,
   quoteComposeRoute,
+  TX_MAX_INSTRUCTIONS,
 } from "./compose-route.js";
 export type {
   ArrivalDeployment,

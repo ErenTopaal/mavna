@@ -9,7 +9,7 @@ vi.mock("./stellar-wallet.js", () => ({ createStellarWallet: () => ({}) }));
  * The widget hands the Arrival Contract it converts through to every rail, so
  * none of them offers a plain transfer into it, where the funds would be stuck.
  */
-const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
+const ARRIVAL = "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD";
 const config: EngineConfig = {
   network: "testnet",
   rpcUrl: "https://rpc.invalid",

@@ -68,13 +68,76 @@ export interface PathVenue {
     readonly maxSlippageBps: number;
     /** The only tokens a path may pass through: the contract's own list. */
     readonly via?: readonly string[];
+    /**
+     * The most the router's estimates for the whole path may cost, in simulated
+     * instructions. A path over it is not offered; with none under it the venue
+     * refuses with an error named "SwapTooCostly".
+     */
+    readonly maxEstimateInstructions?: number;
   }): Promise<{
     readonly provider: string;
     readonly amountOut: string;
     readonly amountOutMinimum: string;
     readonly path: readonly ComposeHop[];
+    /** What the router's estimates for this path cost, simulated, summed over its hops. */
+    readonly estimateInstructions: number;
   }>;
 }
+
+/** The network's per-transaction instruction cap (ContractComputeV0, mainnet and testnet). */
+export const TX_MAX_INSTRUCTIONS: number = 400_000_000;
+/**
+ * The share of that cap a conversion may be expected to use when it is quoted.
+ * Running out of budget aborts the compose where nothing can catch it, and the
+ * pools can move, or be fragmented by anyone, between the quote and the run: on
+ * a mainnet fork, filling every tick spacing a swap crossed added about 4M
+ * instructions per spacing, which a cap at 40% leaves room for.
+ */
+export const COMPOSE_BUDGET_SHARE_PCT: number = 40;
+/**
+ * A conversion runs the router's estimate for every hop, then the swap, which
+ * cost 1.35 to 1.42 times the estimates on mainnet (2026-10-21), plus the
+ * contract's own work: up to about 25M instructions (its VM, the endpoint, the
+ * token calls). 2.5 times the estimates plus that covered every run measured on
+ * a mainnet fork (83M for 50,000 USDT0 into XLM, against 115M projected).
+ */
+export const COMPOSE_OWN_INSTRUCTIONS: number = 25_000_000;
+export const COMPOSE_INSTRUCTIONS_PER_ESTIMATE: number = 2.5;
+/** The most the venue's estimates for a conversion may cost: 54M. */
+export const COMPOSE_MAX_ESTIMATE_INSTRUCTIONS: number = Math.floor(
+  ((TX_MAX_INSTRUCTIONS * COMPOSE_BUDGET_SHARE_PCT) / 100 - COMPOSE_OWN_INSTRUCTIONS) /
+    COMPOSE_INSTRUCTIONS_PER_ESTIMATE,
+);
+
+/** A whole-token figure with thousands separators, as the user reads an amount. */
+function wholeUnits(baseUnits: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = (baseUnits / scale).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const fraction = (baseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction === "" ? whole : `${whole}.${fraction}`;
+}
+
+/** Why the contract would not convert this much, or undefined when it would. */
+function overTheLimit(
+  config: ArrivalConfig,
+  wantedContract: string,
+  arriving: Asset,
+  wanted: Asset,
+  amount: bigint,
+): string | undefined {
+  const largest = config.largestConversion.get(wantedContract);
+  if (largest === undefined || amount <= largest) return undefined;
+  return (
+    `The Arrival Contract converts at most ${wholeUnits(largest, arriving.decimals)} ` +
+    `${arriving.symbol} into ${wanted.symbol} in one transfer; more than that it delivers as ` +
+    `${arriving.symbol}. The plain route delivers it.`
+  );
+}
+
+const tooCostly = (arriving: Asset, wanted: Asset): string =>
+  `Converting this much into ${wanted.symbol} on arrival would cost more to run on Stellar ` +
+  `than one transaction may spend, so it is not offered. The plain route delivers ` +
+  `${arriving.symbol}.`;
 
 /** Where compose routes go on this network, and what prices them. */
 export interface ArrivalSetup {
@@ -322,6 +385,14 @@ export async function quoteComposeRoute(
         "route still delivers what arrives.",
     );
   }
+  const limit = overTheLimit(
+    config,
+    request.wantedContract,
+    arriving,
+    wanted,
+    BigInt(plain.receives.baseUnits),
+  );
+  if (limit !== undefined) return ctx.decline("amount-too-large", limit);
 
   const fee = request.integratorFee;
   if (fee !== undefined && (!Number.isInteger(fee.bps) || fee.bps < 0 || fee.bps > 1_000)) {
@@ -378,8 +449,15 @@ export async function quoteComposeRoute(
       // a path through anything else would be delivered as it came, so it is
       // built from the router's pools between listed tokens only
       via: config.pathTokens,
+      maxEstimateInstructions: COMPOSE_MAX_ESTIMATE_INSTRUCTIONS,
     });
   } catch (cause) {
+    if (cause instanceof Error && cause.name === "SwapTooCostly") {
+      return {
+        ...ctx.decline("amount-too-large", tooCostly(arriving, wanted)),
+        detail: operatorDetail(cause),
+      };
+    }
     // the venue's reason can carry a router's host error or a node's URL, so it
     // goes to the operator and the user reads only our sentence
     return {
@@ -389,6 +467,17 @@ export async function quoteComposeRoute(
           "now. The plain route still delivers it.",
       ),
       detail: operatorDetail(cause),
+    };
+  }
+
+  // held to the bound here too, whatever the venue did with it
+  if (
+    !Number.isFinite(venue.estimateInstructions) ||
+    venue.estimateInstructions > COMPOSE_MAX_ESTIMATE_INSTRUCTIONS
+  ) {
+    return {
+      ...ctx.decline("amount-too-large", tooCostly(arriving, wanted)),
+      detail: `the venue's estimates cost ${venue.estimateInstructions} instructions, over ${COMPOSE_MAX_ESTIMATE_INSTRUCTIONS}`,
     };
   }
 
@@ -581,6 +670,14 @@ export async function composeSendFor(
       retryable: false,
     });
   }
+  const limit = overTheLimit(
+    config,
+    route.compose.wantedContract,
+    route.compose.arriving,
+    route.compose.wanted,
+    BigInt(arrived),
+  );
+  if (limit !== undefined) throw new MavnaError(limit, { retryable: false });
   const why =
     (await cannotHold(
       ctx.rpc,

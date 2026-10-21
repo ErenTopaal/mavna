@@ -12,10 +12,18 @@ arriving token on as it came. It has no administrator and no upgrade path.
 ## What it accepts
 
 Fixed when the contract is deployed and never changeable: the OFTs it accepts, each with the token
-it credits; the assets it converts into; the further tokens a conversion can route through; and the
-Aquarius router. A message that names anything else is delivered as it came, without the contract
-calling the unknown token. Paths are capped at four hops through three tokens, and the integrator
-fee at 1000 basis points.
+it credits; the assets it converts into, each with the largest amount it converts into that asset in
+one transfer; the further tokens a conversion can route through; and the Aquarius router. A message
+that names anything else is delivered as it came, without the contract calling the unknown token.
+Paths are capped at four hops through three tokens, and the integrator fee at 1000 basis points.
+
+The largest conversion exists because Stellar caps what one transaction may spend, and a swap that
+runs out of that budget cannot fall back to anything: the whole step fails. Above the limit the
+contract delivers the arriving token as it came without calling the exchange. On mainnet the limits
+are 50,000 USDT0 into XLM and 250,000 USDT0 into USDC, set on a copy of mainnet's own pools where
+those amounts used at most 35% of the budget, even with the pools deliberately fragmented. The SDK
+does not offer a conversion above the limit, or one whose simulated cost would take more than 40%
+of the budget; the plain route still delivers.
 
 ## When it holds funds
 
@@ -23,6 +31,16 @@ LayerZero on Stellar credits the contract in one transaction and runs the compos
 one, so each arrival sits in the contract between the two. While it waits, it can go only to the
 recipient named in the signed message. Anyone can run the step:
 [finishing an overdue conversion](/operate/api#post-compose) runs only the exact queued message.
+
+If the conversion still cannot complete, whatever the reason, anyone can record the waiting step
+with the contract's `note`, and seven days later deliver it as it came with `deliver_overdue`: the
+arriving token, exactly the amount that arrived, to the recipient the sender named, without calling
+the exchange. Both paths spend the same entry in LayerZero's queue, so a transfer is paid once,
+whichever runs first. The contract README has the commands.
+
+Waiting arrivals share one balance of the arriving token. USDT0's issuer side can be given the power
+to claw back or freeze that balance; nobody holds it today, the deploy check refuses to pass while
+anyone does, and the README explains what it would mean if that changed.
 
 Because there is no administrator, nothing can recover funds the step can never deliver, such as
 tokens sent to the contract without a compose message. The SDK never builds such a transfer: every
@@ -33,12 +51,13 @@ again at build, that the recipient can hold both the arriving token and the want
 
 | Network | Contract | Wasm sha256 |
 | --- | --- | --- |
-| testnet | `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ` | `468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b` |
+| testnet | `CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD` | `d8cc3923a6605ada3ad761f2f0545a15dc7b0715bbd4ce8a93caef6267acf9a6` |
 
 The testnet instance proves the endpoint's queue, the Aquarius router and the contract together: no
 OFT is peered to Stellar's test network, so its allowlisted sender is a test key that queues compose
-messages on the real testnet endpoint. The main network has no deployment, so routes that convert
-on arrival are not offered there.
+messages on the real testnet endpoint. It converts at most 10,000 XLM into testnet USDC per
+transfer. The main network has no deployment, so routes that convert on arrival are not offered
+there.
 
 ## Reproducing the build
 
@@ -62,12 +81,13 @@ the mainnet contract is built with and checks every entry against mainnet, read-
 anything is signed:
 
 ```sh
-pnpm --filter @mavna/swap build
-node scripts/arrival-mainnet.mjs --wasm=<built wasm> --source=<deployer key name>
+pnpm --filter @mavna/swap --filter @mavna/adapter-layerzero build
+node scripts/arrival-mainnet.mjs --wasm=<built wasm> --source=<deployer key name> --payer=<deployer address>
 ```
 
-It exits non-zero on any failed check and ends with the two commands to sign: the upload and the
-deploy. The contract has no admin, so the key that signs them holds no power over it afterwards.
+It exits non-zero on any failed check, including a change to the code the USDT0 OFT runs or anyone
+holding a role that can claw back or freeze USDT0, prints the upload's current resource fee (32.255
+XLM on 2026-10-21), and ends with the two commands to sign: the upload and the deploy. The contract has no admin, so the key that signs them holds no power over it afterwards.
 After the deploy, the same script checks the new instance with `--contract=<new contract id>`. The
 [deploying section of the contract README](https://github.com/ErenTopaal/mavna/blob/main/contracts/arrival/README.md#deploying)
 has the lists, the measured fees and the trust each listed party carries.

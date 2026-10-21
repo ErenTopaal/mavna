@@ -2,7 +2,8 @@
 # Builds the Arrival Contract with contracts/build.sh and fails unless the wasm
 # hash equals the testnet row of the deployments table in its README. That row
 # is what anyone checking the deployed contract compares against, so a source
-# change that alters the bytes must update it in the same commit.
+# change that alters the bytes must update it in the same commit, along with the
+# copy in contracts/arrival/testdata that the budget tests run.
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,3 +24,11 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 echo "arrival wasm matches the README: $actual"
+
+# the budget tests run this copy, so it has to be the same build
+tested="$(shasum -a 256 "$root/contracts/arrival/testdata/mavna_arrival.wasm" | cut -d ' ' -f 1)"
+if [ "$tested" != "$expected" ]; then
+  echo "contracts/arrival/testdata/mavna_arrival.wasm is $tested, the README says $expected" >&2
+  exit 1
+fi
+echo "the wasm the tests run matches too"

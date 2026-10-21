@@ -14,14 +14,16 @@ extern crate std;
 use soroban_sdk::{
     address_payload::AddressPayload,
     contract, contractimpl, contracttype,
-    testutils::{Address as _, BytesN as _, Events as _, MockAuth, MockAuthInvoke},
+    testutils::{
+        Address as _, BytesN as _, Events as _, IssuerFlags, Ledger as _, MockAuth, MockAuthInvoke,
+    },
     token::{StellarAssetClient, TokenClient},
     vec, xdr, Address, Bytes, BytesN, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
 
 use crate::{
     codec::MESSAGE_VERSION, fee_of, venue_floor, ArrivalContract, ArrivalContractClient, Arrived,
-    Error,
+    Error, OVERDUE_AFTER_LEDGERS,
 };
 
 mod endpoint {
@@ -37,6 +39,29 @@ enum VenueKey {
     // what estimate_swap overstates by, in basis points, so the swap can still
     // refuse after an estimate that cleared the floor
     Optimism,
+    // how many times the arrival contract has called it
+    Calls,
+    // a separate rate for swaps that sell this token, as a swap back does
+    Back,
+}
+
+/// The rate for a swap selling `token_in`: the back rate when one is set for it.
+fn rate_for(env: &Env, token_in: &Address) -> (i128, i128) {
+    if let Some((token, num, den)) = env
+        .storage()
+        .instance()
+        .get::<_, (Address, i128, i128)>(&VenueKey::Back)
+    {
+        if token == *token_in {
+            return (num, den);
+        }
+    }
+    env.storage().instance().get(&VenueKey::Rate).unwrap()
+}
+
+fn count_call(env: &Env) {
+    let calls: u32 = env.storage().instance().get(&VenueKey::Calls).unwrap_or(0);
+    env.storage().instance().set(&VenueKey::Calls, &(calls + 1));
 }
 
 #[contracttype]
@@ -62,21 +87,34 @@ impl Venue {
         env.storage().instance().set(&VenueKey::Optimism, &bps);
     }
 
+    /// A venue that pays `num / den` for whatever sells `token`; a rate under one
+    /// unit per amount sold pays a single unit, as a router keeping the rest would.
+    pub fn set_back_rate(env: Env, token: Address, num: i128, den: i128) {
+        env.storage()
+            .instance()
+            .set(&VenueKey::Back, &(token, num, den));
+    }
+
+    pub fn calls(env: Env) -> u32 {
+        env.storage().instance().get(&VenueKey::Calls).unwrap_or(0)
+    }
+
     pub fn estimate_swap(
         env: Env,
         _tokens: Vec<Address>,
-        _token_in: Address,
+        token_in: Address,
         _token_out: Address,
         _pool_index: BytesN<32>,
         in_amount: u128,
     ) -> u128 {
-        let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
+        count_call(&env);
+        let (num, den) = rate_for(&env, &token_in);
         let optimism: i128 = env
             .storage()
             .instance()
             .get(&VenueKey::Optimism)
             .unwrap_or(0);
-        (in_amount as i128 * num / den * (10_000 + optimism) / 10_000) as u128
+        ((in_amount as i128 * num / den).max(1) * (10_000 + optimism) / 10_000) as u128
     }
 
     pub fn set_reenter(env: Env, reentry: Reentry) {
@@ -91,6 +129,7 @@ impl Venue {
         in_amount: u128,
         out_min: u128,
     ) -> u128 {
+        count_call(&env);
         user.require_auth();
         let me = env.current_contract_address();
         TokenClient::new(&env, &token_in).transfer(&user, &me, &(in_amount as i128));
@@ -109,8 +148,8 @@ impl Venue {
                 &0,
             );
         }
-        let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
-        let out = in_amount as i128 * num / den;
+        let (num, den) = rate_for(&env, &token_in);
+        let out = (in_amount as i128 * num / den).max(1);
         if (out as u128) < out_min {
             panic!("below out_min");
         }
@@ -145,14 +184,28 @@ fn sac(env: &Env) -> (Address, xdr::Asset) {
     (sac.address(), sac.asset())
 }
 
+/// Larger than any arrival the tests make, so only the tests about the limit meet it.
+const NO_LIMIT: i128 = i64::MAX as i128;
+
 fn setup() -> World {
+    setup_converting_at_most(NO_LIMIT)
+}
+
+fn setup_converting_at_most(largest: i128) -> World {
     let env = Env::default();
     env.cost_estimate().budget().reset_unlimited();
     env.mock_all_auths();
 
     let (native, _) = sac(&env);
     let endpoint = env.register(endpoint::WASM, (Address::generate(&env), 40600u32, native));
-    let (usdt0, usdt0_asset) = sac(&env);
+    // as USDT0's issuer is on mainnet: its holders' balances can be clawed back
+    // and frozen, the Arrival Contract's included
+    let usdt0_sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    usdt0_sac.issuer().set_flag(IssuerFlags::RevocableFlag);
+    usdt0_sac
+        .issuer()
+        .set_flag(IssuerFlags::ClawbackEnabledFlag);
+    let (usdt0, usdt0_asset) = (usdt0_sac.address(), usdt0_sac.asset());
     let (usdc, usdc_asset) = sac(&env);
     let oft = Address::generate(&env);
     let venue = env.register(Venue, ());
@@ -165,7 +218,7 @@ fn setup() -> World {
             endpoint.clone(),
             venue.clone(),
             vec![&env, (oft.clone(), usdt0.clone())],
-            vec![&env, usdc.clone()],
+            vec![&env, (usdc.clone(), largest)],
             Vec::<Address>::new(&env),
         ),
     );
@@ -374,6 +427,24 @@ impl World {
         (guid, message)
     }
 
+    /// Queues a compose whose envelope states `amount_ld` without crediting
+    /// anything, as only a misbehaving OFT could.
+    fn queue_only(&mut self, amount_ld: i128, compose_msg: &Bytes) -> (BytesN<32>, Bytes) {
+        self.nonce += 1;
+        let guid = BytesN::random(&self.env);
+        let message = envelope(&self.env, self.nonce, amount_ld, compose_msg);
+        self.env.mock_all_auths();
+        endpoint::Client::new(&self.env, &self.endpoint).send_compose(
+            &self.oft,
+            &self.arrival,
+            &guid,
+            &0,
+            &message,
+        );
+        self.env.set_auths(&[]);
+        (guid, message)
+    }
+
     fn arrive(&mut self, amount: i128, compose_msg: &Bytes) -> (BytesN<32>, Bytes) {
         let oft = self.oft.clone();
         self.arrive_from(&oft, amount, compose_msg)
@@ -436,6 +507,49 @@ impl World {
         message: &Bytes,
     ) -> Result<(), Option<soroban_sdk::Error>> {
         self.compose_from(&self.oft, guid, message)
+    }
+
+    /// note(), with nothing mocked: it needs no one's signature.
+    fn note(&self, guid: &BytesN<32>, message: &Bytes) -> Result<(), Option<soroban_sdk::Error>> {
+        match self.client().try_note(&self.oft, guid, &0, message) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => panic!("conversion error {e:?}"),
+            Err(Ok(e)) => Err(Some(e)),
+            Err(Err(_)) => Err(None),
+        }
+    }
+
+    /// deliver_overdue(), with nothing mocked.
+    fn overdue(
+        &self,
+        guid: &BytesN<32>,
+        message: &Bytes,
+    ) -> Result<(), Option<soroban_sdk::Error>> {
+        let r = self
+            .client()
+            .try_deliver_overdue(&self.oft, guid, &0, message);
+        *self.last_events.borrow_mut() = self.read_events();
+        match r {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => panic!("conversion error {e:?}"),
+            Err(Ok(e)) => Err(Some(e)),
+            Err(Err(_)) => Err(None),
+        }
+    }
+
+    fn queued(&self, guid: &BytesN<32>) -> Option<BytesN<32>> {
+        endpoint::Client::new(&self.env, &self.endpoint).compose_queue(
+            &self.oft,
+            &self.arrival,
+            guid,
+            &0,
+        )
+    }
+
+    fn wait(&self, ledgers: u32) {
+        self.env
+            .ledger()
+            .set_sequence_number(self.env.ledger().sequence() + ledgers);
     }
 
     fn arrived_events(&self) -> std::vec::Vec<Arrived> {
@@ -891,6 +1005,77 @@ fn a_zero_minimum_is_not_a_floor_and_is_not_converted() {
 }
 
 #[test]
+fn an_arrival_larger_than_the_limit_is_delivered_as_it_came_without_calling_the_venue() {
+    let mut w = setup_converting_at_most(1_000_000);
+    let venue = VenueClient::new(&w.env, &w.venue);
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+
+    let (guid, message) = w.arrive(1_000_001, &msg);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_001);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+    assert_eq!(venue.calls(), 0);
+
+    // the limit itself still converts
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("converted"));
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn the_constructor_refuses_a_limit_that_converts_nothing_or_a_repeated_asset() {
+    let env = Env::default();
+    let endpoint = Address::generate(&env);
+    let router = Address::generate(&env);
+    let oft = Address::generate(&env);
+    let token = Address::generate(&env);
+    let wanted = Address::generate(&env);
+    for list in [
+        vec![&env, (wanted.clone(), 0i128)],
+        vec![&env, (wanted.clone(), -1i128)],
+        vec![&env, (wanted.clone(), 5i128), (wanted.clone(), 6i128)],
+    ] {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.register(
+                ArrivalContract,
+                (
+                    endpoint.clone(),
+                    router.clone(),
+                    vec![&env, (oft.clone(), token.clone())],
+                    list.clone(),
+                    Vec::<Address>::new(&env),
+                ),
+            );
+        }));
+        assert!(r.is_err());
+    }
+}
+
+#[test]
+fn a_negative_amount_is_refused_and_stays_queued() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (other, other_message) = w.arrive(500, &msg);
+    for amount_ld in [-1, i128::MIN] {
+        let (guid, message) = w.queue_only(amount_ld, &msg);
+        assert_eq!(
+            w.compose(&guid, &message),
+            Err(Some(contract_error(Error::BadAmount)))
+        );
+        let slot =
+            endpoint::Client::new(&w.env, &w.endpoint).compose_queue(&w.oft, &w.arrival, &guid, &0);
+        assert_eq!(slot, Some(w.env.crypto().keccak256(&message).to_bytes()));
+    }
+    assert_eq!(w.held(), (500, 0));
+    w.compose(&other, &other_message).unwrap();
+}
+
+#[test]
 fn compose_needs_the_executor_signature() {
     let mut w = setup();
     let recipient = Address::generate(&w.env);
@@ -925,7 +1110,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                 endpoint.clone(),
                 router.clone(),
                 empty,
-                vec![&env, token.clone()],
+                vec![&env, (token.clone(), NO_LIMIT)],
                 Vec::<Address>::new(&env),
             ),
         );
@@ -942,7 +1127,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                     (oft.clone(), token.clone()),
                     (oft.clone(), token.clone()),
                 ],
-                vec![&env, token.clone()],
+                vec![&env, (token.clone(), NO_LIMIT)],
                 Vec::<Address>::new(&env),
             ),
         );
@@ -955,7 +1140,7 @@ fn the_constructor_refuses_an_empty_or_duplicated_allowlist() {
                 endpoint.clone(),
                 router.clone(),
                 vec![&env, (oft.clone(), token.clone())],
-                Vec::<Address>::new(&env),
+                Vec::<(Address, i128)>::new(&env),
                 Vec::<Address>::new(&env),
             ),
         );
@@ -1289,6 +1474,68 @@ fn a_recipient_trustline_limit_below_the_conversion_delivers_as_it_came() {
 }
 
 #[test]
+fn a_swap_back_that_returns_almost_nothing_traps_and_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    // a router that quotes and pays one unit for anything sold back to it
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &1, &1_000_000_000);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    assert_eq!(w.held(), (1_000_000, 0));
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 0);
+}
+
+#[test]
+fn a_swap_back_within_the_round_trip_allowance_delivers_as_it_came() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    // two pools' worth of a 1% fee on the way back
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &9_801, &10_000);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 980_100);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn a_fee_swapped_back_for_almost_nothing_traps_and_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 998_000);
+    let integrator = account(&w.env);
+    open_account(&w.env, &integrator);
+    trust_up_to(&w.env, &integrator, &w.usdc_asset, AUTHORIZED, 1);
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &1, &1_000_000_000);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 20;
+    ask.fee_recipient = integrator.clone();
+    let msg = encode(&w.env, &ask);
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    assert_eq!(w.held(), (1_000_000, 0));
+}
+
+#[test]
 fn an_integrator_trustline_at_its_limit_gives_the_fee_to_the_recipient() {
     let mut w = setup();
     let recipient = account(&w.env);
@@ -1392,4 +1639,181 @@ fn a_fee_named_for_the_contract_itself_is_not_charged() {
     let e = &w.arrived_events()[0];
     assert_eq!(e.fee, 0);
     assert_eq!(e.fee_recipient, None);
+}
+
+mod fork;
+mod funds;
+mod integrations;
+mod math;
+
+// ---------------------------------------------------------------- overdue delivery
+
+/// A compose the conversion can never complete while this holds: the recipient
+/// refuses the converted amount and the venue will not take it back.
+fn stuck(w: &mut World) -> (Address, BytesN<32>, Bytes) {
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&100);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    (recipient, guid, message)
+}
+
+#[test]
+fn an_overdue_compose_is_delivered_as_it_came_exactly_once() {
+    let mut w = setup();
+    let (recipient, guid, message) = stuck(&mut w);
+    let (other, other_message) = w.arrive(700, &encode(&w.env, &w.ask(&recipient)));
+
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    w.overdue(&guid, &message).unwrap();
+
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 0);
+    assert_eq!(w.held(), (700, 0));
+    let e = &w.arrived_events()[0];
+    assert_eq!(e.outcome, w.sym("as_came"));
+    assert_eq!(e.guid, guid);
+    assert_eq!(e.amount, 1_000_000);
+    assert_eq!(e.arrived_amount, 1_000_000);
+    assert_eq!(e.recipient, recipient);
+    // the endpoint's slot is spent, so neither path can pay it again
+    assert_ne!(
+        w.queued(&guid),
+        Some(w.env.crypto().keccak256(&message).to_bytes())
+    );
+    assert!(w.overdue(&guid, &message).is_err());
+    trust(&w.env, &recipient, &w.usdc_asset);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&0);
+    assert!(w.compose(&guid, &message).is_err());
+    assert_eq!(w.held(), (700, 0));
+    // the other arrival is untouched and still completes
+    w.compose(&other, &other_message).unwrap();
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn an_overdue_delivery_waits_the_full_delay_from_the_note() {
+    let mut w = setup();
+    let (_, guid, message) = stuck(&mut w);
+
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::NotNoted)))
+    );
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS - 1);
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::NotOverdue)))
+    );
+    // noting again does not restart or shorten the wait
+    w.note(&guid, &message).unwrap();
+    w.wait(1);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn only_a_compose_still_waiting_on_the_endpoint_can_be_noted() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    // other bytes than the ones queued
+    let mut forged = message.clone();
+    forged.set(20, forged.get(20).unwrap() ^ 1);
+    assert_eq!(
+        w.note(&guid, &forged),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+    // a guid nothing was queued under
+    assert_eq!(
+        w.note(&BytesN::random(&w.env), &message),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+    // a compose queued by a sender not on the list
+    let stranger = Address::generate(&w.env);
+    let (sguid, smessage) = w.arrive_from(&stranger, 5, &msg);
+    assert_eq!(
+        w.client().try_note(&stranger, &sguid, &0, &smessage),
+        Err(Ok(contract_error(Error::NotAllowlisted)))
+    );
+    // a compose already completed
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(
+        w.note(&guid, &message),
+        Err(Some(contract_error(Error::NotQueued)))
+    );
+}
+
+#[test]
+fn completing_a_noted_compose_removes_its_note() {
+    let mut w = setup();
+    let (recipient, guid, message) = stuck(&mut w);
+    w.note(&guid, &message).unwrap();
+    assert!(w.client().noted(&w.oft, &guid, &0).is_some());
+
+    trust(&w.env, &recipient, &w.usdc_asset);
+    VenueClient::new(&w.env, &w.venue).set_optimism(&0);
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdc).balance(&recipient), 1_000_000);
+    assert_eq!(w.client().noted(&w.oft, &guid, &0), None);
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    assert!(w.overdue(&guid, &message).is_err());
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn an_overdue_delivery_removes_its_note() {
+    let mut w = setup();
+    let (_, guid, message) = stuck(&mut w);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.client().noted(&w.oft, &guid, &0), None);
+}
+
+#[test]
+fn an_overdue_delivery_the_recipient_cannot_take_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+
+    assert!(w.overdue(&guid, &message).is_err());
+    assert_eq!(w.held(), (1_000_000, 0));
+    assert_eq!(
+        w.queued(&guid),
+        Some(w.env.crypto().keccak256(&message).to_bytes())
+    );
+    // and runs once it can
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    w.overdue(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 1_000_000);
+}
+
+#[test]
+fn an_overdue_delivery_refuses_a_negative_amount() {
+    let mut w = setup();
+    let recipient = Address::generate(&w.env);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.queue_only(-5, &msg);
+    w.note(&guid, &message).unwrap();
+    w.wait(OVERDUE_AFTER_LEDGERS);
+    assert_eq!(
+        w.overdue(&guid, &message),
+        Err(Some(contract_error(Error::BadAmount)))
+    );
 }

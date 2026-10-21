@@ -5,7 +5,7 @@ import { Keypair, Networks, Asset as StellarAsset, StrKey, xdr } from "@stellar/
 import { describe, expect, it, vi } from "vitest";
 import entries from "./__fixtures__/testnet-ledger-entries.json" with { type: "json" };
 import { LayerZeroAdapter } from "./adapter.js";
-import { arrivalRecipientOf } from "./compose.js";
+import { arrivalRecipientOf, readArrivalConfig } from "./compose.js";
 import {
   COMPOSE_FINISH_BASE_STROOPS,
   type ComposeContext,
@@ -21,7 +21,7 @@ import type { SendParam } from "./oft.js";
 // for an OFT, crediting native XLM. Ledger entries are recorded from testnet;
 // the EVM side (Discovery's reads) and the venue are the network boundaries
 // replaced here.
-const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
+const ARRIVAL = "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD";
 const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const SENDER = "GBNCXZUVSV4GCBTYKCUPK46XS5U3CEDP6F54NZIWQ4GN3SWD52D3N2NB";
 const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
@@ -178,6 +178,7 @@ function context(
           id: "aquarius",
           quotePath: async () => ({
             provider: "aquarius",
+            estimateInstructions: 10_000_000,
             amountOut: "1000000",
             amountOutMinimum: "990000",
             path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
@@ -276,6 +277,7 @@ describe("a compose route", () => {
           asked.push(q.maxSlippageBps);
           return {
             provider: "aquarius",
+            estimateInstructions: 10_000_000,
             amountOut: "1000000",
             amountOutMinimum: "998000",
             path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
@@ -414,6 +416,7 @@ describe("a compose route", () => {
         id: "aquarius",
         quotePath: async () => ({
           provider: "aquarius",
+          estimateInstructions: 10_000_000,
           amountOut: "1000000",
           amountOutMinimum: "990000",
           path: OFF_LIST,
@@ -640,6 +643,95 @@ describe("what finishing a compose route by hand would cost", () => {
   });
 });
 
+describe("the most a compose route converts", () => {
+  // the testnet contract converts at most 10,000 XLM into USDC per arrival
+  const LARGEST = 100_000_000_000n;
+  const arriving = (baseUnits: bigint): ComposeQuoteRequest => {
+    const r = request();
+    return {
+      ...r,
+      plain: { ...r.plain, receives: { asset: xlm, baseUnits: baseUnits.toString() } },
+    };
+  };
+
+  it("reads the contract's own limit for each asset it converts into", async () => {
+    const { ctx } = context();
+    const config = await readArrivalConfig(ctx.rpc, ARRIVAL);
+    expect(config.wanted).toEqual([USDC_SAC]);
+    expect(config.largestConversion.get(USDC_SAC)).toBe(LARGEST);
+  });
+
+  it("is declined above it, without asking the venue, since the contract would deliver it as it came", async () => {
+    let asked = 0;
+    const { ctx } = context({
+      venue: {
+        id: "aquarius",
+        quotePath: async () => {
+          asked += 1;
+          throw new Error("not asked");
+        },
+      },
+    });
+    const result = await quoteComposeRoute(ctx, arriving(LARGEST + 1n));
+    expect(result).toMatchObject({ reason: "amount-too-large", retryable: false });
+    expect((result as RouteRejection).explanation).toBe(
+      "The Arrival Contract converts at most 10,000 XLM into USDC in one transfer; more than " +
+        "that it delivers as XLM. The plain route delivers it.",
+    );
+    expect(asked).toBe(0);
+  });
+
+  it("converts the limit itself", async () => {
+    const { ctx } = context();
+    const route = await quoteComposeRoute(ctx, arriving(LARGEST));
+    expect(route !== undefined && !isRejection(route)).toBe(true);
+  });
+
+  it("asks the venue only for paths a transaction can afford, and declines one it says costs more", async () => {
+    const budgets: Array<number | undefined> = [];
+    const venue = (estimateInstructions: number) => ({
+      id: "aquarius",
+      quotePath: async (q: { readonly maxEstimateInstructions?: number }) => {
+        budgets.push(q.maxEstimateInstructions);
+        return {
+          provider: "aquarius",
+          estimateInstructions,
+          amountOut: "1000000",
+          amountOutMinimum: "998000",
+          path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
+        };
+      },
+    });
+    const fits = await quoteComposeRoute(context({ venue: venue(54_000_000) }).ctx, request());
+    expect(fits !== undefined && !isRejection(fits)).toBe(true);
+    // 40% of the 400M cap, less the contract's own 25M, over 2.5 times the estimates
+    expect(budgets).toEqual([54_000_000]);
+
+    const over = await quoteComposeRoute(context({ venue: venue(54_000_001) }).ctx, request());
+    expect(over).toMatchObject({ reason: "amount-too-large", retryable: false });
+    expect((over as RouteRejection).explanation).toMatch(
+      /would cost more to run on Stellar than one transaction may spend.*plain route/,
+    );
+  });
+
+  it("is not sent above the limit even when a route says otherwise", async () => {
+    const { ctx } = context();
+    const route = await quoteComposeRoute(ctx, request());
+    if (route === undefined || isRejection(route)) throw new Error(JSON.stringify(route));
+    const big = {
+      ...route,
+      steps: route.steps.map((s) =>
+        s.kind === "compose"
+          ? { ...s, from: { asset: xlm, baseUnits: (LARGEST + 1n).toString() } }
+          : s,
+      ),
+    } as typeof route;
+    await expect(composeSendFor(ctx, big as never, resolved)).rejects.toThrow(
+      /converts at most 10,000 XLM/,
+    );
+  });
+});
+
 describe("the conversion path a compose route asks for", () => {
   it("is built only through the tokens the contract lists, never whatever the quoting service picks", async () => {
     const asked: Array<readonly string[] | undefined> = [];
@@ -650,6 +742,7 @@ describe("the conversion path a compose route asks for", () => {
           asked.push(q.via);
           return {
             provider: "aquarius",
+            estimateInstructions: 10_000_000,
             amountOut: "1000000",
             amountOutMinimum: "998000",
             path: [{ tokens: [XLM_SAC, USDC_SAC], poolIndex: "07".repeat(32), tokenOut: USDC_SAC }],
@@ -667,11 +760,11 @@ describe("the Arrival Contract each network has", () => {
   it("names the testnet deployment with the lists it was built with", () => {
     expect(ARRIVAL_CONTRACTS.testnet).toEqual({
       contract: ARRIVAL,
-      wasmSha256: "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b",
+      wasmSha256: "d8cc3923a6605ada3ad761f2f0545a15dc7b0715bbd4ce8a93caef6267acf9a6",
       endpoint: ENDPOINT,
       router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
       ofts: [[SENDER, XLM_SAC]],
-      wanted: [USDC_SAC],
+      wanted: [[USDC_SAC, 100_000_000_000n]],
       pathTokens: [AQUA, "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN"],
     });
   });

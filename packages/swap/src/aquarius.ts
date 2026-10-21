@@ -9,9 +9,10 @@ import {
   type SwapQuote,
   type SwapQuoteRequest,
   SwapRefusal,
+  SwapTooCostly,
   type Usability,
 } from "./provider.js";
-import { buildContractCall, readContract } from "./soroban.js";
+import { buildContractCall, readContract, readContractMetered } from "./soroban.js";
 import {
   boundedBy,
   causeOf,
@@ -156,6 +157,13 @@ export class AquariusProvider implements SwapProvider {
   }
 
   async quote(request: SwapQuoteRequest): Promise<SwapQuote> {
+    return (await this.pricedQuote(request)).quote;
+  }
+
+  /** A quote, with what the router's estimates for its chain cost in instructions. */
+  private async pricedQuote(
+    request: SwapQuoteRequest,
+  ): Promise<{ readonly quote: SwapQuote; readonly instructions: number }> {
     const tokenIn = toContractId(request.assetIn, this.network);
     const tokenOut = toContractId(request.assetOut, this.network);
     const response = await fetchOrThrow("Aquarius", `${this.baseUrl}/api/external/v1/find-path/`, {
@@ -198,15 +206,16 @@ export class AquariusProvider implements SwapProvider {
     // pool as it was before a swap moved it, and a floor set from that reverts.
     // The router prices the same chain against the pools as they are now.
     const quoted = BigInt(body.amount);
-    const now = await this.priceChain(
+    const priced = await this.priceChain(
       tokenIn,
       decodeSwapChain(body.swap_chain_xdr),
       BigInt(request.amountIn),
       request.signal,
     );
+    const now = priced.amount;
     const amountOut = (now < quoted ? now : quoted).toString();
 
-    return {
+    const quote: SwapQuote = {
       provider: this.id,
       assetIn: request.assetIn,
       assetOut: request.assetOut,
@@ -219,21 +228,26 @@ export class AquariusProvider implements SwapProvider {
       isClassicPathPayment: false,
       raw: { tokenIn, tokenOut, swapChainXdr: body.swap_chain_xdr },
     };
+    return { quote, instructions: priced.instructions };
   }
 
-  /** What the router's `estimate_swap` gives for `amountIn` along these hops, now. */
+  /**
+   * What the router's `estimate_swap` gives for `amountIn` along these hops, now,
+   * and what those estimates cost in simulated instructions.
+   */
   private async priceChain(
     tokenIn: string,
     hops: readonly ComposeHop[],
     amountIn: bigint,
     signal: AbortSignal | undefined,
-  ): Promise<bigint> {
+  ): Promise<{ readonly amount: bigint; readonly instructions: number }> {
     let holding = tokenIn;
     let amount = amountIn;
+    let instructions = 0;
     for (const hop of hops) {
       let estimate: xdr.ScVal;
       try {
-        estimate = await readContract(
+        const read = await readContractMetered(
           this.rpcUrl,
           this.network,
           ROUTER[this.network],
@@ -249,6 +263,8 @@ export class AquariusProvider implements SwapProvider {
           "Aquarius",
           signal,
         );
+        estimate = read.retval;
+        instructions += read.instructions;
       } catch (cause) {
         if (cause instanceof MavnaError && cause.retryable) throw cause;
         throw new SwapRefusal(
@@ -260,7 +276,7 @@ export class AquariusProvider implements SwapProvider {
       amount = BigInt(scValToNative(estimate) as bigint);
       holding = hop.tokenOut;
     }
-    return amount;
+    return { amount, instructions };
   }
 
   /**
@@ -276,10 +292,25 @@ export class AquariusProvider implements SwapProvider {
        * service, which routes through whatever token prices best.
        */
       readonly via?: readonly string[];
+      /**
+       * The most the router's estimates for the whole path may cost, in
+       * simulated instructions. A contract that estimates before it swaps runs
+       * them inside its own transaction, whose budget an over-long path exceeds.
+       */
+      readonly maxEstimateInstructions?: number;
     },
   ): Promise<PathQuote> {
     if (request.via !== undefined) return this.listedPath({ ...request, via: request.via });
-    const quote = await this.quote({ ...request, destinationKind: "contract" });
+    const { quote, instructions } = await this.pricedQuote({
+      ...request,
+      destinationKind: "contract",
+    });
+    if (
+      request.maxEstimateInstructions !== undefined &&
+      instructions > request.maxEstimateInstructions
+    ) {
+      throw tooCostly(`${instructions} instructions, over ${request.maxEstimateInstructions}`);
+    }
     // quote() has already walked this chain from the asked token to the asked one
     const raw = validated("Aquarius", aquariusRaw, quote.raw);
     const path = decodeSwapChain(raw.swapChainXdr);
@@ -302,6 +333,7 @@ export class AquariusProvider implements SwapProvider {
       amountOut: quote.amountOut,
       amountOutMinimum: quote.amountOutMinimum,
       path,
+      estimateInstructions: instructions,
     };
   }
 
@@ -318,10 +350,21 @@ export class AquariusProvider implements SwapProvider {
     readonly amountIn: string;
     readonly maxSlippageBps: number;
     readonly via: readonly string[];
+    readonly maxEstimateInstructions?: number;
   }): Promise<PathQuote> {
     const router = ROUTER[this.network];
     const read = (method: string, args: xdr.ScVal[]) =>
       readContract(this.rpcUrl, this.network, router, method, args, this.timeoutMs, "Aquarius");
+    const readMetered = (method: string, args: xdr.ScVal[]) =>
+      readContractMetered(
+        this.rpcUrl,
+        this.network,
+        router,
+        method,
+        args,
+        this.timeoutMs,
+        "Aquarius",
+      );
     // the router keys a pool by its tokens in address byte order, not string order
     const ordered = (tokens: readonly string[]): string[] =>
       [...tokens].sort((a, b) =>
@@ -370,27 +413,29 @@ export class AquariusProvider implements SwapProvider {
       from: string,
       to: string,
       amount: bigint,
-    ): Promise<{ out: bigint; hop: ComposeHop } | undefined> => {
+    ): Promise<{ out: bigint; hop: ComposeHop; instructions: number } | undefined> => {
       const tokens = ordered([from, to]);
-      let best: { out: bigint; hop: ComposeHop } | undefined;
+      let best: { out: bigint; hop: ComposeHop; instructions: number } | undefined;
       for (const index of await poolsOf(tokens)) {
         let out: bigint;
+        let instructions: number;
         try {
-          const estimate = await read("estimate_swap", [
+          const estimate = await readMetered("estimate_swap", [
             vecOf(tokens),
             new Address(from).toScVal(),
             new Address(to).toScVal(),
             xdr.ScVal.scvBytes(index),
             nativeToScVal(amount, { type: "u128" }),
           ]);
-          out = BigInt(scValToNative(estimate) as bigint);
+          out = BigInt(scValToNative(estimate.retval) as bigint);
+          instructions = estimate.instructions;
         } catch (cause) {
           if (cause instanceof MavnaError && cause.retryable) throw cause;
           refusals.push(`estimate_swap: ${causeOf(cause)}`);
           continue;
         }
         if (best === undefined || out > best.out) {
-          best = { out, hop: { tokens, poolIndex: hexOf(index), tokenOut: to } };
+          best = { out, hop: { tokens, poolIndex: hexOf(index), tokenOut: to }, instructions };
         }
       }
       return best;
@@ -402,9 +447,12 @@ export class AquariusProvider implements SwapProvider {
         .filter((t) => t !== request.assetIn && t !== request.assetOut)
         .map((t) => [request.assetIn, t, request.assetOut]),
     ];
-    let best: { out: bigint; path: ComposeHop[] } | undefined;
+    let best: { out: bigint; path: ComposeHop[]; instructions: number } | undefined;
+    // the cheapest path the budget turned away, for the operator's detail
+    let overBudget: number | undefined;
     for (const route of routes) {
       let amount = BigInt(request.amountIn);
+      let instructions = 0;
       const path: ComposeHop[] = [];
       for (let i = 0; i + 1 < route.length; i++) {
         const hop = await bestHop(route[i] as string, route[i + 1] as string, amount);
@@ -414,10 +462,20 @@ export class AquariusProvider implements SwapProvider {
         }
         path.push(hop.hop);
         amount = hop.out;
+        instructions += hop.instructions;
       }
-      if (path.length === route.length - 1 && (best === undefined || amount > best.out)) {
-        best = { out: amount, path };
+      if (path.length !== route.length - 1) continue;
+      const max = request.maxEstimateInstructions;
+      if (max !== undefined && instructions > max) {
+        overBudget = Math.min(overBudget ?? instructions, instructions);
+        continue;
       }
+      if (best === undefined || amount > best.out) best = { out: amount, path, instructions };
+    }
+    if (best === undefined && overBudget !== undefined) {
+      throw tooCostly(
+        `the cheapest path costs ${overBudget} instructions, over ${request.maxEstimateInstructions}`,
+      );
     }
     if (best === undefined) {
       // the router's own refusals are an operator's to read, not the user's
@@ -433,6 +491,7 @@ export class AquariusProvider implements SwapProvider {
       amountOut,
       amountOutMinimum: applySlippage(amountOut, request.maxSlippageBps),
       path: best.path,
+      estimateInstructions: best.instructions,
     };
   }
 
@@ -495,6 +554,15 @@ export interface PathQuote {
   readonly amountOut: string;
   readonly amountOutMinimum: string;
   readonly path: readonly ComposeHop[];
+  /** What the router's estimates along the path cost, simulated, summed over its hops. */
+  readonly estimateInstructions: number;
+}
+
+function tooCostly(detail: string): SwapTooCostly {
+  return new SwapTooCostly(
+    "Converting this much through Aquarius would cost more than a Stellar transaction may spend.",
+    detail,
+  );
 }
 
 /**

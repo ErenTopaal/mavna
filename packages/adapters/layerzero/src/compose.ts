@@ -281,6 +281,11 @@ export interface ArrivalConfig {
   readonly ofts: readonly (readonly [oft: string, token: string])[];
   /** What it converts into. */
   readonly wanted: readonly string[];
+  /**
+   * The largest arriving amount it converts into each wanted asset. A larger
+   * arrival it delivers as it came, without calling the venue.
+   */
+  readonly largestConversion: ReadonlyMap<string, bigint>;
   /** What else a path may pass through. */
   readonly pathTokens: readonly string[];
 }
@@ -326,10 +331,16 @@ export async function readArrivalConfig(
     };
     const strings = (v: unknown): v is string[] =>
       Array.isArray(v) && v.every((x) => typeof x === "string");
+    const limits = (v: unknown): v is [string, bigint][] =>
+      Array.isArray(v) &&
+      v.every(
+        (pair: unknown) =>
+          Array.isArray(pair) && typeof pair[0] === "string" && typeof pair[1] === "bigint",
+      );
     if (
       typeof config.endpoint === "string" &&
       typeof config.router === "string" &&
-      strings(config.wanted) &&
+      limits(config.wanted) &&
       strings(config.path_tokens) &&
       Array.isArray(config.ofts) &&
       config.ofts.every(
@@ -341,7 +352,8 @@ export async function readArrivalConfig(
         endpoint: config.endpoint,
         router: config.router,
         ofts: (config.ofts as [string, string][]).map(([oft, token]) => [oft, token] as const),
-        wanted: config.wanted,
+        wanted: config.wanted.map(([asset]) => asset),
+        largestConversion: new Map(config.wanted),
         pathTokens: config.path_tokens,
       };
     }

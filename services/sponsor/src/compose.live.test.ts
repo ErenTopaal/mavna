@@ -39,7 +39,7 @@ import { Composer, KEEP_ALIVE_LEDGERS } from "./compose.js";
  * endpoint's queue, Aquarius's router, the contract, the sponsor's finish.
  */
 
-const WASM_HASH = "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b";
+const WASM_HASH = "d8cc3923a6605ada3ad761f2f0545a15dc7b0715bbd4ce8a93caef6267acf9a6";
 const ENDPOINT = "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV";
 const ROUTER = "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD";
 const network = createNetworkConfig({ id: "testnet", rpcUrl: PUBLIC_TESTNET_RPC_URL });
@@ -142,7 +142,13 @@ beforeAll(async () => {
         new Address(ENDPOINT).toScVal(),
         new Address(ROUTER).toScVal(),
         nativeToScVal([[new Address(sender.publicKey()), new Address(XLM)]]),
-        nativeToScVal([new Address(USDC_SAC)]),
+        // converting into USDC, at most 10,000 XLM per arrival, as the shared testnet instance does
+        xdr.ScVal.scvVec([
+          xdr.ScVal.scvVec([
+            new Address(USDC_SAC).toScVal(),
+            nativeToScVal(100_000_000_000n, { type: "i128" }),
+          ]),
+        ]),
         xdr.ScVal.scvVec([]),
       ],
     }),

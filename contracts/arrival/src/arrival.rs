@@ -21,14 +21,28 @@ pub const BPS: i128 = 10_000;
 /// The most an integrator fee may take, the same cap the SDK applies. A message
 /// asking for more is not converted.
 pub const MAX_FEE_BPS: u32 = 1_000;
+/// What a swap back may lose against the forward swap, per hop: both directions
+/// of Aquarius's highest pool fee tier (1%). Within one transaction the pool's
+/// price returns along the curve it came, so a fair venue loses only its fees.
+pub const ROUND_TRIP_BPS_PER_HOP: i128 = 200;
 
 /// What this contract may convert into and route through, fixed at construction.
 /// Nothing outside these lists is ever called: a sender cannot make the contract
 /// run code of their choosing inside an executor's transaction.
 pub struct Venue {
     pub router: Address,
-    pub wanted: Vec<Address>,
+    /// Each asset it converts into, with the largest arriving amount it converts.
+    pub wanted: Vec<(Address, i128)>,
     pub path_tokens: Vec<Address>,
+}
+
+impl Venue {
+    fn largest(&self, asset: &Address) -> Option<i128> {
+        self.wanted
+            .iter()
+            .find(|(wanted, _)| wanted == asset)
+            .map(|(_, largest)| largest)
+    }
 }
 
 /// Where the funds came from, for the event. Each rail fills in what it has.
@@ -63,26 +77,35 @@ pub fn arrive(env: &Env, venue: &Venue, arrival: Arrival) -> Outcome {
     };
     let delivery = match converted {
         Some(delivery) => delivery,
-        None => {
-            if arrival.amount > 0 {
-                TokenClient::new(env, &arrival.token).transfer(
-                    &env.current_contract_address(),
-                    &recipient,
-                    &arrival.amount,
-                );
-            }
-            Delivery {
-                outcome: Outcome::AsCame,
-                asset: arrival.token.clone(),
-                amount: arrival.amount,
-                fee: 0,
-                fee_recipient: None,
-                unconverted: 0,
-            }
-        }
+        None => as_came(env, &arrival),
     };
     publish(env, &arrival, &recipient, &delivery);
     delivery.outcome
+}
+
+/// Delivers the arrival as it came, without calling the venue. For a compose that
+/// has waited past the overdue delay, whatever its instructions ask for.
+pub fn deliver_as_came(env: &Env, arrival: Arrival) {
+    let delivery = as_came(env, &arrival);
+    publish(env, &arrival, &arrival.instructions.recipient, &delivery);
+}
+
+fn as_came(env: &Env, arrival: &Arrival) -> Delivery {
+    if arrival.amount > 0 {
+        TokenClient::new(env, &arrival.token).transfer(
+            &env.current_contract_address(),
+            &arrival.instructions.recipient,
+            &arrival.amount,
+        );
+    }
+    Delivery {
+        outcome: Outcome::AsCame,
+        asset: arrival.token.clone(),
+        amount: arrival.amount,
+        fee: 0,
+        fee_recipient: None,
+        unconverted: 0,
+    }
 }
 
 struct Delivery {
@@ -145,11 +168,11 @@ fn path_is_sound(arriving: &Address, conversion: &Conversion) -> bool {
 
 /// Whether every contract the conversion would touch was fixed at construction.
 fn on_lists(venue: &Venue, arriving: &Address, conversion: &Conversion) -> bool {
-    if !venue.wanted.contains(&conversion.wanted) {
+    if venue.largest(&conversion.wanted).is_none() {
         return false;
     }
     let allowed =
-        |t: &Address| t == arriving || venue.wanted.contains(t) || venue.path_tokens.contains(t);
+        |t: &Address| t == arriving || venue.largest(t).is_some() || venue.path_tokens.contains(t);
     conversion
         .path
         .iter()
@@ -169,7 +192,9 @@ fn pay(env: &Env, token: &TokenClient, to: &Address, amount: i128) -> bool {
 /// arriving token and returns what came back. Used when the recipient refuses what
 /// the conversion produced, which only a trustline limit can do once `can_hold`
 /// has passed: the swap cannot be undone in place, so it is undone through the
-/// venue, holding the venue to its own estimate. When that fails too the call
+/// venue. The venue is held to the arrival's own forward rate, `taken` for `out`,
+/// less the round trip allowance, not only to its own estimate, so a venue that
+/// turned hostile cannot keep what it is handed back. When that fails too the call
 /// traps, which leaves the compose queued for after the recipient raises its limit.
 fn swap_back(
     env: &Env,
@@ -177,7 +202,18 @@ fn swap_back(
     arrival: &Arrival,
     conversion: &Conversion,
     amount: i128,
+    forward: (i128, i128),
 ) -> i128 {
+    let (taken, out) = forward;
+    let keep = BPS - ROUND_TRIP_BPS_PER_HOP * conversion.path.len() as i128;
+    let floor = match taken
+        .checked_mul(amount)
+        .and_then(|v| v.checked_mul(keep))
+        .and_then(|v| v.checked_div(out.checked_mul(BPS)?))
+    {
+        Some(floor) if keep > 0 => floor,
+        _ => panic_with_error!(env, Error::NoWayBack),
+    };
     let mut holding = Vec::new(env);
     holding.push_back(arrival.token.clone());
     for (_, _, token_out) in conversion.path.iter() {
@@ -195,7 +231,7 @@ fn swap_back(
     let before = arriving.balance(&me);
     let wanted_before = wanted.balance(&me);
     let swapped = match venue::estimate(env, &venue.router, &conversion.wanted, amount, &back) {
-        Some(estimate) if estimate > 0 => venue::swap(
+        Some(estimate) if estimate > 0 && estimate >= floor => venue::swap(
             env,
             &venue.router,
             &conversion.wanted,
@@ -207,7 +243,11 @@ fn swap_back(
     };
     let returned = arriving.balance(&me) - before;
     // any of it left here would belong to no arrival, so all of it must go back
-    if !swapped || returned <= 0 || wanted_before - wanted.balance(&me) != amount {
+    if !swapped
+        || returned <= 0
+        || returned < floor
+        || wanted_before - wanted.balance(&me) != amount
+    {
         panic_with_error!(env, Error::NoWayBack);
     }
     returned
@@ -225,6 +265,14 @@ fn convert(
     let recipient = &arrival.instructions.recipient;
     if conversion.min_out <= 0 || conversion.fee_bps > MAX_FEE_BPS {
         return None;
+    }
+    // A large swap through a concentrated pool can cost more than a transaction
+    // may spend, and running out of budget aborts the whole call where no try_
+    // can catch it, so the compose would stay queued for good. Above the limit
+    // the venue is never called.
+    match venue.largest(&conversion.wanted) {
+        Some(largest) if arrival.amount <= largest => {}
+        _ => return None,
     }
     if conversion.wanted == arrival.token || !path_is_sound(&arrival.token, conversion) {
         return None;
@@ -285,7 +333,7 @@ fn convert(
 
     if !pay(env, &wanted, recipient, net) {
         // the recipient's trustline limit has no room for the conversion
-        unconverted += swap_back(env, venue, arrival, conversion, out);
+        unconverted += swap_back(env, venue, arrival, conversion, out, (taken, out));
         arriving.transfer(&me, recipient, &unconverted);
         return Some(Delivery {
             outcome: Outcome::AsCame,
@@ -308,7 +356,7 @@ fn convert(
         } else if pay(env, &wanted, recipient, fee) {
             amount += fee;
         } else {
-            unconverted += swap_back(env, venue, arrival, conversion, fee);
+            unconverted += swap_back(env, venue, arrival, conversion, fee, (taken, out));
         }
     }
     if unconverted > 0 {

@@ -7,12 +7,20 @@ export type {
   SwapQuoteRequest,
   Usability,
 } from "./provider.js";
-export { applySlippage, detailOf, SwapRefusal } from "./provider.js";
+export { applySlippage, detailOf, SwapRefusal, SwapTooCostly } from "./provider.js";
 export type { PathPaymentInputs } from "./sdex.js";
 export { buildPathPayment, SdexProvider } from "./sdex.js";
 export { selectSwapProvider } from "./select.js";
 export type { Simulated } from "./soroban.js";
-export { buildContractCall, readContract, rpcHealth, rpcHealthy, simulate } from "./soroban.js";
+export {
+  buildContractCall,
+  instructionsOf,
+  readContract,
+  readContractMetered,
+  rpcHealth,
+  rpcHealthy,
+  simulate,
+} from "./soroban.js";
 export type {
   SoroswapBuildRequest,
   SoroswapOptions,

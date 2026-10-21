@@ -22,7 +22,7 @@ import {
 const USDT0 = "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF";
 const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const RECIPIENT = "GCC6RRT2HPHDRHJEMA3UHYNCOTCQJSWBHKNF44PS2IQSMCPVIQYEC7AL";
-const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
+const ARRIVAL = "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD";
 // the vector below was written with the first testnet id as fee recipient
 const VECTOR_FEE_TO = "CB4B235WXWSGKVKBYD7H3QKUWYQE2B4DXH7U42B67M4ZP2K4KWNCJS7F";
 
@@ -160,6 +160,7 @@ describe("the contract's allowlist", () => {
     router: "CROUTER",
     ofts: [["COFT", "CTOKEN"]] as const,
     wanted: ["CWANT"],
+    largestConversion: new Map([["CWANT", 1_000n]]),
     pathTokens: ["CVIA"],
   };
   it("accepts only an allowlisted OFT and token on the same endpoint", () => {
@@ -200,7 +201,7 @@ describe("proof of arrival from the contract's own event", () => {
     vi.restoreAllMocks();
   });
 
-  // recorded from testnet: CBBT5762..., the harness runs after the rust 1.99 rebuild
+  // recorded from testnet: CDHHLRLK..., the harness runs after the audit fixes (2026-10-21)
   const client = (events: { result: { events: unknown[]; latestLedger: number } }) => {
     const c = new RpcClient({ url: "https://rpc.invalid" });
     vi.spyOn(c.server, "getHealth").mockResolvedValue({
@@ -219,17 +220,17 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(converted),
       ARRIVAL,
-      "f72ac1608fd43b2bf26d1bc136d897defb82e912ef59a3e6c43c3a9a48e5d3c6",
-      5_295_406,
+      "2c2f1ab998d15686e016c990b2add8bd5b26392b1dec1c6b159d2c98eba823b6",
+      5_318_495,
     );
     expect(event).toMatchObject({
       outcome: "converted",
       recipient: RECIPIENT,
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-      amount: 53_892_720n,
+      amount: 94_819_809n,
       fee: 0n,
       arrivedAmount: 100_000_000n,
-      txHash: "63d355a5380f9067373b8bb9c76776f575165e006c95eea08c7baf5e3b3e67ea",
+      txHash: "62b9690c8c762a8a805392ae798a3da4d325f2ad0e69173441fda99cdfcbf610",
     });
   });
 
@@ -237,21 +238,21 @@ describe("proof of arrival from the contract's own event", () => {
     const event = await findArrivalEvent(
       client(asCame),
       ARRIVAL,
-      "e319aa62d9c06a6af4b2069dea087a43ed04a3638f9e1955f0a38ae8249e1713",
-      5_295_413,
+      "8fad55f88c3162585114f5222f807257cf84ca21fc20bedbba8529d6fd06edec",
+      5_318_500,
     );
     expect(event).toMatchObject({
       outcome: "as_came",
       asset: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-      amount: 100_000_000n,
+      amount: 50_000_000n,
     });
   });
 });
 
 describe("what finishing a compose would pay to renew the contract's storage", () => {
-  const CONTRACT = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
+  const CONTRACT = "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD";
   const WASM = Buffer.from(
-    "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b",
+    "d8cc3923a6605ada3ad761f2f0545a15dc7b0715bbd4ce8a93caef6267acf9a6",
     "hex",
   );
   const LATEST = 1_000_000;

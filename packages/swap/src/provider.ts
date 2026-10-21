@@ -152,6 +152,17 @@ export class SwapRefusal extends MavnaError {
   }
 }
 
+/**
+ * A conversion the venue could run, but not within what one Stellar transaction
+ * may spend. Named so a caller in another package can tell it apart.
+ */
+export class SwapTooCostly extends SwapRefusal {
+  constructor(message: string, detail: string) {
+    super(message, detail, { retryable: false });
+    this.name = "SwapTooCostly";
+  }
+}
+
 /** A cause's operator detail: a refusal's own detail, or its message. */
 export function detailOf(cause: unknown): string {
   if (cause instanceof SwapRefusal) return `${cause.message} ${cause.detail}`.trim();

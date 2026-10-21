@@ -632,7 +632,11 @@ describe("the Arrival Contract recorded for testnet", () => {
       new RpcClient({ url: PUBLIC_TESTNET_RPC_URL }),
       recorded.contract,
     );
-    const { contract: _contract, wasmSha256: _hash, ...lists } = recorded;
-    expect(stored).toEqual(lists);
+    const { contract: _contract, wasmSha256: _hash, wanted, ...lists } = recorded;
+    expect(stored).toEqual({
+      ...lists,
+      wanted: wanted.map(([asset]) => asset),
+      largestConversion: new Map(wanted),
+    });
   }, 60_000);
 });

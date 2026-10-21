@@ -137,8 +137,14 @@ contracts/arrival/src/errors.rs
 contracts/arrival/src/events.rs
 contracts/arrival/src/lib.rs
 contracts/arrival/src/test.rs
+contracts/arrival/src/test/fork.rs
+contracts/arrival/src/test/funds.rs
+contracts/arrival/src/test/integrations.rs
+contracts/arrival/src/test/math.rs
 contracts/arrival/src/venue.rs
 contracts/arrival/testdata/layerzero_endpoint_v2.wasm
+contracts/arrival/testdata/mainnet-fork.txt
+contracts/arrival/testdata/mavna_arrival.wasm
 contracts/build.sh
 contracts/clippy.toml
 contracts/rust-toolchain.toml
@@ -422,6 +428,7 @@ packages/widget/tsconfig.test.json
 packages/widget/tsdown.config.ts
 pnpm-lock.yaml
 pnpm-workspace.yaml
+scripts/arrival-fork-snapshot.mjs
 scripts/arrival-mainnet.mjs
 scripts/arrival-mainnet.test.ts
 scripts/browser-test-build.mjs
