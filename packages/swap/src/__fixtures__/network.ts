@@ -62,8 +62,14 @@ export interface ContractCall {
   readonly source: string;
 }
 
-/** The answer a simulated contract call gets: a return value, or a host error. */
-export type CallAnswer = xdr.ScVal | { readonly error: string };
+/**
+ * The answer a simulated contract call gets: a return value, one with what it
+ * cost in instructions, or a host error.
+ */
+export type CallAnswer =
+  | xdr.ScVal
+  | { readonly value: xdr.ScVal; readonly instructions: number }
+  | { readonly error: string };
 
 /**
  * A Stellar RPC node that answers getHealth and simulateTransaction, handing
@@ -91,21 +97,27 @@ export function sorobanNode(
       source: tx.source,
     };
     const result = answer(call);
-    if (!(result instanceof xdr.ScVal)) {
+    if ("error" in result) {
       return json({
         jsonrpc: "2.0",
         id: request.id,
         result: { latestLedger: 100, error: result.error },
       });
     }
+    const [value, instructions] =
+      result instanceof xdr.ScVal ? [result, 0] : [result.value, result.instructions];
     return json({
       jsonrpc: "2.0",
       id: request.id,
       result: {
         latestLedger: 100,
         minResourceFee: "12345",
-        transactionData: new SorobanDataBuilder().setResourceFee(12_345).build().toXdr("base64"),
-        results: [{ auth: [], xdr: result.toXdr("base64") }],
+        transactionData: new SorobanDataBuilder()
+          .setResourceFee(12_345)
+          .setResources(instructions, 0, 0)
+          .build()
+          .toXdr("base64"),
+        results: [{ auth: [], xdr: value.toXdr("base64") }],
       },
     });
   };

@@ -8,7 +8,7 @@ import { AxelarAdapter } from "./adapter.js";
  * A plain transfer to it lands in a contract that has no way to send it on, so
  * every rail refuses it as a destination, before anything is asked of a network.
  */
-const ARRIVAL = "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ";
+const ARRIVAL = "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD";
 const nowhere = () => new RpcClient({ url: "https://rpc.invalid" });
 
 describe("a plain Axelar transfer to the Arrival Contract", () => {

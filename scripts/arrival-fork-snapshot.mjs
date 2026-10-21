@@ -145,7 +145,8 @@ footprint(
 // a position on the side of each pool a conversion crosses: below the price in
 // USDT0/USDC (selling USDT0 lowers it), above it in XLM/USDC (buying XLM raises it)
 const lp = new Address(USDC_XLM_HOLDER).toScVal();
-const tick = async (pool) => Number(scValToNative((await simulate(pool, "get_slot0", [])).result.retval).tick);
+const tick = async (pool) =>
+  Number(scValToNative((await simulate(pool, "get_slot0", [])).result.retval).tick);
 const below = Math.floor((await tick(USDT0_USDC)) / 20) * 20 - 20;
 const above = Math.ceil((await tick(USDC_XLM)) / 20) * 20 + 20;
 footprint(

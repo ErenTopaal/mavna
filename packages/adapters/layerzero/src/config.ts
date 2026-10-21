@@ -335,14 +335,17 @@ export interface ArrivalDeployment {
   readonly router: string;
   /** (OFT or sender, token it delivers) pairs it accepts arrivals from. */
   readonly ofts: readonly (readonly [string, string])[];
-  /** What it converts into. */
-  readonly wanted: readonly string[];
+  /**
+   * What it converts into, each with the largest arriving amount it converts into
+   * that asset in one arrival. A larger one it delivers as it came.
+   */
+  readonly wanted: readonly (readonly [asset: string, largest: bigint])[];
   /** What else a conversion path may pass through. */
   readonly pathTokens: readonly string[];
 }
 
 /**
- * The Arrival Contract per network. Testnet's was deployed 2026-10-20 and its
+ * The Arrival Contract per network. Testnet's was deployed 2026-10-21 and its
  * OFT list holds a harness key and the native XLM contract, since no public
  * OFT is peered to Stellar testnet. Mainnet has none: deploying needs a
  * mainnet signature, which this project does not make yet.
@@ -351,7 +354,7 @@ export const ARRIVAL_CONTRACTS: Readonly<Record<NetworkId, ArrivalDeployment | u
   testnet: {
     // the id every rail refuses as a plain destination, held once in core
     contract: ARRIVAL_CONTRACT_IDS.testnet,
-    wasmSha256: "468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b",
+    wasmSha256: "d8cc3923a6605ada3ad761f2f0545a15dc7b0715bbd4ce8a93caef6267acf9a6",
     endpoint: "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV",
     router: "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD",
     ofts: [
@@ -360,7 +363,8 @@ export const ARRIVAL_CONTRACTS: Readonly<Record<NetworkId, ArrivalDeployment | u
         "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
       ],
     ],
-    wanted: ["CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"],
+    // at most 10,000 XLM converted into USDC per arrival
+    wanted: [["CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", 100_000_000_000n]],
     pathTokens: [
       "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE",
       "CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN",

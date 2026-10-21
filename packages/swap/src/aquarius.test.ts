@@ -374,7 +374,7 @@ describe("a conversion path built from the router's own pools between listed tok
   const key = (tokens: string[]) => byBytes(tokens).join(",");
 
   function router(
-    pools: Record<string, Array<[number, (amountIn: bigint) => bigint]>>,
+    pools: Record<string, Array<[number, (amountIn: bigint) => bigint, number?]>>,
     asked: string[],
   ) {
     return sorobanNode((call) => {
@@ -401,7 +401,10 @@ describe("a conversion path built from the router's own pools between listed tok
         const amount = BigInt(scValToNative(call.args[4] as xdr.ScVal) as bigint);
         const pool = known.find(([n]) => n === poolIndex);
         if (pool === undefined) return { error: "HostError: no such pool" };
-        return nativeToScVal(pool[1](amount), { type: "u128" });
+        return {
+          value: nativeToScVal(pool[1](amount), { type: "u128" }),
+          instructions: pool[2] ?? 4_000_000,
+        };
       }
       return { error: `unexpected ${call.method}` };
     }, Networks.TESTNET);
@@ -440,6 +443,64 @@ describe("a conversion path built from the router's own pools between listed tok
       { tokens: byBytes([AQUA, USDC]), poolIndex: index(4).toString("hex"), tokenOut: USDC },
     ]);
     expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it("says what the router's estimates for the chosen path cost", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        [RPC]: router(
+          {
+            [key([XLM, USDC])]: [[1, (a) => a / 20n, 3_000_000]],
+            [key([XLM, AQUA])]: [[3, (a) => a * 10n, 9_000_000]],
+            [key([AQUA, USDC])]: [[4, (a) => a / 150n, 11_000_000]],
+          },
+          [],
+        ),
+      }).fetch,
+    );
+    const quote = await new AquariusProvider("testnet", undefined, { rpcUrl: RPC }).quotePath({
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 20,
+      via: [AQUA],
+    });
+    // through AQUA pays more, and its two estimates cost 9M and 11M
+    expect(quote.amountOut).toBe("6666666");
+    expect(quote.estimateInstructions).toBe(20_000_000);
+  });
+
+  it("takes the best path a transaction can afford, and refuses when none fits", async () => {
+    const pools = {
+      [key([XLM, USDC])]: [[1, (a: bigint) => a / 20n, 3_000_000]],
+      [key([XLM, AQUA])]: [[3, (a: bigint) => a * 10n, 9_000_000]],
+      [key([AQUA, USDC])]: [[4, (a: bigint) => a / 150n, 11_000_000]],
+    } as Record<string, Array<[number, (amountIn: bigint) => bigint, number?]>>;
+    vi.stubGlobal("fetch", routedFetch({ [RPC]: router(pools, []) }).fetch);
+    const ask = {
+      assetIn: XLM,
+      assetOut: USDC,
+      amountIn: "100000000",
+      maxSlippageBps: 20,
+      via: [AQUA],
+    };
+    const provider = new AquariusProvider("testnet", undefined, { rpcUrl: RPC });
+    // the richer path through AQUA costs 20M, so under a 10M budget the direct one is taken
+    const cheaper = await provider.quotePath({ ...ask, maxEstimateInstructions: 10_000_000 });
+    expect(cheaper.amountOut).toBe("5000000");
+    expect(cheaper.estimateInstructions).toBe(3_000_000);
+
+    const error = await provider
+      .quotePath({ ...ask, maxEstimateInstructions: 2_000_000 })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SwapRefusal);
+    expect((error as SwapRefusal).name).toBe("SwapTooCostly");
+    expect((error as SwapRefusal).retryable).toBe(false);
+    expect((error as SwapRefusal).message).toBe(
+      "Converting this much through Aquarius would cost more than a Stellar transaction may spend.",
+    );
+    expect((error as SwapRefusal).detail).toMatch(/3000000.*over 2000000/);
   });
 
   it("says why when the router refused to list pools, rather than only that there are none", async () => {

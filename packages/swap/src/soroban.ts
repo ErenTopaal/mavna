@@ -136,6 +136,35 @@ export async function simulate(
   };
 }
 
+/** What a simulation charged in instructions, from its resources; 0 when it says none. */
+export function instructionsOf(simulated: Simulated): number {
+  const data = simulated.raw.transactionData;
+  if (data === undefined) return 0;
+  return xdr.SorobanTransactionData.fromXdr(data, "base64").resources.instructions;
+}
+
+/** The same read, with what it cost the host in instructions. */
+export async function readContractMetered(
+  rpcUrl: string,
+  network: NetworkId,
+  contract: string,
+  method: string,
+  args: readonly xdr.ScVal[],
+  timeoutMs: number,
+  venue: string,
+  caller?: AbortSignal,
+): Promise<{ readonly retval: xdr.ScVal; readonly instructions: number }> {
+  const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, "0"), {
+    fee: "100",
+    networkPassphrase: PASSPHRASE[network],
+  })
+    .addOperation(new Contract(contract).call(method, ...args))
+    .setTimeout(60)
+    .build();
+  const simulated = await simulate(rpcUrl, tx, timeoutMs, venue, caller);
+  return { retval: simulated.retval, instructions: instructionsOf(simulated) };
+}
+
 /** Call a contract function read-only and return what it would return. */
 export async function readContract(
   rpcUrl: string,

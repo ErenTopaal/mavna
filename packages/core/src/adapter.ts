@@ -222,7 +222,7 @@ export const ARRIVAL_CONTRACT_IDS: {
   readonly testnet: string;
   readonly mainnet: string | undefined;
 } = {
-  testnet: "CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ",
+  testnet: "CDHHLRLKWNRMRQ2PPT7CNMWG3OF4XOIQ2QTDEBMZ25CJQCLQK7Y5PMPD",
   mainnet: undefined,
 };
 
