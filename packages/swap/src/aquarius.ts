@@ -194,7 +194,17 @@ export class AquariusProvider implements SwapProvider {
       });
     }
 
-    const amountOut = BigInt(body.amount).toString();
+    // The service's figure can lag the pools: on testnet it went on quoting a
+    // pool as it was before a swap moved it, and a floor set from that reverts.
+    // The router prices the same chain against the pools as they are now.
+    const quoted = BigInt(body.amount);
+    const now = await this.priceChain(
+      tokenIn,
+      decodeSwapChain(body.swap_chain_xdr),
+      BigInt(request.amountIn),
+      request.signal,
+    );
+    const amountOut = (now < quoted ? now : quoted).toString();
 
     return {
       provider: this.id,
@@ -209,6 +219,48 @@ export class AquariusProvider implements SwapProvider {
       isClassicPathPayment: false,
       raw: { tokenIn, tokenOut, swapChainXdr: body.swap_chain_xdr },
     };
+  }
+
+  /** What the router's `estimate_swap` gives for `amountIn` along these hops, now. */
+  private async priceChain(
+    tokenIn: string,
+    hops: readonly ComposeHop[],
+    amountIn: bigint,
+    signal: AbortSignal | undefined,
+  ): Promise<bigint> {
+    let holding = tokenIn;
+    let amount = amountIn;
+    for (const hop of hops) {
+      let estimate: xdr.ScVal;
+      try {
+        estimate = await readContract(
+          this.rpcUrl,
+          this.network,
+          ROUTER[this.network],
+          "estimate_swap",
+          [
+            xdr.ScVal.scvVec(hop.tokens.map((t) => new Address(t).toScVal())),
+            new Address(holding).toScVal(),
+            new Address(hop.tokenOut).toScVal(),
+            xdr.ScVal.scvBytes(bytesOfHex(hop.poolIndex)),
+            nativeToScVal(amount, { type: "u128" }),
+          ],
+          this.timeoutMs,
+          "Aquarius",
+          signal,
+        );
+      } catch (cause) {
+        if (cause instanceof MavnaError && cause.retryable) throw cause;
+        throw new SwapRefusal(
+          "Aquarius's router would not price the path its service found.",
+          causeOf(cause),
+          { retryable: true, cause },
+        );
+      }
+      amount = BigInt(scValToNative(estimate) as bigint);
+      holding = hop.tokenOut;
+    }
+    return amount;
   }
 
   /**
@@ -497,6 +549,13 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
     if (d !== 0) return d;
   }
   return a.length - b.length;
+}
+
+function bytesOfHex(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);
+  return bytes;
 }
 
 function hexOf(bytes: Uint8Array): string {

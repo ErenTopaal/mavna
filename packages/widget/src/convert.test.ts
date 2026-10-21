@@ -3,8 +3,10 @@ import { createSwapVenues } from "@mavna/swap";
 import {
   Address,
   Networks,
+  nativeToScVal,
   rpc,
   SorobanDataBuilder,
+  scValToNative,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -110,6 +112,30 @@ describe("converting on Stellar", () => {
             tx.operations[0].func,
             "hostFunctionTypeInvokeContract",
           ).invokeContract;
+          // the quote prices Aquarius's chain on the router, at the figure it quoted
+          if (call.functionName.toString() === "estimate_swap") {
+            const amountIn = Number(scValToNative(call.args[4] as xdr.ScVal) as bigint);
+            return respond({
+              jsonrpc: "2.0",
+              id: 1,
+              result: {
+                latestLedger: 10,
+                minResourceFee: "100",
+                transactionData: new SorobanDataBuilder()
+                  .setResourceFee(100)
+                  .build()
+                  .toXdr("base64"),
+                results: [
+                  {
+                    auth: [],
+                    xdr: nativeToScVal(BigInt(quoteOut(amountIn)), { type: "u128" }).toXdr(
+                      "base64",
+                    ),
+                  },
+                ],
+              },
+            });
+          }
           simulated.push(
             `${Address.fromScAddress(call.contractAddress).toString()} ${call.functionName.toString()}`,
           );
