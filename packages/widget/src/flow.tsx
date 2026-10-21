@@ -24,7 +24,7 @@ import type {
   WalletConfig,
 } from "./config";
 import type { Engine, SourceDetail } from "./engine";
-import { fromBaseUnits, toBaseUnits } from "./format";
+import { destValid, fromBaseUnits, toBaseUnits } from "./format";
 import { type FoundState, foundFor } from "./found";
 import { msg, shortAddr } from "./helpers";
 import { forgetHistory, readHistory, type TransferRecord } from "./history";
@@ -416,7 +416,7 @@ export class Flow extends React.Component<FlowProps, State> {
     return undefined;
   }
   destValid(): boolean {
-    return /^G[A-Z2-7]{55}$/.test(this.state.destination.trim());
+    return destValid(this.state.destination);
   }
   sym(): string {
     return this.state.wanted;

@@ -991,3 +991,22 @@ describe("the estimated time", () => {
     );
   });
 });
+
+describe("the recipient check", () => {
+  const VALID = "GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY";
+  // one character off: still 56 base32 characters from G, but its checksum fails
+  const MISTYPED = `${VALID.slice(0, 20)}${VALID[20] === "A" ? "B" : "A"}${VALID.slice(21)}`;
+
+  it("takes an account address", () => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, destination: VALID };
+    expect(flow.destValid()).toBe(true);
+  });
+
+  it("does not take a mistyped one that every rail would refuse", () => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, destination: MISTYPED };
+    expect(MISTYPED).toMatch(/^G[A-Z2-7]{55}$/);
+    expect(flow.destValid()).toBe(false);
+  });
+});

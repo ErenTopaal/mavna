@@ -3,7 +3,7 @@
  * figures read exactly as designed, and given real base-unit conversion so
  * nothing goes through a float where money is concerned.
  */
-import type { Amount } from "@mavna/core";
+import { type Amount, stellarAddress } from "@mavna/core";
 
 const TWO_DP = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -20,9 +20,14 @@ export function short(address: string): string {
   return address.length <= 12 ? address : `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
 
-/** The design's `destValid`: a Stellar public key, 56 chars starting with G. */
+/**
+ * The design's `destValid`: a Stellar account, G and 56 characters, with its
+ * checksum checked too. A mistyped one has the right shape, so a shape check
+ * passed it here while every rail refused it as not an address.
+ */
 export function destValid(address: string): boolean {
-  return /^G[A-Z2-7]{55}$/.test(address.trim());
+  const text = address.trim();
+  return text.startsWith("G") && stellarAddress.safeParse(text).success;
 }
 
 /**
