@@ -822,8 +822,13 @@ export function runQuote(
   let live = true;
   const send = inputs.send ?? "USDC";
   // only asks whether there is anything to send; the amount is counted in the
-  // source token's own decimals once that token is known
-  if (BigInt(toBaseUnits(inputs.amount, USDC_DECIMALS_ON_EVM)) <= 0n) {
+  // source token's own decimals once that token is known. Without a recipient
+  // there is nothing to ask either: every rail checks the receiving account
+  // before it prices, so each would only decline an address nobody typed yet.
+  if (
+    BigInt(toBaseUnits(inputs.amount, USDC_DECIMALS_ON_EVM)) <= 0n ||
+    inputs.destination.trim() === ""
+  ) {
     const empty: RouteSet = { routes: [], rejected: [], complete: true };
     onUpdate(empty);
     onDone(empty);

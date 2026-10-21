@@ -191,6 +191,7 @@ function quotedFlow(asked: { terms: number }, emit?: (event: MavnaWidgetEvent) =
     usdcOnStellar: STELLAR_USDC,
     xlmOnStellar: STELLAR_XLM,
     adapters: [],
+    sourceChains: [],
     // the sponsor is the first thing a quote asks, so counting it counts quotes
     sponsorTerms: () => {
       asked.terms += 1;
@@ -222,6 +223,32 @@ describe("Flow.setDestination", () => {
     expect(flow.state.routes).toEqual([]);
     vi.advanceTimersByTime(500);
     expect(asked.terms).toBe(1);
+  });
+
+  it("asks no rail once the recipient is cleared, and the panel waits for one instead", () => {
+    vi.useFakeTimers();
+    const asked = { terms: 0 };
+    const flow = quotedFlow(asked);
+    flow.state = { ...flow.state, showDeclined: true };
+    flow.setDestination("");
+    vi.advanceTimersByTime(500);
+    expect(asked.terms).toBe(0);
+    expect(flow.state.quoting).toBe(false);
+    expect(flow.state.rejected).toEqual([]);
+    expect(flow.resting()).toBe("recipient");
+    const html = renderToStaticMarkup(renderRoutes(flow, { sym: "USDC", resting: flow.resting() }));
+    expect(html).toContain("Awaiting a recipient");
+    expect(html).toContain("Set a recipient to compare.");
+    expect(html).not.toContain("Declined");
+    expect(html).not.toContain("Enter an amount");
+  });
+
+  it("keeps waiting on the amount when neither is given yet", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, amount: "", destination: "" };
+    expect(flow.resting()).toBe("amount");
+    flow.state = { ...flow.state, amount: "5", destination: DESTINATION };
+    expect(flow.resting()).toBeUndefined();
   });
 });
 

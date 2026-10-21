@@ -38,3 +38,21 @@ test("the app renders the widget and validates a recipient address", async ({ pa
     root.getByText(`${VALID_ADDRESS.slice(0, 5)}…${VALID_ADDRESS.slice(-4)}`),
   ).toBeVisible();
 });
+
+test("an amount with no recipient waits for one instead of showing every rail declined", async ({
+  page,
+  baseURL,
+}) => {
+  const origin = new URL(baseURL ?? "http://localhost:4319").origin;
+  await page.route(
+    (url) => url.origin !== origin,
+    (route) => route.abort(),
+  );
+
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  await root.getByRole("textbox", { name: "Amount to send" }).fill("5");
+  await expect(root.getByText("Awaiting a recipient")).toBeVisible();
+  await expect(root.getByText(/Set a recipient to compare\./)).toBeVisible();
+  await expect(root.getByText("Declined")).toHaveCount(0);
+});
