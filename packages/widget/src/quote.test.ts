@@ -1243,3 +1243,11 @@ describe("the approvals a route will ask for", () => {
     expect(approvalsLabel(toRouteView(every))).toBe("2 steps");
   });
 });
+
+describe("approvalsLabel", () => {
+  it("says one step, not one steps", () => {
+    expect(approvalsLabel({ sigs: 1, sigsUpTo: false })).toBe("1 step");
+    expect(approvalsLabel({ sigs: 1, sigsUpTo: true })).toBe("Up to 1 step");
+    expect(approvalsLabel({ sigs: 3, sigsUpTo: false })).toBe("3 steps");
+  });
+});

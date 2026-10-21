@@ -132,7 +132,8 @@ export interface DeclineView {
 
 /** The approvals line, as "Up to N" when some of them may not be asked for. */
 export function approvalsLabel(r: Pick<RouteView, "sigs" | "sigsUpTo">): string {
-  return r.sigsUpTo ? `Up to ${r.sigs} steps` : `${r.sigs} steps`;
+  const steps = `${r.sigs} step${r.sigs === 1 ? "" : "s"}`;
+  return r.sigsUpTo ? `Up to ${steps}` : steps;
 }
 
 export function railDisplay(source: string): string {
