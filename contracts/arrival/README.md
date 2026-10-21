@@ -88,7 +88,8 @@ The same commit built from a clean `git archive` in another directory gives the 
 The testnet instance is a harness. No OFT is peered to Stellar testnet, so its allowlisted sender is
 a key that queues compose messages on the real testnet endpoint itself. It proves the endpoint
 queue, the Aquarius router and this contract together; it does not prove an OFT's `lz_receive`.
-Mainnet is not deployed: the contract goes through an independent audit first.
+Mainnet is not deployed yet. It is deployed with the lists and commands under "Deploying" below,
+signed by the owner's mainnet key.
 
 ## Before a mainnet deployment
 
