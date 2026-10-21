@@ -30,6 +30,7 @@ import {
   meetsFloor,
   quoteReserve,
   type RpcClient,
+  recipientRefusal,
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
@@ -154,6 +155,9 @@ export class NearIntentsAdapter implements BridgeAdapter {
       this.arrivalContract,
     ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
+    // asked before any network, in the words every rail uses for the same input
+    const unfit = recipientRefusal(request.destination);
+    if (unfit !== undefined) return this.decline("destination-unsupported", unfit);
     const slippage = badSlippage(request.maxSlippageBps);
     if (slippage !== undefined) {
       // the caller's input, so asking again will not help

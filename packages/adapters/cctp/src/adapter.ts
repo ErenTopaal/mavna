@@ -28,6 +28,7 @@ import {
   meetsFloor,
   quoteReserve,
   type RpcClient,
+  recipientRefusal,
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
@@ -158,6 +159,9 @@ export class CctpAdapter implements BridgeAdapter {
       this.arrivalContract,
     ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
+    // asked before any network, in the words every rail uses for the same input
+    const unfit = recipientRefusal(request.destination);
+    if (unfit !== undefined) return this.decline("destination-unsupported", unfit);
     // Circle's domain is all quoting needs; how the burn is built is a question
     // for later and differs per family.
     const domain = this.domainOf(request.from.chainId);

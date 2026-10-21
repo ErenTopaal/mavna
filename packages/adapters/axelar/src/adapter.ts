@@ -28,6 +28,7 @@ import {
   meetsFloor,
   quoteReserve,
   type RpcClient,
+  recipientRefusal,
   valueInXlm,
   XlmPriceSource,
 } from "@mavna/stellar";
@@ -168,6 +169,9 @@ export class AxelarAdapter implements BridgeAdapter {
       this.arrivalContract,
     ]);
     if (stuck !== undefined) return this.decline("destination-unsupported", stuck);
+    // asked before any network, in the words every rail uses for the same input
+    const unfit = recipientRefusal(request.destination);
+    if (unfit !== undefined) return this.decline("destination-unsupported", unfit);
     if (request.to.chainId !== stellarChainId(this.network)) {
       return this.decline("chain-unsupported", "This route only delivers to Stellar.");
     }

@@ -122,6 +122,35 @@ export function assertCanReceive(address: string): ClassifiedAddress {
 }
 
 /**
+ * Why an address cannot be a payment recipient at all, in words for whoever
+ * typed it, or undefined when it can be one. Every rail asks this first, so
+ * the same input reads the same on all of them; what a single rail cannot
+ * deliver to (a muxed id, a contract) is that rail's own answer, given after.
+ * Never repeats the input, so nothing pasted is echoed back into a page.
+ */
+export function recipientRefusal(address: string): string | undefined {
+  if (address.trim() === "") {
+    return "No recipient was given. Enter the Stellar address that should receive this.";
+  }
+  if (StrKey.isValidEd25519SecretSeed(address)) {
+    return (
+      "That is a secret key, not an address. Keep it private, and enter the address that " +
+      "should receive this instead."
+    );
+  }
+  let classified: ClassifiedAddress;
+  try {
+    classified = classifyAddress(address);
+  } catch {
+    // classifyAddress throws only for input that is no Stellar address; the
+    // empty and secret cases it also throws for are answered above
+    return "That is not a Stellar address. Check that it was copied in full.";
+  }
+  if (!classified.canReceive) return `A ${classified.kind} address cannot receive a payment.`;
+  return undefined;
+}
+
+/**
  * Whether a destination needs a memo to identify the real recipient behind it.
  *
  * A muxed address carries that id in the address itself, which is why it exists.

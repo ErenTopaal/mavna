@@ -3,6 +3,7 @@ export {
   assertCanReceive,
   classifyAddress,
   memoIsEncodedInAddress,
+  recipientRefusal,
   underlyingAccountOfMuxed,
 } from "./address.js";
 export type { DestinationLane, DestinationState, InspectOptions } from "./destination.js";

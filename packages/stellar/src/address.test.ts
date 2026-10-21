@@ -5,6 +5,7 @@ import {
   assertCanReceive,
   classifyAddress,
   memoIsEncodedInAddress,
+  recipientRefusal,
   underlyingAccountOfMuxed,
 } from "./address.js";
 
@@ -90,5 +91,46 @@ describe("memoIsEncodedInAddress", () => {
     expect(memoIsEncodedInAddress(muxed)).toBe(true);
     expect(memoIsEncodedInAddress(account)).toBe(false);
     expect(memoIsEncodedInAddress(contract)).toBe(false);
+  });
+});
+
+describe("recipientRefusal", () => {
+  it("has nothing to say about an address value can be sent to", () => {
+    for (const address of [account, contract, muxed]) {
+      expect(recipientRefusal(address)).toBeUndefined();
+    }
+  });
+
+  it("says no recipient was given, not that one is bad, when there is none", () => {
+    for (const address of ["", "   "]) {
+      expect(recipientRefusal(address)).toBe(
+        "No recipient was given. Enter the Stellar address that should receive this.",
+      );
+    }
+  });
+
+  it("says what is wrong with an address that is not one, without echoing it", () => {
+    const typed = "GABC123NOTANADDRESS";
+    const said = recipientRefusal(typed);
+    expect(said).toBe("That is not a Stellar address. Check that it was copied in full.");
+    expect(said).not.toContain("GABC");
+  });
+
+  it("names a secret key for what it is, and never repeats it", () => {
+    const secret = Keypair.random().secret();
+    const said = recipientRefusal(secret);
+    expect(said).toBe(
+      "That is a secret key, not an address. Keep it private, and enter the address that " +
+        "should receive this instead.",
+    );
+  });
+
+  it("names the kind of an address that exists but cannot be paid", () => {
+    expect(recipientRefusal(StrKey.encodeLiquidityPool(Buffer.alloc(32, 3)))).toBe(
+      "A liquidity-pool address cannot receive a payment.",
+    );
+    expect(recipientRefusal(StrKey.encodeClaimableBalance(Buffer.alloc(33, 0)))).toBe(
+      "A claimable-balance address cannot receive a payment.",
+    );
   });
 });
