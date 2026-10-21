@@ -12,6 +12,7 @@ import type { Engine } from "./engine";
 import { Flow } from "./flow";
 import { toRouteView } from "./quote";
 import {
+  renderAddress,
   renderChains,
   renderFlight,
   renderReview,
@@ -1008,5 +1009,34 @@ describe("the recipient check", () => {
     flow.state = { ...flow.state, destination: MISTYPED };
     expect(MISTYPED).toMatch(/^G[A-Z2-7]{55}$/);
     expect(flow.destValid()).toBe(false);
+  });
+});
+
+describe("what the recipient screen says is wrong", () => {
+  const VALID = "GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY";
+  const said = (destination: string): string => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, destination };
+    return renderToStaticMarkup(renderAddress(flow));
+  };
+
+  it("does not tell a mistyped account it is the wrong length or prefix", () => {
+    const mistyped = `${VALID.slice(0, 20)}${VALID[20] === "A" ? "B" : "A"}${VALID.slice(21)}`;
+    expect(said(mistyped)).toContain(
+      "That is not a Stellar address. Check that it was copied in full.",
+    );
+    expect(said(mistyped)).not.toContain("56 characters");
+  });
+
+  it("says a pasted secret key is one, and to keep it private", () => {
+    const secret = "SBSYRVZXRGKITFCQCLN7DZWTRDMYXIANCHTDNP53KEQWPO4H7U6XB377";
+    expect(said(secret)).toContain("That is a secret key, not an address. Keep it private");
+  });
+
+  it("still gives the shape for something that is not one", () => {
+    expect(said("not-an-address")).toContain(
+      "A Stellar address is 56 characters and starts with G.",
+    );
+    expect(said(VALID)).not.toContain("Stellar address is");
   });
 });

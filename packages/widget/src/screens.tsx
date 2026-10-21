@@ -4,6 +4,7 @@
  * through s(); every hover/active/focus is pseudo(). All the bound values are
  * computed from the real component state, never from demo constants.
  */
+import { recipientRefusal } from "@mavna/stellar";
 import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
@@ -662,6 +663,17 @@ function chainCount(c: Flow): string {
 
 // ---------------------------------------------------------------- address ---
 
+/**
+ * Why the typed recipient is refused. Something with an account's shape fails
+ * on its checksum, and a secret key is said to be one, in the words every rail
+ * uses for the same input; anything else is told the shape it needs.
+ */
+function addressHint(destination: string): string {
+  const shape = "A Stellar address is 56 characters and starts with G.";
+  if (/^[GS][A-Z2-7]{55}$/.test(destination)) return recipientRefusal(destination) ?? shape;
+  return shape;
+}
+
 export function renderAddress(c: Flow): ReactElement {
   const st = c.state;
   const invalid = st.destination !== "" && !c.destValid();
@@ -687,7 +699,7 @@ export function renderAddress(c: Flow): ReactElement {
             "margin:0;font-size:12.5px;line-height:1.5;color:var(--mv-signal);text-wrap:pretty",
           )}
         >
-          A Stellar address is 56 characters and starts with G.
+          {addressHint(st.destination)}
         </p>
       ) : null}
       <button
