@@ -39,6 +39,22 @@ enum VenueKey {
     Optimism,
     // how many times the arrival contract has called it
     Calls,
+    // a separate rate for swaps that sell this token, as a swap back does
+    Back,
+}
+
+/// The rate for a swap selling `token_in`: the back rate when one is set for it.
+fn rate_for(env: &Env, token_in: &Address) -> (i128, i128) {
+    if let Some((token, num, den)) = env
+        .storage()
+        .instance()
+        .get::<_, (Address, i128, i128)>(&VenueKey::Back)
+    {
+        if token == *token_in {
+            return (num, den);
+        }
+    }
+    env.storage().instance().get(&VenueKey::Rate).unwrap()
 }
 
 fn count_call(env: &Env) {
@@ -69,6 +85,14 @@ impl Venue {
         env.storage().instance().set(&VenueKey::Optimism, &bps);
     }
 
+    /// A venue that pays `num / den` for whatever sells `token`; a rate under one
+    /// unit per amount sold pays a single unit, as a router keeping the rest would.
+    pub fn set_back_rate(env: Env, token: Address, num: i128, den: i128) {
+        env.storage()
+            .instance()
+            .set(&VenueKey::Back, &(token, num, den));
+    }
+
     pub fn calls(env: Env) -> u32 {
         env.storage().instance().get(&VenueKey::Calls).unwrap_or(0)
     }
@@ -76,19 +100,19 @@ impl Venue {
     pub fn estimate_swap(
         env: Env,
         _tokens: Vec<Address>,
-        _token_in: Address,
+        token_in: Address,
         _token_out: Address,
         _pool_index: BytesN<32>,
         in_amount: u128,
     ) -> u128 {
         count_call(&env);
-        let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
+        let (num, den) = rate_for(&env, &token_in);
         let optimism: i128 = env
             .storage()
             .instance()
             .get(&VenueKey::Optimism)
             .unwrap_or(0);
-        (in_amount as i128 * num / den * (10_000 + optimism) / 10_000) as u128
+        ((in_amount as i128 * num / den).max(1) * (10_000 + optimism) / 10_000) as u128
     }
 
     pub fn set_reenter(env: Env, reentry: Reentry) {
@@ -122,8 +146,8 @@ impl Venue {
                 &0,
             );
         }
-        let (num, den): (i128, i128) = env.storage().instance().get(&VenueKey::Rate).unwrap();
-        let out = in_amount as i128 * num / den;
+        let (num, den) = rate_for(&env, &token_in);
+        let out = (in_amount as i128 * num / den).max(1);
         if (out as u128) < out_min {
             panic!("below out_min");
         }
@@ -1395,6 +1419,68 @@ fn a_recipient_trustline_limit_below_the_conversion_delivers_as_it_came() {
     assert_eq!(e.asset, w.usdt0);
     assert_eq!(e.amount, 1_000_000);
     assert_eq!(e.fee, 0);
+}
+
+#[test]
+fn a_swap_back_that_returns_almost_nothing_traps_and_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    // a router that quotes and pays one unit for anything sold back to it
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &1, &1_000_000_000);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    assert_eq!(w.held(), (1_000_000, 0));
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 0);
+}
+
+#[test]
+fn a_swap_back_within_the_round_trip_allowance_delivers_as_it_came() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 500_000);
+    // two pools' worth of a 1% fee on the way back
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &9_801, &10_000);
+    let msg = encode(&w.env, &w.ask(&recipient));
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    w.compose(&guid, &message).unwrap();
+    assert_eq!(w.token(&w.usdt0).balance(&recipient), 980_100);
+    assert_eq!(w.arrived_events()[0].outcome, w.sym("as_came"));
+    assert_eq!(w.held(), (0, 0));
+}
+
+#[test]
+fn a_fee_swapped_back_for_almost_nothing_traps_and_stays_queued() {
+    let mut w = setup();
+    let recipient = account(&w.env);
+    open_account(&w.env, &recipient);
+    trust(&w.env, &recipient, &w.usdt0_asset);
+    trust_up_to(&w.env, &recipient, &w.usdc_asset, AUTHORIZED, 998_000);
+    let integrator = account(&w.env);
+    open_account(&w.env, &integrator);
+    trust_up_to(&w.env, &integrator, &w.usdc_asset, AUTHORIZED, 1);
+    VenueClient::new(&w.env, &w.venue).set_back_rate(&w.usdc, &1, &1_000_000_000);
+    let mut ask = w.ask(&recipient);
+    ask.fee_bps = 20;
+    ask.fee_recipient = integrator.clone();
+    let msg = encode(&w.env, &ask);
+    let (guid, message) = w.arrive(1_000_000, &msg);
+
+    assert_eq!(
+        w.compose(&guid, &message),
+        Err(Some(contract_error(Error::NoWayBack)))
+    );
+    assert_eq!(w.held(), (1_000_000, 0));
 }
 
 #[test]

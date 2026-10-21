@@ -21,6 +21,10 @@ pub const BPS: i128 = 10_000;
 /// The most an integrator fee may take, the same cap the SDK applies. A message
 /// asking for more is not converted.
 pub const MAX_FEE_BPS: u32 = 1_000;
+/// What a swap back may lose against the forward swap, per hop: both directions
+/// of Aquarius's highest pool fee tier (1%). Within one transaction the pool's
+/// price returns along the curve it came, so a fair venue loses only its fees.
+pub const ROUND_TRIP_BPS_PER_HOP: i128 = 200;
 
 /// What this contract may convert into and route through, fixed at construction.
 /// Nothing outside these lists is ever called: a sender cannot make the contract
@@ -179,7 +183,9 @@ fn pay(env: &Env, token: &TokenClient, to: &Address, amount: i128) -> bool {
 /// arriving token and returns what came back. Used when the recipient refuses what
 /// the conversion produced, which only a trustline limit can do once `can_hold`
 /// has passed: the swap cannot be undone in place, so it is undone through the
-/// venue, holding the venue to its own estimate. When that fails too the call
+/// venue. The venue is held to the arrival's own forward rate, `taken` for `out`,
+/// less the round trip allowance, not only to its own estimate, so a venue that
+/// turned hostile cannot keep what it is handed back. When that fails too the call
 /// traps, which leaves the compose queued for after the recipient raises its limit.
 fn swap_back(
     env: &Env,
@@ -187,7 +193,18 @@ fn swap_back(
     arrival: &Arrival,
     conversion: &Conversion,
     amount: i128,
+    forward: (i128, i128),
 ) -> i128 {
+    let (taken, out) = forward;
+    let keep = BPS - ROUND_TRIP_BPS_PER_HOP * conversion.path.len() as i128;
+    let floor = match taken
+        .checked_mul(amount)
+        .and_then(|v| v.checked_mul(keep))
+        .and_then(|v| v.checked_div(out.checked_mul(BPS)?))
+    {
+        Some(floor) if keep > 0 => floor,
+        _ => panic_with_error!(env, Error::NoWayBack),
+    };
     let mut holding = Vec::new(env);
     holding.push_back(arrival.token.clone());
     for (_, _, token_out) in conversion.path.iter() {
@@ -205,7 +222,7 @@ fn swap_back(
     let before = arriving.balance(&me);
     let wanted_before = wanted.balance(&me);
     let swapped = match venue::estimate(env, &venue.router, &conversion.wanted, amount, &back) {
-        Some(estimate) if estimate > 0 => venue::swap(
+        Some(estimate) if estimate > 0 && estimate >= floor => venue::swap(
             env,
             &venue.router,
             &conversion.wanted,
@@ -217,7 +234,11 @@ fn swap_back(
     };
     let returned = arriving.balance(&me) - before;
     // any of it left here would belong to no arrival, so all of it must go back
-    if !swapped || returned <= 0 || wanted_before - wanted.balance(&me) != amount {
+    if !swapped
+        || returned <= 0
+        || returned < floor
+        || wanted_before - wanted.balance(&me) != amount
+    {
         panic_with_error!(env, Error::NoWayBack);
     }
     returned
@@ -303,7 +324,7 @@ fn convert(
 
     if !pay(env, &wanted, recipient, net) {
         // the recipient's trustline limit has no room for the conversion
-        unconverted += swap_back(env, venue, arrival, conversion, out);
+        unconverted += swap_back(env, venue, arrival, conversion, out, (taken, out));
         arriving.transfer(&me, recipient, &unconverted);
         return Some(Delivery {
             outcome: Outcome::AsCame,
@@ -326,7 +347,7 @@ fn convert(
         } else if pay(env, &wanted, recipient, fee) {
             amount += fee;
         } else {
-            unconverted += swap_back(env, venue, arrival, conversion, fee);
+            unconverted += swap_back(env, venue, arrival, conversion, fee, (taken, out));
         }
     }
     if unconverted > 0 {
