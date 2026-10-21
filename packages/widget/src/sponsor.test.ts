@@ -83,6 +83,22 @@ describe("settle", () => {
   });
 });
 
+describe("requestSettlement", () => {
+  it("asks for the repayment in the asset the route delivers", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ xdr: "AAAA", channel: "G" }), { status: 200 });
+    });
+    await client.requestSettlement("GDEST", "arbitrum", "USDT0");
+    await client.requestSettlement("GDEST", "base");
+    expect(bodies).toEqual([
+      { destination: "GDEST", sourceChainId: "arbitrum", asset: "USDT0" },
+      { destination: "GDEST", sourceChainId: "base", asset: "USDC" },
+    ]);
+  });
+});
+
 describe("terms", () => {
   it("reads who funds reserves and the smallest delivery from /health", async () => {
     answer(
@@ -98,7 +114,22 @@ describe("terms", () => {
       network: "mainnet",
       reserveFunding: "self",
       minDeliveryBaseUnits: 2_500_000n,
+      lends: [],
     });
+  });
+
+  it("reads which trustlines the sponsor lends, each repaid in its own asset", async () => {
+    answer(
+      200,
+      JSON.stringify({
+        ok: true,
+        network: "mainnet",
+        reserveFunding: "sponsor",
+        minDeliveryBaseUnits: "0",
+        lends: ["USDC", "USDT0"],
+      }),
+    );
+    expect((await client.terms()).lends).toEqual(["USDC", "USDT0"]);
   });
 
   it("reads a sponsor from before the switch as what it is: one that fronts reserves, with no minimum", async () => {
@@ -107,6 +138,8 @@ describe("terms", () => {
       network: "testnet",
       reserveFunding: "sponsor",
       minDeliveryBaseUnits: 0n,
+      // and lent only USDC, the one asset its settlement could repay in
+      lends: ["USDC"],
     });
   });
 
@@ -117,6 +150,10 @@ describe("terms", () => {
     await expect(client.terms()).rejects.toThrow(/minimum/);
     answer(200, JSON.stringify({ ok: true }));
     await expect(client.terms()).rejects.toThrow(/network/);
+    answer(200, JSON.stringify({ ok: true, network: "testnet", lends: "USDC" }));
+    await expect(client.terms()).rejects.toThrow(/lends/);
+    answer(200, JSON.stringify({ ok: true, network: "testnet", lends: [5] }));
+    await expect(client.terms()).rejects.toThrow(/lends/);
   });
 
   it("rejects when the sponsor does not answer", async () => {

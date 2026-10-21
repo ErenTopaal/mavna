@@ -48,7 +48,9 @@ const engine = {
   usdcOnStellar: stellar(`USDC:${CCTP_CONTRACTS.testnet.usdcIssuer}`, "USDC", 7),
   xlmOnStellar: stellar("native", "XLM", 7),
   // Horizon's order book, at its boundary: 10 XLM to the USDC
-  xlmStroopsPerUsdc: async () => 100_000_000n,
+  xlmStroopsPerUnit: async () => 100_000_000n,
+  // Horizon's direct path, at its boundary: the reserve bought back at that price
+  repaymentCost: async (_asset: Asset, xlmStroops: bigint) => xlmStroops / 10n,
 };
 
 /** An account entry the way the Stellar node returns it. */
@@ -235,7 +237,8 @@ describe("applySponsorTerms", () => {
         network: "testnet",
         terms: sponsorFunded,
         destination: "exists",
-        xlmStroopsPerUsdc: 100_000_000n,
+        xlmStroopsPerUnit: 100_000_000n,
+        repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
       },
     );
     // the new account's repayment is one more approval, and a preparation the
@@ -270,7 +273,8 @@ describe("applySponsorTerms", () => {
         network: "testnet",
         terms: sponsorFunded,
         destination: "missing",
-        xlmStroopsPerUsdc: 5_000_000n,
+        xlmStroopsPerUnit: 5_000_000n,
+        repaymentCost: { forStroops: 15_000_000n, baseUnits: 30_000_000n },
       },
     );
     expect(set.routes).toEqual([]);
@@ -286,7 +290,7 @@ describe("applySponsorTerms", () => {
         network: "testnet",
         terms: sponsorFunded,
         destination: "missing",
-        xlmStroopsPerUsdc: new Error("The order book has no bids."),
+        xlmStroopsPerUnit: new Error("The order book has no bids."),
       },
     );
     expect(set.rejected[0]).toMatchObject({ reason: "temporarily-unavailable" });
@@ -627,7 +631,7 @@ describe("sending USDT0", () => {
     expect(set.rejected[0]?.detail).toContain("node.example");
   });
 
-  it("declines a new-account USDT0 route, saying the sponsor only curates USDC", () => {
+  it("declines a new-account USDT0 route on a sponsor that lends only USDC", () => {
     const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
     const ready = routeFor("layerzero", { delivers: usdt0To });
     const set = declineUnsettleable(
@@ -635,8 +639,123 @@ describe("sending USDT0", () => {
       engine.usdcOnStellar.id,
     );
     expect(set.routes).toEqual([ready]);
-    expect(set.rejected[0]?.explanation).toMatch(/the sponsor curates/);
-    expect(set.rejected[0]?.explanation).toMatch(/this route delivers USDT0\.$/);
+    expect(set.rejected[0]?.explanation).toBe(
+      "A new Stellar account can only be set up on a route that delivers USDC, the asset the " +
+        "sponsor is repaid in from what arrives, and this route delivers USDT0.",
+    );
+  });
+
+  it("keeps a new-account USDT0 route on a sponsor that lends USDT0, whose repayment is in USDT0", () => {
+    const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
+    const set = declineUnsettleable(
+      { routes: [fresh], rejected: [], complete: true },
+      engine.usdcOnStellar.id,
+      "sponsor",
+      "missing",
+      ["USDC", "USDT0"],
+    );
+    expect(set.routes).toEqual([fresh]);
+    // an asset it does not lend is still declined, naming what it does
+    const eurc = { ...usdt0To, id: `EURC:${CCTP_CONTRACTS.testnet.usdcIssuer}`, symbol: "EURC" };
+    const declined = declineUnsettleable(
+      {
+        routes: [routeFor("layerzero", { newAccount: true, delivers: eurc })],
+        rejected: [],
+        complete: true,
+      },
+      engine.usdcOnStellar.id,
+      "sponsor",
+      "exists",
+      ["USDC", "USDT0"],
+    );
+    expect(declined.rejected[0]?.explanation).toBe(
+      "This account cannot hold EURC yet, and the sponsor only opens a USDC or USDT0 " +
+        "trustline, each repaid in its own asset. Add a EURC trustline to the account first, " +
+        "or send USDC or USDT0.",
+    );
+  });
+
+  describe("priced against USDT0's own market, as mainnet answered", () => {
+    // recorded 2026-10-21 (packages/stellar/src/__fixtures__): the order book's mid is
+    // 5.1876162 XLM a USDT0, and the direct path buys 1.5 XLM for 0.2808399 USDT0
+    const sponsorLendingUsdt0 = {
+      network: "testnet",
+      reserveFunding: "sponsor" as const,
+      minDeliveryBaseUnits: 0n,
+      lends: ["USDC", "USDT0"],
+    };
+    const fresh = routeFor("layerzero", { newAccount: true, delivers: usdt0To });
+    const check = (repaymentCost: SponsorCheck["repaymentCost"]): SponsorCheck => ({
+      network: "testnet",
+      terms: sponsorLendingUsdt0,
+      destination: "missing",
+      xlmStroopsPerUnit: 51_876_162n,
+      ...(repaymentCost === undefined ? {} : { repaymentCost }),
+    });
+
+    it("shows the most the repayment may take, in USDT0", () => {
+      const set = applySponsorTerms(
+        { routes: [fresh], rejected: [], complete: true },
+        check({ forStroops: 15_000_000n, baseUnits: 2_808_399n }),
+      );
+      expect(set.rejected).toEqual([]);
+      const repays = set.routes[0]?.fees.find((f) => f.kind === "reserve-repayment");
+      // twice the reserve at the mid, as the sponsor builds its ceiling
+      expect(repays?.total).toEqual({ asset: usdt0To, baseUnits: "5783002" });
+      const view = toRouteView(set.routes[0] ?? fresh);
+      expect(view.repaymentSetAside).toMatchObject({ symbol: "USDT0" });
+    });
+
+    it("declines while the direct market has no USDT0/XLM trade to repay with", () => {
+      const set = applySponsorTerms(
+        { routes: [fresh], rejected: [], complete: true },
+        check({ forStroops: 15_000_000n, baseUnits: undefined }),
+      );
+      expect(set.routes).toEqual([]);
+      expect(set.rejected[0]).toMatchObject({ reason: "temporarily-unavailable", retryable: true });
+      expect(set.rejected[0]?.explanation).toBe(
+        "Stellar's market has no direct trade from USDT0 to XLM right now, which repaying the " +
+          "new account's reserve needs. Try again later, or send to an account that can " +
+          "already receive USDT0.",
+      );
+    });
+
+    it("declines while buying the reserve back would cost more than the repayment may take", () => {
+      const set = applySponsorTerms(
+        { routes: [fresh], rejected: [], complete: true },
+        check({ forStroops: 15_000_000n, baseUnits: 5_780_000n }),
+      );
+      expect(set.routes).toEqual([]);
+      expect(set.rejected[0]).toMatchObject({ reason: "temporarily-unavailable" });
+      expect(set.rejected[0]?.explanation).toMatch(
+        /^Buying back the 1\.5 XLM reserve the sponsor fronts costs 0\.578 USDT0 on Stellar's market right now, more than the 0\.5783002 USDT0 the repayment may take\./,
+      );
+    });
+
+    it("holds the market to the reserve the sponsor will lend, as it read the account", () => {
+      // an account that exists is lent the trustline's 0.5 XLM alone, whose ceiling is a third
+      const set = applySponsorTerms(
+        { routes: [fresh], rejected: [], complete: true },
+        check({ forStroops: 5_000_000n, baseUnits: 1_910_000n }),
+      );
+      expect(set.rejected[0]?.explanation).toMatch(
+        /^Buying back the 0\.5 XLM reserve the sponsor fronts costs 0\.191 USDT0 .* more than the 0\.1927667 USDT0/,
+      );
+    });
+
+    it("declines when the market could not be asked", () => {
+      for (const cost of [
+        new Error("Horizon could not quote the settlement (HTTP 503)."),
+        undefined,
+      ]) {
+        const set = applySponsorTerms(
+          { routes: [fresh], rejected: [], complete: true },
+          check(cost),
+        );
+        expect(set.routes).toEqual([]);
+        expect(set.rejected[0]).toMatchObject({ reason: "temporarily-unavailable" });
+      }
+    });
   });
 
   it("shows the transfer fee in the asset it is charged in", () => {
@@ -752,6 +871,77 @@ describe("a trustline an account opens with its own XLM", () => {
     const sponsored = await quoted("sponsor");
     expect(sponsored.routes).toEqual([]);
     expect(sponsored.rejected[0]?.explanation).toMatch(/cannot hold USDT0 yet/);
+  });
+
+  it("sets a new account up on a USDT0 route when the sponsor lends USDT0, priced on USDT0's market", async () => {
+    const route = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
+    const rpc = new RpcClient({
+      url: "https://example.invalid",
+      baseDelayMs: 0,
+      sleep: async () => {},
+    });
+    // the node has no such account
+    vi.spyOn(rpc.server, "getLedgerEntries").mockResolvedValue({
+      entries: [],
+      latestLedger: 1,
+    } as never);
+    const priced: string[] = [];
+    const costed: Array<[string, bigint]> = [];
+    const set = await new Promise<RouteSet>((resolve) => {
+      runQuote(
+        {
+          ...engine,
+          xlmStroopsPerUnit: async (asset: Asset) => {
+            priced.push(asset.id);
+            return 51_876_162n;
+          },
+          repaymentCost: async (asset: Asset, xlmStroops: bigint) => {
+            costed.push([asset.id, xlmStroops]);
+            return 2_808_399n;
+          },
+          adapters: [quotingOnce(route)],
+          breaker: createCircuitBreaker(() => parseDisabledSources(undefined)),
+          xlmSwap: {
+            provider: new SdexProvider("testnet"),
+            delivered: engine.usdcOnStellar,
+            deliveredContract: engine.usdcOnStellar.id,
+            wanted: engine.xlmOnStellar,
+            wantedContract: "native",
+          },
+          integratorFee: undefined,
+          rpc,
+          usdcIssuer: CCTP_CONTRACTS.testnet.usdcIssuer,
+          sponsorTerms: async () => ({
+            network: "testnet",
+            reserveFunding: "sponsor" as const,
+            minDeliveryBaseUnits: 0n,
+            lends: ["USDC", "USDT0"],
+          }),
+          usdt0Assets: async () => ({ from: SOURCE_USDC, to: usdt0 }),
+          usdt0Swap: () => {
+            throw new Error("this quote wants USDT0 itself");
+          },
+        },
+        {
+          chainId: "arbitrum",
+          wanted: "USDT0",
+          amount: "5",
+          destination: route.destination,
+          priority: "best",
+          rails: { Circle: true, Axelar: true, LayerZero: true, "NEAR Intents": true },
+          send: "USDT0",
+        },
+        () => {},
+        resolve,
+      );
+    });
+    expect(set.rejected).toEqual([]);
+    expect(set.routes).toHaveLength(1);
+    expect(priced).toEqual([usdt0.id]);
+    // three slots: the account's two and the trustline's one
+    expect(costed).toEqual([[usdt0.id, 15_000_000n]]);
+    const repays = set.routes[0]?.fees.find((f) => f.kind === "reserve-repayment");
+    expect(repays?.total).toEqual({ asset: usdt0, baseUnits: "5783002" });
   });
 });
 
@@ -947,7 +1137,8 @@ describe("how many approvals a route asks for", () => {
     destination: "exists" as const,
     spareStroops: 100_000_000n,
     baseReserveStroops: 5_000_000,
-    xlmStroopsPerUsdc: 100_000_000n,
+    xlmStroopsPerUnit: 100_000_000n,
+    repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
   });
 
   it("counts the delivery the receiving account signs for a Circle route when it pays its own", () => {
@@ -1283,7 +1474,8 @@ describe("a conversion the recipient pays the network fee for", () => {
         destination,
         spareStroops,
         baseReserveStroops: 5_000_000,
-        xlmStroopsPerUsdc: 100_000_000n,
+        xlmStroopsPerUnit: 100_000_000n,
+        repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
       },
     );
 
@@ -1309,7 +1501,8 @@ describe("a conversion the recipient pays the network fee for", () => {
         terms,
         destination: "missing",
         baseReserveStroops: 5_000_000,
-        xlmStroopsPerUsdc: 100_000_000n,
+        xlmStroopsPerUnit: 100_000_000n,
+        repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
       },
     );
     expect(set.routes).toEqual([]);
@@ -1328,7 +1521,8 @@ describe("a new account's reserve repaid from USDC that arrives as USDC", () => 
       terms: { network: "testnet", reserveFunding: "sponsor", minDeliveryBaseUnits: 0n },
       destination: "missing",
       // 10 XLM to the USDC: the 1.5 XLM reserve may take up to 0.3 USDC
-      xlmStroopsPerUsdc: 100_000_000n,
+      xlmStroopsPerUnit: 100_000_000n,
+      repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
     },
   );
 
@@ -1380,7 +1574,8 @@ describe("a muxed or contract recipient", () => {
         destination: "exists",
         spareStroops,
         baseReserveStroops: 5_000_000,
-        xlmStroopsPerUsdc: 100_000_000n,
+        xlmStroopsPerUnit: 100_000_000n,
+        repaymentCost: { forStroops: 15_000_000n, baseUnits: 1_500_000n },
       },
     );
 

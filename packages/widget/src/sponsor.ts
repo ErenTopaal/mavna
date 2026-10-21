@@ -83,6 +83,13 @@ export interface SponsorTerms {
   readonly reserveFunding: "sponsor" | "self";
   /** In USDC base units at six decimals. Zero means no minimum. */
   readonly minDeliveryBaseUnits: bigint;
+  /**
+   * The curated trustlines the sponsor fronts for an account, each repaid in
+   * its own asset from what arrives. Read as USDC alone when absent, which is
+   * what a sponsor from before this field lent; none when accounts pay their
+   * own reserve.
+   */
+  readonly lends?: readonly string[];
 }
 
 export interface SponsorClient {
@@ -102,6 +109,8 @@ export interface SponsorClient {
   requestSettlement(
     destination: string,
     sourceChainId: string,
+    /** The curated name of the asset the repayment spends: what the route delivers. */
+    asset?: "USDC" | "USDT0",
   ): Promise<{ xdr: string; channel: string }>;
   /** The user has signed; the sponsor holds it until their money lands. */
   commitSettlement(destination: string, signedXdr: string): Promise<{ held: boolean }>;
@@ -216,8 +225,8 @@ export function createSponsorClient(
     submitPreparation(signedXdr) {
       return post("/submit", { signedXdr });
     },
-    requestSettlement(destination, sourceChainId) {
-      return post("/settlement", { destination, sourceChainId });
+    requestSettlement(destination, sourceChainId, asset = "USDC") {
+      return post("/settlement", { destination, sourceChainId, asset });
     },
     commitSettlement(destination, signedXdr) {
       return post("/settlement/commit", { destination, signedXdr });
@@ -275,6 +284,7 @@ export function createSponsorClient(
         network?: unknown;
         reserveFunding?: unknown;
         minDeliveryBaseUnits?: unknown;
+        lends?: unknown;
       };
       // A sponsor from before these fields fronted every reserve and had no
       // minimum, so their absence says exactly that. A value that is present
@@ -290,10 +300,17 @@ export function createSponsorClient(
       if (typeof body.network !== "string") {
         throw new Error("The sponsor did not say which network it runs on.");
       }
+      const lends = body.lends ?? (funding === "sponsor" ? ["USDC"] : []);
+      if (!Array.isArray(lends) || !lends.every((name) => typeof name === "string")) {
+        throw new Error(
+          "The sponsor named the trustlines it lends in a form this page cannot read.",
+        );
+      }
       return {
         network: body.network,
         reserveFunding: funding,
         minDeliveryBaseUnits: BigInt(minimum),
+        lends,
       };
     },
   };

@@ -14,7 +14,14 @@ import {
   parseDisabledSources,
   type SwapAttachment,
 } from "@mavna/routing";
-import { createNetworkConfig, type NetworkConfig, RpcClient, XlmPriceSource } from "@mavna/stellar";
+import {
+  createNetworkConfig,
+  DirectSpendQuote,
+  type NetworkConfig,
+  RpcClient,
+  stroopsToXlm,
+  XlmPriceSource,
+} from "@mavna/stellar";
 import { AquariusProvider, createSwapVenues, SdexProvider, type SwapVenues } from "@mavna/swap";
 import { Asset as StellarAsset } from "@stellar/stellar-sdk";
 import type { IntegratorFeeConfig } from "./config.js";
@@ -130,11 +137,19 @@ export interface Engine {
    */
   sponsorTerms(): Promise<SponsorTerms>;
   /**
-   * The XLM order book's mid price for Stellar USDC, in stroops per whole USDC,
-   * read from Horizon the way the sponsor prices its settlement. Rejects when the
-   * book cannot price it.
+   * The XLM order book's mid price for a Stellar asset (the one a sponsored
+   * account's repayment spends), in stroops per whole unit, read from Horizon
+   * the way the sponsor prices its settlement. Rejects when the book cannot
+   * price it.
    */
-  xlmStroopsPerUsdc(): Promise<bigint>;
+  xlmStroopsPerUnit(asset: MavnaAsset): Promise<bigint>;
+  /**
+   * What buying `xlmStroops` of XLM costs on the asset's direct market right
+   * now, in its base units: the trade a sponsored account's repayment makes,
+   * read from Horizon as the sponsor reads it. Undefined when there is no
+   * direct market.
+   */
+  repaymentCost(asset: MavnaAsset, xlmStroops: bigint): Promise<bigint | undefined>;
   /** Chains USDT0 can be sent from, filtered by the same allow and deny lists. */
   readonly usdt0Chains: ReadonlyArray<{ id: string; name: string }>;
   /**
@@ -161,6 +176,7 @@ export function createEngine(config: EngineConfig): Engine {
   const netConfig = createNetworkConfig({ id: network, rpcUrl: config.rpcUrl });
   const rpc = new RpcClient({ url: netConfig.rpcUrl });
   const xlmPrices = new XlmPriceSource({ horizonUrl: netConfig.horizonUrl });
+  const directSpend = new DirectSpendQuote({ horizonUrl: netConfig.horizonUrl });
 
   const breaker = createCircuitBreaker(() => parseDisabledSources(config.disabledSources));
 
@@ -281,8 +297,9 @@ export function createEngine(config: EngineConfig): Engine {
     // A host can bring its own Stellar signer; otherwise the built-in wallet kit.
     stellar: rememberConnection(config.stellar ?? createStellarWallet(network)),
     historyKey: config.historyKey,
-    xlmStroopsPerUsdc: () =>
-      xlmPrices.xlmStroopsPerUnit(new StellarAsset("USDC", STELLAR_USDC_ISSUER[network])),
+    xlmStroopsPerUnit: (asset) => xlmPrices.xlmStroopsPerUnit(stellarAssetOf(asset)),
+    repaymentCost: (asset, xlmStroops) =>
+      directSpend.directSpendStroops(stellarAssetOf(asset), stroopsToXlm(xlmStroops)),
     sourceDomain(chainId) {
       return circleDomain(network, chainId);
     },
@@ -316,4 +333,11 @@ export function createEngine(config: EngineConfig): Engine {
       return layerzero.sendableAssets(chainId);
     },
   };
+}
+
+/** A Stellar asset as the SDK names it, from the CODE:ISSUER id a route carries. */
+function stellarAssetOf(asset: MavnaAsset): StellarAsset {
+  if (asset.id === "native") return StellarAsset.native();
+  const [code, issuer] = asset.id.split(":");
+  return new StellarAsset(code ?? "", issuer);
 }

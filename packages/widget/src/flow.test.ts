@@ -464,6 +464,39 @@ describe("a review of a new account the sponsor sets up, arriving as USDC", () =
   });
 });
 
+describe("a review of a new account the sponsor sets up, arriving as USDT0", () => {
+  it("says the reserve's repayment comes out of the USDT0 that arrives", () => {
+    const usdt0 = {
+      ...STELLAR_USDC,
+      id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+      symbol: "USDT0",
+      curatedBy: "LayerZero",
+    };
+    const base = routeFor("layerzero", { newAccount: true, delivers: usdt0 });
+    const route = {
+      ...base,
+      fees: [
+        ...base.fees,
+        {
+          kind: "reserve-repayment" as const,
+          total: { asset: usdt0, baseUnits: "5783002" },
+          recipients: [],
+          includedInQuote: false,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      renderReview(quotedFlow({ terms: 0 }), {
+        r: toRouteView(route),
+        chain: { id: "x", name: "X" },
+        sym: "USDT0",
+      }),
+    );
+    expect(html).toContain("Repays the reserve, from what arrives");
+    expect(html).toContain("Up to 0.5783002 USDT0");
+  });
+});
+
 describe("a review where the account pays its own Circle delivery", () => {
   const review = (source: string, funding: "self" | "sponsor") => {
     const flow = quotedFlow({ terms: 0 });
@@ -760,7 +793,7 @@ describe("a transfer that ended without arriving", () => {
       usdt0Chains: [],
       // the sponsor cannot be asked, which a quote turns into declines and finishes
       sponsorTerms: () => Promise.reject(new Error("The sponsor is down.")),
-      xlmStroopsPerUsdc: async () => 100_000_000n,
+      xlmStroopsPerUnit: async () => 100_000_000n,
     } as unknown as Engine;
     const flow = applied(new Flow({ engine: quoting, variant }));
     const view = toRouteView(routeFor("layerzero"));
@@ -841,7 +874,7 @@ describe("a route that was sent", () => {
       sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
       usdt0Chains: [],
       sponsorTerms: () => new Promise(() => {}),
-      xlmStroopsPerUsdc: async () => 100_000_000n,
+      xlmStroopsPerUnit: async () => 100_000_000n,
     } as unknown as Engine;
     const flow = applied(new Flow({ engine: quoting, variant, emit: (e) => events.push(e) }));
     const view = toRouteView(routeFor("layerzero"));
@@ -940,7 +973,7 @@ describe("after an ending, round 6", () => {
       sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
       usdt0Chains: [],
       sponsorTerms: () => Promise.reject(new Error("The sponsor is down.")),
-      xlmStroopsPerUsdc: async () => 100_000_000n,
+      xlmStroopsPerUnit: async () => 100_000_000n,
     } as unknown as Engine;
     const flow = applied(new Flow({ engine: quoting, variant }));
     const view = toRouteView(routeFor("layerzero"));

@@ -274,9 +274,10 @@ export function buildAssets(
  * Why a route cannot set up a new account, or undefined when it can.
  *
  * The sponsor fronts the reserve and is repaid out of what arrives, and the
- * repayment it holds spends USDC: the only asset it curates. A rail that lands
- * anything else leaves that repayment with nothing to spend, so the sponsor
- * would be out the reserve for good.
+ * repayment it holds spends the asset of the trustline it opened: one of the
+ * curated assets it lends. A rail that lands anything else leaves that
+ * repayment with nothing to spend, so the sponsor would be out the reserve for
+ * good.
  */
 export function settlementBlocker(
   route: Route,
@@ -284,6 +285,8 @@ export function settlementBlocker(
   reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
   /** Whether the destination account exists, when that was read. */
   destination?: "exists" | "missing" | Error,
+  /** What the sponsor lends, as its terms say; USDC alone from a sponsor that does not say. */
+  lends: readonly string[] = ["USDC"],
 ): string | undefined {
   if (!route.steps.some((s) => s.kind === "prepare-account")) return undefined;
   const delivers = route.deliveredAtLeast.asset;
@@ -296,19 +299,21 @@ export function settlementBlocker(
       `the assets the sponsor curates, and this route delivers ${delivers.symbol}.`
     );
   }
-  if (delivers.id === usdcId) return undefined;
+  const name = trustlineName(route, usdcId);
+  if (name !== undefined && lends.includes(name)) return undefined;
+  const lent = lends.length === 0 ? "USDC" : lends.join(" or ");
   if (destination === "exists") {
     // the account is there; it is the trustline the sponsor will not open
     return (
-      `This account cannot hold ${delivers.symbol} yet, and the sponsor only opens a USDC ` +
-      "trustline, the one asset its deposit is repaid in. Add a " +
-      `${delivers.symbol} trustline to the account first, or send USDC.`
+      `This account cannot hold ${delivers.symbol} yet, and the sponsor only opens a ${lent} ` +
+      `trustline, ${lends.length > 1 ? "each repaid in its own asset" : "the one asset its deposit is repaid in"}. ` +
+      `Add a ${delivers.symbol} trustline to the account first, or send ${lent}.`
     );
   }
   return (
-    "A new Stellar account can only be set up on a route that delivers USDC, the one asset " +
-    "the sponsor curates, because its deposit is repaid in USDC from what arrives, and this " +
-    `route delivers ${delivers.symbol}.`
+    `A new Stellar account can only be set up on a route that delivers ${lent}, ` +
+    `${lends.length > 1 ? "the assets" : "the asset"} the sponsor is repaid in from what ` +
+    `arrives, and this route delivers ${delivers.symbol}.`
   );
 }
 
@@ -334,11 +339,12 @@ export function declineUnsettleable(
   usdcId: string,
   reserveFunding: SponsorTerms["reserveFunding"] = "sponsor",
   destination?: "exists" | "missing" | Error,
+  lends?: readonly string[],
 ): RouteSet {
   const routes: Route[] = [];
   const rejected: RouteRejection[] = [...set.rejected];
   for (const route of set.routes) {
-    const why = settlementBlocker(route, usdcId, reserveFunding, destination);
+    const why = settlementBlocker(route, usdcId, reserveFunding, destination, lends);
     if (why === undefined) {
       routes.push(route);
       continue;
@@ -381,11 +387,20 @@ export interface SponsorCheck {
    */
   readonly convertsInto?: Asset;
   /**
-   * The XLM order book's mid price for USDC, in stroops per whole USDC: the same
-   * figure the sponsor prices its settlement's most it may spend by. Read only
-   * when the sponsor fronts reserves, for a route that sets an account up.
+   * The XLM order book's mid price for the asset the repayment spends (what the
+   * route delivers), in stroops per whole unit: the same figure the sponsor
+   * prices its settlement's most it may spend by. Read only when the sponsor
+   * fronts reserves, for a route that sets an account up.
    */
-  readonly xlmStroopsPerUsdc?: bigint | Error;
+  readonly xlmStroopsPerUnit?: bigint | Error;
+  /**
+   * What buying the reserve back costs on that asset's direct market right
+   * now, the trade the repayment makes: for `forStroops` of XLM, in base units
+   * of the asset, undefined when there is no direct market. Read with the price.
+   */
+  readonly repaymentCost?:
+    | { readonly forStroops: bigint; readonly baseUnits: bigint | undefined }
+    | Error;
   readonly holdsWanted?:
     | "ready"
     | "missing"
@@ -472,7 +487,7 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
   }
 
   if (setsUp && terms.reserveFunding === "sponsor") {
-    const blocked = repaymentBlocker(route, check.xlmStroopsPerUsdc);
+    const blocked = repaymentBlocker(route, check);
     if (blocked !== undefined) return decline(blocked[0], blocked[1]);
   }
 
@@ -547,8 +562,9 @@ function convertsInto(route: Route, check: SponsorCheck): Asset | undefined {
  */
 function repaymentBlocker(
   route: Route,
-  price: bigint | Error | undefined,
+  check: Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost">,
 ): [RouteRejection["reason"], string] | undefined {
+  const price = check.xlmStroopsPerUnit;
   if (price === undefined || price instanceof Error) {
     return [
       "temporarily-unavailable",
@@ -562,8 +578,10 @@ function repaymentBlocker(
   }
   const arrives = route.deliveredAtLeast;
   const mostItMayTake = repaymentCeiling(BigInt(reserve.total.baseUnits), arrives, price);
-  if (BigInt(arrives.baseUnits) > mostItMayTake) return undefined;
   const symbol = arrives.asset.symbol;
+  if (BigInt(arrives.baseUnits) > mostItMayTake) {
+    return marketBlocker(check.repaymentCost, price, arrives.asset);
+  }
   return [
     "amount-too-small",
     `Setting up this new account is repaid from what arrives, and that repayment may take up ` +
@@ -571,6 +589,61 @@ function repaymentBlocker(
       `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
       "may not cover it. Send more, or send to an account that can already receive it.",
   ];
+}
+
+/**
+ * The sponsor's own room over the quoted cost, in basis points: it lends only
+ * when the direct market buys the reserve back within the ceiling with this
+ * much to spare, so a route it would refuse is not offered.
+ */
+const REPAYMENT_MARGIN_BPS = 100n;
+
+/**
+ * Why the repayment could not be made on the market right now, or undefined.
+ * The settlement buys the reserve back on the asset's direct market alone, and
+ * a thin market (USDT0's is) can cost more than the ceiling or be gone.
+ */
+function marketBlocker(
+  cost: SponsorCheck["repaymentCost"],
+  price: bigint,
+  asset: Route["deliveredAtLeast"]["asset"],
+): [RouteRejection["reason"], string] | undefined {
+  const symbol = asset.symbol;
+  if (cost === undefined || cost instanceof Error) {
+    return [
+      "temporarily-unavailable",
+      "What repaying the new account's reserve would cost on Stellar's market could not be " +
+        `read just now${cost instanceof Error ? `: ${message(cost)}` : "."}`,
+    ];
+  }
+  if (cost.baseUnits === undefined) {
+    return [
+      "temporarily-unavailable",
+      `Stellar's market has no direct trade from ${symbol} to XLM right now, which repaying ` +
+        "the new account's reserve needs. Try again later, or send to an account that can " +
+        `already receive ${symbol}.`,
+    ];
+  }
+  // held to the reserve the sponsor lends, which it reads from the account as
+  // this check did, and to the same ceiling it builds for that reserve
+  const mostItMayTake = (cost.forStroops * 2n * 10n ** BigInt(asset.decimals)) / price;
+  if ((cost.baseUnits * (10_000n + REPAYMENT_MARGIN_BPS)) / 10_000n <= mostItMayTake) {
+    return undefined;
+  }
+  return [
+    "temporarily-unavailable",
+    `Buying back the ${stroopsToXlm(cost.forStroops)} XLM reserve the sponsor fronts costs ` +
+      `${unitsPlain(cost.baseUnits, asset.decimals)} ${symbol} on Stellar's market right now, ` +
+      `more than the ${unitsPlain(mostItMayTake, asset.decimals)} ${symbol} the repayment may ` +
+      `take. Try again later, or send to an account that can already receive ${symbol}.`,
+  ];
+}
+
+/** Base units as a plain decimal, with no rounding and no trailing zeros. */
+function unitsPlain(baseUnits: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const fraction = (baseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction === "" ? (baseUnits / scale).toString() : `${baseUnits / scale}.${fraction}`;
 }
 
 /** Twice the reserve at the mid price, in the arriving asset: the settlement's ceiling. */
@@ -590,7 +663,7 @@ function repaymentCeiling(
  */
 function withRepayment(route: Route, check: SponsorCheck): Route {
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
-  const price = check.xlmStroopsPerUsdc;
+  const price = check.xlmStroopsPerUnit;
   if (
     reserve === undefined ||
     typeof price !== "bigint" ||
@@ -842,9 +915,18 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
 async function checkSponsor(
   engine: Pick<
     Engine,
-    "network" | "rpc" | "usdcIssuer" | "sponsorTerms" | "baseReserveStroops" | "xlmStroopsPerUsdc"
+    | "network"
+    | "rpc"
+    | "usdcIssuer"
+    | "usdcOnStellar"
+    | "sponsorTerms"
+    | "baseReserveStroops"
+    | "xlmStroopsPerUnit"
+    | "repaymentCost"
   >,
   destination: string,
+  /** What the rails deliver on Stellar, which a sponsored setup's repayment spends. */
+  delivered: Asset,
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
   /** Whether the route converts at all, whose fee the recipient pays. */
@@ -860,14 +942,22 @@ async function checkSponsor(
   let spare: bigint | undefined;
   const signer = signerOf(destination);
   let price: bigint | Error | undefined;
+  let cost: SponsorCheck["repaymentCost"];
   const { baseReserveStroops } = engine;
   if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
+    // the trustline a setup opens is the one the repayment spends: what the rails
+    // deliver when the sponsor curates it, otherwise USDC, which the decline names
+    const lendsIn =
+      trustlineNameOf(delivered.id, engine.usdcOnStellar.id) === undefined
+        ? engine.usdcOnStellar
+        : delivered;
+    const [lendsCode, lendsIssuer] = lendsIn.id.split(":");
     // read too, so a decline can say whether the account or only the trustline is missing
     try {
       const state = await inspectDestination(
         engine.rpc,
         destination,
-        new StellarAsset("USDC", engine.usdcIssuer),
+        new StellarAsset(lendsCode ?? "", lendsIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
       // the recipient pays its own conversion's fee, from XLM it can spare
@@ -878,9 +968,17 @@ async function checkSponsor(
       // something will be set up, and repaid from the arrival at this price
       if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
         try {
-          price = await engine.xlmStroopsPerUsdc();
+          price = await engine.xlmStroopsPerUnit(lendsIn);
         } catch (cause) {
           price = cause instanceof Error ? cause : new Error(String(cause));
+        }
+        // the account's two slots and the trustline's one, or the trustline alone
+        const forStroops =
+          BigInt(state.lane.kind === "needs-account" ? 3 : 1) * BigInt(baseReserveStroops);
+        try {
+          cost = { forStroops, baseUnits: await engine.repaymentCost(lendsIn, forStroops) };
+        } catch (cause) {
+          cost = cause instanceof Error ? cause : new Error(String(cause));
         }
       }
     } catch (cause) {
@@ -935,7 +1033,8 @@ async function checkSponsor(
     destination: found,
     spareStroops: spare,
     baseReserveStroops,
-    ...(price === undefined ? {} : { xlmStroopsPerUsdc: price }),
+    ...(price === undefined ? {} : { xlmStroopsPerUnit: price }),
+    ...(cost === undefined ? {} : { repaymentCost: cost }),
     ...(convertsInto === undefined ? {} : { convertsInto, holdsWanted }),
   };
 }
@@ -965,7 +1064,8 @@ export function runQuote(
     | "usdt0Assets"
     | "usdt0Swap"
     | "baseReserveStroops"
-    | "xlmStroopsPerUsdc"
+    | "xlmStroopsPerUnit"
+    | "repaymentCost"
   >,
   inputs: QuoteInputs,
   onUpdate: (set: RouteSet) => void,
@@ -1041,14 +1141,18 @@ export function runQuote(
     // and then taken back. They are cached on the engine after the first answer.
     // a conversion into anything but XLM needs a trustline the recipient holds
     const into = swap !== undefined && swap.wanted.id !== "native" ? swap.wanted : undefined;
-    void checkSponsor(engine, destination, into, swap !== undefined)
+    void checkSponsor(engine, destination, swap?.delivered ?? to, into, swap !== undefined)
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
         // An unreadable answer is declined by the sponsor terms anyway.
         const funding = check.terms instanceof Error ? "sponsor" : check.terms.reserveFunding;
+        const lends = check.terms instanceof Error ? undefined : check.terms.lends;
         const settle = (set: RouteSet): RouteSet =>
-          applySponsorTerms(declineUnsettleable(set, usdc, funding, check.destination), check);
+          applySponsorTerms(
+            declineUnsettleable(set, usdc, funding, check.destination, lends),
+            check,
+          );
         return raceAdapters(
           adapters,
           {

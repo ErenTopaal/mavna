@@ -192,7 +192,7 @@ export type TransferEngine = Pick<
   | "usdcOnStellar"
   | "sponsorTerms"
   | "stellarNetwork"
-  | "xlmStroopsPerUsdc"
+  | "xlmStroopsPerUnit"
   | "xlmOnStellar"
 >;
 
@@ -230,19 +230,25 @@ async function collectSettlement(
   /** What to tell the user about their funds if this is refused. */
   funds = "Nothing has been sent.",
 ): Promise<{ readonly owner: string; readonly repaysAtMost: bigint }> {
+  const holds = route.deliveredAtLeast.asset;
+  // the repayment spends what arrives, so it is asked for in that asset
+  const name = trustlineNameOf(holds.id, engine.usdcOnStellar.id);
+  if (name === undefined) {
+    throw new Error(`The sponsor curates no trustline for ${holds.symbol}. ${funds}`);
+  }
   const address = await engine.stellar.connect();
   if (address !== signerFor(route.destination)) {
     throw wrongAccount(
       engine,
       address,
       route.destination,
-      "Only the owner of the receiving account can allow it to hold USDC.",
+      `Only the owner of the receiving account can allow it to hold ${holds.symbol}.`,
       funds,
     );
   }
   let built: Awaited<ReturnType<typeof engine.sponsor.requestSettlement>>;
   try {
-    built = await engine.sponsor.requestSettlement(route.destination, chainId);
+    built = await engine.sponsor.requestSettlement(route.destination, chainId, name);
   } catch (cause) {
     // too many waiting for this client, or every channel in use: nothing is
     // wrong with this transfer, and it can simply be started again shortly
@@ -263,7 +269,7 @@ async function collectSettlement(
   // and held to the ceiling the quote offered this setup on
   let price: bigint;
   try {
-    price = await engine.xlmStroopsPerUsdc();
+    price = await engine.xlmStroopsPerUnit(holds);
   } catch (cause) {
     throw new Error(
       "The sponsor's repayment could not be held to the order book's price " +
@@ -280,7 +286,6 @@ async function collectSettlement(
   if ("problem" in read) {
     throw new Error(`The sponsor's repayment was not signed: ${read.problem}. ${funds}`);
   }
-  const holds = route.deliveredAtLeast.asset;
   patch("settle", {
     phase: "blocked",
     note: `Repays the reserve from what arrives: at most ${stroopsToXlm(read.sendMax)} ${holds.symbol}.`,
@@ -420,9 +425,13 @@ async function prepareSponsored(
   address: string,
   funds: string,
 ): Promise<void> {
+  const name = trustlineNameOf(opens.holds.id, engine.usdcOnStellar.id);
+  if (name === undefined) {
+    throw new Error(`The sponsor curates no trustline for ${opens.holds.symbol}. ${funds}`);
+  }
   for (let attempt = 0; ; attempt += 1) {
     const preparation = await engine.sponsor
-      .requestPreparation(opens.destination, chainId)
+      .requestPreparation(opens.destination, chainId, name)
       .catch((cause: unknown) => {
         throw withFunds(cause, funds);
       });
@@ -1038,7 +1047,13 @@ async function ownWallet(
  */
 async function assertSponsorable(engine: TransferEngine, route: Route): Promise<SponsorTerms> {
   const terms = await termsOf(engine, "Setting up a new Stellar account");
-  const blocked = settlementBlocker(route, engine.usdcOnStellar.id, terms.reserveFunding);
+  const blocked = settlementBlocker(
+    route,
+    engine.usdcOnStellar.id,
+    terms.reserveFunding,
+    undefined,
+    terms.lends,
+  );
   if (blocked !== undefined) throw new Error(`${blocked} Nothing has been sent.`);
   return terms;
 }

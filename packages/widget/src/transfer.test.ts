@@ -94,6 +94,12 @@ const attested = {
 };
 /** The assets each /prepare asked for. */
 let askedAssets: string[][];
+/** What each /settlement asked the repayment to spend, as sent. */
+let settlementAssets: unknown[];
+/** Which assets the order book was asked to price, by CODE:ISSUER. */
+let pricedAssets: string[];
+/** The trustlines the sponsor says it lends at /health; absent, as an older sponsor says. */
+let lends: string[] | undefined;
 /** The settlement the sponsor builds for a new account it fronts. */
 let settlementXdr: string;
 /** The preparation the sponsor builds for a new account it fronts. */
@@ -102,8 +108,8 @@ let sponsoredPreparation: string;
 let onDeliver: (() => void) | undefined;
 
 /** A held settlement as the sponsor builds it: the arrival may buy back the reserve. */
-function settlementSpending(sendMax: string): string {
-  const [code, issuer] = STELLAR_USDC.id.split(":");
+function settlementSpending(sendMax: string, paying: string = STELLAR_USDC.id): string {
+  const [code, issuer] = paying.split(":");
   return new TransactionBuilder(new Account(SENDER_STELLAR, "1"), {
     fee: "1000000",
     networkPassphrase: Networks.TESTNET,
@@ -161,6 +167,9 @@ beforeEach(() => {
   usdcLimit = 10n ** 15n;
   conversionAmounts = [];
   askedAssets = [];
+  settlementAssets = [];
+  pricedAssets = [];
+  lends = undefined;
   settlementXdr = settlementSpending("0.6");
   sponsoredPreparation = buildPreparation({
     network: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
@@ -213,8 +222,10 @@ beforeEach(() => {
           network: "testnet",
           reserveFunding: funding,
           minDeliveryBaseUnits: "1000000",
+          ...(lends === undefined ? {} : { lends }),
         });
       case "/settlement": {
+        settlementAssets.push((bodyOf(init) as { asset?: unknown }).asset);
         const refusal = settlementRefusals.shift();
         if (refusal !== undefined) return reply(refusal[0], refusal[1]);
         return reply(200, { xdr: settlementXdr, channel: SENDER_STELLAR });
@@ -449,7 +460,8 @@ function engineWith(adapter: BridgeAdapter): TransferEngine {
     sponsor,
     sponsorTerms: () => sponsor.terms(),
     // the order book, at Horizon's boundary
-    xlmStroopsPerUsdc: async () => {
+    xlmStroopsPerUnit: async (asset) => {
+      pricedAssets.push(asset.id);
       if (xlmPerUsdc instanceof Error) throw xlmPerUsdc;
       return xlmPerUsdc;
     },
@@ -1843,7 +1855,7 @@ describe("runTransfer when the account pays its own reserve", () => {
     expect(adapter.built).toBe(0);
   });
 
-  it("still refuses a USDT0 trustline the sponsor would have to front", async () => {
+  it("still refuses a USDT0 trustline a sponsor that lends only USDC would have to front", async () => {
     const adapter = new ScriptedAdapter("layerzero", [delivered()], {
       transactions: [layerZeroSend("777")],
     });
@@ -1853,8 +1865,55 @@ describe("runTransfer when the account pays its own reserve", () => {
         routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }),
         patches().patch,
       ),
-    ).rejects.toThrow(/the sponsor curates/);
+    ).rejects.toThrow(/delivers USDC, the asset the sponsor is repaid in/);
     expect(log.some((l) => l.startsWith("sponsor /prepare"))).toBe(false);
+  });
+
+  it("sets a new account up for USDT0 on a sponsor that lends it, repaid in USDT0", async () => {
+    lends = ["USDC", "USDT0"];
+    settlementXdr = settlementSpending("0.6", STELLAR_USDT0.id);
+    sponsoredPreparation = buildPreparation({
+      network: createNetworkConfig({ id: "testnet", rpcUrl: "https://example.invalid" }),
+      sponsorAccount: new Account(SPONSOR_STELLAR, "1"),
+      userAddress: DESTINATION,
+      createAccount: true,
+      assets: [new Asset("USDT0", STELLAR_USDT0.id.split(":")[1])],
+    }).toXdr();
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    const { seen, patch } = patches();
+    await run(adapter, routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }), patch);
+
+    expect(settlementAssets).toEqual(["USDT0"]);
+    expect(askedAssets).toEqual([["USDT0"]]);
+    expect(pricedAssets).toEqual([STELLAR_USDT0.id]);
+    expect(log).toContain("stellar sign SETTLEMENT");
+    expect(log).toContain("stellar sign PREPARATION");
+    expect(seen).toContainEqual({
+      id: "settle",
+      patch: {
+        phase: "blocked",
+        note: "Repays the reserve from what arrives: at most 0.6 USDT0.",
+      },
+    });
+  });
+
+  it("refuses a USDT0 setup whose repayment would spend USDC, before anything is signed", async () => {
+    lends = ["USDC", "USDT0"];
+    // an older sponsor ignores the asset asked for and repays in USDC
+    const adapter = new ScriptedAdapter("layerzero", [delivered()], {
+      transactions: [layerZeroSend("777")],
+    });
+    await expect(
+      run(
+        adapter,
+        routeFor("layerzero", { newAccount: true, delivers: STELLAR_USDT0 }),
+        patches().patch,
+      ),
+    ).rejects.toThrow(/its repayment is not the receiving account buying back its own reserve/);
+    expect(log).not.toContain("stellar sign SETTLEMENT");
+    expect(adapter.built).toBe(0);
   });
 });
 
