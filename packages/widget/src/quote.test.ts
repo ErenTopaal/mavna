@@ -154,6 +154,25 @@ describe("runQuote", () => {
     ]);
     expect(updates).toHaveLength(1);
   });
+
+  it("asks neither the sponsor nor any rail while there is no recipient", () => {
+    let asked = 0;
+    const finals: RouteSet[] = [];
+    runQuote(
+      {
+        ...quoting,
+        sponsorTerms: () => {
+          asked += 1;
+          return new Promise(() => {});
+        },
+      },
+      { ...inputs, chainId: "arbitrum-sepolia", destination: "  " },
+      () => {},
+      (set) => finals.push(set),
+    );
+    expect(asked).toBe(0);
+    expect(finals).toEqual([{ routes: [], rejected: [], complete: true }]);
+  });
 });
 
 describe("declineUnsettleable", () => {

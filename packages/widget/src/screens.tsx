@@ -1489,10 +1489,17 @@ export function renderActivity(c: Flow): ReactElement {
 
 export function renderRoutes(
   c: Flow,
-  d: { sym: string; resting: boolean; embed?: boolean; pick?: boolean },
+  d: {
+    sym: string;
+    /** What has to be given before any rail is asked, if anything. */
+    resting: "amount" | "recipient" | undefined;
+    embed?: boolean;
+    pick?: boolean;
+  },
 ): ReactElement {
   const st = c.state;
-  const { sym, resting, embed = false, pick = false } = d;
+  const { sym, embed = false, pick = false } = d;
+  const resting = d.resting !== undefined;
   const xlm = st.wanted === "XLM";
   const routes = st.routes;
   const expected = enabledRailCount(st.rails);
@@ -1520,7 +1527,7 @@ export function renderRoutes(
       : [];
 
   const routesStatus = resting
-    ? "Awaiting an amount"
+    ? `Awaiting ${d.resting === "recipient" ? "a recipient" : "an amount"}`
     : st.quoting
       ? "Asking"
       : `${routes.length} of ${expected}`;
@@ -1854,7 +1861,7 @@ export function renderRoutes(
                   "margin:0;font-size:12.5px;line-height:1.55;color:var(--mv-faint);text-wrap:pretty;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 220ms both",
                 )}
               >
-                Mavna ranks them by what actually arrives. Enter an amount to compare.
+                {`Mavna ranks them by what actually arrives. ${d.resting === "recipient" ? "Set a recipient" : "Enter an amount"} to compare.`}
               </p>
             </div>
           </div>

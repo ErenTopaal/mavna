@@ -386,6 +386,15 @@ export class Flow extends React.Component<FlowProps, State> {
   chosen(): RouteView | undefined {
     return this.state.routes.find((x) => x.id === this.state.selected) ?? this.state.routes[0];
   }
+  /**
+   * What the routes panel waits on before any rail is asked, in the order the
+   * quote needs them. Undefined once both are there.
+   */
+  resting(): "amount" | "recipient" | undefined {
+    if (this.amountNumber() <= 0) return "amount";
+    if (this.state.destination.trim() === "") return "recipient";
+    return undefined;
+  }
   destValid(): boolean {
     return /^G[A-Z2-7]{55}$/.test(this.state.destination.trim());
   }
@@ -1784,7 +1793,7 @@ function renderApp(c: Flow): ReactNode {
             ) : null}
           </div>
 
-          {st.routesMounted ? renderRoutes(c, { sym, resting }) : null}
+          {st.routesMounted ? renderRoutes(c, { sym, resting: c.resting() }) : null}
         </div>
       </main>
 
@@ -2181,7 +2190,7 @@ function renderCompact(c: Flow): ReactNode {
         <div ref={c.paneRef} style={s(`height:${st.screen === "flight" ? "100%" : "auto"}`)}>
           {st.screen === "send" ? renderSend(c, { r, chain, sym, xlm, resting }) : null}
           {st.screen === "routes"
-            ? renderRoutes(c, { sym, resting: false, embed: true, pick: true })
+            ? renderRoutes(c, { sym, resting: undefined, embed: true, pick: true })
             : null}
           {st.screen === "chains" ? renderChains(c) : null}
           {st.screen === "priority" ? renderPriority(c, sym) : null}
