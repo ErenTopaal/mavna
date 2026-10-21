@@ -1641,6 +1641,7 @@ fn a_fee_named_for_the_contract_itself_is_not_charged() {
     assert_eq!(e.fee_recipient, None);
 }
 
+mod fork;
 mod funds;
 mod integrations;
 mod math;
