@@ -33,9 +33,19 @@ It takes three kinds of address:
   anything in a Stellar wallet, so a route that needs the recipient's approval on Stellar is
   declined for a contract, with the reason.
 
-An address with a typo in it, or a secret key, is refused on the spot with the reason. Each rail
-delivers to the kinds of address it supports, and a rail that does not support yours appears as
-**Declined** with the reason.
+These are refused on the spot, before any rail is asked:
+
+- An address whose checksum does not match, such as one with a typo or copied only in part: "That
+  is not a Stellar address. Check that it was copied in full."
+- A secret key: "That is a secret key, not an address. Keep it private, and enter the address that
+  should receive this instead."
+- A Stellar address nothing can be paid to, such as a liquidity pool's: "A liquidity-pool address
+  cannot receive a payment."
+- Anything else: "A Stellar address starts with G or C and is 56 characters, or starts with M and
+  is 69."
+
+Each rail delivers to the kinds of address it supports, and a rail that does not support yours
+appears as **Declined** with the reason.
 
 **Route priority** ranks the routes by **Best return** (the most arriving on Stellar) or
 **Fastest** (the shortest time to arrival).
