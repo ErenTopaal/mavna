@@ -62,6 +62,7 @@ import {
   STELLAR_SIDE,
   sourceChainsFor,
   sourceFor,
+  stellarCodesFrom,
   stellarExplorerTxUrl,
 } from "./config.js";
 import {
@@ -197,6 +198,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
   private readonly scan: ScanService;
   private readonly passphrase: string;
   private readonly composing: ComposeContext | undefined;
+  private readonly ownOfts: readonly OftLocation[];
 
   constructor(options: LayerZeroAdapterOptions) {
     this.network = options.network;
@@ -212,6 +214,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
             : "https://horizon-testnet.stellar.org"),
       });
     this.lzReceiveGas = options.lzReceiveGas;
+    this.ownOfts = options.ofts ?? [];
     this.passphrase = options.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
     this.discovery = new Discovery({
       network: options.network,
@@ -295,6 +298,16 @@ export class LayerZeroAdapter implements BridgeAdapter {
         { retryable: false },
       );
     }
+    // quote turns away anything but these codes before reading the chain, so a
+    // token landing under another code would be offered and then never quote
+    const lands = stellarCodesFrom(this.network, this.ownOfts, chainId);
+    if (lands !== undefined && !lands.includes(route.delivers.code)) {
+      throw new MavnaError(
+        `${route.tokenSymbol} from ${route.source.name} now lands on Stellar as ` +
+          `${route.delivers.code}, not ${lands.join(" or ")}, so this app does not offer it.`,
+        { retryable: false },
+      );
+    }
     return {
       from: {
         chainId,
@@ -334,6 +347,18 @@ export class LayerZeroAdapter implements BridgeAdapter {
       return this.decline(
         "chain-unsupported",
         `Mavna does not move funds from ${request.from.chainId} over LayerZero yet.`,
+      );
+    }
+    const lands = stellarCodesFrom(this.network, this.ownOfts, request.from.chainId);
+    const asked = /^([A-Za-z0-9]{1,12}):/.exec(request.to.id)?.[1];
+    if (
+      lands !== undefined &&
+      lands.length > 0 &&
+      (asked === undefined || !lands.includes(asked))
+    ) {
+      return this.decline(
+        "asset-unsupported",
+        `LayerZero carries ${lands.join(" or ")} to Stellar, not ${request.to.symbol}.`,
       );
     }
 

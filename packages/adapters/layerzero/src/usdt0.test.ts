@@ -735,6 +735,100 @@ describe("the Stellar side of the pathway, checked before sending", () => {
   });
 });
 
+describe("a request for an asset this rail does not carry", () => {
+  // Circle's USDC on Ethereum and on Stellar, as the widget asks for a USDC send
+  const usdcOnEthereum = {
+    chainId: "ethereum",
+    id: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    symbol: "USDC",
+    decimals: 6,
+    curatedBy: "Circle",
+  };
+  const usdcOnStellar = {
+    chainId: "stellar",
+    id: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    symbol: "USDC",
+    decimals: 7,
+    curatedBy: "Circle",
+  };
+
+  it("declines USDC at once, saying what it carries, without asking any network", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const node = stellarNode();
+    const adapter = new LayerZeroAdapter({
+      network: "mainnet",
+      rpc: node,
+      baseReserveStroops: 5_000_000,
+      prices: new XlmPriceSource({ horizonUrl: HORIZON }),
+    });
+    const result = await adapter.quote({
+      from: usdcOnEthereum,
+      to: usdcOnStellar,
+      sends: { asset: usdcOnEthereum, baseUnits: "5000000" },
+      destination: READY,
+      maxSlippageBps: 50,
+    });
+    expect(isRoute(result)).toBe(false);
+    const rejection = result as RouteRejection;
+    expect(rejection.reason).toBe("asset-unsupported");
+    expect(rejection.retryable).toBe(false);
+    expect(rejection.explanation).toBe("LayerZero carries USDT0 to Stellar, not USDC.");
+    expect(asked).not.toHaveBeenCalled();
+    expect(node.server.getLedgerEntries).not.toHaveBeenCalled();
+  });
+
+  it("declines XLM the same way, since the rail lands USDT0 and converts nothing itself", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const xlm = {
+      chainId: "stellar",
+      id: "native",
+      symbol: "XLM",
+      decimals: 7,
+      curatedBy: "Stellar",
+    };
+    const result = await mainnet().quote({
+      from: usdcOnEthereum,
+      to: xlm,
+      sends: { asset: usdcOnEthereum, baseUnits: "5000000" },
+      destination: READY,
+      maxSlippageBps: 50,
+    });
+    expect((result as RouteRejection).explanation).toBe(
+      "LayerZero carries USDT0 to Stellar, not XLM.",
+    );
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("still reads the chain for a caller that named its own OFT there", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const adapter = new LayerZeroAdapter({
+      network: "mainnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+      prices: new XlmPriceSource({ horizonUrl: HORIZON }),
+      ofts: [{ chainId: "arbitrum", address: OFT, symbol: "USDC" }],
+    });
+    await adapter.quote({
+      from: { ...usdcOnEthereum, chainId: "arbitrum" },
+      to: usdcOnStellar,
+      sends: { asset: { ...usdcOnEthereum, chainId: "arbitrum" }, baseUnits: "5000000" },
+      destination: READY,
+      maxSlippageBps: 50,
+    });
+    expect(asked).toHaveBeenCalled();
+  });
+
+  it("does not offer its token as a send asset if it stops landing as USDT0", async () => {
+    world.assetInfoCode = "USDT";
+    world.token = new StellarAsset("USDT", ISSUER).contractId(Networks.PUBLIC);
+    const error = (await mainnet()
+      .sendableAssets("arbitrum")
+      .catch((e: unknown) => e)) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/USDT0/);
+  });
+});
+
 describe("what sendableAssets throws to an SDK caller", () => {
   it("says it in our words, keeps the node's in detail, and stays retryable", async () => {
     world.evmDown = true;

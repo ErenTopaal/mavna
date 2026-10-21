@@ -97,6 +97,37 @@ export const ROUTED_SYMBOLS: Readonly<Record<NetworkId, readonly string[]>> = {
   mainnet: ["USDT0"],
 };
 
+/**
+ * The classic asset code each routed token lands on Stellar as. USDT0 lands as
+ * USDT0 issued by GATISXX6...HN6Q, read from the Stellar OFT's token on mainnet
+ * on 22 October 2026.
+ *
+ * Only for turning a request for some other asset away before any network is
+ * asked: resolving a route costs two registry downloads and a dozen chain
+ * reads, more than a rail's whole quote budget when nothing is cached. A route
+ * that is offered is still resolved and checked on chain, and a token that
+ * stops landing under its code here is not offered at all.
+ */
+export const ROUTED_STELLAR_CODES: Readonly<Record<string, string>> = {
+  USDT0: "USDT0",
+};
+
+/**
+ * The Stellar asset codes this rail can land from a chain, or undefined when
+ * that cannot be known without reading it: a caller named its own OFT there.
+ */
+export function stellarCodesFrom(
+  network: NetworkId,
+  ownOfts: readonly { readonly chainId: string }[],
+  chainId: string,
+): readonly string[] | undefined {
+  if (ownOfts.some((oft) => oft.chainId === chainId)) return undefined;
+  return ROUTED_SYMBOLS[network].flatMap((symbol) => {
+    const code = ROUTED_STELLAR_CODES[symbol];
+    return code === undefined ? [] : [code];
+  });
+}
+
 export interface NativeCurrency {
   readonly name: string;
   readonly symbol: string;
