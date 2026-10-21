@@ -1,0 +1,53 @@
+---
+title: Layouts
+description: An inline card, a full page, or a drawer. One config field chooses the layout, and the drawer opens from its own button, a prop, or a ref.
+---
+
+`variant` chooses how the widget sits in your page. The flow inside is the same in all three.
+
+## Compact
+
+`variant: "compact"` is the default: one card that holds the form, the routes and the transfer. It
+takes the width of its container, so it fits in a sidebar or a checkout panel. The widget on
+[Embed the widget](/widget) is this layout.
+
+## Wide
+
+`variant: "wide"` is the full-page layout the Mavna app uses: a header with the network toggle,
+the wallet button and the menu, and the form with the routes beside it. Use it when the widget is
+the page.
+
+## Drawer
+
+`variant: "drawer"` puts the compact card in a popup that rises from the bottom over a dimmed page.
+By default it comes with its own button, labelled **Bring funds to Stellar**. It closes on its close
+button, the dimmed backdrop, or the Escape key. While your user's wallet is showing a prompt, the
+drawer stays open.
+
+<LiveWidget variant="drawer" />
+
+To open it from your own button instead, pass the `open` prop: the widget then shows no button of
+its own, and `onClose` is called once the closing animation has finished.
+
+```tsx
+const [open, setOpen] = useState(false);
+
+<MavnaWidget config={config} open={open} onClose={() => setOpen(false)} />;
+```
+
+Or take a ref and call its methods:
+
+```tsx
+const ref = useRef<MavnaWidgetRef>(null);
+
+<MavnaWidget ref={ref} config={config} />;
+
+// ref.current?.openDrawer(), closeDrawer(), toggleDrawer(), isOpen()
+```
+
+## The component's types
+
+The declarations below are copied from `packages/widget/src/MavnaWidget.tsx` when this site is
+built.
+
+<include>../../generated/source-widget-component.mdx</include>

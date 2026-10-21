@@ -1,0 +1,56 @@
+---
+title: Arrival Contract
+description: The Soroban contract that receives a LayerZero transfer with instructions, converts it on Stellar with the sender's minimum enforced, and sends the result on.
+---
+
+The Mavna Arrival Contract (`contracts/arrival`) receives a LayerZero OFT transfer that carries a
+compose message, and completes the arrival on Stellar in the same flow: it converts through
+Aquarius with the sender's minimum as a hard floor, takes the integrator fee if one is set, and sends
+the result to the recipient the sender signed for. When the minimum cannot be met, it sends the
+arriving token on as it came. It has no administrator and no upgrade path.
+
+## What it accepts
+
+Fixed when the contract is deployed and never changeable: the OFTs it accepts, each with the token
+it credits; the assets it converts into; the further tokens a conversion can route through; and the
+Aquarius router. A message that names anything else is delivered as it came, without the contract
+calling the unknown token. Paths are capped at four hops through three tokens, and the integrator
+fee at 1000 basis points.
+
+## When it holds funds
+
+LayerZero on Stellar credits the contract in one transaction and runs the compose step in a later
+one, so each arrival sits in the contract between the two. While it waits, it can go only to the
+recipient named in the signed message. Anyone can run the step:
+[finishing an overdue conversion](/operate/api#post-compose) runs only the exact queued message.
+
+Because there is no administrator, nothing can recover funds the step can never deliver, such as
+tokens sent to the contract without a compose message. The SDK never builds such a transfer: every
+rail refuses the contract as a plain destination, and a conversion route checks, at the quote and
+again at build, that the recipient can hold both the arriving token and the wanted asset.
+
+## Deployments
+
+| Network | Contract | Wasm sha256 |
+| --- | --- | --- |
+| testnet | `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ` | `468af775ca15d3c8acdffeccaeee9053c73f580831acff590f1d5d15e7f0db7b` |
+
+The testnet instance proves the endpoint's queue, the Aquarius router and the contract together: no
+OFT is peered to Stellar's test network, so its allowlisted sender is a test key that queues compose
+messages on the real testnet endpoint. The main network has no deployment; the contract goes
+through an independent audit first.
+
+## Reproducing the build
+
+The deployed bytes reproduce with the toolchain pinned in the repository: Rust 1.99.1 with the
+`wasm32v1-none` target (`contracts/rust-toolchain.toml`) and stellar-cli 28.1.0, which writes its
+version into the wasm.
+
+```sh
+contracts/build.sh
+stellar contract fetch --id <contract> --network testnet -o deployed.wasm
+shasum -a 256 deployed.wasm
+```
+
+The hash `build.sh` prints for a commit matches the deployed one. `contracts/arrival/README.md` in
+the repository has the full detail, including what has to be true before a mainnet deployment.

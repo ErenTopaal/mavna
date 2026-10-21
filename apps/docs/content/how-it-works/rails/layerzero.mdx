@@ -1,0 +1,76 @@
+---
+title: LayerZero OFT
+description: LayerZero's Omnichain Fungible Token standard as a rail. Verifiers chosen by the token's owner attest each message; the adapter checks the deployment on every quote.
+---
+
+`@mavna/adapter-layerzero`, adapter id `layerzero`, trust model `dvn-stack`. A token that implements
+LayerZero's OFT standard moves by message, and a set of verifiers (Decentralized Verifier Networks,
+DVNs) attests each message. The token's owner chooses that set, so two tokens on this rail can be
+verified by different parties. On Stellar's main network it carries USDT0.
+
+```ts
+const layerzero = new LayerZeroAdapter({ network, rpc, baseReserveStroops });
+```
+
+## Assets and chains
+
+On the main network the adapter sends USDT0 from 12 chains. Each chain is only a candidate: every
+quote reads the chain's endpoint, its OFT contract, the OFT's peer on Stellar and its verifier set,
+and declines when any of them is missing.
+
+`sendableAssets(chainId)` answers which assets a quote request names, read from the deployment:
+
+```ts
+const { from, to } = await layerzero.sendableAssets("arbitrum");
+// to.id is "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q" on mainnet
+```
+
+## Who verifies
+
+The adapter refuses two kinds of verifier set: one with no verifier required, and one the token's
+owner never set, inherited from LayerZero's defaults, which can change without the owner acting.
+Every send it builds says in its description which verifiers attest it, how many of them must
+agree, and after how many source-chain confirmations.
+
+## Checks on every quote
+
+- The Stellar OFT is asked which endpoint it is registered on, and the adapter refuses to send when
+  that is not the current endpoint, so a transfer never goes to a superseded deployment.
+- The sending OFT's peer for Stellar must be set, and the Stellar side must accept messages from
+  it.
+- The Stellar OFT must not be paused, and its inbound limit must have room for the amount.
+- The amount must be within the limits the sending OFT's `quoteOFT` reports.
+
+## Approvals
+
+Where the source OFT holds the token rather than burning it, as for USDT0 on Ethereum, the build
+returns three transactions: an approval of zero, an approval of exactly the amount, and the send.
+USDT refuses to change one non-zero allowance to another, so the reset to zero comes first. It
+carries `skipAlsoWhenExactly: "0"`, and the approval carries the amount as `atLeastBaseUnits`, so a
+caller sends the reset only when an allowance sits between zero and the amount, and neither when the
+allowance already covers it. Where the OFT burns the token, the build is the send alone.
+
+## The fee
+
+LayerZero's fee is paid in the source chain's own currency, on top of the amount. The quote shows
+the fee `quoteSend` returns. The build prices it again and attaches a tenth more as the call's
+`value`; LayerZero's endpoint refunds whatever is not needed to the sending wallet, and the send's
+description states the most it attaches.
+
+## The minimum
+
+What arrives can be less than what is sent, because a token can take a fee in transit. The sender's
+minimum is enforced on-chain through `minAmountLD`, derived from their slippage, so
+`receivesAtLeast` is a real floor.
+
+## Converting on arrival
+
+Given an Arrival Contract, the adapter also quotes a second route for the same send: delivered to
+the [Arrival Contract](/how-it-works/arrival-contract) with a message that names the recipient, the
+asset wanted and the least they accept. The contract converts on Stellar and sends the result on;
+the route adds no step and no signature.
+
+A route that converts on arrival is declined, with the reason, for a muxed address, for a recipient
+that cannot hold the wanted asset or the arriving token, and for a new account, which is left to the
+plain route. An integrator fee from 0 to 1000 basis points is taken only on these routes, by the
+contract, from the converted amount.

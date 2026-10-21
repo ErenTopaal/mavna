@@ -1,13 +1,14 @@
 // What the browser tests check before serving and after building: that the
 // surfaces they serve were built for the test sponsor, in the test directories,
-// and that the host builds in dist/ and .next were not touched doing it.
+// and that the host builds in dist/ were not touched doing it.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const VITE_APPS = ["app", "playground", "web"];
 export const VITE_TEST_OUT = "dist-test";
-export const NEXT_TEST_OUT = ".next-test";
+// the docs are prerendered by react router, which writes the static site to client/
+export const DOCS_SITE = "client";
 
 function filesUnder(dir) {
   if (!existsSync(dir)) return [];
@@ -36,24 +37,21 @@ export function testBuildProblem(root, sponsorUrl) {
   if (!existsSync(join(root, "apps/app", VITE_TEST_OUT, "harness/buffer-free.html"))) {
     return `apps/app/${VITE_TEST_OUT} has no harness page`;
   }
-  const docs = join(root, "apps/docs", NEXT_TEST_OUT);
-  if (!existsSync(join(docs, "BUILD_ID"))) return `apps/docs/${NEXT_TEST_OUT} has no build`;
-  // next clears its output directory on every build, so any client chunk
-  // naming the sponsor is this build's
-  const named = filesUnder(join(docs, "static"))
+  const docs = join(root, "apps/docs", VITE_TEST_OUT, DOCS_SITE);
+  if (!existsSync(join(docs, "index.html"))) return `apps/docs/${VITE_TEST_OUT} has no build`;
+  // the build empties its output directory first, so any chunk naming the
+  // sponsor is this build's
+  const named = filesUnder(join(docs, "assets"))
     .filter((file) => file.endsWith(".js"))
     .some((file) => readFileSync(file, "utf8").includes(sponsorUrl));
-  if (!named) return `apps/docs/${NEXT_TEST_OUT} was built for another sponsor`;
+  if (!named) return `apps/docs/${VITE_TEST_OUT} was built for another sponsor`;
   return undefined;
 }
 
-/** A digest of every file in the host builds (dist/ and .next), by path, size and time. */
+/** A digest of every file in the host builds (each app's dist/), by path, size and time. */
 export function hostBuildFingerprint(root) {
   const hash = createHash("sha256");
-  const dirs = [
-    ...VITE_APPS.map((app) => join(root, "apps", app, "dist")),
-    join(root, "apps/docs/.next"),
-  ];
+  const dirs = [...VITE_APPS, "docs"].map((app) => join(root, "apps", app, "dist"));
   for (const dir of dirs) {
     for (const file of filesUnder(dir)) {
       const { size, mtimeMs } = statSync(file);

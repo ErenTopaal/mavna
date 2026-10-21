@@ -7,7 +7,6 @@ node_modules/
 dist/
 # the browser tests' own builds, kept apart from what a host is given
 dist-test/
-.next-test/
 .turbo/
 *.tsbuildinfo
 cctp-chains.verified.json
@@ -16,7 +15,6 @@ resources/
 test-results/
 playwright-report/
 .superpowers/
-.next/
 apps/docs/generated/
 shot.png
 target/

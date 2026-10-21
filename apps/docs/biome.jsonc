@@ -4,31 +4,32 @@
   "extends": "//",
   "files": {
     // A nested config replaces the root's file list rather than adding to it, so
-    // the root's exclusions are repeated here. The additions are Next's build
-    // output and the reference tables this package writes from the packages' own
-    // source before every build. MDX is content, not code the linter reads.
+    // the root's exclusions are repeated here. The additions are react router's
+    // generated route types and the reference tables this package writes from the
+    // packages' own source before every build. MDX is content, not code the
+    // linter reads.
     "includes": [
       "**",
       "!dist",
-      "!.next",
-      "!.next-test",
+      "!dist-test",
       "!.turbo",
+      "!.react-router",
       "!node_modules",
       "!generated",
-      "!next-env.d.ts",
-      "!public/_pagefind",
       "!**/*.md",
       "!**/*.mdx",
       "!**/*.yml",
       "!**/*.yaml"
     ]
   },
+  // the stylesheet is tailwind's, with its @theme and @import directives
+  "css": { "parser": { "tailwindDirectives": true } },
   "linter": {
     "rules": {
       "suspicious": {
-        // The runnable example prints its quote and the reference generator
-        // prints what it wrote. Both are command line programs whose output is
-        // the entire point of running them.
+        // The runnable example prints its quote, the reference generator prints
+        // what it wrote, and the static server says where it listens. All are
+        // command line programs whose output is the point of running them.
         "noConsole": "off"
       }
     }

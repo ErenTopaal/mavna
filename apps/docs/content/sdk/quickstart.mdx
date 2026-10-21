@@ -1,0 +1,64 @@
+---
+title: Quickstart
+description: Get a real quote from Stellar's test network with one runnable file, and see the transactions it builds.
+---
+
+This runs a real quote against Stellar's test network and prints the route and the transactions to
+sign.
+
+## Run it
+
+From the repository root, after you [build the workspace](/sdk/install), pass any Stellar address,
+including one that does not exist yet, then an amount and a source chain:
+
+```sh
+node apps/docs/examples/quote.ts GCDKRWPXEG63JJB22U6CME3AUKL75GWWMLZ4A7URNMC7VF5Z2MM32FLA 25 ethereum-sepolia
+```
+
+Node 24 runs the TypeScript file directly. On the test network, Circle answers with a route and the
+other three rails decline, each with its reason:
+
+```txt
+near-intents declined (chain-unsupported): NEAR Intents runs on Stellar's main network only, so it has no route on the test network.
+layerzero declined (asset-unsupported): This route carries no token on the test network. It works on the main network, where it is the only way to bring USDT to Stellar. Another route may work here.
+axelar declined (asset-unsupported): That token has not been set up to travel to Stellar on this route.
+Route cctp-ethereum-sepolia-stellar via cctp
+  sends     25.0 USDC
+  receives  25.0 USDC
+  at least  25.0 USDC
+  takes     about 5 minutes
+  signatures 3
+  fee bridge: 0.0 USDC
+  fee account-reserve: 1.5 XLM
+  step prepare-account
+  step approve-source
+  step bridge
+  step settle-account
+
+2 transactions to sign, in this order:
+  evm-tx on ethereum-sepolia: Let Circle's transfer contract move 25 USDC from your wallet, once. This does not send anything on its own.  (skippable, see unnecessaryWhen)
+  evm-tx on ethereum-sepolia: Send 25 USDC to GCDKRWPXEG63JJB22U6CME3AUKL75GWWMLZ4A7URNMC7VF5Z2MM32FLA on Stellar, via Circle, on the standard path.
+```
+
+That address did not exist on the test network when this ran, so the route carries an account
+reserve and the steps that set the account up.
+
+## The file
+
+<include lang="ts" meta='title="apps/docs/examples/quote.ts"'>../../examples/quote.ts</include>
+
+## What to notice
+
+- **The network is an explicit value.** `createNetworkConfig` takes the network by id, and every
+  adapter takes it in its constructor. Nothing defaults to one network.
+- **An asset is a chain plus an identifier.** On Stellar the `id` is `CODE:ISSUER`, so a token that
+  only calls itself USDC is not mistaken for Circle's. See
+  [Assets and amounts](/how-it-works/assets-and-amounts).
+- **Amounts are integer strings in base units.** 25 USDC with six decimals is `"25000000"`.
+- **Only the rail that quoted a route can build it.** The file finds the adapter whose `id` is the
+  route's `source`.
+- **Building does not sign.** `buildTransactions` returns what to sign, each with a sentence that
+  says what signing it does. NEAR Intents also needs the sending wallet's address, `{ sender }`, the
+  fourth argument here.
+
+Next: [Quote and rank routes](/sdk/routes).

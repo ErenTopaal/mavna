@@ -1,0 +1,19 @@
+{
+  "title": "How it works",
+  "description": "The rails, trust, sponsorship, delivery and security",
+  "root": true,
+  "pages": [
+    "index",
+    "networks",
+    "rails",
+    "---Concepts---",
+    "assets-and-amounts",
+    "trust-models",
+    "sponsorship",
+    "delivery",
+    "conversion",
+    "arrival-contract",
+    "---Security---",
+    "security"
+  ]
+}

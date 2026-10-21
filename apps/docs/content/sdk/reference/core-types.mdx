@@ -1,0 +1,26 @@
+---
+title: Core types
+description: The money, route and execution types from @mavna/core, copied from the source with their comments when this site is built.
+---
+
+The comments in the declarations are the source's own.
+
+## Money
+
+Assets, amounts and fees. [Assets and amounts](/how-it-works/assets-and-amounts) explains the rules
+behind them.
+
+<include>../../../generated/source-money.mdx</include>
+
+## Routes
+
+A quote and a transfer in flight have the same type: the execution state is added to the quoted
+route. [Quote and rank routes](/sdk/routes) shows how routes are produced.
+
+<include>../../../generated/source-route.mdx</include>
+
+## Execution
+
+The phase of each step. [Track and resume a transfer](/sdk/tracking) shows how to use them.
+
+<include>../../../generated/source-execution.mdx</include>

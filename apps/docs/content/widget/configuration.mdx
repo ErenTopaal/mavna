@@ -1,132 +1,111 @@
 ---
 title: Configuration
-description: Every field of the widget's config object, what it does, and the events it reports back.
+description: Every field of the widget's config object, what it changes, and what the widget refuses at mount.
 ---
 
-import Config from "../../generated/source-widget-config.mdx";
+The widget takes one object, `config`. `integrator` is the only required field. A configuration
+mistake, such as an empty endpoint or a network without a sponsor, stops the widget when it
+mounts, with a message that starts with `Mavna widget configuration:`, rather than later in front of
+your users.
 
-# Configuration
+## Network and endpoints
 
-The widget takes one object. `integrator` is the only required field; every other
-field narrows what the widget offers, points it at your own infrastructure, or wires
-it into your app. The exact type, generated from the source, is at the bottom of
-this page.
+**`integrator`** (required). A name for your integration.
 
-## Identity and network
+**`network`**. `"testnet"` or `"mainnet"`: the network the widget starts on. The default is
+`"testnet"`.
 
-- **`integrator`** (required). A string that identifies you and attributes any
-  integrator fee.
-- **`network`**. `"testnet"` or `"mainnet"`, the network the widget starts on,
-  defaulting to the test network. You choose when to move.
-- **`rpcUrl`**. The Stellar RPC endpoint for `network`. EVM reads go through the
-  connected wallet, never here. The foundation runs no mainnet node, so mainnet
-  defaults to the first of the measured public nodes; set your own provider for
-  real money. An empty string is refused as a configuration error.
-- **`sponsorUrl`**. A [sponsor](/developers/sponsor) you run, for `network`. On
-  testnet it defaults to a local development sponsor; on mainnet it is required,
-  and the widget refuses to mount without it. An empty string is refused. The
-  widget tells a user the page is safe to close during a Circle transfer only
-  once this sponsor's `/deliver` answers `"watching": true`, meaning it will
-  deliver the burn by itself; a sponsor that does not say so, an account that
-  still has to be set up by its own wallet, or one that signs its own delivery
-  keep the "closing this page pauses it" note.
-- **`networks`**. The networks the header's network toggle switches between,
-  `network` among them. Defaults to `[network]`, which shows the other network
-  disabled. Switching rebuilds the engine for that network and starts the form
-  over; it is refused while a transfer runs.
-- **`endpoints`**. `{ testnet?: { rpcUrl?, sponsorUrl? }, mainnet?: { ... } }`.
-  Every network in `networks` other than `network` needs its own `sponsorUrl`
-  here, because a sponsor serves one network; the widget refuses to mount without
-  it.
-- **`arrivalContract`**. The Mavna Arrival Contract on `network`; other networks
-  set theirs as `endpoints.<network>.arrivalContract`. With one, LayerZero offers
-  routes that convert on arrival with one signature and no Stellar wallet, listed
-  with their own label beside the plain route. Testnet defaults to the deployed
-  `CBBT5762DOTXQMDPWSCMPSKB6YMXHS3XJJO7R3DZPXVHK62TOC5HV7XQ` (its lists are recorded
-  as `ARRIVAL_CONTRACTS` in `@mavna/adapter-layerzero`). Mainnet has none yet,
-  because deploying it needs a mainnet signature; there LayerZero says so beside the
-  plain route instead of offering a conversion on arrival.
+**`rpcUrl`**. The Stellar RPC endpoint for `network`. The widget reads EVM chains through the
+connected wallet, never through this endpoint. On the test network the default is the public
+testnet endpoint; on the main network it is the first entry of `PUBLIC_MAINNET_RPC_URLS` in
+`@mavna/stellar`, a public node run by a third party. An empty string is a configuration error.
 
-## Routing
+**`sponsorUrl`**. The [sponsor service](/operate) you run for `network`. On the test network the
+default is `http://localhost:8787`. On the main network there is no default and the widget refuses
+to mount without one. An empty string is a configuration error.
 
-- **`routePriority`**. `"best-received"` (the default) or `"fastest"`, the initial
-  ranking.
-- **`fee`**. An integrator fee, `{ bps, recipient, recipientName }`. `bps` is an
-  integer in `[0, 1000]`. It is taken only on routes that convert on arrival, where
-  the Arrival Contract pays it out on-chain and the route itemises it as an
-  `integrator` fee. No other route has anything that collects it, so on those it is
-  neither shown nor taken (the widget warns once at start when one is set).
-- **`rails`**. Which rails to race and offer, as display names:
-  `["Circle", "Axelar", "LayerZero", "NEAR Intents"]`. Defaults to all four. NEAR
-  Intents (trust model `solver-network`: competing solvers fill the trade and the HOT
-  Bridge pays out on Stellar) is on by default and quotes on mainnet only; leave it out of this list
-  to keep it off.
-- **`disabledSources`**. Rails an operator has taken out of rotation, in the circuit
-  breaker's `id:reason` format using adapter ids, for example
-  `"cctp:Circle is paused"`. A disabled rail shows the reason rather than vanishing.
-- **`chains`**. `{ allow?, deny? }`, filtered over the network's real chain list by
-  Mavna slug. These narrow the list; they cannot add a chain the network does not
-  carry.
-- **`wanted`**. What the recipient arrives holding: `"USDC"` or `"XLM"` when sending
-  USDC, and `"USDT0"`, `"USDC"` or `"XLM"` when sending USDT0 (anything but USDT0 is
-  converted on Stellar).
+**`networks`**. The networks the network toggle offers, `network` among them. The default is
+`[network]`, and the toggle then shows the other network as unavailable. Switching starts the form
+over on the other network, and the toggle does nothing while a transfer runs.
 
-## Starting the form
+**`endpoints`**. Endpoints per network:
+`{ testnet?: { rpcUrl?, sponsorUrl?, arrivalContract? }, mainnet?: { ... } }`. A value here wins
+over the top-level field for the same network. Every network in `networks` other than `network`
+needs its own `sponsorUrl` here, because a sponsor serves one network; without it the widget
+refuses to mount.
 
-- **`fromChain`**. The chain the form starts on, by Mavna slug (for example
-  `"ethereum-sepolia"`).
-- **`fromAsset`**. `"USDC"` or `"USDT0"`, what the form starts out sending. Defaults
-  to `"USDC"`. USDT0 is offered only while the LayerZero rail is enabled, and its
-  chain list is LayerZero's, narrowed by the same `chains` filter.
-- **`fromAmount`**. The amount the form starts with.
-- **`toAddress`**. The recipient's Stellar address, pre-filled. Combine with
-  `requiredUI: ["destination"]` to lock it.
+**`arrivalContract`**. The Mavna [Arrival Contract](/how-it-works/arrival-contract) on `network`.
+With one, the LayerZero rail also offers routes that convert on arrival. The test network defaults
+to the deployed contract, recorded as `ARRIVAL_CONTRACTS` in `@mavna/adapter-layerzero`. The main
+network has no default.
+
+## What the widget offers
+
+**`rails`**. The rails to race and offer, by display name: `"Circle"`, `"Axelar"`, `"LayerZero"`,
+`"NEAR Intents"`. The default is all four.
+
+**`chains`**. `{ allow?, deny? }`: lists of chain slugs that narrow the chains the picker offers.
+They only remove chains; they cannot add one. The slugs are listed in
+[Rails and networks](/how-it-works/networks#source-chains).
+
+**`disabledSources`**. Rails you have taken out of rotation, as comma-separated `id:reason` pairs
+with adapter ids, for example `"cctp:Circle is paused"`. A disabled rail appears as declined with
+your reason. See [Turn off a rail](/operate/turn-off-a-rail).
+
+**`routePriority`**. `"best-received"` (the default) or `"fastest"`: how routes are ranked when the
+widget opens.
+
+**`fee`**. An integrator fee: `{ bps, recipient, recipientName }`, with `bps` an integer from 0 to
+1000. The fee is taken only on routes that convert on arrival, where the Arrival Contract pays it
+out and the review lists it as **Integrator fee**. When you set one, the widget logs a warning
+once in the browser console that says so.
+
+## Starting values
+
+**`fromChain`**. The chain the form starts on, by slug. A chain the picker does not offer for the
+asset being sent is a configuration error.
+
+**`fromAsset`**. `"USDC"` (the default) or `"USDT0"`: what the form starts out sending. USDT0 is
+offered only while the LayerZero rail is on.
+
+**`wanted`**. What the recipient ends up holding: `"USDC"` or `"XLM"` when sending USDC, and
+`"USDT0"`, `"USDC"` or `"XLM"` when sending USDT0. `"USDT0"` requires `fromAsset: "USDT0"`.
+
+**`fromAmount`**. The amount the form starts with.
+
+**`toAddress`**. The recipient, prefilled. With `requiredUI: ["destination"]` your user cannot
+change it.
 
 ## What the widget shows
 
-- **`hiddenUI`**. UI to remove: `"activity"`, `"settings"`, `"networkToggle"`,
-  `"railToggles"`, `"poweredBy"`.
-- **`requiredUI`**. UI to lock: `"destination"` fixes the recipient to `toAddress`.
+**`hiddenUI`**. Controls to remove: `"activity"`, `"settings"`, `"networkToggle"`,
+`"railToggles"`, `"poweredBy"`.
+
+**`requiredUI`**. Controls to lock: `"destination"` fixes the recipient to `toAddress`.
+
+**`menuLinks`**. Links for the widget's header menu (the `...` button):
+`{ label, href, external? }`. With `external: true` the link opens in a new tab. An empty or absent
+list hides the menu.
+
+**`variant`**, **`appearance`** and **`theme`** are covered in [Layouts](/widget/layouts) and
+[Theming](/widget/theming).
 
 ## Integration
 
-- **`keyPrefix`**. Namespaces this widget's local transfer history, so two
-  integrators on one origin do not share it. History is also kept per network, so
-  Activity on mainnet never shows, or tries to finish, a testnet transfer.
-- **`walletConfig`**. Opt out of the widget's own wallet management:
-  `onConnect` replaces the built-in connect UI with your own, `evm` seeds an
-  already-connected EVM connection, and `stellar` provides your own Stellar signer.
-- **`onEvent`**. A callback that receives the widget's events.
+**`keyPrefix`**. A prefix for the transfer history the widget keeps in the browser, so two
+integrations on one website keep separate lists. The history is also kept separately per network.
 
-## Events
+**`walletConfig`**. Use your app's own wallet connection instead of the widget's:
 
-`onEvent` reports what the flow is doing: `routesAvailable` (with a count and how
-many declined), `routeSelected` (the source and the amount received),
-`walletConnected` (the ecosystem and address), `transferStarted`,
-`transferStepUpdated` (a step id and its phase), `transferCompleted`,
-`transferFailed` (with a reason), `transferStillMoving` (with a reason),
-`transferDeliveredAsCame` (with a reason, the asset and the amount that arrived),
-and `transferDeliveredUnverified` (with a reason, `stellarTxHash` and `explorerUrl`).
+- `onConnect`: called when your user presses the widget's connect button with no wallet connected,
+  in place of the widget's own wallet menu.
+- `evm`: an EVM connection your app already holds.
+- `stellar`: your own Stellar signer.
 
-`transferStillMoving` means the widget stopped watching a transfer that is still
-on its way: it outlived the widget's patience, or the widget went away (the drawer
-closed, for example). It is not a failure; the transfer can be checked on and
-finished from Activity.
-
-`transferDeliveredAsCame` means a conversion on arrival could not meet the
-minimum, so the money arrived in the asset it was sent in, which is neither a
-success nor a loss.
-
-`transferDeliveredUnverified` (`{ type: "transferDeliveredUnverified", reason,
-stellarTxHash, explorerUrl }`) is sent instead of `transferStillMoving` when the
-rail records the transfer as executed on Stellar but what arrived can no longer be
-read back. It ends the transfer: no `transferFailed` or `transferCompleted` follows
-it, and it is neither a failure nor still moving. `stellarTxHash` and
-`explorerUrl` name the Stellar transaction to check, and `reason` says why it could
-not be confirmed.
-
-Each event is backed by a real signal in the flow.
+**`onEvent`**. A function that receives the widget's [events](/widget/events).
 
 ## The type
 
-<Config />
+The declarations below are copied from `packages/widget/src/config.ts` when this site is built.
+
+<include>../../generated/source-widget-config.mdx</include>

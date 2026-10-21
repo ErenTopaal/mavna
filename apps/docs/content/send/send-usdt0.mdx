@@ -1,0 +1,45 @@
+---
+title: Send USDT0 to Stellar
+description: Send USDT0 from another chain and receive USDT0, USDC or XLM on Stellar.
+---
+
+USDT0 travels to Stellar over LayerZero and arrives as USDT0, the Stellar asset issued by
+`GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q`. If you add USDT0 to a Stellar wallet by
+hand, check that issuer: anyone can issue an asset with the code USDT0.
+
+USDT0 moves on Stellar's main network. On the test network, the LayerZero route declines with a
+sentence that says it carries no token there.
+
+## Choose USDT0
+
+On the **Send to Stellar** card, switch the asset next to the amount from `USDC` to `USDT0`. Two
+things change:
+
+- **Send** now lists the chains USDT0 leaves from: Arbitrum One, Berachain, Ethereum, Flare,
+  Hyperliquid EVM, Ink, OP Mainnet, Polygon, Rootstock, Sei Network, Unichain and X Layer.
+- **Receive on Stellar** offers `USDT0`, `USDC` and `XLM`. With `USDC` or `XLM`, the USDT0 that
+  arrives is converted on Stellar, and the recipient approves that conversion in a Stellar wallet.
+
+## The receiving account
+
+To receive USDT0, the Stellar account has to exist. If it cannot hold USDT0 yet, the quote does one
+of two things before you sign anything: it adds a step in which the account allows USDT0, paid
+from the account's own XLM, or it declines the route and says what to do, such as adding USDT0 to
+the account in its own wallet or sending USDC instead.
+
+## Fees and time
+
+LayerZero charges its delivery fee in the sending chain's own currency, on top of the amount you
+send. The fee is part of the send transaction your wallet asks you to approve. Any part of it that
+is not needed is refunded to your wallet.
+
+Where the USDT0 contract holds the token rather than burning it, as on Ethereum, sending takes up
+to three prompts: clearing an earlier allowance, approving this amount, and the send. The app
+skips the first two when they are not needed.
+
+The estimated time depends on the chain you send from, and the quote shows it for that chain.
+
+## After you send
+
+A USDT0 transfer appears under **Activity** like any other, and you can
+[find it again](/send/track) from the transaction you sent.

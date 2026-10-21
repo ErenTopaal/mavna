@@ -1,0 +1,6 @@
+{
+  "title": "Run Mavna",
+  "description": "Run the sponsor service and the pages yourself",
+  "root": true,
+  "pages": ["index", "local", "sponsor", "capacity", "api", "deploy", "turn-off-a-rail"]
+}

@@ -1,0 +1,97 @@
+---
+title: Quote and rank routes
+description: Ask every rail at once with raceAdapters, show routes as they arrive, and treat a refusal as data with a reason.
+---
+
+`raceAdapters` from `@mavna/routing` asks every adapter you pass it at the same time and returns a
+`RouteSet`: the routes, ranked, and the refusals.
+
+```ts
+import { raceAdapters } from "@mavna/routing";
+
+const set = await raceAdapters([cctp, axelar, layerzero, nearIntents], request, {
+  onUpdate: (partial) => render(partial),
+});
+```
+
+`request` is a `QuoteRequest`: the asset sent (`from`), the asset wanted (`to`), the amount
+(`sends`), the Stellar `destination`, and `maxSlippageBps`, the most your user accepts to lose to
+price movement, in basis points. The [quickstart](/sdk/quickstart) builds one.
+
+## Show answers as they arrive
+
+Each rail answers on its own time. `onUpdate` is called every time one answers, with the routes so
+far, ranked, and the refusals so far. `complete` is `true` once every rail has answered or run out
+of time, and the promise `raceAdapters` returns resolves with the complete set.
+
+Each rail gets `ADAPTER_QUOTE_TIMEOUT_MS` from `@mavna/core`, 3000 milliseconds, unless you pass
+`timeoutMs`. A rail that runs out of time is a refusal with the reason `timed-out`; the other rails
+are not held back by it.
+
+## Refusals
+
+A rail that cannot carry the transfer, that runs out of time, or that throws, appears in
+`set.rejected` as a `RouteRejection`:
+
+```ts
+interface RouteRejection {
+  readonly source: string;
+  readonly reason:
+    | "no-liquidity"
+    | "amount-too-small"
+    | "amount-too-large"
+    | "asset-unsupported"
+    | "chain-unsupported"
+    | "destination-unsupported"
+    | "temporarily-unavailable"
+    | "timed-out"
+    | "errored";
+  readonly explanation: string;
+  readonly retryable: boolean;
+  readonly detail?: string;
+}
+```
+
+- `explanation` is a sentence for your user: what happened and what to do.
+- `retryable` says whether asking again can change the answer. It is `true` for
+  `temporarily-unavailable`, `timed-out`, `no-liquidity` and `errored`, and `false` for the reasons
+  that describe the request itself. `rejectionIsRetryable` in `@mavna/core` makes that decision.
+- `detail`, when present, carries a node's or a service's own words, which can include raw protocol
+  text and URLs. Log it for yourself; show your user `explanation`.
+
+## Ranking
+
+`ranking` orders the routes:
+
+| Value | Order |
+| --- | --- |
+| `"best-received"` (default) | the most arriving first, compared in integer base units |
+| `"fastest"` | the shortest `estimatedSeconds` first |
+| `"fewest-signatures"` | the fewest `signaturesRequired` first |
+
+## Turn a rail off
+
+`breaker` takes a circuit breaker that removes rails from the race without a release. A rail it
+turns off still appears in `rejected`, as `temporarily-unavailable` with your sentence as the
+`explanation`.
+
+```ts
+import { createCircuitBreaker, parseDisabledSources } from "@mavna/routing";
+
+const breaker = createCircuitBreaker(() => parseDisabledSources(process.env.MAVNA_DISABLED_SOURCES));
+```
+
+`parseDisabledSources` reads comma-separated `id:reason` pairs, such as
+`cctp:Circle is not available right now`. An entry without a reason uses
+"This route is turned off right now." The breaker reads the list through the function on every
+quote, so a change takes effect on the next quote.
+
+## Convert and take a fee
+
+Two more options change the routes after a rail quotes them:
+
+- `swap` attaches a conversion on Stellar, so your user can receive another asset than the one the
+  rail delivers. [Conversion on Stellar](/how-it-works/conversion) explains it.
+- `integratorFee` takes your fee, `{ bps, recipient, recipientName, collects }`, from the routes
+  that `collects` accepts, and lists it on each such route as an `integrator` fee. `bps` must be an
+  integer from 0 to 1000.

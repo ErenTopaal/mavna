@@ -1,0 +1,72 @@
+---
+title: Capacity and caps
+description: The daily caps that bound what the sponsor can lose, the channel accounts repayments run on, and the background sweep.
+---
+
+## Daily caps
+
+Two daily caps, counted per UTC day, bound the reserves the sponsor puts out:
+
+- **Volume**: how many sponsorships can start in a day, set per source-chain class:
+  `MAVNA_CAP_VOLUME_EXPENSIVE_PER_DAY` (300) for chains where gas is expensive and
+  `MAVNA_CAP_VOLUME_CHEAP_PER_DAY` (200) for chains where gas is cheap.
+- **Strandings**: `MAVNA_CAP_STRANDING_PER_DAY` (75). A stranding is a sponsorship whose repayment
+  can never land: one the network refuses for good, or one whose account was set up and whose
+  repayment's time limit passed unpaid. Past the cap, sponsorship pauses for the rest of the day.
+
+The caps are checked when a client asks for an account setup, before anyone signs, and again when
+the signed setup is submitted. A refusal answers `429` with a sentence that says which cap. When
+the stored counts cannot be read, sponsorship pauses and the answer is `503`.
+
+The source chain a request names is the caller's word, since the transfer has not started yet. So
+every sponsorship counts against the smaller of the two volume caps, and in practice the daily
+volume is the smaller setting. Raise that one to allow more.
+
+The counts are stored under `MAVNA_STATE_DIR`, so a restart does not reset them.
+
+## Channels
+
+Each repayment is a transaction on a channel account of the sponsor's, one repayment per channel at
+a time. The sponsor creates channels as it needs them, 2 XLM each, one at a time, and only when
+every existing channel is busy.
+
+- **A ten-minute window.** Asking for a repayment holds a channel for ten minutes from the first
+  ask. Asking again or committing the signed repayment returns the same channel and window and
+  never extends it.
+- **Up to a day once set up.** When the account setup the repayment pays for lands, the channel is
+  held until the repayment's own time limit, one day.
+- **A lapsed window.** If no setup lands within the window, the channel goes back, the held
+  repayment is dropped, and the account waits one more window before it can ask again.
+
+Two limits bound the repayments not yet backed by a setup: `MAVNA_PROVISIONAL_SETTLEMENTS` (16)
+across all clients and `MAVNA_SETTLEMENTS_PER_CLIENT` (2) per client address. Past either,
+`/settlement` answers `503` or `429`.
+
+The pool cannot run out within the caps. At most C sponsorships start in a UTC day, C being the
+smaller volume cap, and each holds its channel for at most a day, so at most 2C are held at once.
+With P unbacked repayments at most, the sponsor funds up to 2C + P channels: 416 at the defaults,
+or 832 XLM if every one is ever created. `GET /health` reports this limit as `channels.maxSize`,
+next to `size` and `leased`.
+
+The sponsor funds at most 12 channels an hour; past that, `/settlement` answers `503` and the log
+says channel funding is paused.
+
+## The sweep
+
+Every `MAVNA_SETTLE_SWEEP_SECONDS` (120), the sponsor runs a sweep that:
+
+- submits held repayments whose money has arrived, so a closed page does not leave a reserve
+  unpaid;
+- delivers watched Circle transfers once Circle attests them (see
+  [`POST /deliver`](/operate/api#post-deliver));
+- tops a channel back up to 2 XLM once it falls below 1.5 XLM;
+- merges a channel nobody has used for a day back into the sponsor, returning its XLM, while more
+  than `MAVNA_CHANNEL_FLOOR` (4) channels remain;
+- once an hour, compares the reserves the network says the sponsor carries with the ones its own
+  records account for, and logs the numbers.
+
+## Delivery budget
+
+Each Circle delivery costs the sponsor a network fee whatever amount it carries. The sponsor pays
+for none below `MAVNA_MIN_DELIVERY_USDC` (1 USDC) and spends at most `MAVNA_DELIVERY_BUDGET_XLM`
+(25 XLM) on delivery fees in a UTC day. The spending is counted under `MAVNA_STATE_DIR`.

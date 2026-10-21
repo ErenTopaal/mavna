@@ -1,0 +1,48 @@
+---
+title: Circle CCTP
+description: Circle burns USDC on the source chain and mints it on Stellar. How the adapter builds the burn, verifies its chains and gets the mint delivered.
+---
+
+`@mavna/adapter-cctp`, adapter id `cctp`, trust model `native-mint`. Circle's Cross-Chain Transfer
+Protocol burns USDC on the source chain and Circle mints the same amount on Stellar once it attests
+the burn. Nobody holds the money in between, and what arrives is Circle's own USDC.
+
+```ts
+const cctp = new CctpAdapter({ network, rpc, baseReserveStroops });
+```
+
+## Chains
+
+The adapter moves USDC from 26 chains on each network: 24 EVM chains, Solana and Starknet. Each
+chain's entry carries its Circle domain number, its `TokenMessengerV2` address and its USDC
+contract. [Rails and networks](/how-it-works/networks#source-chains) lists them.
+
+The EVM list comes from `scripts/verify-cctp-chains.mjs`, which records no address it has not
+checked on the chain itself: that there is code at the `TokenMessengerV2` address, which minter
+that contract names, and which token the minter calls local USDC, and that the token reports itself
+as USDC with six decimals. Run it with `node scripts/verify-cctp-chains.mjs`.
+
+## The burn
+
+The burn's `mintRecipient` and `destinationCaller` are both Circle's Stellar forwarder contract, not
+the sender's address, and the sender's address travels inside the message as hook data. Circle mints to
+the forwarder, which passes the USDC on to the recipient. The hook data is validated before it is
+encoded, and an address the forwarder cannot deliver to is refused.
+
+Before the burn, the sender approves the exact amount for `TokenMessengerV2`, never an unlimited
+allowance. The approval is skipped when the wallet's allowance already covers the amount.
+
+## Fees
+
+The fee is read from Circle's fee service on every quote, for the standard path.
+
+## Delivery on Stellar
+
+Circle's own forwarding service does not deliver to Stellar, so someone on Stellar has to submit
+the mint once Circle attests the burn. With a sponsor that covers costs, the
+[sponsor](/operate/api#post-deliver) submits it and pays its fee. With
+`MAVNA_RESERVE_FUNDING=self`, the receiving account signs and pays for it. Either way, the
+recipient is fixed inside the attested message, so whoever submits it cannot redirect anything.
+
+[Delivery](/how-it-works/delivery) explains how arrival is proven and why a delivery cannot happen
+twice.

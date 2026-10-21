@@ -1,0 +1,47 @@
+---
+title: Events
+description: What the widget reports to your app through onEvent, and when each event fires.
+---
+
+Pass a function as `onEvent` in the config and the widget calls it with an object whose `type`
+says what happened.
+
+```tsx
+<MavnaWidget
+  config={{
+    integrator: "your-product",
+    onEvent: (event) => {
+      if (event.type === "transferCompleted") showReceipt();
+    },
+  }}
+/>
+```
+
+## Quoting and wallets
+
+| Event | Fields | Fires when |
+| --- | --- | --- |
+| `routesAvailable` | `count`, `declined` | every rail has answered a quote: `count` routes and `declined` refusals |
+| `routeSelected` | `source`, `receives` | your user picks a route: its rail and the amount it delivers |
+| `walletConnected` | `ecosystem`, `address` | a wallet connects: `"evm"` for the sending wallet, `"stellar"` for the Stellar wallet |
+
+## A transfer
+
+| Event | Fields | Fires when |
+| --- | --- | --- |
+| `transferStarted` | none | your user presses **Start transfer** |
+| `transferStepUpdated` | `id`, `phase` | a step changes phase: `phase` is `"idle"`, `"blocked"` (waiting on your user's wallet), `"pending"`, `"done"` or `"failed"` |
+| `transferCompleted` | none | the transfer arrived |
+| `transferFailed` | `reason` | the transfer ended without arriving; `reason` is the sentence the widget shows |
+
+Each transfer ends with exactly one of the four ending events: `transferCompleted`,
+`transferFailed`, or one of these three:
+
+| Event | Fields | Fires when |
+| --- | --- | --- |
+| `transferStillMoving` | `reason` | the widget stopped watching a transfer that is still on its way, because it took longer than the widget waits or the widget went away (a closed drawer, for example). Your user can check on it and finish it from Activity |
+| `transferDeliveredAsCame` | `reason`, `asset`, `baseUnits` | a conversion on arrival could not meet your user's minimum, so the money arrived unconverted: `asset` is its symbol and `baseUnits` the amount |
+| `transferDeliveredUnverified` | `reason`, `stellarTxHash`, `explorerUrl` | the rail records the transfer as executed on Stellar, and the amount that arrived can no longer be read back; the Stellar transaction is given for checking |
+
+The exact type, `MavnaWidgetEvent`, is on the [Configuration](/widget/configuration#the-type)
+page.

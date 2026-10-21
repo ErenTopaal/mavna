@@ -1,6 +1,6 @@
 import type { MavnaWidgetConfig } from "@mavna/widget";
 
-const SPONSOR_DOCS = "https://docs.mavna.app/developers/sponsor";
+const SPONSOR_DOCS = "https://docs.mavna.app/operate";
 
 /**
  * Print the config as the JSX an integrator would paste. The event hook goes

@@ -1,0 +1,24 @@
+---
+title: Trust models
+description: Who a sender trusts to deliver a transfer is a field on every route, so routes can be compared by it.
+---
+
+Every adapter and every route carries a `trustModel`. The widget shows it on each route in plain
+words, beside the amount and the time.
+
+```ts
+type TrustModel = "native-mint" | "validator-set" | "solver-network" | "liquidity-pool" | "dvn-stack";
+```
+
+| Trust model | Rail | Shown as | Who you trust |
+| --- | --- | --- | --- |
+| `native-mint` | [Circle CCTP](/how-it-works/rails/cctp) | Issuer mint & burn | the issuer, Circle, which burns on one chain and mints on Stellar; nobody holds the money in between |
+| `validator-set` | [Axelar ITS](/how-it-works/rails/axelar) | Validator set | Axelar's named set of validators, which attests to the transfer |
+| `dvn-stack` | [LayerZero OFT](/how-it-works/rails/layerzero) | Issuer-chosen verifiers | the verifiers the token's owner chose for it; two tokens on this rail can have different verifiers |
+| `solver-network` | [NEAR Intents](/how-it-works/rails/near-intents) | Competing solvers, HOT Bridge payout | the solvers that fill the trade, NEAR Intents' settlement, and the HOT Bridge that pays out on Stellar |
+
+`liquidity-pool` exists in the type for rails where a pool holds both sides and swaps between them.
+No adapter in the repository uses it.
+
+`dvn-stack` is kept apart from `validator-set` because the party that decides who verifies is
+different: the token's deployer rather than the network.
