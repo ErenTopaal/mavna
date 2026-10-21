@@ -534,15 +534,17 @@ function RankBoard(): ReactNode {
   );
 }
 
-/** A price that keeps moving, and the minimum you drag under it. */
+// where the quote and the route's minimum sit on the chart; the gap is drawn
+// wider than the real one so it can be seen
+const QUOTED = 52;
+const MINIMUM = 44;
+
+/** A price that keeps moving against the minimum a converting route carries. */
 function FloorTicker(): ReactNode {
-  const [floor, setFloor] = useState(42);
   const [trades, setTrades] = useState(true);
   const inkPath = useRef<SVGPathElement>(null);
   const redPath = useRef<SVGPathElement>(null);
   const dot = useRef<HTMLSpanElement>(null);
-  const floorRef = useRef(floor);
-  floorRef.current = floor;
 
   useEffect(() => {
     const W = 600;
@@ -567,7 +569,7 @@ function FloorTicker(): ReactNode {
       const now = value(1, t);
       // a circle inside the stretched svg would turn into an oval, so the dot is html
       if (dot.current) dot.current.style.top = `${((1 - now) * 100).toFixed(2)}%`;
-      const ok = now * 100 >= floorRef.current;
+      const ok = now * 100 >= MINIMUM;
       if (ok !== last) {
         last = ok;
         setTrades(ok);
@@ -583,7 +585,8 @@ function FloorTicker(): ReactNode {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const y = (1 - floor / 100) * 240;
+  const y = (1 - MINIMUM / 100) * 240;
+  const yq = (1 - QUOTED / 100) * 240;
   return (
     <div style={s("display: grid; gap: 18px; align-content: start")}>
       <div
@@ -625,6 +628,15 @@ function FloorTicker(): ReactNode {
           <line
             x1="0"
             x2="600"
+            y1={yq}
+            y2={yq}
+            stroke={FAINT}
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+          <line
+            x1="0"
+            x2="600"
             y1={y}
             y2={y}
             stroke={SIGNAL}
@@ -645,28 +657,24 @@ function FloorTicker(): ReactNode {
             `position: absolute; left: 16px; top: calc(${(y / 240) * 100}% + 8px); font-size: 13px; color: ${SIGNAL}; pointer-events: none`,
           )}
         >
-          Your minimum
+          The route’s minimum
+        </span>
+        <span
+          style={s(
+            `position: absolute; left: 16px; top: calc(${(yq / 240) * 100}% - 24px); font-size: 13px; color: ${MUTED}; pointer-events: none`,
+          )}
+        >
+          Quoted
         </span>
       </div>
-      <label style={s(`display: grid; gap: 10px; font-size: 15px; color: ${MUTED}`)}>
-        Drag your minimum
-        <input
-          data-floor=""
-          type="range"
-          min={20}
-          max={80}
-          value={floor}
-          onChange={(e) => setFloor(Number(e.target.value))}
-        />
-      </label>
       <p
         style={s(
           `margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 300; letter-spacing: -0.02em; line-height: 1.25; color: ${trades ? INK : SIGNAL}; transition: color .3s ease`,
         )}
       >
         {trades
-          ? "Above your minimum, so it goes through."
-          : "Below your minimum, so it does not happen."}
+          ? "Above the minimum, so it converts into the coin you asked for."
+          : "Below the minimum, so the swap does not happen and what you sent arrives as it came."}
       </p>
     </div>
   );
@@ -1317,9 +1325,9 @@ export function Landing(): ReactNode {
                 `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED}; max-width: 42ch`,
               )}
             >
-              Rank every route by how much reaches you, or by how soon it gets there. Either way you
-              also set the least you will accept. If the price moves past it, the trade does not
-              happen, and you are never handed a different coin instead.
+              Rank every route by how much reaches you, or by how soon it gets there. A route that
+              converts on arrival carries a minimum it will not go below. If the price moves past
+              it, the swap does not happen: what you sent arrives as it came, and you are told why.
             </p>
           </div>
           <div
