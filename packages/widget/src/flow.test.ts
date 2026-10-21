@@ -10,6 +10,7 @@ import {
 import type { MavnaWidgetEvent } from "./config";
 import type { Engine } from "./engine";
 import { Flow } from "./flow";
+import { fmt } from "./format";
 import { toRouteView } from "./quote";
 import {
   renderAddress,
@@ -1038,5 +1039,31 @@ describe("what the recipient screen says is wrong", () => {
       "A Stellar address is 56 characters and starts with G.",
     );
     expect(said(VALID)).not.toContain("Stellar address is");
+  });
+});
+
+describe("an amount with more decimals than two", () => {
+  it("is shown as it is on review, never rounded up past what is sent or guaranteed", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const base = toRouteView(routeFor("layerzero"));
+    const view = {
+      ...base,
+      route: { ...base.route, sends: { ...base.route.sends, baseUnits: "10126789" } },
+      receives: 10.126789,
+      floor: 10.126785,
+      exact: false,
+    };
+    const html = renderToStaticMarkup(
+      renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC" }),
+    );
+    expect(html).toContain("10.126789 USDC");
+    expect(html).toContain("10.126785 USDC");
+    expect(html).not.toContain("10.13");
+  });
+
+  it("keeps two decimals for a round one", () => {
+    expect(fmt(10)).toBe("10.00");
+    expect(fmt(1234.5)).toBe("1,234.50");
+    expect(fmt(0.000001)).toBe("0.000001");
   });
 });

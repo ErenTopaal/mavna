@@ -5,14 +5,17 @@
  */
 import { type Amount, stellarAddress } from "@mavna/core";
 
-const TWO_DP = new Intl.NumberFormat("en-US", {
+// seven places is the most any Stellar asset carries, so no amount here has more;
+// at two a review said 10.13 for a route that sends 10.126789, and rounded a
+// guaranteed minimum up past what is guaranteed
+const FIGURE = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 7,
 });
 
-/** The design's `fmt`: a plain two-decimal grouped figure. */
+/** The design's `fmt`: a grouped figure, two decimals at least and every one it has. */
 export function fmt(value: number): string {
-  return TWO_DP.format(value);
+  return FIGURE.format(value);
 }
 
 /** The design's `short`: a 5…4 elision for anything longer than 12 characters. */
@@ -64,7 +67,7 @@ export function amountValue(amount: Amount): number {
 export function fmtUnits(baseUnits: string, decimals: number): string {
   const value = BigInt(baseUnits);
   const scale = 10n ** BigInt(decimals);
-  const whole = TWO_DP.format(Number(value / scale)).split(".")[0] ?? "0";
+  const whole = FIGURE.format(Number(value / scale)).split(".")[0] ?? "0";
   const fraction = (value % scale)
     .toString()
     .padStart(decimals, "0")
