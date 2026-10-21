@@ -397,6 +397,7 @@ packages/widget/src/quote.test.ts
 packages/widget/src/quote.ts
 packages/widget/src/rails.test.ts
 packages/widget/src/rails.ts
+packages/widget/src/recipient.ts
 packages/widget/src/screens.tsx
 packages/widget/src/sponsor.test.ts
 packages/widget/src/sponsor.ts
