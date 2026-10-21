@@ -211,3 +211,25 @@ test("Tab in the drawer never stops on the invisible backdrop", async ({ page })
   await page.keyboard.press("Tab");
   await expect(page.locator(".mv-overlay").locator(":focus")).toHaveCount(1);
 });
+
+test("hover and focus styles show over the inline styles they are written against", async ({
+  page,
+  baseURL,
+}) => {
+  await offline(page, baseURL);
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  const row = root.getByRole("button", { name: /Route priority/ });
+  const background = () => row.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await expect(row).toBeVisible();
+  const rest = await background();
+  await row.hover();
+  await expect.poll(background).not.toBe(rest);
+
+  await root.getByRole("button", { name: "Activity" }).click();
+  const lookup = root.getByRole("textbox", { name: "Transaction or address" });
+  const border = () => lookup.evaluate((el) => getComputedStyle(el).borderTopColor);
+  const blurred = await border();
+  await lookup.focus();
+  await expect.poll(border).not.toBe(blurred);
+});

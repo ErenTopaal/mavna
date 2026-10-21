@@ -43,6 +43,20 @@ function toDecls(input: Decls): string {
     .join(";");
 }
 
+/**
+ * Every element these rules style also carries an inline style, often setting the
+ * same property (a hover background over the resting background). An inline style
+ * outranks any selector, so a pseudo state only shows if its declarations are
+ * important; that is the only way a stylesheet rule wins over one.
+ */
+function important(decls: string): string {
+  return decls
+    .split(";")
+    .filter((d) => d.trim() !== "")
+    .map((d) => `${d.trim()} !important`)
+    .join(";");
+}
+
 /** A short stable hash of the rule text, so identical rules share one class. */
 function hash(text: string): string {
   let h = 5381;
@@ -65,7 +79,7 @@ export function pseudo(spec: Pseudo): string {
   const parts: string[] = [];
   for (const key of Object.keys(SELECTORS) as (keyof Pseudo)[]) {
     const decls = spec[key];
-    if (decls !== undefined) parts.push(`${SELECTORS[key]}{${toDecls(decls)}}`);
+    if (decls !== undefined) parts.push(`${SELECTORS[key]}{${important(toDecls(decls))}}`);
   }
   if (parts.length === 0) return "";
   const className = `mv-p${hash(parts.join("|"))}`;
@@ -73,8 +87,7 @@ export function pseudo(spec: Pseudo): string {
     inserted.add(className);
     const el = styleSheet();
     if (el !== undefined) {
-      // Doubled class raises specificity over the inline-adjacent base rules,
-      // matching how the design's own generated sheet outranks defaults.
+      // the doubled class still orders these over widget.css's own rules
       el.appendChild(
         document.createTextNode(parts.map((p) => `.${className}.${className}${p}`).join("")),
       );
