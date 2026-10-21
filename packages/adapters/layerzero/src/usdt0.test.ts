@@ -962,9 +962,10 @@ describe("status, for a USDT0 transfer", () => {
     expect(phase.phase).toBe("done");
   });
 
-  it("still calls an unindexed hash pending", async () => {
+  // Scan answers 404 alike for a hash it has never seen and one not indexed yet
+  it("has nothing to report for a hash Scan has no message for", async () => {
     world.messages = [];
-    expect((await lookUp()).phase).toBe("pending");
+    expect((await lookUp()).phase).toBe("idle");
   });
 
   it("still reads a delivered transfer when a send-time gate fails today", async () => {

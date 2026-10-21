@@ -167,3 +167,58 @@ describe("pressing twice, or looking up twice", () => {
     expect(flow.state.found?.note).toMatch(/the newer one/);
   });
 });
+
+describe("looking up a hash the rails have no record of", () => {
+  const HASH = `0x${"ab".repeat(32)}`;
+  // every rail answers what its indexer answers for a hash it has not listed
+  const rail = (id: string) => ({
+    id,
+    supportedChains: async () => ["ethereum-sepolia"],
+    status: async () => ({ phase: "idle" as const }),
+  });
+  const flowWith = (history: readonly object[]) => {
+    const engine = {
+      network: "testnet",
+      defaultSourceChain: "arbitrum-sepolia",
+      ranking: "best-received",
+      historyKey: "test.transfers",
+      adapters: [rail("cctp"), rail("axelar"), rail("layerzero")],
+      sourceChainDetail: () => ({ kind: "other", name: "Somewhere", family: "move" }),
+    } as unknown as Engine;
+    const flow = new Flow({ engine });
+    flow.setState = ((patch: object) => {
+      flow.state = { ...flow.state, ...patch };
+    }) as never;
+    flow.state = { ...flow.state, lookup: HASH, history: history as never };
+    return flow;
+  };
+  const sent = (secondsAgo: number) => ({
+    sourceTxHash: HASH,
+    sourceChainId: "ethereum-sepolia",
+    sourceChainName: "Ethereum Sepolia",
+    sendsBaseUnits: "1000000",
+    decimals: 6,
+    symbol: "USDC",
+    startedAtUnix: Math.floor(Date.now() / 1000) - secondsAgo,
+  });
+
+  it("says it was not found, with nothing to finish, when this browser did not send it", async () => {
+    const flow = flowWith([]);
+    await flow.onFind();
+    expect(flow.state.found?.note).toMatch(/^No rail has a record of this transaction/);
+    expect(flow.state.found?.canFinish).toBe(false);
+  });
+
+  it("keeps one this browser just sent as on its way, since the index may not list it yet", async () => {
+    const flow = flowWith([sent(20)]);
+    await flow.onFind();
+    expect(flow.state.found?.note).toBe("On its way to Stellar.");
+  });
+
+  it("calls one this browser sent long ago overdue, not failed", async () => {
+    const flow = flowWith([sent(3 * 60 * 60)]);
+    await flow.onFind();
+    expect(flow.state.found?.tone).toBe("wait");
+    expect(flow.state.found?.note).toMatch(/^Taking longer than usual/);
+  });
+});

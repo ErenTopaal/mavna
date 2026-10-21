@@ -655,13 +655,10 @@ export class AxelarAdapter implements BridgeAdapter {
       ) ?? records[0];
 
     if (first === undefined) {
-      // Not indexed yet. There is no evidence of failure, and reporting failure
-      // without evidence is how somebody is talked into paying twice.
-      return {
-        phase: "pending",
-        ref: this.refFor(handle.sourceChainId, handle.sourceTxHash),
-        expectedByUnix: 0,
-      };
+      // Axelar has no record of the hash. Its search says the same for one it has
+      // never seen and one not indexed yet, so this claims neither failure nor
+      // progress; a watched transfer keeps being asked, a looked-up one is not found.
+      return { phase: "idle" };
     }
 
     const ref = this.refFor(first.sourceChain ?? handle.sourceChainId, handle.sourceTxHash);

@@ -93,6 +93,37 @@ describe("status for a burn transaction carrying more than one message", () => {
     attestation: "PENDING",
   };
 
+  // Circle answers 404 alike for a hash it has never seen and for a burn it has
+  // not observed yet (measured: an Arc testnet burn was listed 2.9 s after it was
+  // sent). Neither is a transfer in progress, so neither is claimed as one.
+  it("has nothing to report for a hash Circle has no burn for", async () => {
+    const adapter = adapterWith({ captured: recent });
+    const phase = await adapter.status(
+      handleFor(`0x${"ab".repeat(32)}`, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
+    );
+    expect(phase.phase).toBe("idle");
+  });
+
+  // Circle's answer for a burn it has observed but not yet confirmed, as recorded
+  // live from a Sepolia burn: no message and no decoded fields, so nothing says
+  // where it goes yet. It is a real burn in progress, not nothing.
+  it("is pending for a burn Circle is still confirming, before it can say where it goes", async () => {
+    const confirming = {
+      attestation: "PENDING",
+      message: null,
+      eventNonce: "0x4f80e151086da95b8da09f41241f26ab134322f59b5d55e8bf05651803fe57cd",
+      cctpVersion: 2,
+      status: "pending_confirmations",
+      decodedMessage: null,
+      delayReason: null,
+    };
+    const adapter = adapterWith({ captured: recent, irisMessages: [confirming] });
+    const phase = await adapter.status(
+      handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
+    );
+    expect(phase.phase).toBe("pending");
+  });
+
   it("never follows a burn to another chain into a search on Stellar", async () => {
     let searched = false;
     const adapter = adapterWith({
@@ -106,7 +137,8 @@ describe("status for a burn transaction carrying more than one message", () => {
     const phase = await adapter.status(
       handleFor(recent.burn, "GAM7ZOID2YK4SVLN4LNOBWCKLXAXRIXPQMBCKGRA3C37EHQ3NFX7I4CO"),
     );
-    expect(phase.phase).toBe("pending");
+    // a burn to another chain is not a transfer to Stellar, so this rail has none
+    expect(phase.phase).toBe("idle");
     expect(searched).toBe(false);
   });
 

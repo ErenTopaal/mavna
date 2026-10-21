@@ -1496,6 +1496,19 @@ export class Flow extends React.Component<FlowProps, State> {
       const answer = await lookupAcross(this.engine.adapters, toHandle(key, rec?.sourceChainId));
       if (seq !== this.lookupSeq) return;
       let phase = answer.phase;
+      // a transfer this browser sent is real even while no rail lists it yet: the
+      // indexers answer a young one exactly as an unknown hash, so it stays on its way
+      if (rec !== undefined && phase.phase === "idle") {
+        phase = {
+          phase: "pending",
+          ref: {
+            chainId: rec.sourceChainId,
+            txHash: rec.sourceTxHash,
+            explorerUrl: rec.explorerUrl ?? "",
+          },
+          expectedByUnix: 0,
+        };
+      }
       if (rec !== undefined && phase.phase === "pending") {
         phase = escalateIfOverdue(
           {

@@ -164,10 +164,15 @@ export function foundFor(
           canFinish: false,
         };
       }
+      // no rail lists the hash, which is how every indexer answers one it has never
+      // seen; a transfer this browser sent is kept as on its way before this is reached
       return {
         tone: "wait",
-        note: "Nothing has been found for this transaction yet.",
-        canFinish: circle,
+        note:
+          "No rail has a record of this transaction. One sent in the last minute may not be " +
+          "listed yet, so check again shortly; otherwise check it is the hash from the chain " +
+          "you sent from.",
+        canFinish: false,
       };
     }
   }

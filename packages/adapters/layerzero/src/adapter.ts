@@ -838,9 +838,9 @@ export class LayerZeroAdapter implements BridgeAdapter {
     if (handle.sourceTxHash === undefined) return { phase: "idle" };
 
     const messages = await this.scan.byTransaction(handle.sourceTxHash);
-    const pendingRef = this.sourceRef(handle.sourceTxHash, handle.sourceChainId);
-    // Nothing indexed yet is the normal first minute, not evidence of anything.
-    if (messages.length === 0) return { phase: "pending", ref: pendingRef, expectedByUnix: 0 };
+    // Scan has no message for the hash: it answers the same for one it has never
+    // seen and one not indexed yet, so this claims neither failure nor progress.
+    if (messages.length === 0) return { phase: "idle" };
 
     // Indexed, but none of it is a transfer this rail can vouch for: a message
     // to another chain, or another contract's message to Stellar. Answering

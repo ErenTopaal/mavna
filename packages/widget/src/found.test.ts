@@ -45,11 +45,16 @@ describe("foundFor", () => {
     );
   });
 
-  it("speaks about the transaction, not an address, when a hash has nothing yet", () => {
+  // no rail has a record of the hash: it is not on its way, and there is no
+  // delivery to finish, so neither is said nor offered
+  it("says a hash no rail knows was not found, and offers nothing to finish", () => {
     expect(foundFor({ phase: "idle" }, "source-tx", ALL)).toEqual({
       tone: "wait",
-      note: "Nothing has been found for this transaction yet.",
-      canFinish: true,
+      note:
+        "No rail has a record of this transaction. One sent in the last minute may not be " +
+        "listed yet, so check again shortly; otherwise check it is the hash from the chain " +
+        "you sent from.",
+      canFinish: false,
     });
   });
 

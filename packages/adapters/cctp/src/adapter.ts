@@ -548,19 +548,28 @@ export class CctpAdapter implements BridgeAdapter {
     }
 
     const found = await this.findBurn(handle.sourceTxHash, handle.sourceChainId);
-    if (found === undefined) {
-      // Not indexed yet, or on a chain we do not route from. Either way there is
-      // no evidence it failed, and reporting failure without evidence is how a
-      // user is talked into sending a second payment.
+    if (found !== undefined && "confirming" in found) {
+      // observed and still confirming: Circle cannot say yet where it goes, and a
+      // burn in progress is on its way until it says otherwise
       return {
         phase: "pending",
         ref: {
-          chainId: handle.sourceChainId ?? "unknown",
+          chainId: found.confirming,
           txHash: handle.sourceTxHash,
-          explorerUrl: "",
+          explorerUrl:
+            nonEvmChainFor(this.network, found.confirming) === undefined
+              ? explorerTxUrl(this.network, found.confirming, handle.sourceTxHash)
+              : nonEvmExplorerTxUrl(this.network, found.confirming, handle.sourceTxHash),
         },
         expectedByUnix: 0,
       };
+    }
+    if (found === undefined) {
+      // Circle has no burn to Stellar for this hash. It answers the same for one it
+      // has never seen and one it has not observed yet (seconds after the send,
+      // measured), so this claims neither failure nor progress: nothing here. A
+      // transfer being watched keeps being asked; one looked up is said not found.
+      return { phase: "idle" };
     }
 
     const { attestations, chainId } = found;
@@ -625,7 +634,9 @@ export class CctpAdapter implements BridgeAdapter {
   private async findBurn(
     txHash: string,
     sourceChainId: string | undefined,
-  ): Promise<{ attestations: readonly Attestation[]; chainId: string } | undefined> {
+  ): Promise<
+    { attestations: readonly Attestation[]; chainId: string } | { confirming: string } | undefined
+  > {
     const candidates =
       sourceChainId === undefined
         ? [...sourceChainsFor(this.network), ...nonEvmChainsFor(this.network)]
@@ -638,14 +649,24 @@ export class CctpAdapter implements BridgeAdapter {
       // Only burns to Stellar are this rail's. A transaction can carry several
       // (a smart wallet batching), and a burn to another chain is never one.
       const attestations = rows.filter((row) => row.destinationDomain === STELLAR_DOMAIN);
-      return attestations.length === 0 ? undefined : { attestations, chainId };
+      if (attestations.length > 0) return { attestations, chainId };
+      // a burn Circle is still confirming comes back with nothing decoded, so
+      // where it goes is not known yet; it is a burn, and may be to Stellar
+      const undecided = rows.some(
+        (row) => row.destinationDomain === -1 && row.message === undefined,
+      );
+      return undecided ? { confirming: chainId } : undefined;
     });
 
     const settled = await Promise.allSettled(lookups);
+    let confirming: { confirming: string } | undefined;
     for (const outcome of settled) {
-      if (outcome.status === "fulfilled" && outcome.value !== undefined) return outcome.value;
+      if (outcome.status !== "fulfilled" || outcome.value === undefined) continue;
+      const value = outcome.value;
+      if (value.confirming !== undefined) confirming ??= { confirming: value.confirming };
+      else return value;
     }
-    return undefined;
+    return confirming;
   }
 
   /**

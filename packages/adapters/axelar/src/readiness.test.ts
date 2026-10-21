@@ -678,8 +678,10 @@ function secondLeg(over: Record<string, unknown> = {}): Record<string, unknown> 
 describe("where an Axelar transfer stands, over both legs", () => {
   const status = (): Promise<StepPhase> => adapter().status(HANDLE);
 
-  it("is pending while Axelar has not indexed the hash", async () => {
-    expect((await status()).phase).toBe("pending");
+  // Axelar's search answers an empty list alike for a hash it has never seen and
+  // one it has not indexed yet, so this rail claims no transfer for it
+  it("has nothing to report while Axelar has no record of the hash", async () => {
+    expect((await status()).phase).toBe("idle");
   });
 
   it("is stalled with a top-up when the first leg was underpaid", async () => {
