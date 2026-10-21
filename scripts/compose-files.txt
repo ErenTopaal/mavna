@@ -305,6 +305,9 @@ packages/status/tsconfig.json
 packages/status/tsconfig.test.json
 packages/status/tsdown.config.ts
 packages/stellar/package.json
+packages/stellar/src/__fixtures__/mainnet-usdt0-order-book.json
+packages/stellar/src/__fixtures__/mainnet-usdt0-strict-receive-0.5.json
+packages/stellar/src/__fixtures__/mainnet-usdt0-strict-receive-1.5.json
 packages/stellar/src/address.test.ts
 packages/stellar/src/address.ts
 packages/stellar/src/destination.live.test.ts
@@ -323,6 +326,8 @@ packages/stellar/src/rpc.test.ts
 packages/stellar/src/rpc.ts
 packages/stellar/src/spare.test.ts
 packages/stellar/src/spare.ts
+packages/stellar/src/spend.test.ts
+packages/stellar/src/spend.ts
 packages/stellar/src/sponsorship.live.test.ts
 packages/stellar/src/sponsorship.test.ts
 packages/stellar/src/sponsorship.ts
@@ -471,10 +476,9 @@ services/sponsor/src/server.ts
 services/sponsor/src/soroswap.live.test.ts
 services/sponsor/src/soroswap.test.ts
 services/sponsor/src/soroswap.ts
-services/sponsor/src/spend.test.ts
-services/sponsor/src/spend.ts
 services/sponsor/src/state.test.ts
 services/sponsor/src/state.ts
+services/sponsor/src/usdt0-repayment.live.test.ts
 services/sponsor/tsconfig.json
 services/sponsor/tsconfig.test.json
 services/sponsor/tsdown.config.ts

@@ -2684,6 +2684,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
         heldSettlements.delete(destination);
         pool.release(destination, transaction.source);
       }
+      warnedFrozen.delete(xdr.encodeBytes(transaction.hash(), "hex"));
       pruneSettled();
       recentlySettled.set(destination, { txHash, untilUnix: held.maxTimeUnix });
       return { settled: true, settlementTxHash: txHash };
@@ -4048,9 +4049,11 @@ function alreadyHolds(asset: Asset): string {
 
 /** Said when a sponsor-fronted trustline is asked for in an asset this sponsor does not lend. */
 function onlyLends(lends: readonly string[]): string {
-  return lends.length === 0
-    ? "This sponsor fronts no trustlines."
-    : `This sponsor only fronts a ${lends.join(" or ")} trustline, each repaid in its own asset.`;
+  if (lends.length === 0) return "This sponsor fronts no trustlines.";
+  if (lends.length === 1) {
+    return `This sponsor only fronts a ${lends[0]} trustline, the asset its settlement repays in.`;
+  }
+  return `This sponsor only fronts a ${lends.join(" or ")} trustline, each repaid in its own asset.`;
 }
 
 /** One burn the sweep keeps asking about, as written down. */
