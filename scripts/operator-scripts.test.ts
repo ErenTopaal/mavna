@@ -302,7 +302,8 @@ describe("deliver-cctp", () => {
   });
 
   it("never sends a mainnet delivery to the testnet node in .env", () => {
-    const secret = "SBK2VIYYSVG76E7VC3QHYARNFLY2EAQXDHRC7BMXBBGIFG74ARPRMNQM";
+    // a key generated for this test and never funded on any network
+    const secret = "SAXIRHO2Z3CMGVSPXNVTSMLF2JSBYY47XSMKNOHNLDFSHSAOKM6UGVWK";
     const root = layout({
       link: ["packages", "services"],
       env: `MAVNA_NETWORK=testnet\nSTELLAR_RPC_URL=https://soroban-testnet.stellar.org\nSPONSOR_SECRET_KEY=${secret}\n`,
