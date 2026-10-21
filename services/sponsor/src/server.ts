@@ -3371,7 +3371,7 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       console.error("[sponsor] iris answered", iris.status);
       return unavailable;
     }
-    let parsed: { messages?: readonly { message?: string; attestation?: string }[] };
+    let parsed: { messages?: readonly { message?: string | null; attestation?: string }[] };
     try {
       parsed = (await iris.json()) as typeof parsed;
     } catch (cause) {
@@ -3379,6 +3379,12 @@ export function createSponsorServer(options: SponsorServerOptions): SponsorServe
       return unavailable;
     }
     const message = parsed?.messages?.[0];
+    // While a burn waits out its source chain's finality, Circle has a record
+    // of it but no message yet. That record is Circle vouching the burn is real,
+    // so it is watched: from Ethereum the wait is a quarter of an hour.
+    if (message?.message === null && message.attestation === "PENDING") {
+      return { status: 200, body: { kind: "not-attested-yet" }, next: "watch" };
+    }
     if (typeof message?.message !== "string" || typeof message.attestation !== "string") {
       return notYet;
     }

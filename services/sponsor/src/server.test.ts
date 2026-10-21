@@ -4794,6 +4794,38 @@ describe("round 3: every /deliver answer says whether the burn is being watched"
     expect(await watched(state)).toEqual([burn(1)]);
   });
 
+  it("watches a burn Circle has indexed but not confirmed, which has no message yet", async () => {
+    // what Iris answered for a real Sepolia burn while it waited out finality:
+    // the record exists, its message does not
+    stubIris(
+      () =>
+        new Response(
+          JSON.stringify({
+            messages: [
+              {
+                attestation: "PENDING",
+                message: null,
+                eventNonce: `0x${"32".repeat(32)}`,
+                cctpVersion: 2,
+                status: "pending_confirmations",
+                decodedMessage: null,
+                delayReason: null,
+              },
+            ],
+            sourceTxHash: burn(7),
+          }),
+          { status: 200 },
+        ),
+    );
+    const state = new MemoryDocumentStore();
+    const server = await startServer({ buildDelivery, state });
+    const answered = await server.post("/deliver", { txHash: burn(7), domain: 0 });
+    expect(answered.status).toBe(200);
+    expect(answered.body.kind).toBe("not-attested-yet");
+    expect(answered.body.watching).toBe(true);
+    expect(await watched(state)).toEqual([burn(7)]);
+  });
+
   it("says nothing of watching on a 404 for a burn Circle has never heard of", async () => {
     irisAnswers(undefined);
     const state = new MemoryDocumentStore();
