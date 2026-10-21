@@ -9,7 +9,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
-import { fmt, fmtAmount, fromBaseUnits, short } from "./format";
+import { fmt, fmtAmount, fromBaseUnits, short, shortIds } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
@@ -688,11 +688,24 @@ export function renderAddress(c: Flow): ReactElement {
   const invalid = st.destination !== "" && !c.destValid();
   const destBorder =
     st.destination === "" || c.destValid() ? "var(--mv-rule)" : "var(--mv-signal-line)";
+  const use = (): void => {
+    if (!c.destValid()) {
+      c.destRef.current?.focus();
+      return;
+    }
+    c.go("send", "pop");
+  };
   return (
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <input
         value={st.destination}
         onChange={(e) => c.setDestination(e.target.value.trim())}
+        // not a <form>: the widget may sit inside a host page's own form
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          use();
+        }}
         ref={c.destRef}
         placeholder="G…, M… or C…"
         spellCheck={false}
@@ -713,13 +726,7 @@ export function renderAddress(c: Flow): ReactElement {
       ) : null}
       <button
         type="button"
-        onClick={() => {
-          if (!c.destValid()) {
-            c.destRef.current?.focus();
-            return;
-          }
-          c.go("send", "pop");
-        }}
+        onClick={use}
         className={pseudo({
           hover: "background:var(--mv-cta-hover)",
           active: "transform:translateY(1px)",
@@ -1975,11 +1982,12 @@ export function renderRoutes(
                   </span>
                 </div>
                 <p
+                  title={decline.why}
                   style={s(
-                    "margin:0;font-size:12.5px;line-height:1.45;color:var(--mv-muted-2);text-wrap:pretty",
+                    "margin:0;min-width:0;font-size:12.5px;line-height:1.45;color:var(--mv-muted-2);text-wrap:pretty;overflow-wrap:anywhere",
                   )}
                 >
-                  {decline.why}
+                  {shortIds(decline.why)}
                 </p>
                 {decline.retryable ? (
                   <button

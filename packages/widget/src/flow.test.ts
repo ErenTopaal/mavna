@@ -1072,6 +1072,38 @@ describe("a figure too long for its card", () => {
     );
     wraps(renderToStaticMarkup(renderReview(flow, { r: big, chain, sym: "USDC" })), figure);
   });
+
+  // what Axelar said on mainnet for a USDC send, 2026-10-22
+  const AXELAR_SAID =
+    "This route delivers USDC as CDPV3H7C3MR2R4Y4GAEJN4AXXY4LBITRRVE74VSMVCSBWISIU3Q4QTMW on " +
+    "Stellar, which is not USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.";
+
+  function declined(explanation: string): string {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      routes: [],
+      quoting: false,
+      complete: true,
+      showDeclined: true,
+      rejected: [{ source: "axelar", reason: "asset-unsupported", explanation, retryable: false }],
+    };
+    return renderToStaticMarkup(renderRoutes(flow, { sym: "USDC", resting: undefined }));
+  }
+
+  it("shortens the ids in a decline the way addresses are shortened, keeping the whole of it to hand", () => {
+    const html = declined(AXELAR_SAID);
+    const shown =
+      "This route delivers USDC as CDPV3…QTMW on Stellar, which is not USDC:GA5ZS…KZVN.";
+    wraps(html, shown);
+    // the full sentence stays on the paragraph, for anyone who needs the ids
+    expect(html).toContain(`title="${AXELAR_SAID}"`);
+  });
+
+  it("wraps any other long unbroken run in a decline inside its card", () => {
+    const run = `0x${"ab".repeat(40)}`;
+    wraps(declined(`No route for ${run} today.`), "No route for ");
+  });
 });
 
 describe("the form while a quote is on its way", () => {
@@ -1212,6 +1244,71 @@ describe("what the recipient screen says is wrong", () => {
     expect(said(StrKey.encodeLiquidityPool(Buffer.alloc(32, 3)))).toContain(
       "A liquidity-pool address cannot receive a payment.",
     );
+  });
+});
+
+describe("Enter in the recipient field", () => {
+  const VALID = "GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY";
+
+  /** The address field in the screen's element tree, found by its label. */
+  function field(flow: Flow): { onKeyDown?: (event: unknown) => void } {
+    const find = (node: unknown): { onKeyDown?: (event: unknown) => void } | undefined => {
+      if (node === null || typeof node !== "object") return undefined;
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const hit = find(child);
+          if (hit !== undefined) return hit;
+        }
+        return undefined;
+      }
+      const props = (node as { props?: Record<string, unknown> }).props;
+      if (props === undefined) return undefined;
+      if (props["aria-label"] === "Stellar address") return props;
+      return find(props.children);
+    };
+    const hit = find(renderAddress(flow));
+    if (hit === undefined) throw new Error("no address field");
+    return hit;
+  }
+
+  function press(flow: Flow, key: string, isComposing = false): { prevented: boolean } {
+    const seen = { prevented: false };
+    field(flow).onKeyDown?.({
+      key,
+      nativeEvent: { isComposing },
+      preventDefault: () => {
+        seen.prevented = true;
+      },
+    });
+    return seen;
+  }
+
+  it("uses a valid address, as the button does", () => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, screen: "address", destination: VALID };
+    const went = vi.spyOn(flow, "go").mockImplementation(() => {});
+    expect(press(flow, "Enter").prevented).toBe(true);
+    expect(went).toHaveBeenCalledWith("send", "pop");
+  });
+
+  it("stays on the screen for one that is not, with its reason still shown", () => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, screen: "address", destination: "not-an-address" };
+    const went = vi.spyOn(flow, "go").mockImplementation(() => {});
+    press(flow, "Enter");
+    expect(went).not.toHaveBeenCalled();
+    expect(renderToStaticMarkup(renderAddress(flow))).toContain(
+      "A Stellar address starts with G or C",
+    );
+  });
+
+  it("leaves other keys, and an Enter that ends an input method's composition, alone", () => {
+    const flow = new Flow({ engine });
+    flow.state = { ...flow.state, screen: "address", destination: VALID };
+    const went = vi.spyOn(flow, "go").mockImplementation(() => {});
+    expect(press(flow, "a").prevented).toBe(false);
+    expect(press(flow, "Enter", true).prevented).toBe(false);
+    expect(went).not.toHaveBeenCalled();
   });
 });
 

@@ -43,6 +43,18 @@ export function short(address: string): string {
 }
 
 /**
+ * A rail's sentence with every Stellar key or contract id and every EVM
+ * address in it put the way `short` puts an address, so a decline reads like
+ * the rest of the widget instead of running a 56 character id across the card.
+ */
+export function shortIds(text: string): string {
+  return text.replace(
+    /(?<![A-Za-z0-9])(?:[GC][A-Z2-7]{55}|M[A-Z2-7]{68}|0x[0-9a-fA-F]{40})(?![A-Za-z0-9])/g,
+    short,
+  );
+}
+
+/**
  * The design's `destValid`: an address value can be paid to, an account (G), a
  * muxed account (M) or a contract (C), with its checksum checked too. A
  * mistyped one has the right shape, so a shape check passed it here while

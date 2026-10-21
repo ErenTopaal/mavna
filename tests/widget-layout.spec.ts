@@ -273,3 +273,54 @@ test("the compact widget can be as narrow as a small phone's column", async ({ p
   });
   expect(narrowest).toBeLessThanOrEqual(320);
 });
+
+for (const [layout, path] of [
+  ["wide", ""],
+  ["compact", "playground"],
+] as const) {
+  test(`Enter in the recipient field uses the address, in the ${layout} layout`, async ({
+    page,
+    baseURL,
+  }) => {
+    const url = path === "" ? (baseURL ?? "/") : `http://localhost:${PORTS.playground}/`;
+    await offline(page, url);
+    await page.goto(url);
+    const root = page.locator(".mv-root").first();
+    await root.getByRole("button", { name: /Recipient/ }).click();
+    const field = root.getByRole("textbox", { name: "Stellar address" });
+    await field.focus();
+    // not an address: the screen stays, and says why
+    await field.fill("not-an-address");
+    await page.keyboard.press("Enter");
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(root.getByText(/A Stellar address starts with G or C/)).toBeVisible();
+    // an address: Enter does what the button does
+    await field.fill("GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY");
+    await page.keyboard.press("Enter");
+    await expect(field).toBeHidden();
+    await expect(root.getByRole("button", { name: /Recipient/ })).toContainText("GDDS3…LCUY");
+  });
+}
+
+test("a decline's long unbroken text wraps inside its card", async ({ page, baseURL }) => {
+  await offline(page, baseURL);
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  await root.getByRole("button", { name: /Recipient/ }).click();
+  await root
+    .getByRole("textbox", { name: "Stellar address" })
+    .fill("GDDS36IOD3FK6AJPFJTMBECSGSTP357B2VOXQBZFALCJQGNLNY54LCUY");
+  await root.getByRole("button", { name: "Use this address" }).click();
+  await root.getByRole("textbox", { name: "Amount to send" }).fill("10");
+  const reason = root.getByText("Declined").first().locator("../..").locator("p");
+  await expect(reason).toBeVisible({ timeout: 30_000 });
+  // offline every rail declines in words of its own; what matters is a run no
+  // space breaks, like the contract ids rails quote, laid out by the browser
+  const fits = await reason.evaluate((el) => {
+    el.textContent = `This route delivers USDC as ${"C".repeat(56)} on Stellar, which is not USDC:${"G".repeat(56)}.`;
+    const card = el.parentElement as HTMLElement;
+    return { text: el.scrollWidth <= el.clientWidth, card: card.scrollWidth <= card.clientWidth };
+  });
+  expect(fits).toEqual({ text: true, card: true });
+});
