@@ -1117,6 +1117,16 @@ function flightAnnouncement(steps: readonly FlightStep[], eyebrow: string): stri
   return [`${lead}: ${now.label}.`, now.note ?? ""].join(" ").trim();
 }
 
+/** How long a transfer took, said in the largest unit that reads naturally. */
+function tookLabel(seconds: number): string {
+  if (seconds < 60) return "Under a minute";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
 export function renderFlight(
   c: Flow,
   d: {
@@ -1146,11 +1156,9 @@ export function renderFlight(
           { key: "sent", name: "Sent", value: sentLabel(r) },
           { key: "rail", name: "Rail", value: railLabel(r) },
           { key: "to", name: "Recipient", value: short(r.route.destination) },
-          {
-            key: "eta",
-            name: arrived ? "Took" : "Estimated time",
-            value: `About ${r.minutes} min`,
-          },
+          arrived && c.state.tookSeconds !== null
+            ? { key: "eta", name: "Took", value: tookLabel(c.state.tookSeconds) }
+            : { key: "eta", name: "Estimated time", value: `About ${r.minutes} min` },
         ];
   const { stepEyebrow, stepCount, stepRows } = c.flightVals(arrived);
   return (

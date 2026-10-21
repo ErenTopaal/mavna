@@ -154,6 +154,10 @@ interface State {
   flying: RouteView | null;
   /** A new send repeats one that may still arrive; it waits for an explicit yes. */
   askAgain: boolean;
+  /** When the flight started, so an arrival can say how long it really took. */
+  flightStartedAtMs: number | null;
+  /** Seconds from start to arrival, once arrived. */
+  tookSeconds: number | null;
 }
 
 export interface FlowProps {
@@ -294,6 +298,8 @@ export class Flow extends React.Component<FlowProps, State> {
     arrivedAs: null,
     flying: null,
     askAgain: false,
+    flightStartedAtMs: null,
+    tookSeconds: null,
   };
 
   /** The widget's own outermost element; nothing outside it is the widget's to touch. */
@@ -1145,10 +1151,22 @@ export class Flow extends React.Component<FlowProps, State> {
     // sets an account up was offered, which is the only kind it changes.
     const steps = buildSteps(view, this.state.reserveFunding);
     this.emit({ type: "transferStarted" });
-    this.setState({ phase: "sending", steps, flying: view, askAgain: false }, () => {
-      this.go("flight", "push");
-      this.timers.push(setTimeout(() => void this.runTransfer(view, chain), this.DUR * 1000 + 20));
-    });
+    this.setState(
+      {
+        phase: "sending",
+        steps,
+        flying: view,
+        askAgain: false,
+        flightStartedAtMs: Date.now(),
+        tookSeconds: null,
+      },
+      () => {
+        this.go("flight", "push");
+        this.timers.push(
+          setTimeout(() => void this.runTransfer(view, chain), this.DUR * 1000 + 20),
+        );
+      },
+    );
   }
 
   async runTransfer(view: RouteView, chain: SourceDetail): Promise<void> {
@@ -1326,8 +1344,19 @@ export class Flow extends React.Component<FlowProps, State> {
    * What every ending clears: the quote that was sent is spent, so the form's
    * routes go and nothing leads back to its review.
    */
-  private afterEnding(): Pick<State, "routes" | "selected" | "picked" | "complete" | "cameFrom"> {
-    return { routes: [], selected: null, picked: false, complete: false, cameFrom: null };
+  private afterEnding(): Pick<
+    State,
+    "routes" | "selected" | "picked" | "complete" | "cameFrom" | "tookSeconds"
+  > {
+    const started = this.state.flightStartedAtMs;
+    return {
+      routes: [],
+      selected: null,
+      picked: false,
+      complete: false,
+      cameFrom: null,
+      tookSeconds: started === null ? null : Math.round((Date.now() - started) / 1000),
+    };
   }
 
   /** Remember a transfer whose money moved, so sending it again is asked about first. */

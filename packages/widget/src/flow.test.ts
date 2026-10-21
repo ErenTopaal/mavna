@@ -434,6 +434,30 @@ describe("an arrival that stayed as it came", () => {
   });
 });
 
+describe("how long an arrived transfer took", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is the time it actually took, not the estimate it was quoted with", () => {
+    // a sepolia transfer quoted at about five minutes arrived after nineteen
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-21T13:09:28Z"));
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.start();
+    vi.setSystemTime(new Date("2026-10-21T13:28:32Z"));
+    flow.arrive();
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC", arrived: true }),
+    );
+    expect(html).toContain("Took");
+    expect(html).toContain("19 min");
+    expect(html).not.toContain(`About ${view.minutes} min`);
+  });
+});
+
 describe("what the user wants to receive", () => {
   it("follows the configured wanted on a USDT0 send", () => {
     const flow = new Flow({ engine, init: { send: "USDT0", wanted: "XLM" } });
