@@ -251,13 +251,14 @@ export function renderSend(
             {sym}
           </span>
         </div>
-        {r !== undefined ? (
+        {/* held open while an amount waits on its quote, so the rows below stay put when it lands */}
+        {r !== undefined || !d.resting ? (
           <p
             style={s(
               "margin:10px 0 0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.13em;text-transform:uppercase;color:var(--mv-faint)",
             )}
           >
-            {floorLine}
+            {r === undefined ? "\u00a0" : floorLine}
           </p>
         ) : null}
       </div>

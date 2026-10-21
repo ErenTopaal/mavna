@@ -940,3 +940,36 @@ describe("a figure too long for its card", () => {
     );
   });
 });
+
+describe("the form while a quote is on its way", () => {
+  // the line under the receive figure, empty or not, is what keeps the rows below still
+  const floorRow = (html: string): number => (html.match(/letter-spacing:0.13em/g) ?? []).length;
+
+  it("keeps the floor line's row, so the rows below do not jump when the quote lands", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const chain = { id: "x", name: "X" };
+    const view = flow.chosen();
+    const waiting = renderToStaticMarkup(
+      renderSend(flow, { r: undefined, chain, sym: "USDC", xlm: false, resting: false }),
+    );
+    const landed = renderToStaticMarkup(
+      renderSend(flow, { r: view, chain, sym: "USDC", xlm: false, resting: false }),
+    );
+    expect(floorRow(landed)).toBe(1);
+    expect(floorRow(waiting)).toBe(1);
+  });
+
+  it("has no floor line with no amount to quote", () => {
+    const flow = quotedFlow({ terms: 0 });
+    const html = renderToStaticMarkup(
+      renderSend(flow, {
+        r: undefined,
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+        xlm: false,
+        resting: true,
+      }),
+    );
+    expect(floorRow(html)).toBe(0);
+  });
+});
