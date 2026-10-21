@@ -133,12 +133,10 @@ const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL |
 function Live({
   config,
   hold,
-  fit,
   style,
 }: {
   readonly config: MavnaWidgetConfig;
   readonly hold: number;
-  readonly fit?: boolean;
   readonly style?: CSSProperties;
 }): ReactNode {
   const ref = useRef<HTMLDivElement>(null);
@@ -158,11 +156,7 @@ function Live({
     };
   }, [show]);
   return (
-    <div
-      ref={ref}
-      data-fit={fit ? "" : undefined}
-      style={{ minHeight: show ? undefined : hold, ...style }}
-    >
+    <div ref={ref} style={{ minHeight: show ? undefined : hold, ...style }}>
       {show ? (
         <MavnaWidget
           config={SPONSOR_URL === undefined ? config : { ...config, sponsorUrl: SPONSOR_URL }}
@@ -864,7 +858,6 @@ export function Landing(): ReactNode {
               />
               <Live
                 hold={540}
-                fit
                 style={{ position: "relative", width: "100%", maxWidth: 440 }}
                 config={{
                   integrator: "web.mavna.app",
