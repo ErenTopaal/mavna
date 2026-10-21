@@ -87,7 +87,7 @@ describe("requestSettlement", () => {
   it("asks for the repayment in the asset the route delivers", async () => {
     const bodies: unknown[] = [];
     vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)));
+      bodies.push(JSON.parse(init?.body as string));
       return new Response(JSON.stringify({ xdr: "AAAA", channel: "G" }), { status: 200 });
     });
     await client.requestSettlement("GDEST", "arbitrum", "USDT0");
