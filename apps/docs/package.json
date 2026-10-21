@@ -4,17 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/sync-reference.mjs && next dev",
-    "build": "node scripts/sync-reference.mjs && next build && pagefind --site .next/server/app --output-path public/_pagefind",
-    "build:test": "node scripts/sync-reference.mjs && MAVNA_NEXT_DIST_DIR=.next-test next build",
-    "start": "next start",
-    "typecheck": "node scripts/sync-reference.mjs && tsc --noEmit",
+    "dev": "node scripts/sync-reference.mjs && react-router dev",
+    "build": "node scripts/sync-reference.mjs && react-router build",
+    "build:test": "node scripts/sync-reference.mjs && MAVNA_BUILD_OUT_DIR=dist-test react-router build",
+    "preview": "vite preview --outDir dist/client",
+    "typecheck": "node scripts/sync-reference.mjs && react-router typegen && tsc --noEmit",
     "test": "vitest run --project unit --root ../.. apps/docs",
     "sync:reference": "node scripts/sync-reference.mjs",
     "example:quote": "node examples/quote.ts"
   },
   "dependencies": {
-    "@fontsource-variable/figtree": "5.3.0",
+    "@fontsource/azeret-mono": "5.3.0",
+    "@fontsource/instrument-sans": "5.3.0",
     "@mavna/adapter-axelar": "workspace:*",
     "@mavna/adapter-cctp": "workspace:*",
     "@mavna/adapter-layerzero": "workspace:*",
@@ -24,16 +25,22 @@
     "@mavna/status": "workspace:*",
     "@mavna/stellar": "workspace:*",
     "@mavna/widget": "workspace:*",
-    "next": "16.4.2",
-    "nextra": "4.6.1",
-    "nextra-theme-docs": "4.6.1",
+    "@react-router/node": "8.5.0",
+    "fumadocs-core": "16.17.7",
+    "fumadocs-mdx": "15.4.8",
+    "fumadocs-ui": "16.17.7",
+    "isbot": "5.2.2",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "react-router": "8.5.0"
   },
   "devDependencies": {
+    "@react-router/dev": "8.5.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/mdx": "2.0.14",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "pagefind": "1.5.2",
-    "typescript": "6.0.3"
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.4"
   }
 }

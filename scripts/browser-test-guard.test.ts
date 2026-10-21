@@ -25,8 +25,8 @@ function tree(files: Record<string, string>): string {
 function testBuild(docsSponsor = SPONSOR): Record<string, string> {
   const files: Record<string, string> = {
     "apps/app/dist-test/harness/buffer-free.html": "<html>",
-    "apps/docs/.next-test/BUILD_ID": "x",
-    "apps/docs/.next-test/static/chunks/app/widget/page-1.js": `fetch("${docsSponsor}/health")`,
+    "apps/docs/dist-test/client/index.html": "<html>",
+    "apps/docs/dist-test/client/assets/LiveWidget-1.js": `fetch("${docsSponsor}/health")`,
   };
   for (const app of ["app", "playground", "web"]) {
     files[`apps/${app}/dist-test/index.html`] =
@@ -50,17 +50,17 @@ describe("the browser tests' build guard", () => {
   it("refuses when only a host build exists, whatever it was built for", () => {
     const files: Record<string, string> = {};
     for (const [path, text] of Object.entries(testBuild())) {
-      files[path.replace("/dist-test/", "/dist/").replace("/.next-test/", "/.next/")] = text;
+      files[path.replace("/dist-test/", "/dist/")] = text;
     }
     expect(testBuildProblem(tree(files), SPONSOR)).toMatch(/missing|no build/);
   });
 });
 
 describe("the host build's fingerprint", () => {
-  it("changes when anything in dist/ or .next changes, and not for the test directories", () => {
+  it("changes when anything in dist/ changes, and not for the test directories", () => {
     const root = tree({
       "apps/app/dist/index.html": "a",
-      "apps/docs/.next/BUILD_ID": "1",
+      "apps/docs/dist/client/index.html": "1",
     });
     const before = hostBuildFingerprint(root);
     mkdirSync(join(root, "apps/web/dist-test"), { recursive: true });
@@ -68,6 +68,9 @@ describe("the host build's fingerprint", () => {
     expect(hostBuildFingerprint(root)).toBe(before);
     writeFileSync(join(root, "apps/app/dist/index.html"), "b-longer");
     expect(hostBuildFingerprint(root)).not.toBe(before);
+    const docsBefore = hostBuildFingerprint(root);
+    writeFileSync(join(root, "apps/docs/dist/client/index.html"), "2-longer");
+    expect(hostBuildFingerprint(root)).not.toBe(docsBefore);
   });
 });
 
@@ -81,7 +84,7 @@ describe("what a cached browser-test build may restore", () => {
         tasks: Record<string, { outputs?: string[] }>;
       }
     ).tasks;
-  const host = ["dist/", ".next/", "public/"];
+  const host = ["dist/", "public/"];
 
   it.each(["app", "playground", "web", "docs"])("is only the test directories for %s", (app) => {
     const test = tasks(app)["build:test"]?.outputs ?? [];

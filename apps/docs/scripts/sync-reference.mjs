@@ -100,12 +100,6 @@ const EXCERPTS = [
   },
 ];
 
-/** Runnable examples, embedded as the real file rather than a copy that drifts. */
-const EXAMPLES = [
-  { slug: "example-quote", file: "apps/docs/examples/quote.ts", lang: "ts" },
-  { slug: "example-panel", file: "apps/docs/examples/Panel.tsx", lang: "tsx" },
-];
-
 // Cleared rather than overwritten. A file left behind from an older excerpt list
 // is a page of documentation for a type nobody removed from the docs.
 rmSync(out, { recursive: true, force: true });
@@ -138,27 +132,11 @@ for (const excerpt of EXCERPTS) {
   );
 }
 
-for (const example of EXAMPLES) {
-  const source = readFileSync(join(repo, example.file), "utf8").trimEnd();
-  writeFileSync(
-    join(out, `${example.slug}.mdx`),
-    [
-      generatedNotice(example.file),
-      "",
-      `\`\`\`${example.lang} filename="${example.file}"`,
-      source,
-      "```",
-      "",
-    ].join("\n"),
-  );
-}
-
 writeFileSync(join(out, "widget-tokens.mdx"), tokenTable());
 
 console.log(
   `reference: ${exported} exports across ${PACKAGES.length} packages, ` +
-    `${EXCERPTS.length} source excerpts, ${EXAMPLES.length} examples, ` +
-    `tokens read from widget.css`,
+    `${EXCERPTS.length} source excerpts, tokens read from widget.css`,
 );
 
 /** Every name an index re-exports, with whether it is a type or a value. */

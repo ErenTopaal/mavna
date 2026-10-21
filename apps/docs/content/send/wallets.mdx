@@ -1,0 +1,37 @@
+---
+title: Connect your wallets
+description: Which wallets the app connects on each side of a transfer, and when you need a Stellar wallet.
+---
+
+A transfer has two sides: the chain your money is on, and Stellar. You always connect a wallet on
+the sending side. You connect a Stellar wallet only when the transfer needs the receiving account to
+approve something.
+
+Press **Connect** in the top bar of the app. The menu has two sections, **Source wallet** and
+**Stellar wallet**, and each has its own **Disconnect**.
+
+## Source wallet
+
+The menu lists every wallet your browser offers to the page, by name. Choose yours and approve the
+connection in it. If no wallet is installed, the menu says **No wallet found in this browser**.
+
+This is the wallet that holds your USDC or USDT0 and approves the sending side of the transfer. When
+it is on a different network from the chain you send from, the app asks it to switch.
+
+## Stellar wallet
+
+Press **Connect** under **Stellar wallet** and choose one of Freighter, xBull, Albedo, Lobstr, Hana
+or Rabet. The wallet has to hold the account the transfer goes to: if you connect a different
+account, the app says which one it needs.
+
+You need a Stellar wallet in these cases:
+
+- **Sending to a new address**, where the account approves the repayment and its own setup. See
+  [Send to a new Stellar address](/send/new-address).
+- **Receiving another asset than the one that crosses**, such as XLM, where the account approves the
+  conversion. See [Receive XLM instead](/send/receive-xlm).
+- **A deployment whose sponsor covers no costs**, where the account signs the delivery on Stellar
+  and pays its network fee in XLM.
+
+For a USDC transfer to an account that can already hold USDC, with the sponsor paying for the
+delivery, you need no Stellar wallet at all.

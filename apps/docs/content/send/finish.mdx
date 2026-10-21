@@ -1,0 +1,36 @@
+---
+title: Finish a delivery
+description: Deliver a Circle transfer to Stellar yourself when it is taking longer than expected. Trying again never delivers twice.
+---
+
+A Circle transfer reaches Stellar in two parts: Circle attests the transfer, then a delivery
+transaction on Stellar mints the USDC to the recipient. If the page was closed before the delivery,
+or the delivery is taking longer than expected, you can trigger it yourself.
+
+## Finish it
+
+1. Open **Activity** and [find the transfer](/send/track) from the transaction you sent.
+2. When the transfer can be finished, a **Finish the delivery** button appears under the result.
+   Press it.
+
+The card then shows one of these:
+
+- **Delivered. The funds are on Stellar.**
+- **Circle has not attested it yet. Nothing is wrong; try again in a minute.**
+- A sentence that says what stopped the delivery and what to do about it.
+
+## Why trying again is safe
+
+Each Circle transfer can be delivered once. Pressing **Finish the delivery** for a transfer that
+already arrived changes nothing, and the card reports it as delivered.
+[Delivery](/how-it-works/delivery) explains how this is enforced.
+
+## When your Stellar wallet is asked
+
+The sponsor pays for the delivery. Your Stellar wallet is asked only in these cases:
+
+- **The address did not exist yet** and the account was never set up. The card asks you to connect
+  the recipient's Stellar wallet, sign the repayment again if the sponsor no longer holds it, and
+  set the account up.
+- **The deployment's sponsor covers no costs.** The recipient's Stellar wallet signs the delivery
+  and pays its network fee from its own XLM.

@@ -1,75 +1,17 @@
 ---
-title: Mavna
-description: Move USDC and USDT0 into Stellar from other chains. An app anyone can use, an SDK that builds transactions and never signs them, and a widget that renders the whole transfer.
+title: Mavna documentation
+description: Guides and reference for the Mavna app, the widget, the SDK and the sponsor service.
 ---
 
-# Mavna
+Mavna moves USDC and USDT0 from other chains to Stellar. It asks every rail that can carry a
+transfer at the same time, shows what arrives on each and who you trust to deliver it, and
+completes the transfer, including to a Stellar address that does not exist yet.
 
-Mavna moves USDC and USDT0 into Stellar. It asks every rail that can carry a transfer at
-once, shows what actually arrives after fees and who you are trusting to deliver
-it, and completes the transfer end to end, including to a Stellar address that
-does not exist yet and holds no XLM.
+It comes in three forms that share one engine: the Mavna app, a widget you embed in a React app,
+and an SDK of packages you build on. The SDK builds transactions and never signs them: every
+transaction that moves the user's money is signed in the user's own wallet.
 
-A mavna is the lighter: the flat-bottomed barge that carries cargo between a ship
-and the shore when the vessel cannot dock itself. The name is the delivery, not
-the crossing.
+<Paths />
 
-## Three ways in
-
-**[Use the app](/guides).** Open [mavna.app](https://mavna.app), pick a chain,
-paste a Stellar address, and see what arrives before you send anything. No
-account, no email, and nothing to install beyond the wallets you already have.
-
-**[Build with the SDK](/developers).** npm packages that put every rail behind
-one interface, rank routes, price the conversion into the asset you want, and
-hand back unsigned transactions for your own signing flow. The SDK never signs,
-never submits, and never holds a key.
-
-**[Embed the widget](/widget).** One React component that renders the quote, the
-confirmation, and the wait, and connects the wallets itself. It is styled by CSS
-custom properties, so it looks like your product.
-
-## What it moves, and from where
-
-Four rails, each a separate adapter behind one interface, each with its own
-trust model. The engine races every rail on offer on each quote and shows the
-differences side by side.
-
-| Rail | Trust model | Source chains | Assets into Stellar |
-| --- | --- | --- | --- |
-| Circle CCTP | The issuer burns and mints; nobody holds the money in between | 26 on testnet, 26 on mainnet: EVM, Solana, Starknet | USDC |
-| Axelar ITS | A named validator set attests | Resolved at runtime from Axelar's registry | Interchain Token Service tokens; USDC arrives as Axelar-wrapped USDC.axl, not Circle USDC |
-| LayerZero OFT | Verifiers chosen by whoever deployed the token | 12 on mainnet, 3 on testnet | USDT0 on mainnet, the only route to native USDT on Stellar; any OFT you deploy yourself |
-| NEAR Intents | Competing solvers fill it, the HOT Bridge pays out on Stellar | 13 EVM chains, mainnet only | USDC and XLM |
-
-On top of the rails, a swap leg converts what a bridge delivers into the asset
-you asked for, priced on Stellar exchanges: Soroswap, SushiSwap or Aquarius,
-the first that can quote it. That is how "send USDC, receive
-XLM" is one flow rather than a bridge followed by a manual trade.
-
-The network is a single configuration value. The deployment you use today runs on
-Stellar's test network, and the same code runs on mainnet: what differs between
-them is which of each rail's routes its own deployment carries.
-[Rails and networks](/developers/rails) states that difference precisely.
-
-## The part no other Stellar product does
-
-A Stellar account cannot hold USDC without a trustline, and a trustline costs a
-reserve in XLM that someone arriving from another chain does not have. Mavna
-completes transfers to a brand-new Stellar address holding zero XLM: a sponsor
-fronts the reserve, the account is created and made able to receive inside the
-flow, and the deposit repays itself out of the arriving funds. You are never
-asked to buy XLM first, and the word "trustline" never appears as a task.
-[How sponsorship works](/developers/concepts/sponsorship) explains the mechanism;
-[as a user you just paste an address](/guides/new-account).
-
-## Where to start
-
-- Sending money: [your first transfer](/guides).
-- Adding routing to your own interface: [the SDK quickstart](/developers/quickstart).
-- Embedding the full flow: [the widget quickstart](/widget/quickstart).
-- Running everything yourself, keys included: [the sponsor service](/developers/sponsor).
-
-Everything is open source under Apache-2.0, and every reference page on this site
-is generated from the source code at build time, so what you read here is what
-the code says.
+Mavna is open source under the Apache-2.0 license. The source is on
+[GitHub](https://github.com/ErenTopaal/mavna).

@@ -1,11 +1,11 @@
-// Serves the four test builds (dist-test/ and .next-test/) for the browser tests. It does not build:
+// Serves the four test builds (each app's dist-test/) for the browser tests. It does not build:
 // scripts/browser-test-build.mjs does, first, so Playwright's webServer timeout
 // covers serving only. Playwright waits on one url, so the app (that url)
 // starts only after the other three answer, and every spec finds all four up.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SPONSOR_URL } from "../tests/env.ts";
-import { NEXT_TEST_OUT, testBuildProblem, VITE_TEST_OUT } from "./browser-test-guard.mjs";
+import { DOCS_SITE, testBuildProblem, VITE_TEST_OUT } from "./browser-test-guard.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const base = Number(process.env.MAVNA_TEST_PORT ?? "4319");
@@ -24,8 +24,6 @@ function serve(pkg, args) {
   const child = spawn("pnpm", ["--filter", pkg, "exec", ...args], {
     cwd: root,
     stdio: "inherit",
-    // next start reads its build directory from next.config.mjs, which reads this
-    env: { ...process.env, MAVNA_NEXT_DIST_DIR: NEXT_TEST_OUT },
   });
   child.on("exit", (code) => {
     // a server that dies takes the run with it, rather than leaving tests to time out
@@ -70,7 +68,8 @@ serve("@mavna/web", [
   port(2),
   "--strictPort",
 ]);
-serve("@mavna/docs", ["next", "start", "--port", port(3)]);
+// the docs are static files, served the way the production proxy serves them
+serve("@mavna/docs", ["node", "scripts/serve.mjs", `${VITE_TEST_OUT}/${DOCS_SITE}`, port(3)]);
 
 const others = [1, 2, 3].map((offset) => `http://localhost:${port(offset)}`);
 const deadline = Date.now() + 120_000;

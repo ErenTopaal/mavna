@@ -1,0 +1,43 @@
+---
+title: What a transfer costs
+description: Every cost line on a quote and the review, and what each one means.
+---
+
+The large amount on a route is what arrives on Stellar after its costs. Each cost is its own line
+on the route or the review.
+
+## Transfer fee
+
+What the rail charges to carry the transfer, in the asset it is charged in, already taken out of the
+amount that arrives. For Circle, the fee comes from Circle's fee service each time you get a quote.
+
+## Network fees on the chain you send from
+
+Your wallet pays the network fee for each transaction you approve, in that chain's own currency,
+separately from the amount you send. LayerZero and Axelar also charge their delivery fee in the
+sending chain's currency; it is paid with the send transaction, on top of the amount.
+
+## Account reserve
+
+Shown only when the address does not exist yet: 1.50 XLM for a new account that holds one asset.
+The review calls it **Kept in your account**, because the XLM stays in the new account as its
+reserve. The sponsor provides it up front, and part of the arriving money pays it back, capped at
+an amount you approve before anything is sent. See
+[Send to a new Stellar address](/send/new-address).
+
+When the transfer also converts to another asset, the review adds
+**Left unconverted to repay the reserve**: the part of the arrival kept back for that repayment.
+
+On a deployment whose sponsor covers no reserves, an existing account pays its own reserve, shown
+as **Reserve, from your own XLM**.
+
+## Conversion
+
+When you [receive XLM instead](/send/receive-xlm), the conversion runs at the exchange's price. It
+has no fee line of its own; the route shows the **Conversion rate** and the minimum you receive.
+
+## Integrator fee
+
+A product that embeds Mavna can add its own fee on routes that convert on arrival. When it does,
+the review shows **Integrator fee** with the amount and who receives it. The Mavna app sets no
+integrator fee.

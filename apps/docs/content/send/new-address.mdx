@@ -1,0 +1,49 @@
+---
+title: Send to a new Stellar address
+description: Send to a Stellar address that does not exist yet and holds no XLM. You do not need to buy XLM first.
+---
+
+A Stellar address that does not exist on the network yet can still receive your transfer, and you
+do not need to buy XLM first. Stellar needs a small XLM reserve before an account can exist and hold
+an asset. The sponsor that the app works with covers that reserve up front, and a small part of the money that arrives
+pays it back.
+
+## What you do
+
+Paste the new address as the **Recipient**, exactly as you would any other address. The route
+gains one line, **Account reserve**: 1.50 XLM for a new account that holds one asset. The review
+shows the same amount as **Kept in your account**, because the XLM stays in the new account as its
+reserve.
+
+You need the Stellar wallet that holds the new address, because the account approves two steps of
+its own. [Connect your wallets](/send/wallets) covers connecting it.
+
+## The prompts
+
+For a Circle route, the card asks for these, in this order:
+
+1. **Approve the repayment first**, in your Stellar wallet, before anything is sent. This approves
+   the transaction that pays back the reserve out of the money that arrives. The card shows the
+   most it can spend before you sign.
+2. **Allow Circle to move your USDC** and **Send from** your chain, in the wallet that holds your
+   USDC, as for any transfer.
+3. **Set the account up**, in your Stellar wallet, once Circle has attested the transfer. This
+   creates the account and lets it hold USDC. It costs you nothing.
+
+On other rails the account is set up before the send instead, so both Stellar prompts come first.
+
+Until the account is set up, closing the page pauses the transfer, and the card says so. You can
+finish it later from [Activity](/send/finish).
+
+## Small transfers
+
+Setting up an account is only offered when enough arrives to pay the reserve back with room to
+spare. Below that, the route declines with the smallest amount that works, for example "Send at
+least 6 XLM of value, or send to an address that already has one."
+
+## When the sponsor does not cover reserves
+
+A Mavna deployment can run with its sponsor covering no reserves. The quote then declines an
+address that does not exist yet and says how much XLM to send it first. An existing account that
+cannot hold the asset yet allows it itself, and the review shows the cost as
+**Reserve, from your own XLM**.
