@@ -208,6 +208,21 @@ function sendsKey(view: RouteView): string {
 
 const ALL_RAILS: readonly RailName[] = ["Circle", "Axelar", "LayerZero", "NEAR Intents"];
 
+/** What detaching the routes panel writes over, and reattaching puts back. */
+const PANEL_KEYS = [
+  "position",
+  "pointerEvents",
+  "left",
+  "top",
+  "width",
+  "height",
+  "opacity",
+  "transform",
+  "zIndex",
+] as const;
+/** The ones among them the panel's own style sets. */
+const PANEL_OWN = ["position", "width", "height", "zIndex"] as const;
+
 export class Flow extends React.Component<FlowProps, State> {
   get engine(): Engine {
     return this.props.engine;
@@ -334,6 +349,8 @@ export class Flow extends React.Component<FlowProps, State> {
   private morphAnims: { stop: () => void }[] | undefined;
   private morphSeq: Record<string, number> | undefined;
   private lastNext: Record<string, ReturnType<typeof box>> | undefined;
+  /** The panel's inline style from before it was detached, for reattaching it. */
+  private panelStyle: Partial<Record<(typeof PANEL_OWN)[number], string>> | undefined;
   private onDown = (_e: MouseEvent): void => {};
   private onKey = (_e: KeyboardEvent): void => {};
 
@@ -542,6 +559,9 @@ export class Flow extends React.Component<FlowProps, State> {
   detachPanel(): void {
     const node = this.routesRef.current;
     if (node === null) return;
+    // react only writes the panel's own inline style when it changes, so the
+    // parts of it detaching overwrites have to be put back by hand on reattach
+    this.panelStyle ??= Object.fromEntries(PANEL_OWN.map((k) => [k, node.style[k]]));
     const row = node.parentElement;
     const rowBefore = row === null ? 0 : row.getBoundingClientRect().left;
     const x = node.offsetLeft;
@@ -579,21 +599,10 @@ export class Flow extends React.Component<FlowProps, State> {
   }
 
   reattachPanel(node: HTMLElement): void {
-    (
-      [
-        "position",
-        "pointerEvents",
-        "left",
-        "top",
-        "width",
-        "height",
-        "opacity",
-        "transform",
-        "zIndex",
-      ] as const
-    ).forEach((k) => {
-      node.style[k as never] = "" as never;
-    });
+    const kept = this.panelStyle;
+    this.panelStyle = undefined;
+    for (const k of PANEL_KEYS) node.style[k] = "";
+    for (const k of PANEL_OWN) node.style[k] = kept?.[k] ?? "";
   }
 
   showRoutesPanel(fromCardX?: number | null): void {
@@ -718,6 +727,7 @@ export class Flow extends React.Component<FlowProps, State> {
       this.detachPanel();
       this.hideTimer = setTimeout(() => {
         this.hideTimer = null;
+        this.panelStyle = undefined;
         this.setState({ routesMounted: false });
       }, this.DUR * 2000);
     }
