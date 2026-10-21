@@ -4,6 +4,7 @@ import {
   CCTP_CONTRACTS,
   deliveryFailureOf,
 } from "@mavna/adapter-cctp";
+import type { NetworkId } from "@mavna/core";
 import { Address, type Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
 import type { Engine } from "./engine";
 import { asError } from "./helpers";
@@ -25,10 +26,23 @@ export const OWN_DELIVERY_INCLUSION_FEE_STROOPS = 100_000;
 
 /**
  * The most the account is asked to have spare for the delivery, in stroops,
- * and the most a prepared delivery may cost before it is refused unsigned.
- * Several times the measured cost, so a busier network still fits.
+ * and the most a prepared delivery may cost before it is refused unsigned. The
+ * quote and the delivery both hold to this one figure, so a route the quote
+ * offered is not refused when it is delivered.
+ *
+ * Measured over every direct `mint_and_forward` in RPC retention on
+ * 2026-10-21, with the 100,000 stroop inclusion bid added. Mainnet: 5,713
+ * deliveries, resource fee median 320,314, highest 427,413, so at most 527,413.
+ * Testnet: 382 deliveries, median 248,221, highest 1,237,525, so at most
+ * 1,337,525. The dear ones pay rent: Circle's minter extends the TTL of its
+ * per-source-domain entries (`RemoteTokenMessenger`, `RemoteTokenToLocal`) on
+ * whichever delivery finds them due, and testnet charges far more for it. Each
+ * figure leaves at least half as much again above the highest.
  */
-export const OWN_DELIVERY_FEE_BUDGET_STROOPS = 1_000_000n;
+export const OWN_DELIVERY_FEE_BUDGET_STROOPS: Readonly<Record<NetworkId, bigint>> = {
+  mainnet: 1_000_000n,
+  testnet: 2_000_000n,
+};
 
 /** The fee the sponsor bids on a self-funded trustline, in stroops. */
 export const OWN_TRUSTLINE_FEE_STROOPS = 1_000n;
@@ -96,7 +110,9 @@ export async function deliverOwn(
     };
   }
   const fee = BigInt(prepared.fee);
-  if (fee > OWN_DELIVERY_FEE_BUDGET_STROOPS) return { kind: "too-costly", feeStroops: fee };
+  if (fee > OWN_DELIVERY_FEE_BUDGET_STROOPS[engine.network]) {
+    return { kind: "too-costly", feeStroops: fee };
+  }
 
   // A wallet that said no is the user's answer, and a signed delivery that did
   // not go through has already cost its fee: neither is asked again on a timer.

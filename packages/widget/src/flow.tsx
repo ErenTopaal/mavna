@@ -1667,7 +1667,10 @@ export class Flow extends React.Component<FlowProps, State> {
         known?.sourceChainId,
       );
       if (outcome.kind === "too-costly") {
-        this.setState({ lookupNote: tooCostly(outcome.feeStroops), lookupNoteKind: "fault" });
+        this.setState({
+          lookupNote: tooCostly(outcome.feeStroops, this.engine.network),
+          lookupNoteKind: "fault",
+        });
       } else if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
         this.setState({
           lookupNote: "Delivered. The funds are on Stellar.",

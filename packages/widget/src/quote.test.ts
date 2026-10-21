@@ -26,6 +26,7 @@ import {
   approvalsLabel,
   buildAssets,
   declineUnsettleable,
+  deliveryBudget,
   railsLabel,
   runQuote,
   type SponsorCheck,
@@ -777,21 +778,21 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
 
   it("is offered to an account that can spare the delivery fee", () => {
     const route = routeFor("cctp");
-    expect(only(route, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([counted(route)]);
+    expect(only(route, OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet).routes).toEqual([counted(route)]);
   });
 
   it("is declined, with what it costs and what the account has, when it cannot", () => {
-    const set = only(routeFor("cctp"), OWN_DELIVERY_FEE_BUDGET_STROOPS - 1n);
+    const set = only(routeFor("cctp"), OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet - 1n);
     expect(set.routes).toEqual([]);
     expect(set.rejected[0]).toMatchObject({ source: "cctp", reason: "destination-unsupported" });
     expect(set.rejected[0]?.explanation).toMatch(
-      /pays for Circle's delivery on Stellar from its own XLM: up to 0\.1 XLM, and it has 0\.0999999 XLM to spare/,
+      /pays for Circle's delivery on Stellar from its own XLM: up to 0\.2 XLM, and it has 0\.1999999 XLM to spare/,
     );
   });
 
   it("counts the trustline's reserve too when the account must open one", () => {
     const route = routeFor("cctp", { newAccount: true });
-    const enough = OWN_DELIVERY_FEE_BUDGET_STROOPS + 5_000_000n + 1_000n;
+    const enough = OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet + 5_000_000n + 1_000n;
     expect(only(route, enough).routes).toEqual([counted(route)]);
     const set = only(route, enough - 1n);
     expect(set.routes).toEqual([]);
@@ -809,7 +810,7 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
       ...routeFor("cctp"),
       sends: { asset: SOURCE_USDC, baseUnits: "10" },
     };
-    expect(only(small, OWN_DELIVERY_FEE_BUDGET_STROOPS).routes).toEqual([counted(small)]);
+    expect(only(small, OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet).routes).toEqual([counted(small)]);
   });
 
   it("leaves rails that deliver by themselves alone", () => {
@@ -866,7 +867,7 @@ describe("a Circle transfer whose receiving account pays its own delivery", () =
         );
       });
     // one subentry: a minimum of 1.5 XLM
-    balance = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS;
+    balance = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet;
     expect((await quoted()).routes).toEqual([counted(route)]);
     balance -= 1n;
     expect((await quoted()).routes).toEqual([]);
@@ -1486,7 +1487,7 @@ describe("a muxed or contract recipient", () => {
   it("reads a muxed recipient's own delivery fee from the account it wraps", async () => {
     const route = to(routeFor("cctp"), muxed);
     const asked: string[] = [];
-    const enough = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS;
+    const enough = 15_000_000n + OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet;
     const set = await quoted(route, "self", asked, enough, "USDC");
     expect(set.rejected).toEqual([]);
     expect(set.routes).toHaveLength(1);
@@ -1513,5 +1514,13 @@ describe("a muxed or contract recipient", () => {
         expect(set.rejected[0]?.explanation).toMatch(/muxed address/);
       }
     }
+  });
+});
+
+describe("the most a delivery the account pays may cost", () => {
+  it("is held per network, to what deliveries there were measured to cost", () => {
+    // highest of 5,713 mainnet deliveries: 527,413 stroops; of 382 testnet ones: 1,337,525
+    expect(deliveryBudget("mainnet")).toBe(1_000_000n);
+    expect(deliveryBudget("testnet")).toBe(2_000_000n);
   });
 });

@@ -482,7 +482,7 @@ describe("a review where the account pays its own Circle delivery", () => {
     // the account then paid 0.0139706 XLM for its own delivery
     const html = review("cctp", "self");
     expect(html).toContain("Delivery fee, from your own XLM");
-    expect(html).toContain("Up to 0.1 XLM");
+    expect(html).toContain("Up to 0.2 XLM");
   });
 
   it("shows none where the sponsor pays it or the rail delivers by itself", () => {

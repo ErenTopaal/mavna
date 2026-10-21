@@ -58,8 +58,9 @@ never its `explanation`.
 
 The account that signs the conversion pays its network fee. When it quotes, the widget declines a
 route that converts unless the receiving account has 0.1 XLM to spare above its minimum balance,
-and 0.1 XLM more when it also pays for its own Circle delivery. An account the sponsor sets up holds
-exactly its minimum, so a route that converts to a new account is declined.
+and more when it also pays for its own Circle delivery: 0.1 XLM on the main network, 0.2 XLM on the
+test network. An account the sponsor sets up holds exactly its minimum, so a route that converts
+to a new account is declined.
 
 When the transfer reaches the conversion, the widget asks the exchanges for a fresh price, refuses
 to continue if it is below the minimum the sender was shown, builds the transaction, and refuses

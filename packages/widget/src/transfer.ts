@@ -712,7 +712,7 @@ async function deliverToStellar(
       tellClosing("watching" in outcome && outcome.watching === true);
     }
     if (outcome.kind === "too-costly") {
-      throw new StillMoving(tooCostly(outcome.feeStroops));
+      throw new StillMoving(tooCostly(outcome.feeStroops, engine.network));
     }
     if (outcome.kind === "refused") throw new StillMoving(`${outcome.detail} ${AFTER_BURN}`);
     if (outcome.kind === "delivered" || outcome.kind === "already-delivered") {
@@ -922,10 +922,10 @@ const BURN_AMOUNT_INDEX = 68;
 const BURN_FEE_EXECUTED_INDEX = 164;
 
 /** Why a delivery the account would pay for was left unsigned. */
-export function tooCostly(feeStroops: bigint): string {
+export function tooCostly(feeStroops: bigint, network: NetworkId): string {
   return (
     `Delivering on Stellar costs ${stroopsToXlm(feeStroops)} XLM right now, more than the ` +
-    `${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM this page asks an account to spend on ` +
+    `${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS[network])} XLM this page asks an account to spend on ` +
     "it, so it was not signed. The funds are safe and still deliverable: finish the delivery " +
     "later under Activity."
   );

@@ -1,6 +1,6 @@
 import { buildForwarderHookData, CctpAdapter, toHex } from "@mavna/adapter-cctp";
 import type { BridgeAdapter } from "@mavna/core";
-import { buildPreparation, createNetworkConfig, RpcClient } from "@mavna/stellar";
+import { buildPreparation, createNetworkConfig, RpcClient, stroopsToXlm } from "@mavna/stellar";
 import { createSwapVenues } from "@mavna/swap";
 import {
   Account,
@@ -1397,7 +1397,7 @@ describe("runTransfer when the account pays its own reserve", () => {
 
   it("over Circle, leaves a delivery that costs more than it should unsigned and still deliverable", async () => {
     funding = "self";
-    preparedFee = (OWN_DELIVERY_FEE_BUDGET_STROOPS + 1n).toString();
+    preparedFee = (OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet + 1n).toString();
     const cctp = new CctpAdapter({
       network: "testnet",
       rpc: stellarNode(),
@@ -1405,8 +1405,27 @@ describe("runTransfer when the account pays its own reserve", () => {
     });
     const error = await run(cctp, routeFor("cctp"), patches().patch).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(StillMoving);
-    expect((error as Error).message).toMatch(/0\.1000001 XLM.*Activity/);
+    expect((error as Error).message).toContain(
+      `${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet + 1n)} XLM`,
+    );
+    expect((error as Error).message).toMatch(/Activity/);
     expect(log).not.toContain("stellar sign DELIVERY");
+  });
+
+  it("over Circle, signs a delivery that pays for Circle's rent extension, as measured on testnet", async () => {
+    // e659e006 on testnet: the delivery that extended the ttl of Circle's
+    // per-domain entries simulated at a 1,221,553 stroop resource fee, plus the
+    // 100,000 stroop inclusion bid; the quote accepted it and Finish refused it
+    funding = "self";
+    preparedFee = "1321553";
+    const cctp = new CctpAdapter({
+      network: "testnet",
+      rpc: stellarNode(),
+      baseReserveStroops: 5_000_000,
+    });
+    await run(cctp, routeFor("cctp"), patches().patch);
+    expect(log).toContain("stellar sign DELIVERY");
+    expect(log.at(-1)).toBe("deliver done");
   });
 
   it("over Circle, opens a trustline that went missing after the quote, checked like any other", async () => {

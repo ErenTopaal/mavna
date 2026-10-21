@@ -703,7 +703,7 @@ function conversionFeeBlocker(
   // paying for its own Circle delivery comes out of the same XLM first
   const delivery =
     route.source === "cctp" && check.terms.reserveFunding === "self"
-      ? OWN_DELIVERY_FEE_BUDGET_STROOPS
+      ? deliveryBudget(check.network)
       : 0n;
   if (spare >= CONVERSION_FEE_BUDGET_STROOPS + delivery) return undefined;
   return [
@@ -736,6 +736,14 @@ export function conversionFeeRefusal(
       : `it has ${stroopsToXlm(spare > 0n ? spare : 0n)} XLM to spare. `) +
     `Receive ${arrives}, or add a little XLM to the account first.`
   );
+}
+
+/** The most a delivery the account pays may cost on this page's network. */
+export function deliveryBudget(network: string): bigint {
+  // a network this page does not know is held to the higher of the two
+  return network === "mainnet"
+    ? OWN_DELIVERY_FEE_BUDGET_STROOPS.mainnet
+    : OWN_DELIVERY_FEE_BUDGET_STROOPS.testnet;
 }
 
 /**
@@ -772,12 +780,13 @@ function ownDeliveryBlocker(
     ];
   }
   const reserve = setsUp ? BigInt(check.baseReserveStroops ?? 0) + OWN_TRUSTLINE_FEE_STROOPS : 0n;
-  if (check.spareStroops >= OWN_DELIVERY_FEE_BUDGET_STROOPS + reserve) return undefined;
+  const budget = deliveryBudget(check.network);
+  if (check.spareStroops >= budget + reserve) return undefined;
   const holds = route.deliveredAtLeast.asset.symbol;
   const spare = check.spareStroops > 0n ? check.spareStroops : 0n;
   return [
     "destination-unsupported",
-    `${pays}: up to ${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM` +
+    `${pays}: up to ${stroopsToXlm(budget)} XLM` +
       (setsUp
         ? `, plus ${stroopsToXlm(BigInt(check.baseReserveStroops ?? 0))} XLM to hold ${holds}`
         : "") +

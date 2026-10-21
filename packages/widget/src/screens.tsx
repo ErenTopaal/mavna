@@ -11,10 +11,10 @@ import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
 import { fmt, fmtAmount, fromBaseUnits, short } from "./format";
 import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
-import { OWN_DELIVERY_FEE_BUDGET_STROOPS } from "./own-delivery";
 import { pseudo } from "./pseudo";
 import {
   approvalsLabel,
+  deliveryBudget,
   enabledRailCount,
   type RailName,
   type RouteView,
@@ -984,7 +984,7 @@ export function renderReview(
                 {
                   key: "delivery",
                   name: "Delivery fee, from your own XLM",
-                  value: `Up to ${stroopsToXlm(OWN_DELIVERY_FEE_BUDGET_STROOPS)} XLM`,
+                  value: `Up to ${stroopsToXlm(deliveryBudget(c.state.network))} XLM`,
                 },
               ]
             : []),
