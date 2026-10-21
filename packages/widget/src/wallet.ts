@@ -177,10 +177,20 @@ export function chainFor(chainId: number, name: string, native: NativeCurrency |
   };
 }
 
-/** Wallets disagree on the shape of a rejection, so both forms are checked. */
+/**
+ * Wallets disagree on the shape of a rejection, so both forms are checked, at
+ * any depth: viem wraps the wallet's own error in two of its own before it
+ * reaches here, so the code is several causes down.
+ */
 export function isUserRejection(cause: unknown): boolean {
-  const code = codeOf(cause);
-  return code === 4001 || code === "ACTION_REJECTED";
+  let at: unknown = cause;
+  // bounded, so a cause that points back at itself cannot loop
+  for (let depth = 0; depth < 8 && typeof at === "object" && at !== null; depth += 1) {
+    const code = (at as { code?: unknown }).code;
+    if (code === 4001 || code === "ACTION_REJECTED") return true;
+    at = (at as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function codeOf(cause: unknown): unknown {

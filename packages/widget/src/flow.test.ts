@@ -395,6 +395,60 @@ describe("an integrator fee on a route", () => {
   });
 });
 
+describe("a review of a new account the sponsor sets up, arriving as USDC", () => {
+  it("says the reserve's repayment comes out of what arrives, and at most how much", () => {
+    const base = routeFor("cctp", { newAccount: true });
+    const route = {
+      ...base,
+      fees: [
+        ...base.fees,
+        {
+          kind: "reserve-repayment" as const,
+          total: { asset: base.deliveredAtLeast.asset, baseUnits: "3000000" },
+          recipients: [],
+          includedInQuote: false,
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      renderReview(quotedFlow({ terms: 0 }), {
+        r: toRouteView(route),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+      }),
+    );
+    expect(html).toContain("Repays the reserve, from what arrives");
+    expect(html).toContain("Up to 0.30 USDC");
+  });
+});
+
+describe("a review where the account pays its own Circle delivery", () => {
+  const review = (source: string, funding: "self" | "sponsor") => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, reserveFunding: funding };
+    return renderToStaticMarkup(
+      renderReview(flow, {
+        r: toRouteView(routeFor(source)),
+        chain: { id: "x", name: "X" },
+        sym: "USDC",
+      }),
+    );
+  };
+
+  it("shows the delivery fee the account pays, as its own line", () => {
+    // a live self-funded Sepolia transfer reviewed with no word of the fee;
+    // the account then paid 0.0139706 XLM for its own delivery
+    const html = review("cctp", "self");
+    expect(html).toContain("Delivery fee, from your own XLM");
+    expect(html).toContain("Up to 0.1 XLM");
+  });
+
+  it("shows none where the sponsor pays it or the rail delivers by itself", () => {
+    expect(review("cctp", "sponsor")).not.toContain("Delivery fee");
+    expect(review("layerzero", "self")).not.toContain("Delivery fee");
+  });
+});
+
 describe("fees and rates on a route", () => {
   const ETH = {
     chainId: "arbitrum-sepolia",
@@ -458,6 +512,48 @@ describe("an arrival that stayed as it came", () => {
     expect(html).toContain("Arrived on Stellar, not converted");
     expect(html).toContain("4.00");
     expect(html).toContain("USDC");
+  });
+
+  it("says why it was not converted, on the screen and not only in a hidden note", () => {
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero", { swap: true, delivers: STELLAR_XLM }));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.endWith(
+      new DeliveredAsCame(
+        "It was not converted: the account has no XLM to pay the conversion's network fee.",
+        "USDC",
+        "40000000",
+        7,
+      ),
+    );
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM", arrived: true }),
+    );
+    expect(html).toContain("the account has no XLM to pay the conversion&#x27;s network fee.");
+  });
+});
+
+describe("how long an arrived transfer took", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is the time it actually took, not the estimate it was quoted with", () => {
+    // a sepolia transfer quoted at about five minutes arrived after nineteen
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-21T13:09:28Z"));
+    const flow = applied(new Flow({ engine }));
+    const view = toRouteView(routeFor("layerzero"));
+    flow.state = { ...flow.state, ...FORM, routes: [view], selected: view.id };
+    flow.start();
+    vi.setSystemTime(new Date("2026-10-21T13:28:32Z"));
+    flow.arrive();
+    const html = renderToStaticMarkup(
+      renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC", arrived: true }),
+    );
+    expect(html).toContain("Took");
+    expect(html).toContain("19 min");
+    expect(html).not.toContain(`About ${view.minutes} min`);
   });
 });
 

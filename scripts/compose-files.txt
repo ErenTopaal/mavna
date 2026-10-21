@@ -194,6 +194,8 @@ packages/adapters/cctp/src/delivery.live.test.ts
 packages/adapters/cctp/src/delivery.test.ts
 packages/adapters/cctp/src/delivery.ts
 packages/adapters/cctp/src/fee.test.ts
+packages/adapters/cctp/src/finality.test.ts
+packages/adapters/cctp/src/finality.ts
 packages/adapters/cctp/src/hook.test.ts
 packages/adapters/cctp/src/hook.ts
 packages/adapters/cctp/src/index.ts
@@ -404,6 +406,7 @@ packages/widget/src/transfer.test.ts
 packages/widget/src/transfer.ts
 packages/widget/src/usdt0.test.ts
 packages/widget/src/usdt0.ts
+packages/widget/src/wallet.test.ts
 packages/widget/src/wallet.ts
 packages/widget/src/widget.css
 packages/widget/tsconfig.json

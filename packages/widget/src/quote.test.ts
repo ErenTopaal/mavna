@@ -236,6 +236,16 @@ describe("applySponsorTerms", () => {
     expect(set.routes).toEqual([
       {
         ...fresh,
+        // the most the repayment may take of what arrives, shown on its own line
+        fees: [
+          ...fresh.fees,
+          {
+            kind: "reserve-repayment",
+            total: { asset: fresh.deliveredAtLeast.asset, baseUnits: "3000000" },
+            recipients: [],
+            includedInQuote: false,
+          },
+        ],
         signaturesRequired: fresh.signaturesRequired + 2,
         optionalSignatures: (fresh.optionalSignatures ?? 0) + 1,
       },
@@ -1241,5 +1251,90 @@ describe("the approvals a route will ask for", () => {
     expect(approvalsLabel(toRouteView(route))).toBe("Up to 3 steps");
     const every = { ...routeFor("layerzero"), signaturesRequired: 2 };
     expect(approvalsLabel(toRouteView(every))).toBe("2 steps");
+  });
+});
+
+describe("a conversion the recipient pays the network fee for", () => {
+  // the conversion on Stellar is the recipient's own transaction, so an account
+  // with no XLM to spare cannot send it: a live Arc transfer to a zero-XLM
+  // account arrived and its conversion failed with txINSUFFICIENT_BALANCE
+  const intoXlm = routeFor("cctp", { swap: true, delivers: STELLAR_XLM });
+  const terms = {
+    network: "testnet",
+    reserveFunding: "sponsor" as const,
+    minDeliveryBaseUnits: 0n,
+  };
+  const offered = (
+    spareStroops: bigint | undefined,
+    destination: "exists" | "missing" = "exists",
+  ) =>
+    applySponsorTerms(
+      { routes: [intoXlm], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms,
+        destination,
+        spareStroops,
+        baseReserveStroops: 5_000_000,
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
+    );
+
+  it("is declined for an account with no XLM to spare, saying why and what to do", () => {
+    const set = offered(0n);
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]).toMatchObject({ reason: "destination-unsupported" });
+    expect(set.rejected[0]?.explanation).toMatch(/network fee/);
+    expect(set.rejected[0]?.explanation).toMatch(/0 XLM to spare/);
+    expect(set.rejected[0]?.explanation).toMatch(/Receive USDC/);
+  });
+
+  it("is offered to an account that can spare the fee", () => {
+    expect(offered(100_000_000n).routes).toEqual([intoXlm]);
+  });
+
+  it("is declined into a new account, which is set up holding only its minimum", () => {
+    const fresh = routeFor("cctp", { newAccount: true, swap: true, delivers: STELLAR_XLM });
+    const set = applySponsorTerms(
+      { routes: [fresh], rejected: [], complete: true },
+      {
+        network: "testnet",
+        terms,
+        destination: "missing",
+        baseReserveStroops: 5_000_000,
+        xlmStroopsPerUsdc: 100_000_000n,
+      },
+    );
+    expect(set.routes).toEqual([]);
+    expect(set.rejected[0]?.explanation).toMatch(/network fee/);
+  });
+});
+
+describe("a new account's reserve repaid from USDC that arrives as USDC", () => {
+  // a live Sepolia transfer to a new account was reviewed as "You receive 1.50
+  // USDC"; the settlement then took 0.37875 USDC of it to repay the reserve
+  const fresh = routeFor("cctp", { newAccount: true });
+  const set = applySponsorTerms(
+    { routes: [fresh], rejected: [], complete: true },
+    {
+      network: "testnet",
+      terms: { network: "testnet", reserveFunding: "sponsor", minDeliveryBaseUnits: 0n },
+      destination: "missing",
+      // 10 XLM to the USDC: the 1.5 XLM reserve may take up to 0.3 USDC
+      xlmStroopsPerUsdc: 100_000_000n,
+    },
+  );
+
+  it("carries the most the repayment may take of the arrival", () => {
+    const repayment = set.routes[0]?.fees.find((f) => f.kind === "reserve-repayment");
+    expect(repayment?.total).toEqual({ asset: fresh.deliveredAtLeast.asset, baseUnits: "3000000" });
+    expect(repayment?.includedInQuote).toBe(false);
+  });
+
+  it("is shown on the review as taken from what arrives", () => {
+    const route = set.routes[0];
+    if (route === undefined) throw new Error("declined");
+    const view = toRouteView(route);
+    expect(view.repaymentSetAside).toEqual({ amount: 0.3, symbol: "USDC" });
   });
 });

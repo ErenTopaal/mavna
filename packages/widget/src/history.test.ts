@@ -25,7 +25,14 @@ class MapStorage {
 
 (globalThis as { window?: unknown }).window = { localStorage: new MapStorage() };
 
-import { forget, forgetHistory, readHistory, remember, type TransferRecord } from "./history.js";
+import {
+  forget,
+  forgetHistory,
+  overdueAfterSeconds,
+  readHistory,
+  remember,
+  type TransferRecord,
+} from "./history.js";
 
 /**
  * The browser's own record of transfers, which is untrusted input like any
@@ -131,5 +138,31 @@ describe("history from before it was kept per network", () => {
       "0xsame",
     ]);
     expect(window.localStorage.getItem("acme:mavna.transfers.v1")).toBeNull();
+  });
+});
+
+describe("when a remembered transfer counts as overdue", () => {
+  it("is twice the route's own estimate, kept with the record", () => {
+    // a Sepolia transfer quoted at 1230 s, and an Arc one at 120 s
+    remember(record({ sourceTxHash: "0x1", expectedSeconds: 1230 }));
+    remember(record({ sourceTxHash: "0x2", expectedSeconds: 120 }));
+    const [arc, sepolia] = readHistory();
+    expect(arc && overdueAfterSeconds(arc)).toBe(240);
+    expect(sepolia && overdueAfterSeconds(sepolia)).toBe(2460);
+  });
+
+  it("keeps the old forty minutes for a record written before the estimate was kept", () => {
+    remember(record());
+    const [old] = readHistory();
+    expect(old && overdueAfterSeconds(old)).toBe(2400);
+  });
+
+  it("ignores an estimate that is not a positive number", () => {
+    window.localStorage.setItem(
+      "mavna.transfers",
+      JSON.stringify([{ ...record(), expectedSeconds: "soon" }]),
+    );
+    const [mangled] = readHistory("mavna.transfers");
+    expect(mangled && overdueAfterSeconds(mangled)).toBe(2400);
   });
 });

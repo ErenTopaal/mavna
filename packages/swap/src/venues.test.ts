@@ -56,6 +56,14 @@ const aquariusFound = (tokens: string[]) => ({
 const healthy = (network: string) => () =>
   json({ network, usable: true, protocols: ["soroswap", "aqua"] });
 const pools = () => json({ count: 10 });
+/** The Aquarius router pricing a chain as the service did, recording what it was asked. */
+const router = (asked: string[] = []) =>
+  sorobanNode((call) => {
+    asked.push(call.method);
+    return call.method === "estimate_swap"
+      ? nativeToScVal(BigInt(aquariusFound([]).amount), { type: "u128" })
+      : { error: `unexpected ${call.method}` };
+  });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -121,9 +129,14 @@ describe("the chain", () => {
             "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
           ]),
         ),
+      [RPC]: router(),
     });
     vi.stubGlobal("fetch", net.fetch);
-    const quote = await createSwapVenues({ network: "testnet", soroswapProxyUrl: PROXY }).quote({
+    const quote = await createSwapVenues({
+      network: "testnet",
+      soroswapProxyUrl: PROXY,
+      rpcUrl: RPC,
+    }).quote({
       ...usdcToXlm,
       assetIn: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
     });
@@ -170,10 +183,12 @@ describe("the chain", () => {
   });
 
   it("does not offer SushiSwap a pair without USDT0", async () => {
+    const asked: string[] = [];
     const net = routedFetch({
       [`${PROXY}/swap/soroswap/health`]: () => json({ error: "down" }, 502),
       [`${AQUA_MAIN}/api/external/v1/pools/`]: pools,
       [`${AQUA_MAIN}/api/external/v1/find-path/`]: () => json(aquariusFound([USDC_MAIN, XLM_MAIN])),
+      [RPC]: router(asked),
     });
     vi.stubGlobal("fetch", net.fetch);
     const quote = await createSwapVenues({
@@ -182,7 +197,8 @@ describe("the chain", () => {
       rpcUrl: RPC,
     }).quote(usdcToXlm);
     expect(quote.provider).toBe("aquarius");
-    expect(net.calls.some((c) => c.url.startsWith(RPC))).toBe(false);
+    // only Aquarius's router pricing its own chain; SushiSwap's pools are never asked
+    expect(asked).toEqual(["estimate_swap"]);
   });
 
   it("names every venue's reason when none can convert", async () => {

@@ -415,8 +415,8 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     retryable: rejectionIsRetryable(reason),
   });
   if (!circle && !setsUp) {
-    // only the conversion's trustline to check; the sponsor is not involved
-    const holds = convertBlocker(route, check);
+    // only the conversion's trustline and fee to check; the sponsor is not involved
+    const holds = convertBlocker(route, check) ?? conversionFeeBlocker(route, check);
     return holds === undefined ? undefined : decline(holds[0], holds[1]);
   }
 
@@ -472,7 +472,7 @@ function sponsorBlocker(route: Route, check: SponsorCheck): RouteRejection | und
     if (blocked !== undefined) return decline(blocked[0], blocked[1]);
   }
 
-  const holds = convertBlocker(route, check);
+  const holds = convertBlocker(route, check) ?? conversionFeeBlocker(route, check);
   if (holds !== undefined) return decline(holds[0], holds[1]);
 
   if (circle && terms.reserveFunding === "self") {
@@ -534,8 +534,7 @@ function repaymentBlocker(
     return ["temporarily-unavailable", "This route does not say what reserve it sets up."];
   }
   const arrives = route.deliveredAtLeast;
-  const scale = 10n ** BigInt(arrives.asset.decimals);
-  const mostItMayTake = (BigInt(reserve.total.baseUnits) * 2n * scale) / price;
+  const mostItMayTake = repaymentCeiling(BigInt(reserve.total.baseUnits), arrives, price);
   if (BigInt(arrives.baseUnits) > mostItMayTake) return undefined;
   const symbol = arrives.asset.symbol;
   return [
@@ -545,6 +544,51 @@ function repaymentBlocker(
       `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
       "may not cover it. Send more, or send to an account that can already receive it.",
   ];
+}
+
+/** Twice the reserve at the mid price, in the arriving asset: the settlement's ceiling. */
+function repaymentCeiling(
+  reserveStroops: bigint,
+  arrives: Route["deliveredAtLeast"],
+  price: bigint,
+) {
+  return (reserveStroops * 2n * 10n ** BigInt(arrives.asset.decimals)) / price;
+}
+
+/**
+ * A route whose new account the sponsor fronts, delivering what the user keeps
+ * as it is, with the most the repayment may take of the arrival as a line of
+ * its own. A conversion already leaves this aside and carries it; without one
+ * nothing said the arrival is not all the user's to keep.
+ */
+function withRepayment(route: Route, check: SponsorCheck): Route {
+  const reserve = route.fees.find((f) => f.kind === "account-reserve");
+  const price = check.xlmStroopsPerUsdc;
+  if (
+    reserve === undefined ||
+    typeof price !== "bigint" ||
+    price <= 0n ||
+    !route.steps.some((s) => s.kind === "settle-account") ||
+    route.steps.some((s) => s.kind === "swap") ||
+    route.fees.some((f) => f.kind === "reserve-repayment")
+  ) {
+    return route;
+  }
+  const arrives = route.deliveredAtLeast;
+  const most = repaymentCeiling(BigInt(reserve.total.baseUnits), arrives, price);
+  return {
+    ...route,
+    fees: [
+      ...route.fees,
+      {
+        kind: "reserve-repayment",
+        total: { asset: arrives.asset, baseUnits: most.toString() },
+        recipients: [],
+        // taken after arrival, and only what the settlement needs
+        includedInQuote: false,
+      },
+    ],
+  };
 }
 
 /**
@@ -601,6 +645,70 @@ function convertBlocker(
       `would fail after the ${arrives} arrives. Add a ${wanted.symbol} trustline to it first, ` +
       `or receive ${arrives}.`,
   ];
+}
+
+/**
+ * What a conversion on Stellar may cost its signer in network fees. The order
+ * book venue builds with 0.1 XLM; an Aquarius conversion measured on testnet
+ * charged 0.03 XLM against a 0.034 XLM maximum.
+ */
+const CONVERSION_FEE_BUDGET_STROOPS = 1_000_000n;
+
+/**
+ * Why the recipient could not pay for its own conversion. It signs and sends
+ * that transaction after the money lands, so an account with no XLM above its
+ * minimum balance is refused by the network and the arrival stays unconverted.
+ * A new account is set up holding exactly its minimum, so it has none either.
+ */
+function conversionFeeBlocker(
+  route: Route,
+  check: SponsorCheck,
+): [RouteRejection["reason"], string] | undefined {
+  const swap = route.steps.find((s) => s.kind === "swap");
+  if (swap === undefined || check.terms instanceof Error) return undefined;
+  const spare =
+    check.destination === "missing"
+      ? 0n
+      : check.destination === "exists"
+        ? check.spareStroops
+        : undefined;
+  if (spare === undefined) return undefined;
+  // paying for its own Circle delivery comes out of the same XLM first
+  const delivery =
+    route.source === "cctp" && check.terms.reserveFunding === "self"
+      ? OWN_DELIVERY_FEE_BUDGET_STROOPS
+      : 0n;
+  if (spare >= CONVERSION_FEE_BUDGET_STROOPS + delivery) return undefined;
+  return [
+    "destination-unsupported",
+    conversionFeeRefusal(
+      swap.to.asset.symbol,
+      swap.from.asset.symbol,
+      `up to ${stroopsToXlm(CONVERSION_FEE_BUDGET_STROOPS)} XLM`,
+      check.destination === "missing" ? undefined : spare,
+    ),
+  ];
+}
+
+/**
+ * Why the receiving account cannot convert: it pays the fee and cannot spare
+ * it. Said the same way when quoting and when the built fee is known.
+ */
+export function conversionFeeRefusal(
+  into: string,
+  arrives: string,
+  fee: string,
+  /** What the account can spare, in stroops; undefined for one not set up yet. */
+  spare: bigint | undefined,
+): string {
+  return (
+    `Converting into ${into} is a transaction the receiving account signs and pays a network ` +
+    `fee for, ${fee}, and ` +
+    (spare === undefined
+      ? "a new account is set up with no XLM to spare. "
+      : `it has ${stroopsToXlm(spare > 0n ? spare : 0n)} XLM to spare. `) +
+    `Receive ${arrives}, or add a little XLM to the account first.`
+  );
 }
 
 /**
@@ -680,11 +788,12 @@ export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet 
         : 0);
     // a preparation the sponsor has to build again is signed once more, at most
     const again = funding === "sponsor" && route.steps.some((s) => s.kind === "settle-account");
+    const shown = funding === "sponsor" ? withRepayment(route, check) : route;
     routes.push(
       extra === 0 && !again
-        ? route
+        ? shown
         : {
-            ...route,
+            ...shown,
             signaturesRequired: route.signaturesRequired + extra + (again ? 1 : 0),
             ...(again ? { optionalSignatures: (route.optionalSignatures ?? 0) + 1 } : {}),
           },
@@ -702,6 +811,8 @@ async function checkSponsor(
   destination: string,
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
+  /** Whether the route converts at all, whose fee the recipient pays. */
+  converts = false,
 ): Promise<SponsorCheck> {
   let terms: SponsorTerms | Error;
   try {
@@ -722,6 +833,11 @@ async function checkSponsor(
         new StellarAsset("USDC", engine.usdcIssuer),
       );
       found = state.lane.kind === "needs-account" ? "missing" : "exists";
+      // the recipient pays its own conversion's fee, from XLM it can spare
+      if (converts && found === "exists" && StrKey.isValidEd25519PublicKey(destination)) {
+        const entry = await readAccountEntry(engine.rpc, destination);
+        if (entry !== undefined) spare = spareStroops(entry, baseReserveStroops);
+      }
       // something will be set up, and repaid from the arrival at this price
       if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
         try {
@@ -887,7 +1003,7 @@ export function runQuote(
     // and then taken back. They are cached on the engine after the first answer.
     // a conversion into anything but XLM needs a trustline the recipient holds
     const into = swap !== undefined && swap.wanted.id !== "native" ? swap.wanted : undefined;
-    void checkSponsor(engine, destination, into)
+    void checkSponsor(engine, destination, into, swap !== undefined)
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
