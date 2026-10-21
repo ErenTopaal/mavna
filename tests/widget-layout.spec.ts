@@ -163,3 +163,31 @@ test("the amount and recipient fields show where keyboard focus is", async ({ pa
   await expect(root.getByRole("textbox", { name: "Stellar address" })).toBeFocused();
   expect(await ring("Stellar address")).not.toBe("none");
 });
+
+test("Escape from inside a header popover hands focus back to its button", async ({
+  page,
+  baseURL,
+}) => {
+  await offline(page, baseURL);
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  const wallet = root.getByRole("button", { name: /Connect$/ }).first();
+  await wallet.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(root.getByRole("button", { name: /Stellar$/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(root.getByText("Source wallet")).toBeHidden();
+  await expect(wallet).toBeFocused();
+
+  const more = root.getByRole("button", { name: "More" });
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(root.getByRole("link", { name: "Home" })).toBeFocused();
+  // a list of links, not an application menu that would promise arrow keys
+  await expect(root.getByRole("menu")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(root.getByRole("link", { name: "Home" })).toBeHidden();
+  await expect(more).toBeFocused();
+});

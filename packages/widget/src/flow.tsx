@@ -324,6 +324,8 @@ export class Flow extends React.Component<FlowProps, State> {
   routesRef = React.createRef<HTMLDivElement>();
   walletPopRef = React.createRef<HTMLDivElement>();
   menuPopRef = React.createRef<HTMLDivElement>();
+  walletButtonRef = React.createRef<HTMLButtonElement>();
+  menuButtonRef = React.createRef<HTMLButtonElement>();
   destRef = React.createRef<HTMLInputElement>();
 
   rows: (HTMLElement | null)[] = [];
@@ -460,13 +462,18 @@ export class Flow extends React.Component<FlowProps, State> {
   handleKey(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
     if (this.rootRef.current === null || !this.rootRef.current.contains(e.target as Node)) return;
+    // focus inside a popover would go with it, so it goes back to the popover's button
+    const inside = (pop: HTMLElement | null): boolean =>
+      pop?.contains(pop.ownerDocument.activeElement) === true;
     if (this.state.menuOpen) {
       e.preventDefault();
+      if (inside(this.menuPopRef.current)) this.menuButtonRef.current?.focus();
       this.setState({ menuOpen: false });
       return;
     }
     if (this.state.walletOpen) {
       e.preventDefault();
+      if (inside(this.walletPopRef.current)) this.walletButtonRef.current?.focus();
       this.closeWallet();
       return;
     }
@@ -1857,9 +1864,9 @@ function renderMenu(c: Flow): ReactNode {
     <div style={s("position:relative;flex:0 0 auto")}>
       <button
         type="button"
+        ref={c.menuButtonRef}
         onClick={() => c.setState({ menuOpen: !st.menuOpen })}
         aria-label="More"
-        aria-haspopup="menu"
         aria-expanded={st.menuOpen}
         className={pseudo({
           hover: "background:var(--mv-surface-2)",
@@ -1886,7 +1893,6 @@ function renderMenu(c: Flow): ReactNode {
       {st.menuOpen ? (
         <div
           ref={c.menuPopRef}
-          role="menu"
           style={s(
             "position:absolute;top:calc(100% + 9px);right:0;z-index:60;min-width:184px;padding:6px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:14px;box-shadow:0 24px 60px -24px var(--mv-scrim)",
           )}
@@ -1897,7 +1903,6 @@ function renderMenu(c: Flow): ReactNode {
               href={l.href}
               target={l.external ? "_blank" : undefined}
               rel={l.external ? "noopener noreferrer" : undefined}
-              role="menuitem"
               onClick={() => c.setState({ menuOpen: false })}
               className={pseudo({ hover: "background:var(--mv-surface-2)" })}
               style={s(
@@ -1927,6 +1932,7 @@ function renderWallet(c: Flow): ReactNode {
   return (
     <div style={s("position:relative;flex:0 0 auto")}>
       <button
+        ref={c.walletButtonRef}
         type="button"
         onClick={() => {
           // Opt-out: if the host handles connection and none is connected yet, hand
