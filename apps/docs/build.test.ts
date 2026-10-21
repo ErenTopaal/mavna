@@ -43,7 +43,9 @@ describe("a production build", () => {
   it("builds with one", async () => {
     process.env.VITE_MAVNA_SPONSOR_URL = "https://sponsor.mavna.test";
     expect(await sponsorCheck()).not.toThrow();
-    expect(() => requireSponsor({ VITE_MAVNA_SPONSOR_URL: "https://sponsor.mavna.test" })).not.toThrow();
+    expect(() =>
+      requireSponsor({ VITE_MAVNA_SPONSOR_URL: "https://sponsor.mavna.test" }),
+    ).not.toThrow();
   });
 });
 

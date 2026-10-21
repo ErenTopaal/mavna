@@ -22,6 +22,8 @@
       "!**/*.yaml"
     ]
   },
+  // the stylesheet is tailwind's, with its @theme and @import directives
+  "css": { "parser": { "tailwindDirectives": true } },
   "linter": {
     "rules": {
       "suspicious": {

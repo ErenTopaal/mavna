@@ -1,6 +1,13 @@
 import { RootProvider } from "fumadocs-ui/provider/react-router";
 import type { ReactElement, ReactNode } from "react";
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import {
+  isRouteErrorResponse,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+} from "react-router";
 // the app's two faces, self-hosted, so the docs read as the same product
 import "@fontsource/instrument-sans/400.css";
 import "@fontsource/instrument-sans/500.css";
@@ -38,7 +45,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): ReactElement
   if (isRouteErrorResponse(error) && error.status === 404) return <NotFound />;
   // anything else is a defect in the site: say what it was rather than hide it
   const detail =
-    error instanceof Error ? error.message : isRouteErrorResponse(error) ? error.statusText : String(error);
+    error instanceof Error
+      ? error.message
+      : isRouteErrorResponse(error)
+        ? error.statusText
+        : String(error);
   return (
     <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-3 p-8">
       <h1 className="text-2xl font-semibold">This page failed to load</h1>

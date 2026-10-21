@@ -6,7 +6,14 @@ const PATH =
 
 export function Mark(): ReactElement {
   return (
-    <svg className="mv-mark" viewBox="0 0 1500 1499.999933" width="20" height="20" fill="currentColor" aria-hidden="true">
+    <svg
+      className="mv-mark"
+      viewBox="0 0 1500 1499.999933"
+      width="20"
+      height="20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d={PATH} />
     </svg>
   );

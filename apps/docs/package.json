@@ -27,7 +27,7 @@
     "@mavna/widget": "workspace:*",
     "@react-router/node": "8.5.0",
     "fumadocs-core": "16.17.7",
-    "fumadocs-mdx": "15.4.8",
+    "fumadocs-mdx": "15.4.9",
     "fumadocs-ui": "16.17.7",
     "isbot": "5.2.2",
     "react": "19.3.1",
