@@ -47,6 +47,7 @@ apps/docs/content/how-it-works/rails/cctp.mdx
 apps/docs/content/how-it-works/rails/layerzero.mdx
 apps/docs/content/how-it-works/rails/meta.json
 apps/docs/content/how-it-works/rails/near-intents.mdx
+apps/docs/content/how-it-works/report-a-vulnerability.mdx
 apps/docs/content/how-it-works/security.mdx
 apps/docs/content/how-it-works/sponsorship.mdx
 apps/docs/content/how-it-works/trust-models.mdx

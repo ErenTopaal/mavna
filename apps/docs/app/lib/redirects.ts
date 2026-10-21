@@ -37,7 +37,7 @@ export const REDIRECTS: Readonly<Record<string, string>> = {
   "/developers/reference/bridge-adapter": "/sdk/reference/adapter-contract",
   "/developers/security": "/how-it-works/security",
   "/developers/security/model": "/how-it-works/security",
-  "/developers/security/reporting": "/how-it-works/security",
+  "/developers/security/reporting": "/how-it-works/report-a-vulnerability",
   "/developers/sponsor": "/operate",
   "/developers/sponsor/api": "/operate/api",
   "/widget/variants": "/widget/layouts",
