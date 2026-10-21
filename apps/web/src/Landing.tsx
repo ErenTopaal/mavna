@@ -1028,8 +1028,8 @@ export function Landing(): ReactNode {
                 `margin: 0; font-size: clamp(16px, 1.3vw, 19px); line-height: 1.6; color: ${MUTED}; max-width: 40ch`,
               )}
             >
-              Move money from another chain onto Stellar, and see exactly what arrives before you
-              send it.
+              Move money from another chain onto Stellar, and see what arrives, and the least it can
+              be, before you send it.
             </p>
             <div style={s("display: flex; align-items: center; gap: 26px; flex-wrap: wrap")}>
               <a data-cta="" href={APP} style={s(`background: ${SIGNAL}; color: ${GROUND}`)}>
@@ -1284,16 +1284,24 @@ export function Landing(): ReactNode {
             )}
           >
             <h2 style={s(`${BIG}; font-size: clamp(34px, 5vw, 72px); max-width: 12ch`)}>
-              You get the coin you asked for.
+              Ask for the coin you want.
             </h2>
             <p
               style={s(
                 `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 42ch`,
               )}
             >
-              A bridge can only hand over what it carries. When that is not what you wanted, Mavna
-              trades it on Stellar in the same transfer, and the amount you saw at the start already
-              counts it.
+              A bridge can only hand over what it carries. Mavna converts that into the coin you
+              asked for on Stellar, priced into the amount you see before you send. If the price
+              moves past the route’s minimum, what you sent arrives as it came.{" "}
+              <a
+                href="#choice"
+                style={s(
+                  `color: ${ON_NIGHT}; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px`,
+                )}
+              >
+                How the minimum works
+              </a>
             </p>
           </div>
           <CoinPicker />
@@ -1384,7 +1392,7 @@ export function Landing(): ReactNode {
               `margin: 0; font-size: 17.5px; line-height: 1.62; color: ${MUTED}; max-width: 40ch`,
             )}
           >
-            Most tools only do the crossing in the middle and leave you the rest. The SDK is the
+            A bridge only does the crossing in the middle and leaves you the rest. The SDK is the
             same engine our own app runs on, and it hands you the whole row: asking every bridge,
             setting up the account, the swap, and following it home.
           </p>
@@ -1463,7 +1471,7 @@ export function Landing(): ReactNode {
               `margin: clamp(22px, 2.6vw, 30px) 0 0; font-size: 17px; line-height: 1.62; color: ${MUTED_NIGHT}; max-width: 40ch`,
             )}
           >
-            Mavna does the last part of the trip, the part everyone else leaves to you.
+            Mavna does the last part of the trip, the part a bridge leaves to you.
           </p>
         </div>
         <div data-reveal="" style={s(`${WRAP}; padding-bottom: clamp(60px, 9vh, 110px)`)}>
