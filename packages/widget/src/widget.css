@@ -136,6 +136,9 @@
   /* Addresses and transaction ids stay in the mono face, where 0 and O, 1 and l
      cannot be mistaken for each other while someone checks one by eye. */
   --mv-font-address: var(--mv-font-mono);
+  /* The values on the form's rows (recipient, priority, approvals), in the mono face by the
+     owner's call, so the right-hand column reads as one set. */
+  --mv-font-value: var(--mv-font-mono);
 
   /*
    * The preset's radius is "small", which the shadcn CLI's own radius map defines

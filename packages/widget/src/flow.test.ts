@@ -341,7 +341,8 @@ describe("addresses", () => {
     }
   });
 
-  it("keeps the words for an unset recipient in the text face", () => {
+  // the owner's call: the form's row values read as one mono column, "Not set" included
+  it("sets an unset recipient in the address face with the other row values", () => {
     const flow = quotedFlow({ terms: 0 });
     flow.state = { ...flow.state, destination: "" };
     const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
@@ -349,7 +350,9 @@ describe("addresses", () => {
       renderSend(flow, { r: undefined, chain, sym: "USDC", xlm: false, resting: true }),
     );
     expect(form).toContain("Not set");
-    expect(inAddressFace(form, "Not set")).toBe(false);
+    expect(inAddressFace(form, "Not set")).toBe(true);
+    const values = [...form.matchAll(/--mv-font-value[^>]*>([^<]*)/g)].map((m) => m[1] ?? "");
+    expect(values).toContain("Best return");
   });
 
   it("are set in the address face in the wallet menu", () => {
@@ -1211,7 +1214,8 @@ describe("the form while a quote is on its way", () => {
     expect(floorRow(waiting)).toBe(1);
   });
 
-  it("has no floor line with no amount to quote", () => {
+  // held open even with no amount, so the card does not grow when the first digit is typed
+  it("keeps the floor line's place with no amount to quote", () => {
     const flow = quotedFlow({ terms: 0 });
     const html = renderToStaticMarkup(
       renderSend(flow, {
@@ -1222,7 +1226,7 @@ describe("the form while a quote is on its way", () => {
         resting: true,
       }),
     );
-    expect(floorRow(html)).toBe(0);
+    expect(floorRow(html)).toBe(1);
   });
 });
 

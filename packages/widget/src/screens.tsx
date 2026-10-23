@@ -292,16 +292,14 @@ export function renderSend(
             {sym}
           </span>
         </div>
-        {/* held open while an amount waits on its quote, so the rows below stay put when it lands */}
-        {r !== undefined || !d.resting ? (
-          <p
-            style={s(
-              "margin:10px 0 0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
-            )}
-          >
-            {r === undefined ? "\u00a0" : floorLine}
-          </p>
-        ) : null}
+        {/* always held open, so the card keeps its height as an amount is typed and quoted */}
+        <p
+          style={s(
+            "margin:10px 0 0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
+          )}
+        >
+          {r === undefined ? "\u00a0" : floorLine}
+        </p>
       </div>
 
       <div style={s("display:flex;flex-direction:column;gap:6px;margin-top:10px")}>
@@ -322,7 +320,7 @@ export function renderSend(
           <span style={s("display:flex;align-items:center;gap:9px;min-width:0")}>
             <span
               style={s(
-                `font-family:${st.destination === "" ? "var(--mv-font);font-size:12px" : "var(--mv-font-address);font-size:11.5px"};color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
+                `font-family:var(--mv-font-address);font-size:11.5px;color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
               )}
             >
               {destShort}
@@ -349,7 +347,9 @@ export function renderSend(
         >
           <span style={s("font-size:13px;font-weight:500")}>Route priority</span>
           <span style={s("display:flex;align-items:center;gap:9px")}>
-            <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
+            <span
+              style={s("font-family:var(--mv-font-value);font-size:11.5px;color:var(--mv-muted)")}
+            >
               {priorityLabel}
             </span>
             <span
@@ -368,7 +368,9 @@ export function renderSend(
           )}
         >
           <span style={s("font-size:13px;font-weight:500")}>You will approve</span>
-          <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
+          <span
+            style={s("font-family:var(--mv-font-value);font-size:11.5px;color:var(--mv-muted)")}
+          >
             {approvals}
           </span>
         </div>
@@ -1877,7 +1879,7 @@ export function renderRoutes(
             >
               Every route
               <br />
-              into Stellar.
+              into Stellar
             </p>
             <p
               style={s(
