@@ -28,6 +28,12 @@ export interface QuoteRequest {
    * they chose; unbounded slippage is not acceptable on any path.
    */
   readonly maxSlippageBps: number;
+  /**
+   * The source chain as the user knows it (for example "Codex"), for a decline
+   * to name it. A rail that has no name of its own for the chain says "that
+   * chain" without it, never the id.
+   */
+  readonly fromChainName?: string | undefined;
 }
 
 /**

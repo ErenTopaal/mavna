@@ -565,6 +565,12 @@ describe("what a user sends and what lands, read from the deployment", () => {
     });
   });
 
+  it("names a mainnet chain with no token to carry by its display name", async () => {
+    await expect(mainnet().sendableAssets("optimism")).rejects.toThrow(
+      "This route carries no token from OP Mainnet to Stellar. Another route may.",
+    );
+  });
+
   it("says plainly that the test network has no USDT0", async () => {
     const testnet = new LayerZeroAdapter({
       network: "testnet",
@@ -854,6 +860,32 @@ describe("what sendableAssets throws to an SDK caller", () => {
     expect(error.retryable).toBe(false);
     expect(error.message).not.toMatch(/does not derive/);
     expect(error.detail).toMatch(/does not derive/);
+  });
+});
+
+describe("a source chain LayerZero does not carry here", () => {
+  const codex = { chainId: "codex", id: TOKEN, symbol: "USDC", decimals: 6, curatedBy: "x" };
+  const to = { chainId: "stellar", id: USDT0_ID, symbol: "USDT0", decimals: 7, curatedBy: "x" };
+  const request = (over: Record<string, unknown> = {}) => ({
+    from: codex,
+    to,
+    sends: { asset: codex, baseUnits: "25000000" },
+    destination: READY,
+    maxSlippageBps: 50,
+    ...over,
+  });
+
+  it("is named by its display name, as the picker shows it", async () => {
+    const result = (await mainnet().quote(request({ fromChainName: "Codex" }))) as RouteRejection;
+    expect(result.reason).toBe("chain-unsupported");
+    expect(result.explanation).toBe("Mavna does not move funds from Codex over LayerZero yet.");
+  });
+
+  it("is never named by its id when no display name was given", async () => {
+    const result = (await mainnet().quote(request())) as RouteRejection;
+    expect(result.explanation).toBe(
+      "Mavna does not move funds from that chain over LayerZero yet.",
+    );
   });
 });
 

@@ -101,7 +101,8 @@ describe("buildAssets", () => {
   });
 
   it("refuses a chain with no known USDC", () => {
-    expect(() => buildAssets(engine, "fantom", "USDC")).toThrow(/fantom/);
+    expect(() => buildAssets(engine, "fantom", "USDC", "Fantom")).toThrow(/for Fantom\./);
+    expect(() => buildAssets(engine, "fantom", "USDC")).toThrow(/for that chain\./);
   });
 });
 
@@ -132,6 +133,7 @@ describe("runQuote", () => {
   };
   const inputs = {
     chainId: "fantom",
+    chainName: "Fantom",
     wanted: "USDC" as const,
     amount: "5",
     destination: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
@@ -157,7 +159,7 @@ describe("runQuote", () => {
       {
         source: "cctp",
         reason: "asset-unsupported",
-        explanation: "No USDC deployment is known for fantom.",
+        explanation: "No USDC deployment is known for Fantom.",
         retryable: false,
       },
     ]);

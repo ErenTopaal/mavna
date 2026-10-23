@@ -932,6 +932,7 @@ export class Flow extends React.Component<FlowProps, State> {
       this.engine,
       {
         chainId: this.state.chainId,
+        chainName: this.list().find((c) => c.id === this.state.chainId)?.name,
         wanted: this.state.wanted,
         amount: this.state.amount,
         destination: this.state.destination,

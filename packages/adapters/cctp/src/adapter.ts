@@ -169,7 +169,7 @@ export class CctpAdapter implements BridgeAdapter {
     if (domain === undefined) {
       return this.decline(
         "chain-unsupported",
-        `Mavna does not move funds from ${request.from.chainId} yet.`,
+        `Mavna does not move funds from ${request.fromChainName ?? "that chain"} yet.`,
       );
     }
     if (request.to.chainId !== stellarChainId(this.network)) {

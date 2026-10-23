@@ -197,6 +197,7 @@ packages/adapters/cctp/src/burn.ts
 packages/adapters/cctp/src/chains.test.ts
 packages/adapters/cctp/src/chains.ts
 packages/adapters/cctp/src/config.ts
+packages/adapters/cctp/src/decline-names.test.ts
 packages/adapters/cctp/src/delivery.live.test.ts
 packages/adapters/cctp/src/delivery.test.ts
 packages/adapters/cctp/src/delivery.ts

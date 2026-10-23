@@ -69,6 +69,8 @@ export interface QuoteInputs {
   readonly rails: Readonly<Record<RailName, boolean>>;
   /** Defaults to USDC. */
   readonly send?: SendAsset;
+  /** The source chain as the picker names it, for the rails' declines. */
+  readonly chainName?: string | undefined;
 }
 
 /** A route reduced to the numbers the design's cards and review screen show. */
@@ -255,10 +257,12 @@ export function buildAssets(
   engine: Pick<Engine, "network" | "usdcOnStellar" | "xlmOnStellar">,
   chainId: string,
   wanted: Wanted,
+  /** The chain as the picker names it, for the refusal. */
+  chainName?: string,
 ): { from: Asset; to: Asset } {
   const usdc = sourceUsdcFor(engine.network, chainId);
   if (usdc === undefined) {
-    throw new Error(`No USDC deployment is known for ${chainId}.`);
+    throw new Error(`No USDC deployment is known for ${chainName ?? "that chain"}.`);
   }
   const from: Asset = {
     chainId,
@@ -1226,6 +1230,7 @@ export function runQuote(
             sends: { asset: from, baseUnits: toBaseUnits(inputs.amount, from.decimals) },
             destination,
             maxSlippageBps: 50,
+            ...(inputs.chainName === undefined ? {} : { fromChainName: inputs.chainName }),
           },
           {
             onUpdate: (partial) => {
@@ -1308,7 +1313,7 @@ export function runQuote(
 
   let assets: { from: Asset; to: Asset };
   try {
-    assets = buildAssets(engine, inputs.chainId, inputs.wanted);
+    assets = buildAssets(engine, inputs.chainId, inputs.wanted, inputs.chainName);
   } catch (cause) {
     declineAll(cause);
     return handle;

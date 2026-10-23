@@ -404,7 +404,7 @@ export class Discovery {
 
     const candidates = await this.candidatesFor(chainId);
     if (candidates.length === 0) {
-      throw new NoRouteHere(noCandidatesExplanation(this.network, chainId));
+      throw new NoRouteHere(noCandidatesExplanation(this.network, source.name));
     }
 
     const stellar = await this.stellar();
@@ -953,14 +953,14 @@ export async function readStellarToken(
  * Testnet gets its own sentence because the reason is specific and a user
  * deserves to know it is not their input that is wrong.
  */
-function noCandidatesExplanation(network: NetworkId, chainId: string): string {
+function noCandidatesExplanation(network: NetworkId, chainName: string): string {
   // Written for whoever reads it on screen, which is a person deciding how to
   // move their money and not a developer reading an API reference. "OFT",
   // "registry" and the name of a configuration field all belong in the comment
   // above rather than in front of them. What they need is that it is not their
   // input that is wrong and that there is another route.
   if (network === "mainnet") {
-    return `This route carries no token from ${chainId} to Stellar. Another route may.`;
+    return `This route carries no token from ${chainName} to Stellar. Another route may.`;
   }
   return (
     "This route carries no token on the test network. It works on the main network, " +

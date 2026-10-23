@@ -110,6 +110,7 @@ function quote(
       },
       {
         chainId: "ethereum",
+        chainName: "Ethereum",
         wanted,
         amount: "100",
         destination: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
@@ -134,6 +135,12 @@ describe("a USDT0 send through NEAR Intents", () => {
     expect(near.requests[0]?.to).toEqual(asset);
     expect(near.requests[0]?.from).toEqual(usdt0From);
     expect(layerzero.requests[0]?.to).toEqual(usdt0To);
+  });
+
+  it("hands every rail the source chain's display name, for its declines", async () => {
+    const near = new Recorder("near-intents", [{ phase: "idle" }]);
+    await quote([near], "XLM");
+    expect(near.requests[0]?.fromChainName).toBe("Ethereum");
   });
 
   it("asks NEAR Intents for USDT0 when USDT0 is what is wanted", async () => {

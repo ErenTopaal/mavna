@@ -346,7 +346,7 @@ export class LayerZeroAdapter implements BridgeAdapter {
     if (source === undefined) {
       return this.decline(
         "chain-unsupported",
-        `Mavna does not move funds from ${request.from.chainId} over LayerZero yet.`,
+        `Mavna does not move funds from ${request.fromChainName ?? "that chain"} over LayerZero yet.`,
       );
     }
     const lands = stellarCodesFrom(this.network, this.ownOfts, request.from.chainId);

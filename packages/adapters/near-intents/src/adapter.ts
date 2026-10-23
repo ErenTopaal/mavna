@@ -177,7 +177,8 @@ export class NearIntentsAdapter implements BridgeAdapter {
     if (chain === undefined) {
       return this.decline(
         "chain-unsupported",
-        "NEAR Intents does not take deposits on that chain, so it has no route from there.",
+        `NEAR Intents does not take deposits on ${request.fromChainName ?? "that chain"}, so it ` +
+          "has no route from there.",
       );
     }
 

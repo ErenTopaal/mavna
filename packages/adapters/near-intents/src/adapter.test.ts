@@ -894,6 +894,19 @@ describe("usdt0 sends", () => {
       expect(result.explanation).toBe(
         "NEAR Intents does not take deposits on that chain, so it has no route from there.",
       );
+      const named = rejectionOf(
+        await adapter().quote(
+          ask({
+            from,
+            to: stellarXlm,
+            sends: { asset: from, baseUnits: "1" },
+            fromChainName: "Ink",
+          }),
+        ),
+      );
+      expect(named.explanation).toBe(
+        "NEAR Intents does not take deposits on Ink, so it has no route from there.",
+      );
       expect(result.explanation).not.toMatch(/EVM/);
       expect(quoteBodies).toHaveLength(0);
     },
