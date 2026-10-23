@@ -1,6 +1,20 @@
 {
   "name": "@mavna/stellar",
   "version": "0.0.0",
+  "description": "Stellar RPC client, address and destination checks, reserves and sponsorship transactions for Mavna.",
+  "keywords": [
+    "stellar",
+    "soroban"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/stellar"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {

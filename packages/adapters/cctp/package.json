@@ -1,6 +1,22 @@
 {
   "name": "@mavna/adapter-cctp",
   "version": "0.0.0",
+  "description": "Circle CCTP as a Mavna rail: USDC to Stellar.",
+  "keywords": [
+    "stellar",
+    "cctp",
+    "usdc",
+    "bridge"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/adapters/cctp"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {

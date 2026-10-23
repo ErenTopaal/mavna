@@ -1,6 +1,22 @@
 {
   "name": "@mavna/widget",
   "version": "0.0.0",
+  "description": "The Mavna transfer flow as one React component: bring funds from other chains to Stellar.",
+  "keywords": [
+    "stellar",
+    "bridge",
+    "react",
+    "widget"
+  ],
+  "homepage": "https://docs.mavna.app/widget",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/widget"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "mavna": {

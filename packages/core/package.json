@@ -1,6 +1,21 @@
 {
   "name": "@mavna/core",
   "version": "0.0.0",
+  "description": "Shared types for Mavna: assets, amounts, routes, step phases and the BridgeAdapter interface every rail implements.",
+  "keywords": [
+    "stellar",
+    "bridge",
+    "cross-chain"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {

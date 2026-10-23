@@ -1,6 +1,21 @@
 {
   "name": "@mavna/swap",
   "version": "0.0.0",
+  "description": "Stellar exchanges (Soroswap, SushiSwap, Aquarius and the order book) behind one interface, for Mavna.",
+  "keywords": [
+    "stellar",
+    "swap",
+    "dex"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/swap"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {

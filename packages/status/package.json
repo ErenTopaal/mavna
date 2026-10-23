@@ -1,6 +1,21 @@
 {
   "name": "@mavna/status",
   "version": "0.0.0",
+  "description": "Lookup keys and the state machine for a Mavna transfer in flight.",
+  "keywords": [
+    "stellar",
+    "bridge",
+    "status"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/status"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {

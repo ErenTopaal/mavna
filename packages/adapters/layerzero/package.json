@@ -1,6 +1,22 @@
 {
   "name": "@mavna/adapter-layerzero",
   "version": "0.0.0",
+  "description": "LayerZero OFT as a Mavna rail: USDT0 to Stellar.",
+  "keywords": [
+    "stellar",
+    "layerzero",
+    "usdt0",
+    "bridge"
+  ],
+  "homepage": "https://docs.mavna.app/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErenTopaal/mavna.git",
+    "directory": "packages/adapters/layerzero"
+  },
+  "bugs": {
+    "url": "https://github.com/ErenTopaal/mavna/issues"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
