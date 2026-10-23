@@ -307,6 +307,33 @@ export function Playground(): ReactElement {
       <div className="pg-body">
         <aside className="pg-rail">
           <div className="pg-group">
+            <p className="pg-group-title">Layout</p>
+            <div className="pg-row">
+              <span className="pg-row-label">Variant</span>
+              <Segmented
+                value={variant}
+                options={[
+                  ["compact", "Compact"],
+                  ["drawer", "Drawer"],
+                ]}
+                onChange={setVariant}
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Appearance</span>
+              <Segmented
+                value={appearance}
+                options={[
+                  ["system", "Auto"],
+                  ["light", "Light"],
+                  ["dark", "Dark"],
+                ]}
+                onChange={setAppearance}
+              />
+            </div>
+          </div>
+
+          <div className="pg-group">
             <p className="pg-group-title">Theme</p>
             <div className="pg-looks">
               <span className="pg-row-label">Look</span>
@@ -432,33 +459,6 @@ export function Playground(): ReactElement {
               </span>
             </div>
           </div>
-          <div className="pg-group">
-            <p className="pg-group-title">Layout</p>
-            <div className="pg-row">
-              <span className="pg-row-label">Variant</span>
-              <Segmented
-                value={variant}
-                options={[
-                  ["compact", "Compact"],
-                  ["drawer", "Drawer"],
-                ]}
-                onChange={setVariant}
-              />
-            </div>
-            <div className="pg-row">
-              <span className="pg-row-label">Appearance</span>
-              <Segmented
-                value={appearance}
-                options={[
-                  ["system", "Auto"],
-                  ["light", "Light"],
-                  ["dark", "Dark"],
-                ]}
-                onChange={setAppearance}
-              />
-            </div>
-          </div>
-
           <div className="pg-group">
             <p className="pg-group-title">Routing</p>
             <div className="pg-row">
