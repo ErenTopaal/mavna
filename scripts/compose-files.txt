@@ -24,6 +24,7 @@ apps/docs/app/components/Paths.tsx
 apps/docs/app/components/mark.tsx
 apps/docs/app/components/mdx.tsx
 apps/docs/app/components/search.tsx
+apps/docs/app/lib/icons.ts
 apps/docs/app/lib/layout.shared.tsx
 apps/docs/app/lib/paths.ts
 apps/docs/app/lib/redirects.ts
