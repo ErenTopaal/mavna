@@ -6,9 +6,16 @@ signs them, and no package ever holds a key.
 
 It ships in three forms that share one engine:
 
-- **App** (`apps/app`): the hosted interface at [mavna.app](https://mavna.app).
-- **SDK** (`packages/*`): the engine as a small set of packages to build on.
-- **Widget** (`packages/widget`): the whole flow as one embeddable component.
+- **App** (`apps/app`): the hosted interface at [mavna.app](https://mavna.app), on Stellar's test
+  and main networks.
+- **SDK** (`packages/*`): the engine as a small set of packages to build on: `@mavna/core`,
+  `@mavna/routing`, `@mavna/status`, `@mavna/stellar`, `@mavna/swap`, and one adapter per rail
+  (`@mavna/adapter-cctp`, `@mavna/adapter-axelar`, `@mavna/adapter-layerzero`,
+  `@mavna/adapter-near-intents`).
+- **Widget** (`packages/widget`): the whole flow as one embeddable React component.
+
+The packages are built from this repository; they are not published to npm.
+[Install](https://docs.mavna.app/sdk/install) covers building them.
 
 ## Links
 
@@ -19,7 +26,7 @@ It ships in three forms that share one engine:
 
 ## Develop
 
-Requires Node 24 and pnpm.
+Requires Node 24.22.0 (`.nvmrc`) and pnpm 12.14.0; the workspace refuses any other pnpm.
 
 ```bash
 pnpm install
@@ -33,7 +40,8 @@ pnpm typecheck
 A production build of the app, playground, landing or docs stops when no sponsor url is set, so a
 hosted page can never fall back to one on localhost. For a local build, point them at the sponsor
 you run (above); a hosted build names its own (`https://sponsor.mavna.app` for Mavna's testnet
-pages).
+pages, `https://sponsor-mainnet.mavna.app` for the app's main network).
+[Deploy to production](https://docs.mavna.app/operate/deploy) has every setting.
 
 After changing a package, build it again (`pnpm build` skips what has not changed) before the dev
 server sees it.
