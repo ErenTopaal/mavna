@@ -10,7 +10,6 @@ import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
 import { fmt, fmtAmount, fromBaseUnits, short, shortIds } from "./format";
-import { MAVNA_MARK_PATH, MAVNA_MARK_VIEWBOX } from "./mark";
 import { pseudo } from "./pseudo";
 import {
   approvalsLabel,
@@ -139,7 +138,6 @@ export function renderSend(
   const destShort = st.destination === "" ? "Not set" : short(st.destination);
   const destInk = c.destValid() ? "var(--mv-ink-2)" : "var(--mv-signal)";
   const priorityLabel = st.priority === "best" ? "Best return" : "Fastest";
-  const railsShown = railsLabel(st.rails, c.availableRails());
   const approvals = r === undefined ? "Nothing yet" : approvalsLabel(r);
 
   return (
@@ -363,31 +361,6 @@ export function renderSend(
             </span>
           </span>
         </button>
-
-        {c.hidden("railToggles") ? null : (
-          <button
-            type="button"
-            onClick={() => c.go("rails", "push")}
-            className={pseudo({ hover: "background:var(--mv-surface-3)" })}
-            style={s(
-              "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
-            )}
-          >
-            <span style={s("font-size:13px;font-weight:500")}>Rails</span>
-            <span style={s("display:flex;align-items:center;gap:9px")}>
-              <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
-                {railsShown}
-              </span>
-              <span
-                style={s(
-                  "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
-                )}
-              >
-                ▸
-              </span>
-            </span>
-          </button>
-        )}
 
         <div
           style={s(
@@ -801,28 +774,30 @@ export function renderSettings(c: Flow): ReactElement {
           </span>
         </span>
       </button>
-      <button
-        type="button"
-        onClick={() => c.go("rails", "push")}
-        className={pseudo({ hover: "background:var(--mv-surface-3)" })}
-        style={s(
-          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
-        )}
-      >
-        <span style={s("font-size:13.5px;font-weight:500")}>Rails</span>
-        <span style={s("display:flex;align-items:center;gap:9px")}>
-          <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-3)")}>
-            {railsShown}
+      {c.hidden("railToggles") ? null : (
+        <button
+          type="button"
+          onClick={() => c.go("rails", "push")}
+          className={pseudo({ hover: "background:var(--mv-surface-3)" })}
+          style={s(
+            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+          )}
+        >
+          <span style={s("font-size:13.5px;font-weight:500")}>Rails</span>
+          <span style={s("display:flex;align-items:center;gap:9px")}>
+            <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-3)")}>
+              {railsShown}
+            </span>
+            <span
+              style={s(
+                "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+              )}
+            >
+              ▸
+            </span>
           </span>
-          <span
-            style={s(
-              "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
-            )}
-          >
-            ▸
-          </span>
-        </span>
-      </button>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => c.setState((prev) => ({ showDeclined: !prev.showDeclined }))}
@@ -1889,38 +1864,32 @@ export function renderRoutes(
 
         {resting ? (
           // what the panel waits for is named in its header, so the body only says
-          // what will be asked: the mark up top, the statement where results begin
+          // what will be asked, set where the results begin
           <div
             style={s(
-              "flex:1 1 auto;display:flex;flex-direction:column;justify-content:space-between;gap:24px;padding:6px 2px 4px",
+              "flex:1 1 auto;display:flex;flex-direction:column;justify-content:flex-end;gap:14px;padding:6px 2px 4px",
             )}
           >
-            <svg
-              viewBox={MAVNA_MARK_VIEWBOX}
-              aria-hidden="true"
-              fill="currentColor"
+            <p
               style={s(
-                "width:20px;height:20px;display:block;color:var(--mv-faint);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both",
+                "margin:0;font-size:27px;line-height:1.12;font-weight:500;letter-spacing:-0.03em;color:var(--mv-ink);text-wrap:balance;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both",
               )}
             >
-              <path d={MAVNA_MARK_PATH} />
-            </svg>
-            <div style={s("display:flex;flex-direction:column;gap:14px;max-width:330px")}>
-              <p
-                style={s(
-                  "margin:0;font-size:27px;line-height:1.12;font-weight:500;letter-spacing:-0.03em;color:var(--mv-ink);text-wrap:balance;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
-                )}
-              >
-                Every route into Stellar, asked at once.
-              </p>
-              <p
-                style={s(
-                  "margin:0;font-size:13px;line-height:1.55;color:var(--mv-faint);text-wrap:pretty;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 160ms both",
-                )}
-              >
-                {`From ${c.list().length} chains over ${expected} ${expected === 1 ? "rail" : "rails"}, ranked by what actually arrives.`}
-              </p>
-            </div>
+              Every route into Stellar.
+            </p>
+            <p
+              style={s(
+                "margin:0;display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.5;color:var(--mv-faint);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
+              )}
+            >
+              <span>
+                <span style={s("font-family:var(--mv-font-num)")}>{c.list().length}</span> chains
+              </span>
+              <span>
+                <span style={s("font-family:var(--mv-font-num)")}>{expected}</span>{" "}
+                {expected === 1 ? "rail" : "rails"}
+              </span>
+            </p>
           </div>
         ) : null}
 
