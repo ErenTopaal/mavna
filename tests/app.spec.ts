@@ -64,7 +64,7 @@ test("an amount with no recipient waits for one instead of showing every rail de
   const root = page.locator(".mv-root");
   await root.getByRole("textbox", { name: "Amount to send" }).fill("5");
   await expect(root.getByText("Awaiting a recipient")).toBeVisible();
-  await expect(root.getByText("Every route into Stellar.")).toBeVisible();
+  await expect(root.getByText(/Every route\s*into Stellar\./)).toBeVisible();
   await expect(root.getByText("Declined")).toHaveCount(0);
 });
 

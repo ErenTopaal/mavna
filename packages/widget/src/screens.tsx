@@ -1872,14 +1872,16 @@ export function renderRoutes(
           >
             <p
               style={s(
-                "margin:0;font-size:27px;line-height:1.12;font-weight:500;letter-spacing:-0.03em;color:var(--mv-ink);text-wrap:balance;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both",
+                "margin:0;font-size:34px;line-height:1.08;font-weight:500;letter-spacing:-0.035em;color:var(--mv-ink);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both",
               )}
             >
-              Every route into Stellar.
+              Every route
+              <br />
+              into Stellar.
             </p>
             <p
               style={s(
-                "margin:0;display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.5;color:var(--mv-faint);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
+                "margin:0;display:flex;flex-direction:column;gap:3px;font-size:15px;line-height:1.5;color:var(--mv-faint);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
               )}
             >
               <span>
