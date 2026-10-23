@@ -269,10 +269,10 @@ importers:
 
   apps/docs:
     dependencies:
-      '@fontsource/azeret-mono':
+      '@fontsource-variable/geist':
         specifier: 5.3.0
         version: 5.3.0
-      '@fontsource/instrument-sans':
+      '@fontsource/azeret-mono':
         specifier: 5.3.0
         version: 5.3.0
       '@mavna/adapter-axelar':

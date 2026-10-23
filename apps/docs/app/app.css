@@ -3,12 +3,11 @@
 @import "fumadocs-ui/css/preset.css";
 
 /*
- * The docs speak the product's visual language: the app's two faces, and a
- * neutral scale with a faint cool cast. Colour stays out of the chrome, because
- * the one chromatic value on a Mavna surface is the widget's error signal.
+ * The docs speak the product's visual language: the app's two faces, a neutral
+ * scale, and Mavna's red as the one accent, on links, the current page and focus.
  */
 @theme {
-  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Azeret Mono", ui-monospace, monospace;
 
   --color-fd-background: hsl(0, 0%, 97.5%);
@@ -20,13 +19,13 @@
   --color-fd-card: hsl(0, 0%, 95%);
   --color-fd-card-foreground: hsl(0, 0%, 9%);
   --color-fd-border: hsl(0, 0%, 86%);
-  --color-fd-primary: hsl(0, 0%, 11%);
-  --color-fd-primary-foreground: hsl(0, 0%, 98%);
+  --color-fd-primary: oklch(0.55 0.2 25);
+  --color-fd-primary-foreground: oklch(0.985 0 0);
   --color-fd-secondary: hsl(0, 0%, 92%);
   --color-fd-secondary-foreground: hsl(0, 0%, 11%);
   --color-fd-accent: hsl(0, 0%, 90%);
   --color-fd-accent-foreground: hsl(0, 0%, 9%);
-  --color-fd-ring: hsl(0, 0%, 55%);
+  --color-fd-ring: oklch(0.55 0.2 25);
 }
 
 .dark {
@@ -39,13 +38,13 @@
   --color-fd-card: hsl(0, 0%, 9.5%);
   --color-fd-card-foreground: hsl(0, 0%, 93%);
   --color-fd-border: hsl(0, 0%, 18%);
-  --color-fd-primary: hsl(0, 0%, 94%);
-  --color-fd-primary-foreground: hsl(0, 0%, 8%);
+  --color-fd-primary: oklch(0.74 0.16 22);
+  --color-fd-primary-foreground: oklch(0.145 0 0);
   --color-fd-secondary: hsl(0, 0%, 13%);
   --color-fd-secondary-foreground: hsl(0, 0%, 91%);
   --color-fd-accent: hsl(0, 0%, 16%);
   --color-fd-accent-foreground: hsl(0, 0%, 93%);
-  --color-fd-ring: hsl(0, 0%, 50%);
+  --color-fd-ring: oklch(0.74 0.16 22);
 }
 
 html {
@@ -58,13 +57,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* prose links: an underline that firms up on hover, not a colour */
+/* prose links: text in the reading colour, an accent underline that firms up on hover */
 .prose a:not(:where(h1, h2, h3, h4) a) {
-  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+  text-decoration-color: color-mix(in oklab, var(--color-fd-primary) 55%, transparent);
   text-underline-offset: 3px;
 }
 .prose a:not(:where(h1, h2, h3, h4) a):hover {
-  text-decoration-color: currentColor;
+  text-decoration-color: var(--color-fd-primary);
 }
 
 /* the mark: the product's draft scale, three waterline bars */

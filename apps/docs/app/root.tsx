@@ -9,9 +9,7 @@ import {
   ScrollRestoration,
 } from "react-router";
 // the app's two faces, self-hosted, so the docs read as the same product
-import "@fontsource/instrument-sans/400.css";
-import "@fontsource/instrument-sans/500.css";
-import "@fontsource/instrument-sans/600.css";
+import "@fontsource-variable/geist";
 import "@fontsource/azeret-mono/400.css";
 import "./app.css";
 import DocsSearchDialog from "@/components/search";
