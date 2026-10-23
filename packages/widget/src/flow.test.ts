@@ -359,7 +359,7 @@ describe("addresses", () => {
       screen: "send",
       walletOpen: true,
       wallet: {
-        ...(flow.state.wallet ?? {}),
+        ...flow.state.wallet,
         name: "Test",
         icon: "",
         short: "0x1234…abcd",

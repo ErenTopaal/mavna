@@ -253,6 +253,9 @@ packages/adapters/layerzero/tsconfig.json
 packages/adapters/layerzero/tsconfig.test.json
 packages/adapters/layerzero/tsdown.config.ts
 packages/adapters/near-intents/package.json
+packages/adapters/near-intents/src/__fixtures__/one-click-quote-xlm-funded.json
+packages/adapters/near-intents/src/__fixtures__/one-click-quote-xlm-unfunded.json
+packages/adapters/near-intents/src/__fixtures__/one-click-tokens-2026-10-23.json
 packages/adapters/near-intents/src/adapter.live.test.ts
 packages/adapters/near-intents/src/adapter.test.ts
 packages/adapters/near-intents/src/adapter.ts
@@ -400,6 +403,7 @@ packages/widget/src/history.ts
 packages/widget/src/index.ts
 packages/widget/src/mark.ts
 packages/widget/src/motion.ts
+packages/widget/src/near-direct.test.ts
 packages/widget/src/own-compose.test.ts
 packages/widget/src/own-compose.ts
 packages/widget/src/own-delivery.ts
