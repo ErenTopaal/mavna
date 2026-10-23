@@ -1769,7 +1769,7 @@ function renderApp(c: Flow): ReactNode {
           </svg>
           <span
             style={s(
-              "font-family:var(--mv-font-mono);font-size:13px;font-weight:500;letter-spacing:0.26em;color:var(--mv-ink)",
+              "font-family:var(--mv-font);font-size:13px;font-weight:600;letter-spacing:0.22em;color:var(--mv-ink)",
             )}
           >
             MAVNA
@@ -1813,7 +1813,7 @@ function renderApp(c: Flow): ReactNode {
                     active: "transform:translateY(1px)",
                   })}
                   style={s(
-                    "width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-ink)",
+                    "width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-size:13px;color:var(--mv-ink)",
                   )}
                 >
                   ←
@@ -1971,9 +1971,7 @@ function renderMenu(c: Flow): ReactNode {
               {l.label}
               {l.external ? (
                 <span
-                  style={s(
-                    "font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-muted-b)",
-                  )}
+                  style={s("font-family:var(--mv-font);font-size:11px;color:var(--mv-muted-b)")}
                 >
                   ↗
                 </span>
@@ -2016,7 +2014,7 @@ function renderWallet(c: Flow): ReactNode {
         {st.wallet === null ? (
           <span
             style={s(
-              "font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:var(--mv-muted-b)",
+              "font-family:var(--mv-font);font-size:9.5px;letter-spacing:0.1em;color:var(--mv-muted-b)",
             )}
           >
             ○
@@ -2054,7 +2052,7 @@ function renderWallet(c: Flow): ReactNode {
           {/* Source wallet: the EVM chain the transfer is sent from. */}
           <p
             style={s(
-              "margin:0;padding:12px 16px 8px;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+              "margin:0;padding:12px 16px 8px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
             )}
           >
             Source wallet
@@ -2092,7 +2090,7 @@ function renderWallet(c: Flow): ReactNode {
                   <span style={s("font-size:13px;font-weight:500")}>{d.info.name}</span>
                   <span
                     style={s(
-                      "margin-left:auto;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;color:var(--mv-faint-2)",
+                      "margin-left:auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);color:var(--mv-faint-2)",
                     )}
                   >
                     {st.connecting === d.info.uuid ? "Connecting…" : "EVM"}
@@ -2119,7 +2117,7 @@ function renderWallet(c: Flow): ReactNode {
                 />
               </span>
               <span
-                style={s("font-family:var(--mv-font-mono);font-size:12px;letter-spacing:0.02em")}
+                style={s("font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.02em")}
               >
                 {st.wallet.short}
               </span>
@@ -2130,7 +2128,7 @@ function renderWallet(c: Flow): ReactNode {
                   hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                 })}
                 style={s(
-                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mv-muted)",
+                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                 )}
               >
                 Disconnect
@@ -2142,7 +2140,7 @@ function renderWallet(c: Flow): ReactNode {
                     account and to convert to XLM. Separate from the source. */}
           <p
             style={s(
-              "margin:0;padding:12px 16px 8px;border-top:1px solid var(--mv-rule-hair);font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+              "margin:0;padding:12px 16px 8px;border-top:1px solid var(--mv-rule-hair);font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
             )}
           >
             Stellar wallet
@@ -2158,7 +2156,7 @@ function renderWallet(c: Flow): ReactNode {
             >
               <span
                 style={s(
-                  "width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-muted)",
+                  "width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font);font-size:11px;color:var(--mv-muted)",
                 )}
               >
                 ✦
@@ -2168,7 +2166,7 @@ function renderWallet(c: Flow): ReactNode {
               </span>
               <span
                 style={s(
-                  "margin-left:auto;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;color:var(--mv-faint-2)",
+                  "margin-left:auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);color:var(--mv-faint-2)",
                 )}
               >
                 Stellar
@@ -2182,13 +2180,13 @@ function renderWallet(c: Flow): ReactNode {
             >
               <span
                 style={s(
-                  "width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-muted)",
+                  "width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font);font-size:11px;color:var(--mv-muted)",
                 )}
               >
                 ✦
               </span>
               <span
-                style={s("font-family:var(--mv-font-mono);font-size:12px;letter-spacing:0.02em")}
+                style={s("font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.02em")}
               >
                 {shortAddr(st.stellarAddress)}
               </span>
@@ -2199,7 +2197,7 @@ function renderWallet(c: Flow): ReactNode {
                   hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                 })}
                 style={s(
-                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mv-muted)",
+                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                 )}
               >
                 Disconnect
@@ -2272,7 +2270,7 @@ function renderCompact(c: Flow): ReactNode {
               active: "transform:translateY(1px)",
             })}
             style={s(
-              "width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-ink)",
+              "width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-size:13px;color:var(--mv-ink)",
             )}
           >
             ←
@@ -2383,7 +2381,7 @@ function renderCompact(c: Flow): ReactNode {
           rel="noopener noreferrer"
           className={pseudo({ hover: "color:var(--mv-faint)" })}
           style={s(
-            "flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 16px 14px;font-family:var(--mv-font-mono);font-size:8.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-faint-2);text-decoration:none;transition:color var(--mv-fast) var(--mv-ease)",
+            "flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 16px 14px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint-2);text-decoration:none;transition:color var(--mv-fast) var(--mv-ease)",
           )}
         >
           <svg

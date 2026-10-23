@@ -144,24 +144,70 @@ test("the playground's controls stay usable once the rail stacks above the stage
   await expect(page.getByRole("button", { name: "Bring funds to Stellar" })).toBeVisible();
 });
 
-test("the amount and recipient fields show where keyboard focus is", async ({ page, baseURL }) => {
+// the owner chose no box around a focused text field; the caret alone shows where typing goes
+test("the text fields take keyboard focus without drawing a box around it", async ({
+  page,
+  baseURL,
+}) => {
   await offline(page, baseURL);
   await page.goto("/");
   const root = page.locator(".mv-root");
-  const ring = (name: string) =>
-    root.getByRole("textbox", { name }).evaluate((el) => getComputedStyle(el).outlineStyle);
+  const look = (name: string) =>
+    root.getByRole("textbox", { name }).evaluate((el) => {
+      const box = el.parentElement as HTMLElement;
+      const own = getComputedStyle(el);
+      return {
+        outline: own.outlineStyle,
+        border: own.borderTopColor,
+        holder: getComputedStyle(box).borderTopColor,
+        caret: own.caretColor,
+      };
+    });
+  const boxless = async (name: string, rest: Awaited<ReturnType<typeof look>>) => {
+    const now = await look(name);
+    expect(now.outline).toBe("none");
+    expect(now.border).toBe(rest.border);
+    expect(now.holder).toBe(rest.holder);
+    expect(now.caret).not.toBe("transparent");
+  };
+
   const amount = root.getByRole("textbox", { name: "Amount to send" });
+  const amountRest = await look("Amount to send");
   await root.getByRole("button", { name: /Ethereum Sepolia/ }).focus();
   await page.keyboard.press("Tab");
   await expect(amount).toBeFocused();
-  expect(await ring("Amount to send")).not.toBe("none");
+  await boxless("Amount to send", amountRest);
+  await page.keyboard.type("12.5");
+  await expect(amount).toHaveValue("12.5");
 
   await root.getByRole("button", { name: /Recipient/ }).focus();
   await page.keyboard.press("Enter");
+  const address = root.getByRole("textbox", { name: "Stellar address" });
+  await expect(address).toBeVisible();
+  const addressRest = await look("Stellar address");
   // focus moved to the new screen's back button; the field is next
   await page.keyboard.press("Tab");
-  await expect(root.getByRole("textbox", { name: "Stellar address" })).toBeFocused();
-  expect(await ring("Stellar address")).not.toBe("none");
+  await expect(address).toBeFocused();
+  await boxless("Stellar address", addressRest);
+  await root.getByRole("button", { name: "Back" }).click();
+
+  await root.getByRole("button", { name: /Ethereum Sepolia/ }).click();
+  const search = root.getByRole("textbox", { name: "Search chains" });
+  await expect(search).toBeVisible();
+  await page.mouse.click(1, 1);
+  const searchRest = await look("Search chains");
+  await search.focus();
+  await expect(search).toBeFocused();
+  await boxless("Search chains", searchRest);
+  await root.getByRole("button", { name: "Back" }).click();
+
+  await root.getByRole("button", { name: "Activity" }).click();
+  const lookup = root.getByRole("textbox", { name: "Transaction or address" });
+  await expect(lookup).toBeVisible();
+  const lookupRest = await look("Transaction or address");
+  await lookup.focus();
+  await expect(lookup).toBeFocused();
+  await boxless("Transaction or address", lookupRest);
 });
 
 test("Escape from inside a header popover hands focus back to its button", async ({
@@ -212,7 +258,7 @@ test("Tab in the drawer never stops on the invisible backdrop", async ({ page })
   await expect(page.locator(".mv-overlay").locator(":focus")).toHaveCount(1);
 });
 
-test("hover and focus styles show over the inline styles they are written against", async ({
+test("hover styles show over the inline styles they are written against", async ({
   page,
   baseURL,
 }) => {
@@ -225,13 +271,6 @@ test("hover and focus styles show over the inline styles they are written agains
   const rest = await background();
   await row.hover();
   await expect.poll(background).not.toBe(rest);
-
-  await root.getByRole("button", { name: "Activity" }).click();
-  const lookup = root.getByRole("textbox", { name: "Transaction or address" });
-  const border = () => lookup.evaluate((el) => getComputedStyle(el).borderTopColor);
-  const blurred = await border();
-  await lookup.focus();
-  await expect.poll(border).not.toBe(blurred);
 });
 
 test("a focus ring on a full-width row is not clipped by the scrolling body", async ({

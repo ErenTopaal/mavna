@@ -158,6 +158,10 @@ describe("Flow.setNetwork", () => {
 
 const OTHER = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
 
+// what a reader sees: an amount's figures sit in their own span, so read past the tags
+const shown = (html: string): string => html.replace(/<[^>]*>/g, "");
+const FIGURE_STYLE = "font-family:var(--mv-font-num)";
+
 /** React only applies setState once mounted; this applies it at once so the
     flow's own handlers can be driven without a renderer. */
 function applied(flow: Flow): Flow {
@@ -289,6 +293,85 @@ describe("Flow.start against the form", () => {
   });
 });
 
+describe("type", () => {
+  // the owner's rule: words in the text face, only figures in the figure face
+  it("sets no words in the figure face and nothing in the mono face directly", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: OTHER, amount: "100" };
+    const r = flow.chosen();
+    const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
+    const d = { r, chain, sym: "USDC" };
+    const pages = [
+      renderToStaticMarkup(renderSend(flow, { ...d, xlm: false, resting: false })),
+      renderToStaticMarkup(renderRoutes(flow, { sym: "USDC", resting: undefined })),
+      renderToStaticMarkup(renderReview(flow, d)),
+      renderToStaticMarkup(renderFlight(flow, { ...d, arrived: false })),
+    ];
+    for (const html of pages) {
+      expect(html).not.toContain("--mv-font-mono");
+      const set = [...html.matchAll(/--mv-font-num[^>]*>([^<]*)/g)].map((m) => m[1] ?? "");
+      expect(set.length).toBeGreaterThan(0);
+      for (const text of set) expect(text).not.toMatch(/[A-Za-z]/);
+    }
+  });
+});
+
+describe("addresses", () => {
+  // the owner's call: an address stays in the figure face, so 0 and O, 1 and l stay apart
+  const inAddressFace = (html: string, text: string): boolean =>
+    [...html.matchAll(/--mv-font-address[^>]*>([^<]*)/g)].some((m) => (m[1] ?? "").includes(text));
+
+  it("are set in the address face on the form, the address screen, review and flight", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: OTHER, amount: "100" };
+    const r = flow.chosen();
+    const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
+    const d = { r, chain, sym: "USDC" };
+    const form = renderToStaticMarkup(renderSend(flow, { ...d, xlm: false, resting: false }));
+    expect(inAddressFace(form, "GBRPY…OX2H")).toBe(true);
+    const field = renderToStaticMarkup(renderAddress(flow));
+    expect(field).toMatch(/<input[^>]*--mv-font-address/);
+    for (const html of [
+      renderToStaticMarkup(renderReview(flow, d)),
+      renderToStaticMarkup(renderFlight(flow, { ...d, arrived: false })),
+    ]) {
+      expect(inAddressFace(html, "GBZXN…MADI")).toBe(true);
+      // the other rows keep the text face
+      expect(inAddressFace(html, "Arbitrum Sepolia")).toBe(false);
+    }
+  });
+
+  it("keeps the words for an unset recipient in the text face", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: "" };
+    const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
+    const form = renderToStaticMarkup(
+      renderSend(flow, { r: undefined, chain, sym: "USDC", xlm: false, resting: true }),
+    );
+    expect(form).toContain("Not set");
+    expect(inAddressFace(form, "Not set")).toBe(false);
+  });
+
+  it("are set in the address face in the wallet menu", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      screen: "send",
+      walletOpen: true,
+      wallet: {
+        ...(flow.state.wallet ?? {}),
+        name: "Test",
+        icon: "",
+        short: "0x1234…abcd",
+      } as never,
+      stellarAddress: OTHER,
+    };
+    const html = renderToStaticMarkup(flow.render() as React.ReactElement);
+    expect(inAddressFace(html, "0x1234…abcd")).toBe(true);
+    expect(inAddressFace(html, "GBRP")).toBe(true);
+  });
+});
+
 describe("review and flight", () => {
   it("show the recipient, amount and chain the route will sign for, not the form", () => {
     const flow = quotedFlow({ terms: 0 });
@@ -301,8 +384,8 @@ describe("review and flight", () => {
     ]) {
       expect(html).toContain("GBZXN…MADI");
       expect(html).not.toContain("GBRPY…OX2H");
-      expect(html).toContain("5.00 USDC");
-      expect(html).not.toContain("100.00");
+      expect(shown(html)).toContain("5.00 USDC");
+      expect(shown(html)).not.toContain("100.00");
       expect(html).toContain("Arbitrum Sepolia");
       expect(html).not.toContain("Base Sepolia");
     }
@@ -433,7 +516,7 @@ describe("an integrator fee on a route", () => {
       renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "XLM" }),
     );
     expect(html).toContain("Integrator fee");
-    expect(html).toContain("0.25 XLM to Acme Wallet");
+    expect(shown(html)).toContain("0.25 XLM to Acme Wallet");
   });
 });
 
@@ -627,7 +710,7 @@ describe("how long an arrived transfer took", () => {
       renderFlight(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC", arrived: true }),
     );
     expect(html).toContain("Took");
-    expect(html).toContain("19 min");
+    expect(shown(html)).toContain("19 min");
     expect(html).not.toContain(`About ${view.minutes} min`);
   });
 });
@@ -1048,7 +1131,10 @@ describe("a figure too long for its card", () => {
   const wraps = (html: string, figure: string): void => {
     const at = html.indexOf(`>${figure}`);
     expect(at).toBeGreaterThan(-1);
-    const open = html.lastIndexOf("<", at);
+    let open = html.lastIndexOf("<", at);
+    // the figure face is a bare span inside the figure's own box, which carries the wrap
+    if (html.slice(open, at) === `<span style="${FIGURE_STYLE}"`)
+      open = html.lastIndexOf("<", open - 1);
     expect(html.slice(open, at)).toContain("overflow-wrap:anywhere");
   };
 
@@ -1108,7 +1194,8 @@ describe("a figure too long for its card", () => {
 
 describe("the form while a quote is on its way", () => {
   // the line under the receive figure, empty or not, is what keeps the rows below still
-  const floorRow = (html: string): number => (html.match(/letter-spacing:0.13em/g) ?? []).length;
+  const floorRow = (html: string): number =>
+    (html.match(/margin:10px 0 0;font-family:var\(--mv-font\);font-weight/g) ?? []).length;
 
   it("keeps the floor line's row, so the rows below do not jump when the quote lands", () => {
     const flow = quotedFlow({ terms: 0 });
@@ -1325,9 +1412,9 @@ describe("an amount with more decimals than two", () => {
     const html = renderToStaticMarkup(
       renderReview(flow, { r: view, chain: { id: "x", name: "X" }, sym: "USDC" }),
     );
-    expect(html).toContain("10.126789 USDC");
-    expect(html).toContain("10.126785 USDC");
-    expect(html).not.toContain("10.13");
+    expect(shown(html)).toContain("10.126789 USDC");
+    expect(shown(html)).toContain("10.126785 USDC");
+    expect(shown(html)).not.toContain("10.13");
   });
 
   it("keeps two decimals for a round one", () => {
@@ -1352,7 +1439,7 @@ describe("what review says is sent and guaranteed", () => {
     const html = renderToStaticMarkup(
       renderReview(flow, { r: view(), chain: { id: "x", name: "X" }, sym: "USDC" }),
     );
-    expect(html).toContain("10.123456789012345678 USDC");
+    expect(shown(html)).toContain("10.123456789012345678 USDC");
   });
 
   it("cuts a minimum toward zero, never rounding it up past the guarantee", () => {
@@ -1361,8 +1448,8 @@ describe("what review says is sent and guaranteed", () => {
     const html = renderToStaticMarkup(
       renderReview(flow, { r, chain: { id: "x", name: "X" }, sym: "USDC" }),
     );
-    expect(html).toContain("9.9999999 USDC");
-    expect(html).not.toContain(">10.00 USDC");
+    expect(shown(html)).toContain("9.9999999 USDC");
+    expect(shown(html)).not.toContain(">10.00 USDC");
     expect(routeDetail(r, "USDC", false).find((row) => row.key === "min")?.value).toBe(
       "9.9999999 USDC",
     );
@@ -1375,6 +1462,6 @@ describe("what review says is sent and guaranteed", () => {
         resting: false,
       }),
     );
-    expect(form).toContain("Min 9.9999999 USDC");
+    expect(shown(form)).toContain("Min 9.9999999 USDC");
   });
 });

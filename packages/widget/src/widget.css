@@ -80,7 +80,6 @@
   --mv-rule-strong: oklch(0 0 0 / 0.18);
   --mv-rule-hover: oklch(0 0 0 / 0.18);
   --mv-rule-max: oklch(0 0 0 / 0.24);
-  --mv-focus: oklch(0 0 0 / 0.2);
   --mv-fill-dim: oklch(0 0 0 / 0.14);
   --mv-track-neutral: oklch(0 0 0 / 0.16);
 
@@ -121,11 +120,22 @@
   --mv-font:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  /* The design sets many labels in a mono face (the wordmark, wallet addresses,
-     tags). Same rule as the sans: a system stack by default, the host's face when
-     asked. The app points this at Azeret Mono, which it ships itself. */
+  /* The face for figures. Same rule as the sans: a system stack by default, the
+     host's face when asked. The app points this at Azeret Mono, which it ships
+     itself. */
   --mv-font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Words are set in --mv-font, every label included. Only figures (amounts,
+     counts, fees, times) take this, so a number reads as a number at a glance. */
+  --mv-font-num: var(--mv-font-mono);
+  /* Small spaced capitals: eyebrows, tags, status words. A sans needs far less
+     tracking than the mono did, and a little more weight to hold its colour at
+     ten pixels. */
+  --mv-caps-track: 0.08em;
+  --mv-caps-weight: 500;
+  /* Addresses and transaction ids stay in the mono face, where 0 and O, 1 and l
+     cannot be mistaken for each other while someone checks one by eye. */
+  --mv-font-address: var(--mv-font-mono);
 
   /*
    * The preset's radius is "small", which the shadcn CLI's own radius map defines
@@ -220,7 +230,6 @@
     --mv-rule-strong: oklch(1 0 0 / 0.24);
     --mv-rule-hover: oklch(1 0 0 / 0.24);
     --mv-rule-max: oklch(1 0 0 / 0.34);
-    --mv-focus: oklch(1 0 0 / 0.18);
     --mv-fill-dim: oklch(1 0 0 / 0.22);
     --mv-track-neutral: oklch(1 0 0 / 0.3);
     --mv-signal: oklch(0.74 0.16 22);
@@ -256,7 +265,6 @@
   --mv-rule-strong: oklch(1 0 0 / 0.24);
   --mv-rule-hover: oklch(1 0 0 / 0.24);
   --mv-rule-max: oklch(1 0 0 / 0.34);
-  --mv-focus: oklch(1 0 0 / 0.18);
   --mv-fill-dim: oklch(1 0 0 / 0.22);
   --mv-track-neutral: oklch(1 0 0 / 0.3);
   --mv-signal: oklch(0.74 0.16 22);
@@ -268,10 +276,10 @@
   outline: 2px solid var(--mv-signal);
   outline-offset: 2px;
 }
-/* a field shows its ring for a click as well as a tab, and red there reads as the
-   invalid-address border; ink keeps the ring visible without saying wrong */
+/* the owner's call: a text field shows focus by its caret alone, never a box drawn
+   around it. buttons and rows keep the ring above */
 .mv-root input:focus-visible {
-  outline-color: var(--mv-ink-3);
+  outline: none;
 }
 
 /* Screen-reader-only, for the phase word that colour and position convey
