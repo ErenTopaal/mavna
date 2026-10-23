@@ -562,3 +562,29 @@ button {
   height: 7px;
   border-radius: 999px;
 }
+
+/* theme sliders: a thin track the width of a segmented control */
+.pg-slider {
+  width: 148px;
+  height: 6px;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--pg-rule);
+  outline: none;
+  cursor: pointer;
+}
+.pg-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--pg-ink);
+  border: 2px solid var(--pg-ground);
+}
+.pg-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--pg-ink);
+  border: 2px solid var(--pg-ground);
+}

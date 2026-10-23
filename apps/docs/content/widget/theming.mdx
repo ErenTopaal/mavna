@@ -1,10 +1,12 @@
 ---
 title: Theming
-description: Light, dark or the reader's system setting, and every colour, font and radius as a CSS custom property.
+description:
+  Light, dark or the reader's system setting, and every colour, font and radius as a CSS custom
+  property.
 ---
 
-The widget is styled entirely by CSS custom properties declared on its root element, `.mv-root`.
-You change how it looks by setting those properties, through the config or through your own CSS.
+The widget is styled entirely by CSS custom properties declared on its root element, `.mv-root`. You
+change how it looks by setting those properties, through the config or through your own CSS.
 
 ## Light, dark and system
 
@@ -30,10 +32,12 @@ widget writes an explicit choice to a `data-mv-theme` attribute on its root.
 ```
 
 `tokens` takes any of the properties listed below. `font`, `fontMono`, `radius` and `radiusLg` set
-`--mv-font`, `--mv-font-mono`, `--mv-radius` and `--mv-radius-lg`. The widget sets its words in `font`
-and its figures (amounts, counts, fees, times) and addresses in `fontMono`. `backdrop: false` stops
-the wide layout painting its own ground and grain, for a host that paints its own background behind
-it.
+`--mv-font`, `--mv-font-mono`, `--mv-radius` and `--mv-radius-lg`. The widget sets its words in
+`font` and its figures (amounts, counts, fees, times) and addresses in `fontMono`. `radius` (default
+12px) rounds the rows, fields and the boxes inside a card, `radiusLg` (default 18px) rounds the
+cards, and the `--mv-radius-pill` token (default 999px) rounds buttons and chips. `backdrop: false`
+stops the wide layout painting its own ground and grain, for a host that paints its own background
+behind it.
 
 ## Through CSS
 
@@ -48,11 +52,11 @@ class wins outright:
 }
 ```
 
-Setting the properties on an ancestor element has no effect, because the widget declares them on
-its own root.
+Setting the properties on an ancestor element has no effect, because the widget declares them on its
+own root.
 
-To change the dark theme as well, set your properties in a rule for
-`.mv-root[data-mv-theme="dark"]` too.
+To change the dark theme as well, set your properties in a rule for `.mv-root[data-mv-theme="dark"]`
+too.
 
 ## The signal colour
 

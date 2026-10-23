@@ -84,12 +84,12 @@ function renderSendAsset(c: Flow): ReactElement {
   return (
     <div
       style={s(
-        "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+        "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill)",
       )}
     >
       <div
         style={s(
-          `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${usdt0 ? "52px" : "0px"})`,
+          `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:var(--mv-radius-pill);transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${usdt0 ? "52px" : "0px"})`,
         )}
       />
       {(["USDC", "USDT0"] as const).map((asset) => (
@@ -142,7 +142,11 @@ export function renderSend(
 
   return (
     <div style={s("display:flex;flex-direction:column")}>
-      <div style={s("background:var(--mv-surface-2);border-radius:14px;padding:15px 16px 14px")}>
+      <div
+        style={s(
+          "background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px);padding:15px 16px 14px",
+        )}
+      >
         <div style={s("display:flex;align-items:center;justify-content:space-between;gap:10px")}>
           <p
             style={s(
@@ -159,7 +163,7 @@ export function renderSend(
               active: "transform:translateY(1px)",
             })}
             style={s(
-              "display:flex;align-items:center;gap:8px;padding:6px 12px 6px 7px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font:inherit;color:var(--mv-ink)",
+              "display:flex;align-items:center;gap:8px;padding:6px 12px 6px 7px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font:inherit;color:var(--mv-ink)",
             )}
           >
             <ChainIcon chainId={chain.id} name={chain.name} size={22} />
@@ -211,7 +215,7 @@ export function renderSend(
                 hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
               })}
               style={s(
-                "padding:2px 7px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
+                "padding:2px 7px;background:transparent;border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
               )}
             >
               Max
@@ -233,7 +237,7 @@ export function renderSend(
 
       <div
         style={s(
-          "position:relative;overflow:hidden;background:var(--mv-surface-2);border-radius:14px;padding:15px 16px 14px;margin-top:8px",
+          "position:relative;overflow:hidden;background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px);padding:15px 16px 14px;margin-top:8px",
         )}
       >
         <div
@@ -252,12 +256,12 @@ export function renderSend(
           </p>
           <div
             style={s(
-              "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+              "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill)",
             )}
           >
             <div
               style={s(
-                `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
+                `position:absolute;top:2px;left:2px;width:52px;height:calc(100% - 4px);background:var(--mv-white);border-radius:var(--mv-radius-pill);transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${segX})`,
               )}
             />
             {receiveChoices.map((asset) => (
@@ -313,7 +317,7 @@ export function renderSend(
             c.required("destination") ? {} : { hover: "background:var(--mv-surface-3)" },
           )}
           style={s(
-            `display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:${c.required("destination") ? "default" : "pointer"};font:inherit;color:var(--mv-ink);text-align:left`,
+            `display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:${c.required("destination") ? "default" : "pointer"};font:inherit;color:var(--mv-ink);text-align:left`,
           )}
         >
           <span style={s("font-size:13px;font-weight:500")}>Recipient</span>
@@ -342,7 +346,7 @@ export function renderSend(
           onClick={() => c.go("priority", "push")}
           className={pseudo({ hover: "background:var(--mv-surface-3)" })}
           style={s(
-            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
           )}
         >
           <span style={s("font-size:13px;font-weight:500")}>Route priority</span>
@@ -364,7 +368,7 @@ export function renderSend(
 
         <div
           style={s(
-            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border-radius:12px",
+            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border-radius:var(--mv-radius)",
           )}
         >
           <span style={s("font-size:13px;font-weight:500")}>You will approve</span>
@@ -490,7 +494,7 @@ export function renderChains(c: Flow): ReactElement {
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <div
         style={s(
-          "display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px",
+          "display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:var(--mv-radius)",
         )}
       >
         <svg
@@ -640,7 +644,7 @@ export function renderPriority(c: Flow, sym: string): ReactElement {
             }
             className={pseudo({ hover: "background:var(--mv-surface-3)" })}
             style={s(
-              `display:flex;align-items:center;gap:12px;padding:15px 16px;background:${on ? "var(--mv-surface-3)" : "var(--mv-surface-2)"};border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left`,
+              `display:flex;align-items:center;gap:12px;padding:15px 16px;background:${on ? "var(--mv-surface-3)" : "var(--mv-surface-2)"};border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left`,
             )}
           >
             <span style={s("flex:1 1 auto;min-width:0")}>
@@ -714,7 +718,7 @@ export function renderAddress(c: Flow): ReactElement {
         autoComplete="off"
         aria-label="Stellar address"
         style={s(
-          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
+          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:var(--mv-radius);font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
         )}
       />
       {invalid ? (
@@ -734,7 +738,7 @@ export function renderAddress(c: Flow): ReactElement {
           active: "transform:translateY(1px)",
         })}
         style={s(
-          "width:100%;padding:14px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600",
+          "width:100%;padding:14px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14px;font-weight:600",
         )}
       >
         Use this address
@@ -759,7 +763,7 @@ export function renderSettings(c: Flow): ReactElement {
         onClick={() => c.go("priority", "push")}
         className={pseudo({ hover: "background:var(--mv-surface-3)" })}
         style={s(
-          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
         )}
       >
         <span style={s("font-size:13.5px;font-weight:500")}>Route priority</span>
@@ -782,7 +786,7 @@ export function renderSettings(c: Flow): ReactElement {
           onClick={() => c.go("rails", "push")}
           className={pseudo({ hover: "background:var(--mv-surface-3)" })}
           style={s(
-            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+            "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
           )}
         >
           <span style={s("font-size:13.5px;font-weight:500")}>Rails</span>
@@ -805,13 +809,13 @@ export function renderSettings(c: Flow): ReactElement {
         onClick={() => c.setState((prev) => ({ showDeclined: !prev.showDeclined }))}
         className={pseudo({ hover: "background:var(--mv-surface-3)" })}
         style={s(
-          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
         )}
       >
         <span style={s("font-size:13.5px;font-weight:500")}>Show rails that declined</span>
         <span
           style={s(
-            `position:relative;flex:0 0 auto;display:block;width:40px;height:22px;border-radius:999px;transition:background 200ms cubic-bezier(0.2,0,0,1);background:${switchBg}`,
+            `position:relative;flex:0 0 auto;display:block;width:40px;height:22px;border-radius:var(--mv-radius-pill);transition:background 200ms cubic-bezier(0.2,0,0,1);background:${switchBg}`,
           )}
         >
           <span
@@ -823,7 +827,7 @@ export function renderSettings(c: Flow): ReactElement {
       </button>
       <div
         style={s(
-          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border-radius:12px",
+          "display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border-radius:var(--mv-radius)",
         )}
       >
         <span style={s("font-size:13.5px;font-weight:500")}>Network</span>
@@ -872,12 +876,12 @@ export function renderNetworkToggle(c: Flow): ReactElement {
   return (
     <div
       style={s(
-        "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px",
+        "position:relative;display:flex;align-items:center;flex:0 0 auto;padding:2px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill)",
       )}
     >
       <div
         style={s(
-          `position:absolute;top:2px;left:2px;width:68px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${seg})`,
+          `position:absolute;top:2px;left:2px;width:68px;height:calc(100% - 4px);background:var(--mv-white);border-radius:var(--mv-radius-pill);transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${seg})`,
         )}
       />
       {option("testnet", "TESTNET")}
@@ -916,7 +920,7 @@ export function renderRails(c: Flow): ReactElement {
             onClick={toggle}
             className={pseudo({ hover: "background:var(--mv-surface-3)" })}
             style={s(
-              "display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:12px;cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
+              "display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:var(--mv-surface-2);border:0;border-radius:var(--mv-radius);cursor:pointer;font:inherit;color:var(--mv-ink);text-align:left",
             )}
           >
             <span style={s("flex:1 1 auto;min-width:0")}>
@@ -1030,7 +1034,11 @@ export function renderReview(
         ];
   return (
     <div style={s("display:flex;flex-direction:column;gap:10px")}>
-      <div style={s("background:var(--mv-surface-2);border-radius:14px;overflow:hidden")}>
+      <div
+        style={s(
+          "background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px);overflow:hidden",
+        )}
+      >
         <div
           style={s(
             "display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:16px 16px 15px",
@@ -1089,7 +1097,7 @@ export function renderReview(
       </div>
       <div
         style={s(
-          "display:flex;flex-direction:column;gap:11px;padding:15px 16px;background:var(--mv-surface-2);border-radius:14px",
+          "display:flex;flex-direction:column;gap:11px;padding:15px 16px;background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px)",
         )}
       >
         {reviewRows.map((v) => (
@@ -1118,7 +1126,7 @@ export function renderReview(
         <div
           role="alert"
           style={s(
-            "display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--mv-signal-line);border-radius:14px",
+            "display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--mv-signal-line);border-radius:calc(var(--mv-radius) + 2px)",
           )}
         >
           <p
@@ -1133,7 +1141,7 @@ export function renderReview(
             onClick={() => c.confirmSendAgain()}
             className={pseudo({ hover: "background:var(--mv-surface-3)" })}
             style={s(
-              "width:100%;padding:13px 20px;background:transparent;color:var(--mv-ink);border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600",
+              "width:100%;padding:13px 20px;background:transparent;color:var(--mv-ink);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14px;font-weight:600",
             )}
           >
             Send it again
@@ -1148,7 +1156,7 @@ export function renderReview(
             active: "transform:translateY(1px)",
           })}
           style={s(
-            "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+            "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
           )}
         >
           Start transfer
@@ -1221,7 +1229,9 @@ export function renderFlight(
   return (
     <div style={s("height:100%;min-height:0;display:flex;flex-direction:column;gap:14px")}>
       <div
-        style={s("flex:0 0 auto;background:var(--mv-surface-2);border-radius:14px;overflow:hidden")}
+        style={s(
+          "flex:0 0 auto;background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px);overflow:hidden",
+        )}
       >
         <div style={s("padding:16px")}>
           <p
@@ -1387,7 +1397,7 @@ export function renderActivity(c: Flow): ReactElement {
           autoComplete="off"
           aria-label="Transaction or address"
           style={s(
-            "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font);font-size:12.5px",
+            "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:var(--mv-radius);outline:none;font-family:var(--mv-font);font-size:12.5px",
           )}
         />
         <button
@@ -1398,7 +1408,7 @@ export function renderActivity(c: Flow): ReactElement {
             active: "transform:translateY(1px)",
           })}
           style={s(
-            "flex:0 0 auto;padding:12px 16px;background:var(--mv-surface-2);border:1px solid var(--mv-rule);border-radius:12px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;color:var(--mv-ink)",
+            "flex:0 0 auto;padding:12px 16px;background:var(--mv-surface-2);border:1px solid var(--mv-rule);border-radius:var(--mv-radius);cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;color:var(--mv-ink)",
           )}
         >
           Find
@@ -1418,7 +1428,7 @@ export function renderActivity(c: Flow): ReactElement {
       {st.found !== null ? (
         <div
           style={s(
-            "display:flex;flex-direction:column;gap:12px;padding:15px 16px;background:var(--mv-surface-2);border-radius:14px",
+            "display:flex;flex-direction:column;gap:12px;padding:15px 16px;background:var(--mv-surface-2);border-radius:calc(var(--mv-radius) + 2px)",
           )}
         >
           <div>
@@ -1468,7 +1478,7 @@ export function renderActivity(c: Flow): ReactElement {
                 active: "transform:translateY(1px)",
               })}
               style={s(
-                "align-self:flex-start;padding:9px 14px;background:transparent;border:1px solid var(--mv-signal-outline);border-radius:999px;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:500;color:var(--mv-ink)",
+                "align-self:flex-start;padding:9px 14px;background:transparent;border:1px solid var(--mv-signal-outline);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:500;color:var(--mv-ink)",
               )}
             >
               Finish the delivery
@@ -1509,7 +1519,7 @@ export function renderActivity(c: Flow): ReactElement {
             <div
               key={h.sourceTxHash}
               style={s(
-                "display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border-radius:12px",
+                "display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--mv-surface-2);border-radius:var(--mv-radius)",
               )}
             >
               <div style={s("flex:1 1 auto;min-width:0")}>
@@ -1541,7 +1551,7 @@ export function renderActivity(c: Flow): ReactElement {
                   hover: "border-color:var(--mv-rule-hover);color:var(--mv-ink)",
                 })}
                 style={s(
-                  "flex:0 0 auto;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-ink-3)",
+                  "flex:0 0 auto;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-ink-3)",
                 )}
               >
                 Check
@@ -1615,7 +1625,7 @@ export function renderRoutes(
         embed
           ? s("position:relative;z-index:1;display:flex;flex-direction:column")
           : s(
-              "position:relative;z-index:1;flex:0 0 auto;width:380px;height:624px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:18px;padding:18px",
+              "position:relative;z-index:1;flex:0 0 auto;width:380px;height:624px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:var(--mv-radius-lg);padding:18px",
             )
       }
     >
@@ -1902,7 +1912,7 @@ export function renderRoutes(
               <div
                 key={a}
                 style={s(
-                  "display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px;border:1px dashed var(--mv-rule);border-radius:14px",
+                  "display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px;border:1px dashed var(--mv-rule);border-radius:calc(var(--mv-radius) + 2px)",
                 )}
               >
                 <span
@@ -1928,7 +1938,7 @@ export function renderRoutes(
               <div
                 key={decline.key}
                 style={s(
-                  "display:flex;flex-direction:column;gap:10px;padding:16px;border:1px dashed var(--mv-rule);border-radius:14px",
+                  "display:flex;flex-direction:column;gap:10px;padding:16px;border:1px dashed var(--mv-rule);border-radius:calc(var(--mv-radius) + 2px)",
                 )}
               >
                 <div
@@ -1967,7 +1977,7 @@ export function renderRoutes(
                       hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                     })}
                     style={s(
-                      "align-self:flex-start;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
+                      "align-self:flex-start;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                     )}
                   >
                     Try again

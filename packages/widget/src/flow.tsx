@@ -1802,7 +1802,7 @@ function renderApp(c: Flow): ReactNode {
           <div
             ref={c.cardRef}
             style={s(
-              "position:relative;z-index:2;flex:0 0 auto;width:460px;height:624px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:18px;padding:18px",
+              "position:relative;z-index:2;flex:0 0 auto;width:460px;height:624px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:var(--mv-radius-lg);padding:18px",
             )}
           >
             <div
@@ -1879,7 +1879,7 @@ function renderApp(c: Flow): ReactNode {
                     active: "transform:translateY(1px)",
                   })}
                   style={s(
-                    "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+                    "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
                   )}
                 >
                   {primaryLabel(c, "Review transfer")}
@@ -1897,7 +1897,7 @@ function renderApp(c: Flow): ReactNode {
                     active: "transform:translateY(1px)",
                   })}
                   style={s(
-                    "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+                    "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
                   )}
                 >
                   Send another
@@ -1958,7 +1958,7 @@ function renderMenu(c: Flow): ReactNode {
         <div
           ref={c.menuPopRef}
           style={s(
-            "position:absolute;top:calc(100% + 9px);right:0;z-index:60;min-width:184px;padding:6px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:14px;box-shadow:0 24px 60px -24px var(--mv-scrim)",
+            "position:absolute;top:calc(100% + 9px);right:0;z-index:60;min-width:184px;padding:6px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:calc(var(--mv-radius) + 2px);box-shadow:0 24px 60px -24px var(--mv-scrim)",
           )}
         >
           {links.map((l) => (
@@ -2013,7 +2013,7 @@ function renderWallet(c: Flow): ReactNode {
           active: "transform:translateY(1px)",
         })}
         style={s(
-          "display:flex;align-items:center;gap:9px;padding:8px 14px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font:inherit;color:var(--mv-ink)",
+          "display:flex;align-items:center;gap:9px;padding:8px 14px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font:inherit;color:var(--mv-ink)",
         )}
       >
         {st.wallet === null ? (
@@ -2041,7 +2041,7 @@ function renderWallet(c: Flow): ReactNode {
         <div
           ref={c.walletPopRef}
           style={s(
-            "position:absolute;top:calc(100% + 9px);right:0;z-index:60;width:264px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:14px;box-shadow:0 24px 60px -24px var(--mv-scrim);overflow:hidden",
+            "position:absolute;top:calc(100% + 9px);right:0;z-index:60;width:264px;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:calc(var(--mv-radius) + 2px);box-shadow:0 24px 60px -24px var(--mv-scrim);overflow:hidden",
           )}
         >
           {st.walletError !== null ? (
@@ -2133,7 +2133,7 @@ function renderWallet(c: Flow): ReactNode {
                   hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                 })}
                 style={s(
-                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
+                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                 )}
               >
                 Disconnect
@@ -2202,7 +2202,7 @@ function renderWallet(c: Flow): ReactNode {
                   hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                 })}
                 style={s(
-                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
+                  "margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--mv-rule);border-radius:var(--mv-radius-pill);cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                 )}
               >
                 Disconnect
@@ -2257,7 +2257,7 @@ function renderCompact(c: Flow): ReactNode {
       style={s(
         // 650 = the app card's 624 content height plus the 26px "Powered by Mavna"
         // strip below it, so the body keeps the full height and never scrolls for it.
-        "position:relative;isolation:isolate;width:100%;max-width:440px;margin:0 auto;height:min(650px,calc(100dvh - 48px));display:flex;flex-direction:column;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:18px",
+        "position:relative;isolation:isolate;width:100%;max-width:440px;margin:0 auto;height:min(650px,calc(100dvh - 48px));display:flex;flex-direction:column;background:var(--mv-surface);border:1px solid var(--mv-rule-hair);border-radius:var(--mv-radius-lg)",
       )}
     >
       <div
@@ -2335,7 +2335,7 @@ function renderCompact(c: Flow): ReactNode {
               active: "transform:translateY(1px)",
             })}
             style={s(
-              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
             )}
           >
             {primaryLabel(c, "Select a route")}
@@ -2353,7 +2353,7 @@ function renderCompact(c: Flow): ReactNode {
               active: "transform:translateY(1px)",
             })}
             style={s(
-              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
             )}
           >
             Review transfer
@@ -2371,7 +2371,7 @@ function renderCompact(c: Flow): ReactNode {
               active: "transform:translateY(1px)",
             })}
             style={s(
-              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:999px;cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
+              "width:100%;padding:15px 20px;background:var(--mv-white);color:var(--mv-on-light);border:0;border-radius:var(--mv-radius-pill);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600",
             )}
           >
             Send another

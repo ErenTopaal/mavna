@@ -44,13 +44,14 @@ const INTEGRATOR = "playground.mavna.app";
 // a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
 const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
 
-// ready-made looks: each tints only the grounds and surfaces, in a light and a dark
-// set that follow the appearance, and sets an accent; the text tokens stay the
-// widget's own, so their contrast stays what the widget measures
-type LookId = "default" | "midnight" | "forest" | "plum" | "sand";
+// ready-made looks: each is a tint (hue and strength) for the grounds and surfaces,
+// in a light and a dark set that follow the appearance, plus an accent. The text
+// tokens stay the widget's own, so their contrast stays what the widget measures
+type LookId = "default" | "midnight" | "ocean" | "forest" | "plum" | "rose" | "sand";
 type Surfaces = Record<string, string>;
-const tint = (hue: number, chroma: number, light: boolean): Surfaces =>
-  light
+const tint = (hue: number, chroma: number, light: boolean): Surfaces => {
+  if (chroma === 0) return {};
+  return light
     ? {
         "--mv-ground": `oklch(0.975 ${chroma * 0.5} ${hue})`,
         "--mv-surface": `oklch(0.995 ${chroma * 0.25} ${hue})`,
@@ -65,43 +66,37 @@ const tint = (hue: number, chroma: number, light: boolean): Surfaces =>
         "--mv-surface-3": `oklch(0.27 ${chroma * 1.36} ${hue})`,
         "--mv-surface-4": `oklch(0.31 ${chroma * 1.44} ${hue})`,
       };
+};
+// strength runs 0..100 on the slider; 100 is a clearly coloured but still quiet tint
+const MAX_CHROMA = 0.04;
 const LOOKS: readonly {
   id: LookId;
   label: string;
   accent: string;
-  light: Surfaces;
-  dark: Surfaces;
+  hue: number;
+  strength: number;
 }[] = [
-  { id: "default", label: "Default", accent: DEFAULT_ACCENT, light: {}, dark: {} },
-  {
-    id: "midnight",
-    label: "Midnight",
-    accent: "#4c8dff",
-    light: tint(260, 0.025, true),
-    dark: tint(260, 0.025, false),
-  },
-  {
-    id: "forest",
-    label: "Forest",
-    accent: "#2f9e64",
-    light: tint(160, 0.022, true),
-    dark: tint(160, 0.02, false),
-  },
-  {
-    id: "plum",
-    label: "Plum",
-    accent: "#b45ce0",
-    light: tint(320, 0.025, true),
-    dark: tint(320, 0.025, false),
-  },
-  {
-    id: "sand",
-    label: "Sand",
-    accent: "#c2410c",
-    light: tint(80, 0.024, true),
-    dark: tint(70, 0.018, false),
-  },
+  { id: "default", label: "Default", accent: DEFAULT_ACCENT, hue: 260, strength: 0 },
+  { id: "midnight", label: "Midnight", accent: "#4c8dff", hue: 260, strength: 62 },
+  { id: "ocean", label: "Ocean", accent: "#1fb6c9", hue: 210, strength: 55 },
+  { id: "forest", label: "Forest", accent: "#2f9e64", hue: 160, strength: 52 },
+  { id: "plum", label: "Plum", accent: "#b45ce0", hue: 320, strength: 62 },
+  { id: "rose", label: "Rose", accent: "#e5487a", hue: 10, strength: 50 },
+  { id: "sand", label: "Sand", accent: "#c2410c", hue: 75, strength: 55 },
 ];
+const CORNERS = {
+  sharp: { radius: "4px", radiusLg: "6px", pill: "6px" },
+  soft: { radius: "12px", radiusLg: "18px", pill: "999px" },
+  round: { radius: "16px", radiusLg: "26px", pill: "999px" },
+} as const;
+type Corners = keyof typeof CORNERS;
+const FONTS = {
+  system: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  serif: 'ui-serif, Georgia, "Times New Roman", serif',
+  rounded: 'ui-rounded, "SF Pro Rounded", system-ui, sans-serif',
+  mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
+} as const;
+type FontId = keyof typeof FONTS;
 
 export function Playground(): ReactElement {
   const [variant, setVariant] = useState<Exclude<Variant, "wide">>("compact");
@@ -119,6 +114,11 @@ export function Playground(): ReactElement {
   const [copied, setCopied] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [look, setLook] = useState<LookId>("default");
+  const [hue, setHue] = useState(260);
+  const [strength, setStrength] = useState(0);
+  const [corners, setCorners] = useState<Corners>("soft");
+  const [font, setFont] = useState<FontId>("system");
+  const [figures, setFigures] = useState<"mono" | "text">("mono");
   const [dockHeight, setDockHeight] = useState(420);
   const drag = useRef<{ y: number; h: number } | null>(null);
 
@@ -161,13 +161,18 @@ export function Playground(): ReactElement {
   }, []);
 
   const config: MavnaWidgetConfig = useMemo(() => {
-    const chosen = LOOKS.find((l) => l.id === look);
-    const preset = chosen === undefined ? {} : dark ? chosen.dark : chosen.light;
+    const corner = CORNERS[corners];
     const tokens = {
-      ...preset,
+      ...tint(hue, (strength / 100) * MAX_CHROMA, !dark),
       ...(accent === DEFAULT_ACCENT ? {} : { "--mv-signal": accent, "--mv-signal-strong": accent }),
+      ...(corners === "soft" ? {} : { "--mv-radius-pill": corner.pill }),
     };
-    const theme = Object.keys(tokens).length === 0 ? undefined : { tokens };
+    const theme = {
+      ...(Object.keys(tokens).length > 0 ? { tokens } : {}),
+      ...(font === "system" ? {} : { font: FONTS[font] }),
+      ...(figures === "text" ? { fontMono: FONTS[font] } : {}),
+      ...(corners === "soft" ? {} : { radius: corner.radius, radiusLg: corner.radiusLg }),
+    };
     return {
       integrator: INTEGRATOR,
       network: "testnet",
@@ -181,7 +186,7 @@ export function Playground(): ReactElement {
       ...(toAddress.trim() !== "" ? { toAddress: toAddress.trim() } : {}),
       ...(fromChain.trim() !== "" ? { fromChain: fromChain.trim() } : {}),
       ...(fromAmount.trim() !== "" ? { fromAmount: fromAmount.trim() } : {}),
-      ...(theme !== undefined ? { theme } : {}),
+      ...(Object.keys(theme).length > 0 ? { theme } : {}),
       onEvent,
     };
   }, [
@@ -195,7 +200,11 @@ export function Playground(): ReactElement {
     fromChain,
     fromAmount,
     accent,
-    look,
+    hue,
+    strength,
+    corners,
+    font,
+    figures,
     dark,
     onEvent,
   ]);
@@ -423,13 +432,15 @@ export function Playground(): ReactElement {
                     onClick={() => {
                       setLook(l.id);
                       setAccent(l.accent);
+                      setHue(l.hue);
+                      setStrength(l.strength);
                     }}
                   >
                     <span
                       className="pg-look-swatch"
                       style={{
                         background:
-                          (dark ? l.dark : l.light)["--mv-surface"] ??
+                          tint(l.hue, (l.strength / 100) * MAX_CHROMA, !dark)["--mv-surface"] ??
                           (dark ? "#262626" : "#ffffff"),
                       }}
                     >
@@ -439,6 +450,77 @@ export function Playground(): ReactElement {
                   </button>
                 ))}
               </span>
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Tint</span>
+              <input
+                className="pg-slider"
+                type="range"
+                min={0}
+                max={360}
+                value={hue}
+                onChange={(e) => {
+                  setHue(Number(e.target.value));
+                  setLook("default");
+                  if (strength === 0) setStrength(50);
+                }}
+                aria-label="Tint hue"
+                style={{
+                  background:
+                    "linear-gradient(to right, oklch(0.7 0.12 0), oklch(0.7 0.12 60), oklch(0.7 0.12 120), oklch(0.7 0.12 180), oklch(0.7 0.12 240), oklch(0.7 0.12 300), oklch(0.7 0.12 360))",
+                }}
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Tint strength</span>
+              <input
+                className="pg-slider"
+                type="range"
+                min={0}
+                max={100}
+                value={strength}
+                onChange={(e) => {
+                  setStrength(Number(e.target.value));
+                  setLook("default");
+                }}
+                aria-label="Tint strength"
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Corners</span>
+              <Segmented
+                value={corners}
+                options={[
+                  ["sharp", "Sharp"],
+                  ["soft", "Soft"],
+                  ["round", "Round"],
+                ]}
+                onChange={setCorners}
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Text</span>
+              <Segmented
+                value={font}
+                options={[
+                  ["system", "Sans"],
+                  ["serif", "Serif"],
+                  ["rounded", "Round"],
+                  ["mono", "Mono"],
+                ]}
+                onChange={setFont}
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Figures</span>
+              <Segmented
+                value={figures}
+                options={[
+                  ["mono", "Mono"],
+                  ["text", "Like text"],
+                ]}
+                onChange={setFigures}
+              />
             </div>
             <div className="pg-row">
               <span className="pg-row-label">Signal accent</span>

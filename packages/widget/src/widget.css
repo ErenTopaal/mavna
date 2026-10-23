@@ -150,8 +150,11 @@
    * adapts. Every other dimension in this file is px for the same reason; a guest
    * component has to be predictable inside a page it did not write.
    */
-  --mv-radius: 5.2px;
-  --mv-radius-lg: 7.2px;
+  /* Corners: rows, fields and inner boxes take --mv-radius (inner boxes 2px more),
+     cards take --mv-radius-lg, chips and buttons --mv-radius-pill. */
+  --mv-radius: 12px;
+  --mv-radius-lg: 18px;
+  --mv-radius-pill: 999px;
 
   --mv-ease: cubic-bezier(0.2, 0, 0, 1);
   /* Symmetric, for anything that breathes rather than arrives. */
