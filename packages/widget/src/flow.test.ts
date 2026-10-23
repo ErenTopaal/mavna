@@ -245,7 +245,7 @@ describe("Flow.setDestination", () => {
     expect(flow.resting()).toBe("recipient");
     const html = renderToStaticMarkup(renderRoutes(flow, { sym: "USDC", resting: flow.resting() }));
     expect(html).toContain("Awaiting a recipient");
-    expect(html).toContain("Set a recipient to compare.");
+    expect(html).not.toContain("to compare");
     expect(html).not.toContain("Declined");
     expect(html).not.toContain("Enter an amount");
   });

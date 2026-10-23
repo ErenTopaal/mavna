@@ -1888,9 +1888,11 @@ export function renderRoutes(
         })}
 
         {resting ? (
+          // what the panel waits for is named in its header, so the body only says
+          // what will be asked: the mark up top, the statement where results begin
           <div
             style={s(
-              "flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:26px;padding:24px 12px",
+              "flex:1 1 auto;display:flex;flex-direction:column;justify-content:space-between;gap:24px;padding:6px 2px 4px",
             )}
           >
             <svg
@@ -1898,72 +1900,25 @@ export function renderRoutes(
               aria-hidden="true"
               fill="currentColor"
               style={s(
-                "width:46px;height:46px;display:block;color:var(--mv-ink);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both,mv-breathe 4600ms cubic-bezier(0.4,0,0.6,1) 640ms infinite",
+                "width:20px;height:20px;display:block;color:var(--mv-faint);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) both",
               )}
             >
               <path d={MAVNA_MARK_PATH} />
             </svg>
-            <div
-              style={s(
-                "display:flex;align-items:stretch;gap:0;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
-              )}
-            >
-              <div
-                style={s(
-                  "display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 22px",
-                )}
-              >
-                <span
-                  style={s(
-                    "font-family:var(--mv-font-num);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
-                  )}
-                >
-                  {c.list().length}
-                </span>
-                <span
-                  style={s(
-                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
-                  )}
-                >
-                  Chains
-                </span>
-              </div>
-              <span style={s("width:1px;background:var(--mv-rule)")} />
-              <div
-                style={s(
-                  "display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 22px",
-                )}
-              >
-                <span
-                  style={s(
-                    "font-family:var(--mv-font-num);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
-                  )}
-                >
-                  {expected}
-                </span>
-                <span
-                  style={s(
-                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
-                  )}
-                >
-                  {expected === 1 ? "Rail" : "Rails"}
-                </span>
-              </div>
-            </div>
-            <div style={s("display:flex;flex-direction:column;gap:6px;max-width:266px")}>
+            <div style={s("display:flex;flex-direction:column;gap:14px;max-width:330px")}>
               <p
                 style={s(
-                  "margin:0;font-size:14px;font-weight:500;letter-spacing:-0.01em;color:var(--mv-ink-strong);animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 160ms both",
+                  "margin:0;font-size:27px;line-height:1.12;font-weight:500;letter-spacing:-0.03em;color:var(--mv-ink);text-wrap:balance;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 90ms both",
                 )}
               >
                 Every route into Stellar, asked at once.
               </p>
               <p
                 style={s(
-                  "margin:0;font-size:12.5px;line-height:1.55;color:var(--mv-faint);text-wrap:pretty;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 220ms both",
+                  "margin:0;font-size:13px;line-height:1.55;color:var(--mv-faint);text-wrap:pretty;animation:mv-emerge 520ms cubic-bezier(0.2,0,0,1) 160ms both",
                 )}
               >
-                {`Mavna ranks them by what actually arrives. ${d.resting === "recipient" ? "Set a recipient" : "Enter an amount"} to compare.`}
+                {`From ${c.list().length} chains over ${expected} ${expected === 1 ? "rail" : "rails"}, ranked by what actually arrives.`}
               </p>
             </div>
           </div>
