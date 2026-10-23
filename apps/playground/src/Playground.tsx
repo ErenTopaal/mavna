@@ -44,68 +44,62 @@ const INTEGRATOR = "playground.mavna.app";
 // a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
 const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
 
-// ready-made looks: each tints only the grounds and surfaces and sets an accent,
-// leaving the text tokens alone so their contrast stays what the widget measures
+// ready-made looks: each tints only the grounds and surfaces, in a light and a dark
+// set that follow the appearance, and sets an accent; the text tokens stay the
+// widget's own, so their contrast stays what the widget measures
 type LookId = "default" | "midnight" | "forest" | "plum" | "sand";
+type Surfaces = Record<string, string>;
+const tint = (hue: number, chroma: number, light: boolean): Surfaces =>
+  light
+    ? {
+        "--mv-ground": `oklch(0.975 ${chroma * 0.5} ${hue})`,
+        "--mv-surface": `oklch(0.995 ${chroma * 0.25} ${hue})`,
+        "--mv-surface-2": `oklch(0.96 ${chroma * 0.6} ${hue})`,
+        "--mv-surface-3": `oklch(0.93 ${chroma * 0.75} ${hue})`,
+        "--mv-surface-4": `oklch(0.89 ${chroma * 0.85} ${hue})`,
+      }
+    : {
+        "--mv-ground": `oklch(0.15 ${chroma} ${hue})`,
+        "--mv-surface": `oklch(0.2 ${chroma * 1.2} ${hue})`,
+        "--mv-surface-2": `oklch(0.24 ${chroma * 1.28} ${hue})`,
+        "--mv-surface-3": `oklch(0.27 ${chroma * 1.36} ${hue})`,
+        "--mv-surface-4": `oklch(0.31 ${chroma * 1.44} ${hue})`,
+      };
 const LOOKS: readonly {
   id: LookId;
   label: string;
-  appearance: Appearance;
   accent: string;
-  tokens: Record<string, string>;
+  light: Surfaces;
+  dark: Surfaces;
 }[] = [
-  { id: "default", label: "Default", appearance: "dark", accent: DEFAULT_ACCENT, tokens: {} },
+  { id: "default", label: "Default", accent: DEFAULT_ACCENT, light: {}, dark: {} },
   {
     id: "midnight",
     label: "Midnight",
-    appearance: "dark",
     accent: "#4c8dff",
-    tokens: {
-      "--mv-ground": "oklch(0.15 0.025 260)",
-      "--mv-surface": "oklch(0.2 0.03 260)",
-      "--mv-surface-2": "oklch(0.24 0.032 260)",
-      "--mv-surface-3": "oklch(0.27 0.034 260)",
-      "--mv-surface-4": "oklch(0.31 0.036 260)",
-    },
+    light: tint(260, 0.025, true),
+    dark: tint(260, 0.025, false),
   },
   {
     id: "forest",
     label: "Forest",
-    appearance: "dark",
-    accent: "#3dbb7a",
-    tokens: {
-      "--mv-ground": "oklch(0.15 0.02 160)",
-      "--mv-surface": "oklch(0.2 0.024 160)",
-      "--mv-surface-2": "oklch(0.24 0.026 160)",
-      "--mv-surface-3": "oklch(0.27 0.028 160)",
-      "--mv-surface-4": "oklch(0.31 0.03 160)",
-    },
+    accent: "#2f9e64",
+    light: tint(160, 0.022, true),
+    dark: tint(160, 0.02, false),
   },
   {
     id: "plum",
     label: "Plum",
-    appearance: "dark",
-    accent: "#c46cf0",
-    tokens: {
-      "--mv-ground": "oklch(0.15 0.025 320)",
-      "--mv-surface": "oklch(0.2 0.03 320)",
-      "--mv-surface-2": "oklch(0.24 0.032 320)",
-      "--mv-surface-3": "oklch(0.27 0.034 320)",
-      "--mv-surface-4": "oklch(0.31 0.036 320)",
-    },
+    accent: "#b45ce0",
+    light: tint(320, 0.025, true),
+    dark: tint(320, 0.025, false),
   },
   {
     id: "sand",
     label: "Sand",
-    appearance: "light",
     accent: "#c2410c",
-    tokens: {
-      "--mv-ground": "oklch(0.975 0.012 80)",
-      "--mv-surface": "oklch(0.995 0.006 80)",
-      "--mv-surface-2": "oklch(0.96 0.014 80)",
-      "--mv-surface-3": "oklch(0.93 0.018 80)",
-      "--mv-surface-4": "oklch(0.89 0.02 80)",
-    },
+    light: tint(80, 0.024, true),
+    dark: tint(70, 0.018, false),
   },
 ];
 
@@ -150,12 +144,25 @@ export function Playground(): ReactElement {
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  // the looks pick their light or dark set from what the widget will actually show
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const on = (e: MediaQueryListEvent): void => setSystemDark(e.matches);
+    query.addEventListener("change", on);
+    return () => query.removeEventListener("change", on);
+  }, []);
+  const dark = appearance === "dark" || (appearance === "system" && systemDark);
+
   const onEvent = useCallback((e: MavnaWidgetEvent) => {
     setLog((prev) => [describeEvent(e), ...prev].slice(0, 60));
   }, []);
 
   const config: MavnaWidgetConfig = useMemo(() => {
-    const preset = LOOKS.find((l) => l.id === look)?.tokens ?? {};
+    const chosen = LOOKS.find((l) => l.id === look);
+    const preset = chosen === undefined ? {} : dark ? chosen.dark : chosen.light;
     const tokens = {
       ...preset,
       ...(accent === DEFAULT_ACCENT ? {} : { "--mv-signal": accent, "--mv-signal-strong": accent }),
@@ -189,6 +196,7 @@ export function Playground(): ReactElement {
     fromAmount,
     accent,
     look,
+    dark,
     onEvent,
   ]);
 
@@ -414,13 +422,16 @@ export function Playground(): ReactElement {
                     aria-pressed={look === l.id}
                     onClick={() => {
                       setLook(l.id);
-                      setAppearance(l.appearance);
                       setAccent(l.accent);
                     }}
                   >
                     <span
                       className="pg-look-swatch"
-                      style={{ background: l.tokens["--mv-surface"] ?? "#262626" }}
+                      style={{
+                        background:
+                          (dark ? l.dark : l.light)["--mv-surface"] ??
+                          (dark ? "#262626" : "#ffffff"),
+                      }}
                     >
                       <span style={{ background: l.accent }} />
                     </span>
