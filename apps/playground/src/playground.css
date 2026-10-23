@@ -336,15 +336,12 @@ button {
   overflow: auto;
   padding: 56px 32px 40px;
 }
-/* The spotlight: a soft glow behind where the widget sits, so it reads as lit on
-   a plinth rather than floating on a flat panel. */
+/* The stage is a flat ground, with no glow behind the widget. */
 .pg-spot {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(58% 52% at 50% 30%, oklch(1 0 0 / 0.85), transparent 70%),
-    linear-gradient(to bottom, oklch(0.99 0 0), var(--pg-ground) 62%);
+  background: var(--pg-ground);
 }
 /* Faint film grain, the same texture the product uses, tying the stage to it. */
 .pg-grain {
@@ -369,10 +366,6 @@ button {
   align-self: center;
   text-align: center;
   filter: drop-shadow(0 12px 26px oklch(0 0 0 / 0.16));
-}
-:root[data-pg-theme="dark"] .pg-spot {
-  background:
-    radial-gradient(52% 46% at 50% 34%, oklch(1 0 0 / 0.035), transparent 72%), var(--pg-ground);
 }
 :root[data-pg-theme="dark"] .pg-stage > .mv-root {
   filter: drop-shadow(0 24px 50px oklch(0 0 0 / 0.45));
