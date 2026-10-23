@@ -153,6 +153,7 @@ contracts/clippy.toml
 contracts/rust-toolchain.toml
 package.json
 packages/adapters/axelar/CHANGELOG.md
+packages/adapters/axelar/README.md
 packages/adapters/axelar/package.json
 packages/adapters/axelar/src/__fixtures__/mainnet-deliveries.json
 packages/adapters/axelar/src/__fixtures__/no-buffer.ts
@@ -185,6 +186,7 @@ packages/adapters/axelar/tsconfig.json
 packages/adapters/axelar/tsconfig.test.json
 packages/adapters/axelar/tsdown.config.ts
 packages/adapters/cctp/CHANGELOG.md
+packages/adapters/cctp/README.md
 packages/adapters/cctp/package.json
 packages/adapters/cctp/src/__fixtures__/fixtures.ts
 packages/adapters/cctp/src/__fixtures__/forward-event.json
@@ -228,6 +230,7 @@ packages/adapters/cctp/tsconfig.json
 packages/adapters/cctp/tsconfig.test.json
 packages/adapters/cctp/tsdown.config.ts
 packages/adapters/layerzero/CHANGELOG.md
+packages/adapters/layerzero/README.md
 packages/adapters/layerzero/package.json
 packages/adapters/layerzero/src/__fixtures__/arrival-event-as-came-testnet.json
 packages/adapters/layerzero/src/__fixtures__/arrival-event-converted-testnet.json
@@ -260,6 +263,7 @@ packages/adapters/layerzero/tsconfig.json
 packages/adapters/layerzero/tsconfig.test.json
 packages/adapters/layerzero/tsdown.config.ts
 packages/adapters/near-intents/CHANGELOG.md
+packages/adapters/near-intents/README.md
 packages/adapters/near-intents/package.json
 packages/adapters/near-intents/src/__fixtures__/one-click-quote-xlm-funded.json
 packages/adapters/near-intents/src/__fixtures__/one-click-quote-xlm-unfunded.json
@@ -282,6 +286,7 @@ packages/adapters/near-intents/tsconfig.json
 packages/adapters/near-intents/tsconfig.test.json
 packages/adapters/near-intents/tsdown.config.ts
 packages/core/CHANGELOG.md
+packages/core/README.md
 packages/core/package.json
 packages/core/src/__fixtures__/aquarius-pools.json
 packages/core/src/__fixtures__/circle-fees.json
@@ -301,6 +306,7 @@ packages/core/tsconfig.json
 packages/core/tsconfig.test.json
 packages/core/tsdown.config.ts
 packages/routing/CHANGELOG.md
+packages/routing/README.md
 packages/routing/package.json
 packages/routing/src/circuit.test.ts
 packages/routing/src/circuit.ts
@@ -315,6 +321,7 @@ packages/routing/tsconfig.json
 packages/routing/tsconfig.test.json
 packages/routing/tsdown.config.ts
 packages/status/CHANGELOG.md
+packages/status/README.md
 packages/status/package.json
 packages/status/src/index.ts
 packages/status/src/machine.test.ts
@@ -325,6 +332,7 @@ packages/status/tsconfig.json
 packages/status/tsconfig.test.json
 packages/status/tsdown.config.ts
 packages/stellar/CHANGELOG.md
+packages/stellar/README.md
 packages/stellar/package.json
 packages/stellar/src/__fixtures__/mainnet-usdt0-order-book.json
 packages/stellar/src/__fixtures__/mainnet-usdt0-strict-receive-0.5.json
@@ -356,6 +364,7 @@ packages/stellar/tsconfig.json
 packages/stellar/tsconfig.test.json
 packages/stellar/tsdown.config.ts
 packages/swap/CHANGELOG.md
+packages/swap/README.md
 packages/swap/package.json
 packages/swap/src/__fixtures__/aquarius-find-path-testnet.json
 packages/swap/src/__fixtures__/browser.ts
@@ -384,6 +393,7 @@ packages/swap/tsconfig.json
 packages/swap/tsconfig.test.json
 packages/swap/tsdown.config.ts
 packages/widget/CHANGELOG.md
+packages/widget/README.md
 packages/widget/package.json
 packages/widget/src/Drawer.test.ts
 packages/widget/src/Drawer.tsx
