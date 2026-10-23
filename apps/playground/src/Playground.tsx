@@ -307,118 +307,6 @@ export function Playground(): ReactElement {
       <div className="pg-body">
         <aside className="pg-rail">
           <div className="pg-group">
-            <p className="pg-group-title">Layout</p>
-            <div className="pg-row">
-              <span className="pg-row-label">Variant</span>
-              <Segmented
-                value={variant}
-                options={[
-                  ["compact", "Compact"],
-                  ["drawer", "Drawer"],
-                ]}
-                onChange={setVariant}
-              />
-            </div>
-            <div className="pg-row">
-              <span className="pg-row-label">Appearance</span>
-              <Segmented
-                value={appearance}
-                options={[
-                  ["system", "Auto"],
-                  ["light", "Light"],
-                  ["dark", "Dark"],
-                ]}
-                onChange={setAppearance}
-              />
-            </div>
-          </div>
-
-          <div className="pg-group">
-            <p className="pg-group-title">Routing</p>
-            <div className="pg-row">
-              <span className="pg-row-label">Priority</span>
-              <Segmented
-                value={priority}
-                options={[
-                  ["best-received", "Received"],
-                  ["fastest", "Fastest"],
-                ]}
-                onChange={setPriority}
-              />
-            </div>
-            {ALL_RAILS.map((name) => (
-              <label className="pg-check" key={name}>
-                <input
-                  type="checkbox"
-                  checked={rails.includes(name)}
-                  onChange={() => toggleRail(name)}
-                />
-                {name}
-              </label>
-            ))}
-          </div>
-
-          <div className="pg-group">
-            <p className="pg-group-title">Hide UI</p>
-            {HIDEABLE.map((el) => (
-              <label className="pg-check" key={el}>
-                <input
-                  type="checkbox"
-                  checked={hidden.includes(el)}
-                  onChange={() => toggleHidden(el)}
-                />
-                {el}
-              </label>
-            ))}
-          </div>
-
-          <div className="pg-group">
-            <p className="pg-group-title">Recipient</p>
-            <label className="pg-check">
-              <input
-                type="checkbox"
-                checked={requireDest}
-                onChange={() => setRequireDest((v) => !v)}
-              />
-              Lock recipient
-            </label>
-            <div className="pg-field">
-              <span className="pg-field-label">toAddress</span>
-              <input
-                className="pg-input"
-                value={toAddress}
-                onChange={(e) => setToAddress(e.target.value)}
-                placeholder="G…, M… or C…"
-                spellCheck={false}
-              />
-            </div>
-          </div>
-
-          <div className="pg-group">
-            <p className="pg-group-title">Form start</p>
-            <div className="pg-field">
-              <span className="pg-field-label">fromChain</span>
-              <input
-                className="pg-input"
-                value={fromChain}
-                onChange={(e) => setFromChain(e.target.value)}
-                placeholder="ethereum-sepolia"
-                spellCheck={false}
-              />
-            </div>
-            <div className="pg-field">
-              <span className="pg-field-label">fromAmount</span>
-              <input
-                className="pg-input"
-                value={fromAmount}
-                onChange={(e) => setFromAmount(e.target.value)}
-                placeholder="10"
-                inputMode="decimal"
-              />
-            </div>
-          </div>
-
-          <div className="pg-group">
             <p className="pg-group-title">Theme</p>
             <div className="pg-looks">
               <span className="pg-row-label">Look</span>
@@ -542,6 +430,117 @@ export function Playground(): ReactElement {
                   aria-label="Accent colour"
                 />
               </span>
+            </div>
+          </div>
+          <div className="pg-group">
+            <p className="pg-group-title">Layout</p>
+            <div className="pg-row">
+              <span className="pg-row-label">Variant</span>
+              <Segmented
+                value={variant}
+                options={[
+                  ["compact", "Compact"],
+                  ["drawer", "Drawer"],
+                ]}
+                onChange={setVariant}
+              />
+            </div>
+            <div className="pg-row">
+              <span className="pg-row-label">Appearance</span>
+              <Segmented
+                value={appearance}
+                options={[
+                  ["system", "Auto"],
+                  ["light", "Light"],
+                  ["dark", "Dark"],
+                ]}
+                onChange={setAppearance}
+              />
+            </div>
+          </div>
+
+          <div className="pg-group">
+            <p className="pg-group-title">Routing</p>
+            <div className="pg-row">
+              <span className="pg-row-label">Priority</span>
+              <Segmented
+                value={priority}
+                options={[
+                  ["best-received", "Received"],
+                  ["fastest", "Fastest"],
+                ]}
+                onChange={setPriority}
+              />
+            </div>
+            {ALL_RAILS.map((name) => (
+              <label className="pg-check" key={name}>
+                <input
+                  type="checkbox"
+                  checked={rails.includes(name)}
+                  onChange={() => toggleRail(name)}
+                />
+                {name}
+              </label>
+            ))}
+          </div>
+
+          <div className="pg-group">
+            <p className="pg-group-title">Hide UI</p>
+            {HIDEABLE.map((el) => (
+              <label className="pg-check" key={el}>
+                <input
+                  type="checkbox"
+                  checked={hidden.includes(el)}
+                  onChange={() => toggleHidden(el)}
+                />
+                {el}
+              </label>
+            ))}
+          </div>
+
+          <div className="pg-group">
+            <p className="pg-group-title">Recipient</p>
+            <label className="pg-check">
+              <input
+                type="checkbox"
+                checked={requireDest}
+                onChange={() => setRequireDest((v) => !v)}
+              />
+              Lock recipient
+            </label>
+            <div className="pg-field">
+              <span className="pg-field-label">toAddress</span>
+              <input
+                className="pg-input"
+                value={toAddress}
+                onChange={(e) => setToAddress(e.target.value)}
+                placeholder="G…, M… or C…"
+                spellCheck={false}
+              />
+            </div>
+          </div>
+
+          <div className="pg-group">
+            <p className="pg-group-title">Form start</p>
+            <div className="pg-field">
+              <span className="pg-field-label">fromChain</span>
+              <input
+                className="pg-input"
+                value={fromChain}
+                onChange={(e) => setFromChain(e.target.value)}
+                placeholder="ethereum-sepolia"
+                spellCheck={false}
+              />
+            </div>
+            <div className="pg-field">
+              <span className="pg-field-label">fromAmount</span>
+              <input
+                className="pg-input"
+                value={fromAmount}
+                onChange={(e) => setFromAmount(e.target.value)}
+                placeholder="10"
+                inputMode="decimal"
+              />
             </div>
           </div>
         </aside>
