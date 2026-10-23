@@ -64,7 +64,7 @@ const config: MavnaWidgetConfig = {
   ...optional("disabledSources", setting(import.meta.env.VITE_MAVNA_DISABLED_SOURCES)),
   // The two faces the app ships. The widget stays on system fonts for anyone else.
   theme: {
-    font: '"Instrument Sans", ui-sans-serif, system-ui, sans-serif',
+    font: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
     fontMono: '"Azeret Mono", ui-monospace, monospace',
   },
   // The header overflow ("...") menu: the app's own destinations.
