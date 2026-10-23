@@ -44,9 +44,74 @@ const INTEGRATOR = "playground.mavna.app";
 // a dev server leaves it unset, so the widget asks the sponsor on localhost:8787.
 const SPONSOR_URL: string | undefined = import.meta.env.VITE_MAVNA_SPONSOR_URL || undefined;
 
+// ready-made looks: each tints only the grounds and surfaces and sets an accent,
+// leaving the text tokens alone so their contrast stays what the widget measures
+type LookId = "default" | "midnight" | "forest" | "plum" | "sand";
+const LOOKS: readonly {
+  id: LookId;
+  label: string;
+  appearance: Appearance;
+  accent: string;
+  tokens: Record<string, string>;
+}[] = [
+  { id: "default", label: "Default", appearance: "dark", accent: DEFAULT_ACCENT, tokens: {} },
+  {
+    id: "midnight",
+    label: "Midnight",
+    appearance: "dark",
+    accent: "#4c8dff",
+    tokens: {
+      "--mv-ground": "oklch(0.15 0.025 260)",
+      "--mv-surface": "oklch(0.2 0.03 260)",
+      "--mv-surface-2": "oklch(0.24 0.032 260)",
+      "--mv-surface-3": "oklch(0.27 0.034 260)",
+      "--mv-surface-4": "oklch(0.31 0.036 260)",
+    },
+  },
+  {
+    id: "forest",
+    label: "Forest",
+    appearance: "dark",
+    accent: "#3dbb7a",
+    tokens: {
+      "--mv-ground": "oklch(0.15 0.02 160)",
+      "--mv-surface": "oklch(0.2 0.024 160)",
+      "--mv-surface-2": "oklch(0.24 0.026 160)",
+      "--mv-surface-3": "oklch(0.27 0.028 160)",
+      "--mv-surface-4": "oklch(0.31 0.03 160)",
+    },
+  },
+  {
+    id: "plum",
+    label: "Plum",
+    appearance: "dark",
+    accent: "#c46cf0",
+    tokens: {
+      "--mv-ground": "oklch(0.15 0.025 320)",
+      "--mv-surface": "oklch(0.2 0.03 320)",
+      "--mv-surface-2": "oklch(0.24 0.032 320)",
+      "--mv-surface-3": "oklch(0.27 0.034 320)",
+      "--mv-surface-4": "oklch(0.31 0.036 320)",
+    },
+  },
+  {
+    id: "sand",
+    label: "Sand",
+    appearance: "light",
+    accent: "#c2410c",
+    tokens: {
+      "--mv-ground": "oklch(0.975 0.012 80)",
+      "--mv-surface": "oklch(0.995 0.006 80)",
+      "--mv-surface-2": "oklch(0.96 0.014 80)",
+      "--mv-surface-3": "oklch(0.93 0.018 80)",
+      "--mv-surface-4": "oklch(0.89 0.02 80)",
+    },
+  },
+];
+
 export function Playground(): ReactElement {
   const [variant, setVariant] = useState<Exclude<Variant, "wide">>("compact");
-  const [appearance, setAppearance] = useState<Appearance>("light");
+  const [appearance, setAppearance] = useState<Appearance>("dark");
   const [priority, setPriority] = useState<"best-received" | "fastest">("best-received");
   const [rails, setRails] = useState<readonly RailName[]>(ALL_RAILS);
   const [hidden, setHidden] = useState<readonly HiddenUIElement[]>([]);
@@ -58,7 +123,8 @@ export function Playground(): ReactElement {
   const [log, setLog] = useState<readonly string[]>([]);
   const [tab, setTab] = useState<"config" | "events">("config");
   const [copied, setCopied] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [look, setLook] = useState<LookId>("default");
   const [dockHeight, setDockHeight] = useState(420);
   const drag = useRef<{ y: number; h: number } | null>(null);
 
@@ -89,10 +155,12 @@ export function Playground(): ReactElement {
   }, []);
 
   const config: MavnaWidgetConfig = useMemo(() => {
-    const theme =
-      accent === DEFAULT_ACCENT
-        ? undefined
-        : { tokens: { "--mv-signal": accent, "--mv-signal-strong": accent } };
+    const preset = LOOKS.find((l) => l.id === look)?.tokens ?? {};
+    const tokens = {
+      ...preset,
+      ...(accent === DEFAULT_ACCENT ? {} : { "--mv-signal": accent, "--mv-signal-strong": accent }),
+    };
+    const theme = Object.keys(tokens).length === 0 ? undefined : { tokens };
     return {
       integrator: INTEGRATOR,
       network: "testnet",
@@ -120,6 +188,7 @@ export function Playground(): ReactElement {
     fromChain,
     fromAmount,
     accent,
+    look,
     onEvent,
   ]);
 
@@ -334,6 +403,32 @@ export function Playground(): ReactElement {
 
           <div className="pg-group">
             <p className="pg-group-title">Theme</p>
+            <div className="pg-looks">
+              <span className="pg-row-label">Look</span>
+              <span className="pg-look-list">
+                {LOOKS.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    className="pg-look"
+                    aria-pressed={look === l.id}
+                    onClick={() => {
+                      setLook(l.id);
+                      setAppearance(l.appearance);
+                      setAccent(l.accent);
+                    }}
+                  >
+                    <span
+                      className="pg-look-swatch"
+                      style={{ background: l.tokens["--mv-surface"] ?? "#262626" }}
+                    >
+                      <span style={{ background: l.accent }} />
+                    </span>
+                    {l.label}
+                  </button>
+                ))}
+              </span>
+            </div>
             <div className="pg-row">
               <span className="pg-row-label">Signal accent</span>
               <span style={{ display: "flex", alignItems: "center", gap: "10px" }}>
