@@ -58,8 +58,9 @@ code and an issuer, or XLM. On 21 October 2026, 1Click listed two: USDC issued b
 
 XLM goes to a new address too. For an address with no account, 1Click's withdrawal fee is 1.1 XLM
 instead of 0.1 XLM, and HOT's relayer creates the account with 1 XLM right before it pays out. The
-route shows the withdrawal fee as including the 1 XLM that opens the account. That 1 XLM stays in
-the account as its minimum balance, and the quoted amount arrives on top of it.
+route's withdrawal fee carries it: its recipient reads "NEAR Intents withdrawal, with 1 XLM that
+opens the account". That 1 XLM stays in the account as its minimum balance, and the quoted amount
+arrives on top of it.
 
 ## Quoting and building
 
