@@ -140,6 +140,7 @@ export const MavnaWidget: ForwardRefExoticComponent<
     menuLinks: resolved.menuLinks,
     walletConfig: resolved.walletConfig,
     emit: resolved.onEvent,
+    backdrop: t?.backdrop,
     networks: resolved.networks,
     onNetworkChange: setActive,
     onAwaitingUser: setWaitingOnUser,

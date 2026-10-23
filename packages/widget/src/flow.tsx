@@ -202,6 +202,8 @@ export interface FlowProps {
    * time the page can go, the transfer ending as still moving, finished under Activity.
    */
   readonly onAwaitingUser?: ((waiting: boolean) => void) | undefined;
+  /** False when the host paints its own backdrop: no ground fill and no grain. */
+  readonly backdrop?: boolean | undefined;
 }
 
 /**
@@ -1729,16 +1731,18 @@ function renderApp(c: Flow): ReactNode {
     activity: "Activity",
   };
 
+  const backdrop = c.props.backdrop ?? true;
+
   return (
     <div
       ref={c.rootRef}
       style={s(
-        "position:relative;isolation:isolate;min-height:100dvh;background:var(--mv-ground);display:flex;flex-direction:column",
+        `position:relative;isolation:isolate;min-height:100dvh;${backdrop ? "background:var(--mv-ground);" : ""}display:flex;flex-direction:column`,
       )}
     >
       {/* Grain layer, behind everything via a negative z-index in this root's
           own stacking context (isolation:isolate above). */}
-      <div className="mv-grain" aria-hidden="true" />
+      {backdrop ? <div className="mv-grain" aria-hidden="true" /> : null}
       <header
         style={s(
           // wraps on a phone, where the controls do not fit beside the wordmark

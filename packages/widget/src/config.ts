@@ -102,6 +102,11 @@ export interface WidgetTheme {
   readonly fontMono?: string;
   readonly radius?: string;
   readonly radiusLg?: string;
+  /**
+   * Whether the wide page paints its own ground and grain. Default true. Set
+   * false when the host paints its own backdrop behind the page.
+   */
+  readonly backdrop?: boolean;
 }
 
 export interface MavnaWidgetConfig {
