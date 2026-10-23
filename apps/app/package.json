@@ -17,7 +17,8 @@
     "@mavna/core": "workspace:*",
     "@mavna/widget": "workspace:*",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "shaders": "4.0.5"
   },
   "devDependencies": {
     "@mavna/adapter-axelar": "workspace:*",

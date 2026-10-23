@@ -66,6 +66,7 @@ export default defineConfig(({ command, mode }) => {
               input: {
                 main: fileURLToPath(new URL("./index.html", import.meta.url)),
                 harness: fileURLToPath(new URL("./harness/buffer-free.html", import.meta.url)),
+                backdrop: fileURLToPath(new URL("./harness/backdrop.html", import.meta.url)),
               },
             },
           }
