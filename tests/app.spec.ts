@@ -87,3 +87,31 @@ test("the page is a flat ground, with no grain over it", async ({ page, baseURL 
   expect(widget).toBe("rgba(0, 0, 0, 0)");
   expect(page_).not.toBe("rgba(0, 0, 0, 0)");
 });
+
+// the app's own faces: Geist for words, Azeret Mono for figures and addresses
+test("the app sets its words in Geist and its figures and addresses in Azeret Mono", async ({
+  page,
+  baseURL,
+}) => {
+  const origin = new URL(baseURL ?? "http://localhost:4319").origin;
+  await page.route(
+    (url) => url.origin !== origin,
+    (route) => route.abort(),
+  );
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  await expect(root.getByText("Send to Stellar")).toBeVisible();
+  const face = (el: Element) => getComputedStyle(el).fontFamily;
+  expect(await root.getByText("Send to Stellar").evaluate(face)).toMatch(/^"?Geist Variable"?,/);
+  expect(await root.getByText("Route priority").evaluate(face)).toMatch(/^"?Geist Variable"?,/);
+  const amount = root.getByRole("textbox", { name: "Amount to send" });
+  expect(await amount.evaluate(face)).toMatch(/^"?Azeret Mono"?,/);
+  // the faces are shipped with the app, not left to whatever the system has
+  await page.evaluate(() => document.fonts.ready);
+  const loaded = await page.evaluate(() =>
+    [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replace(/"/g, "")),
+  );
+  expect(loaded).toContain("Geist Variable");
+  expect(loaded).toContain("Azeret Mono");
+  expect(loaded).not.toContain("Instrument Sans");
+});

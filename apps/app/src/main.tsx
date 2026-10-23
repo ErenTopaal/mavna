@@ -67,7 +67,7 @@ const config: MavnaWidgetConfig = {
   theme: {
     // the page brings its own backdrop, so the widget paints no ground and no grain
     backdrop: false,
-    font: '"Instrument Sans", ui-sans-serif, system-ui, sans-serif',
+    font: '"Geist Variable", ui-sans-serif, system-ui, sans-serif',
     fontMono: '"Azeret Mono", ui-monospace, monospace',
   },
   // The header overflow ("...") menu: the app's own destinations.
