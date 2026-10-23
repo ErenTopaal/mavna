@@ -31,7 +31,9 @@ widget writes an explicit choice to a `data-mv-theme` attribute on its root.
 
 `tokens` takes any of the properties listed below. `font`, `fontMono`, `radius` and `radiusLg` set
 `--mv-font`, `--mv-font-mono`, `--mv-radius` and `--mv-radius-lg`. The widget sets its words in `font`
-and only its figures (amounts, counts, fees, times) in `fontMono`.
+and its figures (amounts, counts, fees, times) and addresses in `fontMono`. `backdrop: false` stops
+the wide layout painting its own ground and grain, for a host that paints its own background behind
+it.
 
 ## Through CSS
 

@@ -1465,3 +1465,39 @@ describe("what review says is sent and guaranteed", () => {
     expect(shown(form)).toContain("Min 9.9999999 USDC");
   });
 });
+
+describe("the wide page's backdrop", () => {
+  const page = (backdrop?: boolean) => {
+    const resting = {
+      ...engine,
+      usdcOnStellar: STELLAR_USDC,
+      xlmOnStellar: STELLAR_XLM,
+      adapters: [],
+      sourceChains: [{ id: "arbitrum-sepolia", name: "Arbitrum Sepolia" }],
+      usdt0Chains: [],
+    } as unknown as Engine;
+    const flow = applied(
+      new Flow({
+        engine: resting,
+        variant: "wide",
+        ...(backdrop === undefined ? {} : { backdrop }),
+      }),
+    );
+    return renderToStaticMarkup(flow.render() as React.ReactElement);
+  };
+
+  it("paints its own ground and grain by default", () => {
+    const html = page();
+    expect(html).toContain("background:var(--mv-ground)");
+    expect(html).toContain('class="mv-grain"');
+  });
+
+  // a host that paints its own backdrop behind the page needs both gone, and
+  // every other use of the ground token left alone
+  it("paints neither when the host brings its own backdrop", () => {
+    const html = page(false);
+    expect(html).not.toContain("background:var(--mv-ground)");
+    expect(html).not.toContain("mv-grain");
+    expect(html).toContain("isolation:isolate");
+  });
+});

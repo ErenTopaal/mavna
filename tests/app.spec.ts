@@ -67,3 +67,23 @@ test("an amount with no recipient waits for one instead of showing every rail de
   await expect(root.getByText(/Set a recipient to compare\./)).toBeVisible();
   await expect(root.getByText("Declined")).toHaveCount(0);
 });
+
+test("the page is a flat ground, with no grain over it", async ({ page, baseURL }) => {
+  const origin = new URL(baseURL ?? "http://localhost:4319").origin;
+  await page.route(
+    (url) => url.origin !== origin,
+    (route) => route.abort(),
+  );
+  await page.goto("/");
+  const root = page.locator(".mv-root");
+  await expect(root.getByText("Send to Stellar")).toBeVisible();
+  await expect(root.locator(".mv-grain")).toHaveCount(0);
+  // the widget leaves the ground to the page, which paints it flat
+  const page_ = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const widget = await root
+    .locator(":scope > div")
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(widget).toBe("rgba(0, 0, 0, 0)");
+  expect(page_).not.toBe("rgba(0, 0, 0, 0)");
+});

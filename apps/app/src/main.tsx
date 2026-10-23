@@ -4,6 +4,7 @@ import type { NetworkId } from "@mavna/core";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import { Backdrop } from "./backdrop";
 
 /*
  * The app is a thin host over the widget: it reads its own configuration from the
@@ -64,6 +65,8 @@ const config: MavnaWidgetConfig = {
   ...optional("disabledSources", setting(import.meta.env.VITE_MAVNA_DISABLED_SOURCES)),
   // The two faces the app ships. The widget stays on system fonts for anyone else.
   theme: {
+    // the page brings its own backdrop, so the widget paints no ground and no grain
+    backdrop: false,
     font: '"Instrument Sans", ui-sans-serif, system-ui, sans-serif',
     fontMono: '"Azeret Mono", ui-monospace, monospace',
   },
@@ -97,6 +100,7 @@ if (container === null) throw new Error("No #root element to mount into.");
 
 createRoot(container).render(
   <StrictMode>
+    <Backdrop />
     <MavnaWidget config={config} />
   </StrictMode>,
 );
