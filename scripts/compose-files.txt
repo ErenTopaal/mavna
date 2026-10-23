@@ -4,7 +4,6 @@ apps/app/harness/buffer-free.html
 apps/app/harness/buffer-free.ts
 apps/app/index.html
 apps/app/package.json
-apps/app/public/background.jpg
 apps/app/public/mavna-logo.png
 apps/app/public/mavna-mark-light.png
 apps/app/public/mavna-mark.png
