@@ -1,6 +1,6 @@
 {
   "name": "@mavna/adapter-cctp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Circle CCTP as a Mavna rail: USDC to Stellar.",
   "keywords": [
     "stellar",

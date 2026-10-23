@@ -1,6 +1,6 @@
 {
   "name": "@mavna/stellar",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Stellar RPC client, address and destination checks, reserves and sponsorship transactions for Mavna.",
   "keywords": [
     "stellar",

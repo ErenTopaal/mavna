@@ -1,6 +1,6 @@
 {
   "name": "@mavna/swap",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Stellar exchanges (Soroswap, SushiSwap, Aquarius and the order book) behind one interface, for Mavna.",
   "keywords": [
     "stellar",

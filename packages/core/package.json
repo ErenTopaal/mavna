@@ -1,6 +1,6 @@
 {
   "name": "@mavna/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Shared types for Mavna: assets, amounts, routes, step phases and the BridgeAdapter interface every rail implements.",
   "keywords": [
     "stellar",

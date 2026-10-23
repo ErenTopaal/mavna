@@ -1,6 +1,6 @@
 {
   "name": "@mavna/widget",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The Mavna transfer flow as one React component: bring funds from other chains to Stellar.",
   "keywords": [
     "stellar",

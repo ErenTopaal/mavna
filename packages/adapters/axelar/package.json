@@ -1,6 +1,6 @@
 {
   "name": "@mavna/adapter-axelar",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Axelar Interchain Token Service as a Mavna rail.",
   "keywords": [
     "stellar",

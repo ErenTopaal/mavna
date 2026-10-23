@@ -1,6 +1,6 @@
 {
   "name": "@mavna/adapter-near-intents",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NEAR Intents, through its 1Click API, as a Mavna rail.",
   "keywords": [
     "stellar",

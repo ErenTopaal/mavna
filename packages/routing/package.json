@@ -1,6 +1,6 @@
 {
   "name": "@mavna/routing",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Asks every Mavna rail at once and ranks the routes by what arrives on Stellar.",
   "keywords": [
     "stellar",

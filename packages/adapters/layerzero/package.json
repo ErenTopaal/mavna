@@ -1,6 +1,6 @@
 {
   "name": "@mavna/adapter-layerzero",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "LayerZero OFT as a Mavna rail: USDT0 to Stellar.",
   "keywords": [
     "stellar",

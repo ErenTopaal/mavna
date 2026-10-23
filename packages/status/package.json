@@ -1,6 +1,6 @@
 {
   "name": "@mavna/status",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Lookup keys and the state machine for a Mavna transfer in flight.",
   "keywords": [
     "stellar",
