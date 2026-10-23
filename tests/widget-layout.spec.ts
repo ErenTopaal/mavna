@@ -144,8 +144,9 @@ test("the playground's controls stay usable once the rail stacks above the stage
   await expect(page.getByRole("button", { name: "Bring funds to Stellar" })).toBeVisible();
 });
 
-// the owner chose no box around a focused text field; the caret alone shows where typing goes
-test("the text fields take keyboard focus without drawing a box around it", async ({
+// the owner chose no box around the amount and recipient fields, where the caret alone
+// shows where typing goes; the chain search and the lookup keep their focus border
+test("the amount and recipient fields take focus without a box, the search fields with their border", async ({
   page,
   baseURL,
 }) => {
@@ -197,7 +198,10 @@ test("the text fields take keyboard focus without drawing a box around it", asyn
   await page.mouse.click(1, 1);
   const searchRest = await look("Search chains");
   await search.focus();
-  await boxless("Search chains", searchRest);
+  await expect(search).toBeFocused();
+  const searchNow = await look("Search chains");
+  expect(searchNow.outline).toBe("none");
+  expect(searchNow.holder).not.toBe(searchRest.holder);
   await root.getByRole("button", { name: "Back" }).click();
 
   await root.getByRole("button", { name: "Activity" }).click();
@@ -205,7 +209,10 @@ test("the text fields take keyboard focus without drawing a box around it", asyn
   await expect(lookup).toBeVisible();
   const lookupRest = await look("Transaction or address");
   await lookup.focus();
-  await boxless("Transaction or address", lookupRest);
+  await expect(lookup).toBeFocused();
+  const lookupNow = await look("Transaction or address");
+  expect(lookupNow.outline).toBe("none");
+  expect(lookupNow.border).not.toBe(lookupRest.border);
 });
 
 test("Escape from inside a header popover hands focus back to its button", async ({

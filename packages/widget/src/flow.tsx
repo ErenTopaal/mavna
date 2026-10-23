@@ -2111,7 +2111,9 @@ function renderWallet(c: Flow): ReactNode {
                   style={s("width:16px;height:16px;object-fit:contain")}
                 />
               </span>
-              <span style={s("font-family:var(--mv-font);font-size:12.5px")}>
+              <span
+                style={s("font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.02em")}
+              >
                 {st.wallet.short}
               </span>
               <button
@@ -2178,7 +2180,9 @@ function renderWallet(c: Flow): ReactNode {
               >
                 ✦
               </span>
-              <span style={s("font-family:var(--mv-font);font-size:12.5px")}>
+              <span
+                style={s("font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.02em")}
+              >
                 {shortAddr(st.stellarAddress)}
               </span>
               <button

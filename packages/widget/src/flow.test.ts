@@ -316,6 +316,62 @@ describe("type", () => {
   });
 });
 
+describe("addresses", () => {
+  // the owner's call: an address stays in the figure face, so 0 and O, 1 and l stay apart
+  const inAddressFace = (html: string, text: string): boolean =>
+    [...html.matchAll(/--mv-font-address[^>]*>([^<]*)/g)].some((m) => (m[1] ?? "").includes(text));
+
+  it("are set in the address face on the form, the address screen, review and flight", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: OTHER, amount: "100" };
+    const r = flow.chosen();
+    const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
+    const d = { r, chain, sym: "USDC" };
+    const form = renderToStaticMarkup(renderSend(flow, { ...d, xlm: false, resting: false }));
+    expect(inAddressFace(form, "GBRPY…OX2H")).toBe(true);
+    const field = renderToStaticMarkup(renderAddress(flow));
+    expect(field).toMatch(/<input[^>]*--mv-font-address/);
+    for (const html of [
+      renderToStaticMarkup(renderReview(flow, d)),
+      renderToStaticMarkup(renderFlight(flow, { ...d, arrived: false })),
+    ]) {
+      expect(inAddressFace(html, "GBZXN…MADI")).toBe(true);
+      // the other rows keep the text face
+      expect(inAddressFace(html, "Arbitrum Sepolia")).toBe(false);
+    }
+  });
+
+  it("keeps the words for an unset recipient in the text face", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = { ...flow.state, destination: "" };
+    const chain = { id: "arbitrum-sepolia", name: "Arbitrum Sepolia" };
+    const form = renderToStaticMarkup(
+      renderSend(flow, { r: undefined, chain, sym: "USDC", xlm: false, resting: true }),
+    );
+    expect(form).toContain("Not set");
+    expect(inAddressFace(form, "Not set")).toBe(false);
+  });
+
+  it("are set in the address face in the wallet menu", () => {
+    const flow = quotedFlow({ terms: 0 });
+    flow.state = {
+      ...flow.state,
+      screen: "send",
+      walletOpen: true,
+      wallet: {
+        ...(flow.state.wallet ?? {}),
+        name: "Test",
+        icon: "",
+        short: "0x1234…abcd",
+      } as never,
+      stellarAddress: OTHER,
+    };
+    const html = renderToStaticMarkup(flow.render() as React.ReactElement);
+    expect(inAddressFace(html, "0x1234…abcd")).toBe(true);
+    expect(inAddressFace(html, "GBRP")).toBe(true);
+  });
+});
+
 describe("review and flight", () => {
   it("show the recipient, amount and chain the route will sign for, not the form", () => {
     const flow = quotedFlow({ terms: 0 });

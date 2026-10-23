@@ -323,7 +323,7 @@ export function renderSend(
           <span style={s("display:flex;align-items:center;gap:9px;min-width:0")}>
             <span
               style={s(
-                `font-family:var(--mv-font);font-size:12px;color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
+                `font-family:${st.destination === "" ? "var(--mv-font);font-size:12px" : "var(--mv-font-address);font-size:11.5px"};color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
               )}
             >
               {destShort}
@@ -513,6 +513,7 @@ export function renderChains(c: Flow): ReactElement {
   return (
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <div
+        className={pseudo({ focusWithin: "border-color:var(--mv-focus)" })}
         style={s(
           "display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px",
         )}
@@ -738,7 +739,7 @@ export function renderAddress(c: Flow): ReactElement {
         autoComplete="off"
         aria-label="Stellar address"
         style={s(
-          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font);font-size:13px;line-height:1.5`,
+          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font-address);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
         )}
       />
       {invalid ? (
@@ -1121,11 +1122,17 @@ export function renderReview(
           >
             <span style={s("font-size:12.5px;color:var(--mv-muted-2)")}>{v.name}</span>
             <span
-              style={s(
-                "font-family:var(--mv-font);font-size:12.5px;color:var(--mv-ink-strong);text-align:right",
-              )}
+              style={
+                v.key === "dest"
+                  ? s(
+                      "font-family:var(--mv-font-address);font-size:12px;color:var(--mv-ink-strong);text-align:right",
+                    )
+                  : s(
+                      "font-family:var(--mv-font);font-size:12.5px;color:var(--mv-ink-strong);text-align:right",
+                    )
+              }
             >
-              {figures(v.value)}
+              {v.key === "dest" ? v.value : figures(v.value)}
             </span>
           </div>
         ))}
@@ -1276,11 +1283,17 @@ export function renderFlight(
             >
               <span style={s("font-size:12px;color:var(--mv-muted-2)")}>{m.name}</span>
               <span
-                style={s(
-                  "font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-strong);text-align:right",
-                )}
+                style={
+                  m.key === "to"
+                    ? s(
+                        "font-family:var(--mv-font-address);font-size:11.5px;color:var(--mv-ink-strong);text-align:right",
+                      )
+                    : s(
+                        "font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-strong);text-align:right",
+                      )
+                }
               >
-                {figures(m.value)}
+                {m.key === "to" ? m.value : figures(m.value)}
               </span>
             </div>
           ))}
@@ -1363,7 +1376,7 @@ export function renderFlight(
                     target="_blank"
                     rel="noreferrer noopener"
                     style={s(
-                      "display:inline-block;margin-top:7px;font-family:var(--mv-font);font-size:11.5px;color:var(--mv-muted-b);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--mv-rule-hover)",
+                      "display:inline-block;margin-top:7px;font-family:var(--mv-font-address);font-size:10.5px;color:var(--mv-muted-b);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--mv-rule-hover)",
                     )}
                   >
                     {step.refText} ↗
@@ -1396,6 +1409,7 @@ export function renderActivity(c: Flow): ReactElement {
           spellCheck={false}
           autoComplete="off"
           aria-label="Transaction or address"
+          className={pseudo({ focus: "border-color:var(--mv-focus)" })}
           style={s(
             "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font);font-size:12.5px",
           )}
