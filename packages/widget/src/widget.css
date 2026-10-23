@@ -120,11 +120,19 @@
   --mv-font:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  /* The design sets many labels in a mono face (the wordmark, wallet addresses,
-     tags). Same rule as the sans: a system stack by default, the host's face when
-     asked. The app points this at Azeret Mono, which it ships itself. */
+  /* The face for figures. Same rule as the sans: a system stack by default, the
+     host's face when asked. The app points this at Azeret Mono, which it ships
+     itself. */
   --mv-font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Words are set in --mv-font, every label included. Only figures (amounts,
+     counts, fees, times) take this, so a number reads as a number at a glance. */
+  --mv-font-num: var(--mv-font-mono);
+  /* Small spaced capitals: eyebrows, tags, status words. A sans needs far less
+     tracking than the mono did, and a little more weight to hold its colour at
+     ten pixels. */
+  --mv-caps-track: 0.08em;
+  --mv-caps-weight: 500;
 
   /*
    * The preset's radius is "small", which the shadcn CLI's own radius map defines

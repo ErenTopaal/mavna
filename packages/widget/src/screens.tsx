@@ -5,7 +5,7 @@
  * computed from the real component state, never from demo constants.
  */
 import { recipientRefusal, stroopsToXlm } from "@mavna/stellar";
-import type { CSSProperties, ReactElement } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ChainIcon } from "./chain-icon";
 import type { SourceDetail } from "./engine";
 import type { Flow } from "./flow";
@@ -32,6 +32,41 @@ import type { FlightRow, FlightStep } from "./transfer";
  * "Circle" for a plain route, "Circle + SDEX" when a swap leg is attached. The
  * venue is read off the route, never assumed, so this is only ever the truth.
  */
+// a number standing alone in a string: not part of a word, an address or a hash
+const FIGURE = /(?<![\w.,])(\d+(?:[.,]\d+)*)(?![\w])/;
+const FIGURE_FACE = s("font-family:var(--mv-font-num)");
+
+/**
+ * An amount and its unit ("25.00 USDC") sets the amount in the figure face and the
+ * unit in the text face. A phrase that only mentions a number ("About 22 min",
+ * "Up to 5 steps") stays in the text face, where its tabular figures still line
+ * up: the figure face beside small words reads heavier than they do.
+ */
+function figures(text: string, unit?: CSSProperties): ReactNode {
+  const parts = text.split(FIGURE);
+  if (parts.length === 1 || parts[0] !== "") return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed string, never reordered
+      <span key={i} style={FIGURE_FACE}>
+        {part}
+      </span>
+    ) : unit === undefined || part.trim() === "" ? (
+      part
+    ) : (
+      // biome-ignore lint/suspicious/noArrayIndexKey: as above
+      <span key={i} style={unit}>
+        {part}
+      </span>
+    ),
+  );
+}
+
+// the unit beside a large figure, set like the form's own: smaller, muted, apart
+const HERO_UNIT = s(
+  "font-size:13px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:4px",
+);
+
 function railLabel(x: RouteView): string {
   if (x.compose !== undefined) return `${x.source} · ${x.compose.label}`;
   return x.swapVenue === undefined ? x.source : `${x.source} + ${x.swapVenue}`;
@@ -64,7 +99,7 @@ function renderSendAsset(c: Flow): ReactElement {
           aria-pressed={c.state.send === asset}
           onClick={() => c.setSend(asset)}
           style={s(
-            `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${ink(c.state.send === asset)}`,
+            `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);color:${ink(c.state.send === asset)}`,
           )}
         >
           {asset}
@@ -112,7 +147,7 @@ export function renderSend(
         <div style={s("display:flex;align-items:center;justify-content:space-between;gap:10px")}>
           <p
             style={s(
-              "margin:0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+              "margin:0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
             )}
           >
             Send
@@ -131,7 +166,9 @@ export function renderSend(
             <ChainIcon chainId={chain.id} name={chain.name} size={22} />
             <span style={s("font-size:13px;font-weight:500;white-space:nowrap")}>{chain.name}</span>
             <span
-              style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}
+              style={s(
+                "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+              )}
             >
               ▸
             </span>
@@ -149,24 +186,20 @@ export function renderSend(
             placeholder="0"
             aria-label="Amount to send"
             style={s(
-              "flex:1 1 auto;width:0;min-width:0;border:0;padding:0;background:transparent;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
+              "flex:1 1 auto;width:0;min-width:0;border:0;padding:0;background:transparent;font-family:var(--mv-font-num);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:var(--mv-ink)",
             )}
           />
           {c.usdt0Offered() ? (
             renderSendAsset(c)
           ) : (
-            <span
-              style={s("font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-muted-2)")}
-            >
+            <span style={s("font-family:var(--mv-font);font-size:13px;color:var(--mv-muted-2)")}>
               USDC
             </span>
           )}
         </div>
         {hasBalance ? (
           <div style={s("display:flex;align-items:baseline;gap:8px;margin-top:8px")}>
-            <span
-              style={s("font-family:var(--mv-font-mono);font-size:10.5px;color:var(--mv-faint)")}
-            >
+            <span style={s("font-family:var(--mv-font);font-size:11.5px;color:var(--mv-faint)")}>
               {balanceLine}
             </span>
             <button
@@ -179,7 +212,7 @@ export function renderSend(
                 hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
               })}
               style={s(
-                "padding:2px 7px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mv-muted)",
+                "padding:2px 7px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:9.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
               )}
             >
               Max
@@ -192,7 +225,7 @@ export function renderSend(
         <div
           ref={c.pivotRef}
           style={s(
-            "position:absolute;left:50%;top:-15px;margin-left:-15px;width:30px;height:30px;display:grid;place-items:center;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font-mono);font-size:12px;color:var(--mv-ink-2)",
+            "position:absolute;left:50%;top:-15px;margin-left:-15px;width:30px;height:30px;display:grid;place-items:center;background:var(--mv-surface);border:1px solid var(--mv-rule);border-radius:999px;font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-2)",
           )}
         >
           ↓
@@ -213,7 +246,7 @@ export function renderSend(
         <div style={s("display:flex;align-items:center;justify-content:space-between;gap:10px")}>
           <p
             style={s(
-              "margin:0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+              "margin:0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
             )}
           >
             Receive on Stellar
@@ -239,7 +272,7 @@ export function renderSend(
                   c.setState({ wanted: asset }, () => c.runQuote());
                 }}
                 style={s(
-                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${st.wanted === asset ? "var(--mv-on-light)" : "var(--mv-muted)"}`,
+                  `position:relative;z-index:1;width:52px;padding:5px 0;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);color:${st.wanted === asset ? "var(--mv-on-light)" : "var(--mv-muted)"}`,
                 )}
               >
                 {asset}
@@ -251,12 +284,12 @@ export function renderSend(
           <span
             ref={c.figureRef}
             style={s(
-              `min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:${figureInk}`,
+              `min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-num);font-weight:500;font-size:33px;line-height:1.1;letter-spacing:-0.055em;color:${figureInk}`,
             )}
           >
             {receiveFigure}
           </span>
-          <span style={s("font-family:var(--mv-font-mono);font-size:13px;color:var(--mv-muted-2)")}>
+          <span style={s("font-family:var(--mv-font);font-size:13px;color:var(--mv-muted-2)")}>
             {sym}
           </span>
         </div>
@@ -264,7 +297,7 @@ export function renderSend(
         {r !== undefined || !d.resting ? (
           <p
             style={s(
-              "margin:10px 0 0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.13em;text-transform:uppercase;color:var(--mv-faint)",
+              "margin:10px 0 0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
             )}
           >
             {r === undefined ? "\u00a0" : floorLine}
@@ -290,14 +323,16 @@ export function renderSend(
           <span style={s("display:flex;align-items:center;gap:9px;min-width:0")}>
             <span
               style={s(
-                `font-family:var(--mv-font-mono);font-size:11.5px;color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
+                `font-family:var(--mv-font);font-size:12px;color:${destInk};overflow:hidden;text-overflow:ellipsis;white-space:nowrap`,
               )}
             >
               {destShort}
             </span>
             {c.required("destination") ? null : (
               <span
-                style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}
+                style={s(
+                  "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+                )}
               >
                 ▸
               </span>
@@ -315,15 +350,13 @@ export function renderSend(
         >
           <span style={s("font-size:13px;font-weight:500")}>Route priority</span>
           <span style={s("display:flex;align-items:center;gap:9px")}>
-            <span
-              style={s(
-                "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-muted)",
-              )}
-            >
+            <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
               {priorityLabel}
             </span>
             <span
-              style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}
+              style={s(
+                "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+              )}
             >
               ▸
             </span>
@@ -341,15 +374,13 @@ export function renderSend(
           >
             <span style={s("font-size:13px;font-weight:500")}>Rails</span>
             <span style={s("display:flex;align-items:center;gap:9px")}>
-              <span
-                style={s(
-                  "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-muted)",
-                )}
-              >
+              <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
                 {railsShown}
               </span>
               <span
-                style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}
+                style={s(
+                  "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+                )}
               >
                 ▸
               </span>
@@ -363,11 +394,7 @@ export function renderSend(
           )}
         >
           <span style={s("font-size:13px;font-weight:500")}>You will approve</span>
-          <span
-            style={s(
-              "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-muted)",
-            )}
-          >
+          <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-muted)")}>
             {approvals}
           </span>
         </div>
@@ -517,7 +544,7 @@ export function renderChains(c: Flow): ReactElement {
         />
         <span
           style={s(
-            "flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.12em;color:var(--mv-faint-2)",
+            "flex:0 0 auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);color:var(--mv-faint-2)",
           )}
         >
           {chainCount(c)}
@@ -540,14 +567,14 @@ export function renderChains(c: Flow): ReactElement {
               </span>
               <span
                 style={s(
-                  "flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;color:var(--mv-faint-2)",
+                  "flex:0 0 auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);color:var(--mv-faint-2)",
                 )}
               >
                 {row.tag}
               </span>
               <span
                 style={s(
-                  "flex:0 0 auto;width:14px;text-align:center;font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-ink)",
+                  "flex:0 0 auto;width:14px;text-align:center;font-family:var(--mv-font);font-size:11px;color:var(--mv-ink)",
                 )}
               >
                 {row.mark}
@@ -561,7 +588,7 @@ export function renderChains(c: Flow): ReactElement {
         <div style={s("display:flex;flex-direction:column;gap:6px")}>
           <p
             style={s(
-              "margin:0 2px 6px;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-faint)",
+              "margin:0 2px 6px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
             )}
           >
             Quoted, not signable here yet
@@ -584,14 +611,14 @@ export function renderChains(c: Flow): ReactElement {
               </span>
               <span
                 style={s(
-                  "flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;color:var(--mv-faint-2)",
+                  "flex:0 0 auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);color:var(--mv-faint-2)",
                 )}
               >
                 {row.need}
               </span>
               <span
                 style={s(
-                  "flex:0 0 auto;width:14px;text-align:center;font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-ink)",
+                  "flex:0 0 auto;width:14px;text-align:center;font-family:var(--mv-font);font-size:11px;color:var(--mv-ink)",
                 )}
               >
                 {row.mark}
@@ -650,7 +677,7 @@ export function renderPriority(c: Flow, sym: string): ReactElement {
             </span>
             <span
               style={s(
-                "flex:0 0 auto;width:16px;text-align:center;font-family:var(--mv-font-mono);font-size:12px;color:var(--mv-ink)",
+                "flex:0 0 auto;width:16px;text-align:center;font-family:var(--mv-font);font-size:12px;color:var(--mv-ink)",
               )}
             >
               {on ? "✓" : ""}
@@ -711,7 +738,7 @@ export function renderAddress(c: Flow): ReactElement {
         autoComplete="off"
         aria-label="Stellar address"
         style={s(
-          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font-mono);font-size:12px;letter-spacing:0.03em;line-height:1.5`,
+          `width:100%;padding:14px 15px;background:var(--mv-surface-2);border:1px solid ${destBorder};border-radius:12px;font-family:var(--mv-font);font-size:13px;line-height:1.5`,
         )}
       />
       {invalid ? (
@@ -761,14 +788,14 @@ export function renderSettings(c: Flow): ReactElement {
       >
         <span style={s("font-size:13.5px;font-weight:500")}>Route priority</span>
         <span style={s("display:flex;align-items:center;gap:9px")}>
-          <span
-            style={s(
-              "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-ink-3)",
-            )}
-          >
+          <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-3)")}>
             {priorityLabel}
           </span>
-          <span style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}>
+          <span
+            style={s(
+              "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+            )}
+          >
             ▸
           </span>
         </span>
@@ -783,14 +810,14 @@ export function renderSettings(c: Flow): ReactElement {
       >
         <span style={s("font-size:13.5px;font-weight:500")}>Rails</span>
         <span style={s("display:flex;align-items:center;gap:9px")}>
-          <span
-            style={s(
-              "font-family:var(--mv-font-mono);font-size:11px;letter-spacing:0.04em;color:var(--mv-ink-3)",
-            )}
-          >
+          <span style={s("font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-3)")}>
             {railsShown}
           </span>
-          <span style={s("font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-muted-2)")}>
+          <span
+            style={s(
+              "font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-muted-2)",
+            )}
+          >
             ▸
           </span>
         </span>
@@ -839,7 +866,7 @@ export function renderSettings(c: Flow): ReactElement {
 export function renderNetworkToggle(c: Flow): ReactElement {
   const net = c.state.network;
   const offered = c.offeredNetworks();
-  const seg = net === "mainnet" ? "64px" : "0px";
+  const seg = net === "mainnet" ? "68px" : "0px";
   const option = (id: "testnet" | "mainnet", label: string): ReactElement => {
     const current = net === id;
     const available = offered.includes(id);
@@ -857,7 +884,7 @@ export function renderNetworkToggle(c: Flow): ReactElement {
         title={available ? undefined : `${label.toLowerCase()} is not set up on this page`}
         onClick={() => c.setNetwork(id)}
         style={s(
-          `position:relative;z-index:1;width:64px;padding:5px 0;background:transparent;border:0;cursor:${available && !current ? "pointer" : "default"};font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.1em;color:${ink}`,
+          `position:relative;z-index:1;width:68px;padding:5px 0;background:transparent;border:0;cursor:${available && !current ? "pointer" : "default"};font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);color:${ink}`,
         )}
       >
         {label}
@@ -872,7 +899,7 @@ export function renderNetworkToggle(c: Flow): ReactElement {
     >
       <div
         style={s(
-          `position:absolute;top:2px;left:2px;width:64px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${seg})`,
+          `position:absolute;top:2px;left:2px;width:68px;height:calc(100% - 4px);background:var(--mv-white);border-radius:999px;transition:transform 260ms cubic-bezier(0.2,0,0,1);transform:translateX(${seg})`,
         )}
       />
       {option("testnet", "TESTNET")}
@@ -918,7 +945,7 @@ export function renderRails(c: Flow): ReactElement {
               <span style={s("display:block;font-size:13.5px;font-weight:500")}>{name}</span>
               <span
                 style={s(
-                  "display:block;margin-top:5px;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-muted-2)",
+                  "display:block;margin-top:5px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
                 )}
               >
                 {TRUST_LABEL[name]}
@@ -926,7 +953,7 @@ export function renderRails(c: Flow): ReactElement {
             </span>
             <span
               style={s(
-                `flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;border-radius:7px;font-family:var(--mv-font-mono);font-size:11px;color:var(--mv-on-light);transition:background 160ms linear;background:${bg};border:1px solid ${bd}`,
+                `flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;border-radius:7px;font-family:var(--mv-font);font-size:11px;color:var(--mv-on-light);transition:background 160ms linear;background:${bg};border:1px solid ${bd}`,
               )}
             >
               {on ? "✓" : ""}
@@ -1034,17 +1061,17 @@ export function renderReview(
           <span style={s("min-width:0")}>
             <span
               style={s(
-                "display:block;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+                "display:block;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
               )}
             >
               Send
             </span>
             <span
               style={s(
-                "display:block;margin-top:9px;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
+                "display:block;margin-top:9px;overflow-wrap:anywhere;font-size:24px;font-weight:500;letter-spacing:-0.05em",
               )}
             >
-              {reviewSend}
+              {figures(reviewSend, HERO_UNIT)}
             </span>
           </span>
           <span
@@ -1062,17 +1089,17 @@ export function renderReview(
           <span style={s("min-width:0")}>
             <span
               style={s(
-                "display:block;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+                "display:block;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
               )}
             >
               Receive
             </span>
             <span
               style={s(
-                "display:block;margin-top:9px;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:24px;font-weight:500;letter-spacing:-0.05em",
+                "display:block;margin-top:9px;overflow-wrap:anywhere;font-size:24px;font-weight:500;letter-spacing:-0.05em",
               )}
             >
-              {reviewGet}
+              {figures(reviewGet, HERO_UNIT)}
             </span>
           </span>
           <span
@@ -1095,10 +1122,10 @@ export function renderReview(
             <span style={s("font-size:12.5px;color:var(--mv-muted-2)")}>{v.name}</span>
             <span
               style={s(
-                "font-family:var(--mv-font-mono);font-size:12px;color:var(--mv-ink-strong);text-align:right",
+                "font-family:var(--mv-font);font-size:12.5px;color:var(--mv-ink-strong);text-align:right",
               )}
             >
-              {v.value}
+              {figures(v.value)}
             </span>
           </div>
         ))}
@@ -1215,20 +1242,20 @@ export function renderFlight(
         <div style={s("padding:16px")}>
           <p
             style={s(
-              "margin:0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+              "margin:0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
             )}
           >
             {flightEyebrow}
           </p>
           <p
             style={s(
-              "margin:9px 0 0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:30px;font-weight:500;letter-spacing:-0.055em",
+              "margin:9px 0 0;overflow-wrap:anywhere;font-family:var(--mv-font-num);font-size:30px;font-weight:500;letter-spacing:-0.055em",
             )}
           >
             {flightFigure}
             <span
               style={s(
-                "font-size:13px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:8px",
+                "font-family:var(--mv-font);font-size:13px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:8px",
               )}
             >
               {flightSym}
@@ -1250,10 +1277,10 @@ export function renderFlight(
               <span style={s("font-size:12px;color:var(--mv-muted-2)")}>{m.name}</span>
               <span
                 style={s(
-                  "font-family:var(--mv-font-mono);font-size:11.5px;color:var(--mv-ink-strong);text-align:right",
+                  "font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-strong);text-align:right",
                 )}
               >
-                {m.value}
+                {figures(m.value)}
               </span>
             </div>
           ))}
@@ -1266,7 +1293,7 @@ export function renderFlight(
       >
         <div
           style={s(
-            "flex:0 0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:14px;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-faint)",
+            "flex:0 0 auto;display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:14px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
           )}
         >
           <span>{stepEyebrow}</span>
@@ -1297,7 +1324,7 @@ export function renderFlight(
               ) : null}
               <span
                 style={s(
-                  `position:relative;z-index:1;display:grid;place-items:center;width:18px;height:18px;margin-top:1px;border-radius:999px;font-family:var(--mv-font-mono);font-size:9px;background:${step.dotBg};border:1px solid ${step.dotBorder};color:${step.markInk};animation:${step.dotAnim}`,
+                  `position:relative;z-index:1;display:grid;place-items:center;width:18px;height:18px;margin-top:1px;border-radius:999px;font-family:var(--mv-font-num);font-size:9px;background:${step.dotBg};border:1px solid ${step.dotBorder};color:${step.markInk};animation:${step.dotAnim}`,
                 )}
               >
                 {step.mark}
@@ -1314,7 +1341,7 @@ export function renderFlight(
                   {step.meta === "" ? null : (
                     <span
                       style={s(
-                        `margin-left:auto;flex:0 0 auto;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:${step.metaInk};white-space:nowrap`,
+                        `margin-left:auto;flex:0 0 auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:${step.metaInk};white-space:nowrap`,
                       )}
                     >
                       {step.meta}
@@ -1336,7 +1363,7 @@ export function renderFlight(
                     target="_blank"
                     rel="noreferrer noopener"
                     style={s(
-                      "display:inline-block;margin-top:7px;font-family:var(--mv-font-mono);font-size:10.5px;color:var(--mv-muted-b);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--mv-rule-hover)",
+                      "display:inline-block;margin-top:7px;font-family:var(--mv-font);font-size:11.5px;color:var(--mv-muted-b);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--mv-rule-hover)",
                     )}
                   >
                     {step.refText} ↗
@@ -1370,7 +1397,7 @@ export function renderActivity(c: Flow): ReactElement {
           autoComplete="off"
           aria-label="Transaction or address"
           style={s(
-            "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font-mono);font-size:11.5px;letter-spacing:0.03em",
+            "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font);font-size:12.5px",
           )}
         />
         <button
@@ -1467,7 +1494,7 @@ export function renderActivity(c: Flow): ReactElement {
       >
         <h2
           style={s(
-            "margin:0;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-muted-2)",
+            "margin:0;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
           )}
         >
           From this browser
@@ -1478,7 +1505,7 @@ export function renderActivity(c: Flow): ReactElement {
             onClick={() => c.clearHistory()}
             className={pseudo({ hover: "color:var(--mv-ink)" })}
             style={s(
-              "padding:2px 6px;margin:-2px -6px;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faint)",
+              "padding:2px 6px;margin:-2px -6px;background:transparent;border:0;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
             )}
           >
             Clear
@@ -1498,10 +1525,10 @@ export function renderActivity(c: Flow): ReactElement {
               <div style={s("flex:1 1 auto;min-width:0")}>
                 <p
                   style={s(
-                    "margin:0;font-family:var(--mv-font-mono);font-size:12.5px;font-weight:500;letter-spacing:-0.02em",
+                    "margin:0;font-family:var(--mv-font);font-size:13px;font-weight:500;letter-spacing:-0.02em",
                   )}
                 >
-                  {readable(h)}
+                  {figures(readable(h))}
                 </p>
                 <p style={s("margin:4px 0 0;font-size:12px;color:var(--mv-muted-2)")}>
                   {`From ${h.sourceChainName} `}
@@ -1510,9 +1537,7 @@ export function renderActivity(c: Flow): ReactElement {
                       href={h.explorerUrl}
                       target="_blank"
                       rel="noreferrer noopener"
-                      style={s(
-                        "font-family:var(--mv-font-mono);font-size:10px;color:var(--mv-muted-b)",
-                      )}
+                      style={s("font-family:var(--mv-font);font-size:10px;color:var(--mv-muted-b)")}
                     >
                       ↗
                     </a>
@@ -1526,7 +1551,7 @@ export function renderActivity(c: Flow): ReactElement {
                   hover: "border-color:var(--mv-rule-hover);color:var(--mv-ink)",
                 })}
                 style={s(
-                  "flex:0 0 auto;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mv-ink-3)",
+                  "flex:0 0 auto;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-ink-3)",
                 )}
               >
                 Check
@@ -1618,7 +1643,7 @@ export function renderRoutes(
           </h2>
           <span
             style={s(
-              "font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faint)",
+              "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
             )}
           >
             {routesStatus}
@@ -1662,9 +1687,10 @@ export function renderRoutes(
             visibility: badged ? "visible" : "hidden",
             background: on ? "var(--mv-white)" : "var(--mv-rule)",
             color: on ? "var(--mv-on-light)" : "var(--mv-ink-strong)",
-            fontFamily: "var(--mv-font-mono)",
-            fontSize: "8.5px",
-            letterSpacing: "0.14em",
+            fontFamily: "var(--mv-font)",
+            fontSize: "9.5px",
+            fontWeight: "var(--mv-caps-weight)",
+            letterSpacing: "var(--mv-caps-track)",
             textTransform: "uppercase",
           };
           return (
@@ -1693,7 +1719,7 @@ export function renderRoutes(
                     active: "transform:translateY(1px)",
                   })}
                   style={s(
-                    "flex:0 0 auto;width:28px;height:28px;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule-2);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:9px;color:var(--mv-ink-2)",
+                    "flex:0 0 auto;width:28px;height:28px;display:grid;place-items:center;background:transparent;border:1px solid var(--mv-rule-2);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-size:13px;line-height:1;color:var(--mv-ink-2)",
                   )}
                 >
                   {open ? "▴" : "▾"}
@@ -1713,13 +1739,13 @@ export function renderRoutes(
                 <span style={s("display:flex;flex-wrap:wrap;align-items:baseline;gap:10px")}>
                   <span
                     style={s(
-                      "min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-mono);font-size:22px;font-weight:500;letter-spacing:-0.05em",
+                      "min-width:0;overflow-wrap:anywhere;font-family:var(--mv-font-num);font-size:22px;font-weight:500;letter-spacing:-0.05em",
                     )}
                   >
                     {fmt(x.receives)}
                     <span
                       style={s(
-                        "font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:7px",
+                        "font-family:var(--mv-font);font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--mv-muted-2);margin-left:7px",
                       )}
                     >
                       {sym}
@@ -1727,7 +1753,7 @@ export function renderRoutes(
                   </span>
                   <span
                     style={s(
-                      "margin-left:auto;font-family:var(--mv-font-mono);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-muted);white-space:nowrap",
+                      "margin-left:auto;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10.5px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted);white-space:nowrap",
                     )}
                   >
                     {railLabel(x)}
@@ -1735,7 +1761,7 @@ export function renderRoutes(
                 </span>
                 <span
                   style={s(
-                    "display:block;margin-top:11px;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-muted-2)",
+                    "display:block;margin-top:11px;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted-2)",
                   )}
                 >
                   {x.compose === undefined
@@ -1744,7 +1770,7 @@ export function renderRoutes(
                 </span>
                 <span
                   style={s(
-                    "display:flex;align-items:center;gap:16px;margin-top:14px;padding-top:13px;border-top:1px solid var(--mv-rule-hair);font-family:var(--mv-font-mono);font-size:10.5px;letter-spacing:0.02em;color:var(--mv-muted-2)",
+                    "display:flex;align-items:center;gap:16px;margin-top:14px;padding-top:13px;border-top:1px solid var(--mv-rule-hair);font-family:var(--mv-font-num);font-size:10.5px;letter-spacing:0.02em;color:var(--mv-muted-2)",
                   )}
                 >
                   <span
@@ -1787,7 +1813,9 @@ export function renderRoutes(
                       <circle cx="12" cy="12" r="8.5" />
                       <path d="M12 7.8V12l3 1.9" />
                     </svg>
-                    <span>{`~${x.minutes}m`}</span>
+                    <span style={s("font-family:var(--mv-font)")}>
+                      ~<span style={FIGURE_FACE}>{x.minutes}</span>m
+                    </span>
                   </span>
                   <span
                     style={s(
@@ -1830,10 +1858,10 @@ export function renderRoutes(
                       <span style={s("font-size:12px;color:var(--mv-muted-2)")}>{row.name}</span>
                       <span
                         style={s(
-                          "font-family:var(--mv-font-mono);font-size:11.5px;color:var(--mv-ink-strong);text-align:right",
+                          "font-family:var(--mv-font);font-size:12px;color:var(--mv-ink-strong);text-align:right",
                         )}
                       >
-                        {row.value}
+                        {figures(row.value)}
                       </span>
                     </div>
                   ))}
@@ -1871,14 +1899,14 @@ export function renderRoutes(
               >
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
+                    "font-family:var(--mv-font-num);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
                   )}
                 >
                   {c.list().length}
                 </span>
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-faint)",
+                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
                   )}
                 >
                   Chains
@@ -1892,14 +1920,14 @@ export function renderRoutes(
               >
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
+                    "font-family:var(--mv-font-num);font-size:32px;font-weight:500;letter-spacing:-0.05em;line-height:1;color:var(--mv-ink)",
                   )}
                 >
                   {expected}
                 </span>
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--mv-faint)",
+                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
                   )}
                 >
                   {expected === 1 ? "Rail" : "Rails"}
@@ -1935,14 +1963,14 @@ export function renderRoutes(
               >
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faint)",
+                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
                   )}
                 >
                   {a}
                 </span>
                 <span
                   style={s(
-                    "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faintest)",
+                    "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faintest)",
                   )}
                 >
                   Asking
@@ -1966,14 +1994,14 @@ export function renderRoutes(
                 >
                   <span
                     style={s(
-                      "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faint)",
+                      "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faint)",
                     )}
                   >
                     {decline.source}
                   </span>
                   <span
                     style={s(
-                      "font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mv-faintest)",
+                      "font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-faintest)",
                     )}
                   >
                     Declined
@@ -1995,7 +2023,7 @@ export function renderRoutes(
                       hover: "color:var(--mv-ink);border-color:var(--mv-rule-hover)",
                     })}
                     style={s(
-                      "align-self:flex-start;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mv-muted)",
+                      "align-self:flex-start;padding:5px 11px;background:transparent;border:1px solid var(--mv-rule);border-radius:999px;cursor:pointer;font-family:var(--mv-font);font-weight:var(--mv-caps-weight);font-size:10px;letter-spacing:var(--mv-caps-track);text-transform:uppercase;color:var(--mv-muted)",
                     )}
                   >
                     Try again

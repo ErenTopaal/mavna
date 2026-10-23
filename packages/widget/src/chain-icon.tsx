@@ -167,7 +167,7 @@ export function ChainIcon({ chainId, name, size }: ChainIconProps): ReactElement
       {Icon === undefined ? (
         <span
           style={s(
-            `position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mv-font-mono);font-size:${Math.round(size * 0.34)}px;font-weight:500;letter-spacing:0.02em;line-height:1`,
+            `position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mv-font);font-size:${Math.round(size * 0.36)}px;font-weight:600;letter-spacing:0.02em;line-height:1`,
           )}
         >
           {chainMonogram(name)}
