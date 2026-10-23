@@ -11,10 +11,11 @@ import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 
 
 const APP = "https://mavna.app";
 const DOCS = "https://docs.mavna.app";
-const DOCS_SDK = "https://docs.mavna.app/developers";
+const DOCS_SDK = "https://docs.mavna.app/sdk";
 const DOCS_WIDGET = "https://docs.mavna.app/widget";
 const PLAYGROUND = "https://playground.mavna.app";
 const GITHUB = "https://github.com/ErenTopaal/mavna";
+const NPM = "https://www.npmjs.com/org/mavna";
 
 // the widget's own neutrals and its signal red, so the page and the product it
 // shows read as one thing
@@ -984,6 +985,9 @@ export function Landing(): ReactNode {
             <a data-navlink="" href={DOCS_WIDGET}>
               Widget
             </a>
+            <a data-navlink="" href={PLAYGROUND}>
+              Playground
+            </a>
             <a data-navlink="" href={DOCS}>
               Docs
             </a>
@@ -1489,6 +1493,22 @@ export function Landing(): ReactNode {
               >
                 npm install @mavna/widget
               </code>
+              <span style={s("display: flex; flex-wrap: wrap; gap: 22px")}>
+                <a
+                  data-underline=""
+                  href={DOCS_WIDGET}
+                  style={s(`font-size: 15.5px; color: ${INK}`)}
+                >
+                  Embed the widget
+                </a>
+                <a
+                  data-underline=""
+                  href={PLAYGROUND}
+                  style={s(`font-size: 15.5px; color: ${INK}`)}
+                >
+                  Open the playground
+                </a>
+              </span>
             </div>
           </div>
           <LookPicker />
@@ -1576,7 +1596,7 @@ export function Landing(): ReactNode {
           </a>
           <span style={s("display: flex; align-items: center; gap: 10px")}>
             <span data-pulse="" />
-            Running on Stellar testnet
+            Running on Stellar mainnet and testnet
           </span>
           <nav aria-label="Footer" style={s("display: flex; flex-wrap: wrap; gap: 24px")}>
             <a data-footlink="" href={APP}>
@@ -1590,6 +1610,9 @@ export function Landing(): ReactNode {
             </a>
             <a data-footlink="" href={GITHUB} target="_blank" rel="noopener noreferrer">
               GitHub
+            </a>
+            <a data-footlink="" href={NPM} target="_blank" rel="noopener noreferrer">
+              npm
             </a>
           </nav>
           <span>© 2026 Mavna. Open source and non-custodial.</span>
