@@ -357,18 +357,12 @@ button {
   width: 100%;
   max-width: 460px;
   margin: 0 auto;
-  /* Lifts the widget off the light stage; follows the card's rounded shape. */
-  filter: drop-shadow(0 26px 50px oklch(0 0 0 / 0.16));
 }
 /* The drawer variant renders only its launch button here; centre it on the stage
-   (both axes) and give the pill its own lighter lift. */
+   (both axes). */
 .pg-stage > .mv-root:has(.mv-launch) {
   align-self: center;
   text-align: center;
-  filter: drop-shadow(0 12px 26px oklch(0 0 0 / 0.16));
-}
-:root[data-pg-theme="dark"] .pg-stage > .mv-root {
-  filter: drop-shadow(0 24px 50px oklch(0 0 0 / 0.45));
 }
 
 /* ---------------------------------------------------------------- dock --- */
