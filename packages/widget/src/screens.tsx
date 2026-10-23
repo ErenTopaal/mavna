@@ -513,7 +513,6 @@ export function renderChains(c: Flow): ReactElement {
   return (
     <div style={s("display:flex;flex-direction:column;gap:12px")}>
       <div
-        className={pseudo({ focusWithin: "border-color:var(--mv-focus)" })}
         style={s(
           "display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px",
         )}
@@ -1409,7 +1408,6 @@ export function renderActivity(c: Flow): ReactElement {
           spellCheck={false}
           autoComplete="off"
           aria-label="Transaction or address"
-          className={pseudo({ focus: "border-color:var(--mv-focus)" })}
           style={s(
             "flex:1 1 auto;width:0;min-width:0;padding:12px 15px;background:var(--mv-surface-2);border:1px solid transparent;border-radius:12px;outline:none;font-family:var(--mv-font);font-size:12.5px",
           )}

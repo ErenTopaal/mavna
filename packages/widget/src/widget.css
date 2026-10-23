@@ -80,7 +80,6 @@
   --mv-rule-strong: oklch(0 0 0 / 0.18);
   --mv-rule-hover: oklch(0 0 0 / 0.18);
   --mv-rule-max: oklch(0 0 0 / 0.24);
-  --mv-focus: oklch(0 0 0 / 0.2);
   --mv-fill-dim: oklch(0 0 0 / 0.14);
   --mv-track-neutral: oklch(0 0 0 / 0.16);
 
@@ -231,7 +230,6 @@
     --mv-rule-strong: oklch(1 0 0 / 0.24);
     --mv-rule-hover: oklch(1 0 0 / 0.24);
     --mv-rule-max: oklch(1 0 0 / 0.34);
-    --mv-focus: oklch(1 0 0 / 0.18);
     --mv-fill-dim: oklch(1 0 0 / 0.22);
     --mv-track-neutral: oklch(1 0 0 / 0.3);
     --mv-signal: oklch(0.74 0.16 22);
@@ -267,7 +265,6 @@
   --mv-rule-strong: oklch(1 0 0 / 0.24);
   --mv-rule-hover: oklch(1 0 0 / 0.24);
   --mv-rule-max: oklch(1 0 0 / 0.34);
-  --mv-focus: oklch(1 0 0 / 0.18);
   --mv-fill-dim: oklch(1 0 0 / 0.22);
   --mv-track-neutral: oklch(1 0 0 / 0.3);
   --mv-signal: oklch(0.74 0.16 22);
@@ -279,9 +276,8 @@
   outline: 2px solid var(--mv-signal);
   outline-offset: 2px;
 }
-/* the owner's call: no ring around a text field. the amount and recipient fields
-   show focus by their caret alone; the search fields brighten their own border
-   (--mv-focus). buttons and rows keep the ring above */
+/* the owner's call: a text field shows focus by its caret alone, never a box drawn
+   around it. buttons and rows keep the ring above */
 .mv-root input:focus-visible {
   outline: none;
 }
