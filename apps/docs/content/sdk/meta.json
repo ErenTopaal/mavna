@@ -2,6 +2,7 @@
   "title": "Build with the SDK",
   "description": "Quote, build and track transfers in your own interface",
   "root": true,
+  "icon": "Code",
   "pages": [
     "index",
     "install",

@@ -2,6 +2,7 @@
   "title": "Send funds",
   "description": "Move money to Stellar with the Mavna app",
   "root": true,
+  "icon": "Send",
   "pages": [
     "index",
     "---Tasks---",

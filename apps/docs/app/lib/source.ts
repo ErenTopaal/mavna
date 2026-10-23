@@ -1,5 +1,6 @@
 import { loader } from "fumadocs-core/source";
 import { defineDocs } from "fumadocs-mdx/macro";
+import { iconsPlugin } from "./icons";
 
 export const docs = defineDocs({
   dir: "content",
@@ -12,4 +13,5 @@ export const docs = defineDocs({
 export const source = loader({
   source: docs.toFumadocsSource(),
   baseUrl: "/",
+  plugins: [iconsPlugin()],
 });

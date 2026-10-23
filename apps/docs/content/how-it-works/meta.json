@@ -2,6 +2,7 @@
   "title": "How it works",
   "description": "The rails, trust, sponsorship, delivery and security",
   "root": true,
+  "icon": "BookOpen",
   "pages": [
     "index",
     "networks",

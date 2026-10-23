@@ -2,5 +2,6 @@
   "title": "Embed the widget",
   "description": "Add the whole transfer flow to a React app",
   "root": true,
+  "icon": "LayoutTemplate",
   "pages": ["index", "quickstart", "configuration", "events", "layouts", "theming", "playground"]
 }

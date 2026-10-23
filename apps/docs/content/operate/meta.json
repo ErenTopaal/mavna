@@ -2,5 +2,6 @@
   "title": "Run Mavna",
   "description": "Run the sponsor service and the pages yourself",
   "root": true,
+  "icon": "Server",
   "pages": ["index", "local", "sponsor", "capacity", "api", "deploy", "turn-off-a-rail"]
 }
