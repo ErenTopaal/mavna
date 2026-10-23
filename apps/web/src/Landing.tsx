@@ -1438,6 +1438,13 @@ export function Landing(): ReactNode {
             >
               It builds, your users sign. No package ever holds a key.
             </p>
+            <code
+              style={s(
+                `font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: ${INK}; padding: 9px 14px; border: 1px solid ${RULE}; border-radius: 10px; user-select: all`,
+              )}
+            >
+              npm install @mavna/routing @mavna/adapter-cctp
+            </code>
             <a data-underline="" href={DOCS_SDK} style={s(`font-size: 15.5px; color: ${INK}`)}>
               Build on the SDK
             </a>
@@ -1466,14 +1473,23 @@ export function Landing(): ReactNode {
             <h2 style={s(`${BIG}; font-size: clamp(34px, 5vw, 72px); max-width: 11ch`)}>
               One component. The whole flow.
             </h2>
-            <p
-              style={s(
-                `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED}; max-width: 42ch`,
-              )}
-            >
-              Drop it into your wallet or exchange and your users bring money onto Stellar without
-              leaving. It takes your colours, your type and your shape. Pick a look, then open it.
-            </p>
+            <div style={s("display: grid; gap: 18px; justify-items: start")}>
+              <p
+                style={s(
+                  `margin: 0; font-size: 17px; line-height: 1.62; color: ${MUTED}; max-width: 42ch`,
+                )}
+              >
+                Drop it into your wallet or exchange and your users bring money onto Stellar without
+                leaving. It takes your colours, your type and your shape. Pick a look, then open it.
+              </p>
+              <code
+                style={s(
+                  `font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: ${INK}; padding: 9px 14px; border: 1px solid ${RULE}; border-radius: 10px; user-select: all`,
+                )}
+              >
+                npm install @mavna/widget
+              </code>
+            </div>
           </div>
           <LookPicker />
         </div>

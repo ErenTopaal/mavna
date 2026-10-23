@@ -1,17 +1,32 @@
 ---
 title: Install
-description: Build the Mavna packages from a checkout of the repository.
+description: Install the Mavna packages from npm, or build them from a checkout of the repository.
 ---
 
-The packages are a pnpm workspace that you build from a checkout of the repository. The app, the
-widget, the sponsor service and the examples on these pages all build from it.
+## From npm
 
-## Requirements
+The packages are published on npm under the `@mavna` scope. Install the ones you use:
+
+```sh
+npm install @mavna/routing @mavna/adapter-cctp
+```
+
+`@mavna/routing` races the rails and ranks their routes. Each rail is its own package
+(`@mavna/adapter-cctp`, `@mavna/adapter-axelar`, `@mavna/adapter-layerzero`,
+`@mavna/adapter-near-intents`), and `@mavna/core` holds the shared types they all use. The packages
+are ESM with their own type declarations.
+
+## From the repository
+
+The packages are also a pnpm workspace that you build from a checkout of the repository. The app,
+the widget, the sponsor service and the examples on these pages all build from it.
+
+### Requirements
 
 - Node 24.22.0, the version in `.nvmrc`.
 - pnpm 12.14.0. The workspace declares this version and refuses any other.
 
-## Build
+### Build
 
 ```sh
 git clone https://github.com/ErenTopaal/mavna.git

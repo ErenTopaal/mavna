@@ -14,8 +14,14 @@ It ships in three forms that share one engine:
   `@mavna/adapter-near-intents`).
 - **Widget** (`packages/widget`): the whole flow as one embeddable React component.
 
-The packages are built from this repository; they are not published to npm.
-[Install](https://docs.mavna.app/sdk/install) covers building them.
+The packages are on npm under [`@mavna`](https://www.npmjs.com/org/mavna):
+
+```bash
+npm install @mavna/widget                           # the component
+npm install @mavna/routing @mavna/adapter-cctp      # the engine, with the rails you want
+```
+
+[Install](https://docs.mavna.app/sdk/install) covers both, and building from this repository.
 
 ## Links
 
