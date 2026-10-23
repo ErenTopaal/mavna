@@ -1,5 +1,7 @@
 .nvmrc
 apps/app/.env.example
+apps/app/harness/backdrop.html
+apps/app/harness/backdrop.tsx
 apps/app/harness/buffer-free.html
 apps/app/harness/buffer-free.ts
 apps/app/index.html
@@ -7,6 +9,7 @@ apps/app/package.json
 apps/app/public/mavna-logo.png
 apps/app/public/mavna-mark-light.png
 apps/app/public/mavna-mark.png
+apps/app/src/backdrop.tsx
 apps/app/src/build.test.ts
 apps/app/src/dependencies.test.ts
 apps/app/src/index.css
