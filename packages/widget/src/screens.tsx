@@ -21,6 +21,7 @@ import {
   railDisplay,
   railsLabel,
   TRUST_LABEL,
+  visibleDeclines,
   type Wanted,
 } from "./quote";
 import { s } from "./style";
@@ -1576,7 +1577,10 @@ export function renderRoutes(
   const awaiting = enabledRails.filter((n) => !landed.has(n) && !declinedNames.has(n));
   const declines =
     st.showDeclined && st.complete && !resting
-      ? st.rejected.map((r) => ({
+      ? visibleDeclines(
+          st.rejected,
+          routes.map((x) => x.route.source),
+        ).map((r) => ({
           key: `${r.source}-${r.reason}`,
           source: railDisplay(r.source),
           why: r.explanation,

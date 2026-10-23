@@ -7,6 +7,10 @@ USDT0 travels to Stellar over LayerZero and arrives as USDT0, the Stellar asset 
 `GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q`. If you add USDT0 to a Stellar wallet by
 hand, check that issuer: anyone can issue an asset with the code USDT0.
 
+NEAR Intents also takes USDT0, from Arbitrum One, Berachain, Ethereum, OP Mainnet, Polygon and
+X Layer, and pays out XLM or USDC on Stellar directly. On Ethereum, the token you send is USDT
+itself, which is what USDT0 moves there.
+
 USDT0 moves on Stellar's main network. On the test network, the LayerZero route declines with a
 sentence that says it carries no token there.
 
@@ -17,9 +21,12 @@ things change:
 
 - **Send** now lists the chains USDT0 leaves from: Arbitrum One, Berachain, Ethereum, Flare,
   Hyperliquid EVM, Ink, OP Mainnet, Polygon, Rootstock, Sei Network, Unichain and X Layer.
-- **Receive on Stellar** offers `USDT0`, `USDC` and `XLM`. With `USDC` or `XLM`, the USDT0 that
-  arrives is converted on Stellar, and the recipient approves that conversion in a Stellar wallet
-  and pays its network fee in XLM, as described in [Receive XLM instead](/send/receive-xlm).
+- **Receive on Stellar** offers `USDT0`, `USDC` and `XLM`. With `USDC` or `XLM`, you get up to two
+  routes:
+  - NEAR Intents delivers the `USDC` or `XLM` itself. There is nothing to approve on Stellar.
+  - LayerZero delivers USDT0, which is converted on Stellar. The recipient approves that conversion
+    in a Stellar wallet and pays its network fee in XLM, as described in
+    [Receive XLM instead](/send/receive-xlm).
 
 ## The receiving account
 

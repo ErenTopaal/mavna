@@ -56,6 +56,12 @@ export interface RaceOptions {
    */
   readonly swap?: SwapAttachment | undefined;
   /**
+   * Rails asked for what the user wants rather than for what `swap` converts
+   * from, because they deliver it themselves. Their routes get no conversion
+   * leg and they are not asked for a compose route.
+   */
+  readonly direct?: readonly string[] | undefined;
+  /**
    * The integrator's cut, applied to every route and itemised on it.
    *
    * Runs even at zero basis points, so turning a fee on is a configuration
@@ -102,9 +108,16 @@ export async function raceAdapters(
     });
   };
 
-  const enrich = async (route: Route, remainingMs: number): Promise<Route | RouteRejection> => {
+  const isDirect = (adapter: BridgeAdapter): boolean =>
+    options.direct?.includes(adapter.id) === true;
+
+  const enrich = async (
+    route: Route,
+    remainingMs: number,
+    direct: boolean,
+  ): Promise<Route | RouteRejection> => {
     let out: Route | RouteRejection = route;
-    if (options.swap !== undefined) {
+    if (options.swap !== undefined && !direct) {
       out = await attachSwapLeg(
         out,
         options.swap,
@@ -152,10 +165,10 @@ export async function raceAdapters(
             adapter.id,
           );
           if (result === undefined) return;
-          if (isRejection(result)) rejected.push(result);
+          if (isRejection(result)) rejected.push({ ...result, compose: true });
           else routes.push(result);
         } catch (error) {
-          rejected.push(toRejection(adapter.id, error));
+          rejected.push({ ...toRejection(adapter.id, error), compose: true });
         } finally {
           settled++;
           publish();
@@ -182,11 +195,16 @@ export async function raceAdapters(
         // route rather than stalling the whole race. A rail that answers after
         // its bound never reaches the lines below, so it asks for nothing more.
         const started = Date.now();
-        const quoted = await withTimeout(adapter.quote(railRequest), timeoutMs, adapter.id);
+        const direct = isDirect(adapter);
+        const quoted = await withTimeout(
+          adapter.quote(direct ? request : railRequest),
+          timeoutMs,
+          adapter.id,
+        );
         let result: Route | RouteRejection = quoted;
         if (!isRejection(quoted)) {
-          askCompose(adapter, quoted);
-          result = await enrich(quoted, timeoutMs - (Date.now() - started));
+          if (!direct) askCompose(adapter, quoted);
+          result = await enrich(quoted, timeoutMs - (Date.now() - started), direct);
         }
         if (isRejection(result)) rejected.push(result);
         else routes.push(result);

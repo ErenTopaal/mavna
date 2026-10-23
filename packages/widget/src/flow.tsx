@@ -43,6 +43,7 @@ import {
   runQuote as realQuote,
   type SendAsset,
   toRouteView,
+  visibleDeclines,
   type Wanted,
 } from "./quote";
 import { lookupAcross, waitPhrase } from "./rails";
@@ -896,7 +897,11 @@ export class Flow extends React.Component<FlowProps, State> {
           this.emit({
             type: "routesAvailable",
             count: views.length,
-            declined: set.rejected.length,
+            // counted as shown: one per rail that has nothing to offer
+            declined: visibleDeclines(
+              set.rejected,
+              set.routes.map((r) => r.source),
+            ).length,
           });
       },
     );

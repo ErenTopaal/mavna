@@ -62,9 +62,12 @@ export function originToken(
   contract: string,
 ): OneClickToken | undefined {
   const wanted = contract.toLowerCase();
-  return tokens.find(
+  const matches = tokens.filter(
     (token) => token.blockchain === chain.code && token.contractAddress?.toLowerCase() === wanted,
   );
+  // 1Click lists Plasma's USDT0 twice, once marked deprecated; that one is an
+  // older route for the same contract and is only taken when it is all there is
+  return matches.find((token) => !/deprecated/i.test(token.symbol)) ?? matches[0];
 }
 
 export function stellarChainId(network: NetworkId): string {

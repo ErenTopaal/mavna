@@ -27,12 +27,39 @@ names is the one a transfer uses: the solvers, NEAR Intents' settlement, and the
 The deposit is an ERC-20 transfer, so the source is an EVM chain: Ethereum, Arbitrum One, Base,
 OP Mainnet, Polygon, Avalanche, BNB Smart Chain, Gnosis, Berachain, Monad, X Layer, Plasma and
 Scroll, each only while 1Click lists a token on it. The token is matched to 1Click's list by
-contract address, never by symbol.
+contract address, never by symbol. A chain outside this list is declined with a sentence that says
+NEAR Intents takes no deposits there.
+
+USDT0 is matched the same way. The token the USDT0 contract moves on each chain the widget offers
+USDT0 from, and 1Click's listing for it on 23 October 2026:
+
+| Chain | Token sent | 1Click lists it as |
+| --- | --- | --- |
+| Ethereum | `0xdAC17F958D2ee523a2206206994597C13D831ec7` (USDT) | `USDT` on `eth` |
+| Arbitrum One | `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` | `USDT0` on `arb` |
+| OP Mainnet | `0x01bFF41798a0BcF287b996046Ca68b395DbC1071` | `USDT0` on `op` |
+| Polygon | `0xc2132D05D31c914a87C6611C10748AEb04B58e8F` | `USDT` on `pol` |
+| X Layer | `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | `USDT0` on `xlayer` |
+| Berachain | `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | `USDT0` on `bera` |
+
+1Click lists no deposits on Ink, Unichain, Sei Network, Hyperliquid EVM, Flare or Rootstock, so a
+USDT0 send from those goes over LayerZero alone. When 1Click lists the same contract twice on one
+chain and marks one listing deprecated (Plasma's USDT0 on 23 October 2026), the adapter takes the
+other one.
+
+With a `swap` attached, the router asks every rail for the asset the conversion starts from. Pass
+`direct: ["near-intents"]` to `raceAdapters` to ask this rail for the wanted asset itself instead:
+its route then has no conversion leg. The widget does this on a USDT0 send.
 
 On Stellar, the adapter offers the assets 1Click lists for Stellar whose identity it can check: a
 code and an issuer, or XLM. On 21 October 2026, 1Click listed two: USDC issued by
 `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`, and XLM. It delivers only to a plain
 `G` account; contract and muxed addresses are refused before a quote is asked for.
+
+XLM goes to a new address too. For an address with no account, 1Click's withdrawal fee is 1.1 XLM
+instead of 0.1 XLM, and HOT's relayer creates the account with 1 XLM right before it pays out. The
+route shows the withdrawal fee as including the 1 XLM that opens the account. That 1 XLM stays in
+the account as its minimum balance, and the quoted amount arrives on top of it.
 
 ## Quoting and building
 

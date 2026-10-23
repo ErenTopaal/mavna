@@ -487,3 +487,108 @@ describe("compose routes", () => {
     expect(compose?.receives.baseUnits).toBe("100");
   });
 });
+
+describe("rails that deliver the wanted asset themselves", () => {
+  const usdt0 = { chainId: "stellar", id: "USDT0:G", symbol: "USDT0", decimals: 7, curatedBy: "t" };
+  const xlm = { chainId: "stellar", id: "native", symbol: "XLM", decimals: 7, curatedBy: "t" };
+  const converted: string[] = [];
+  const quoter: SwapQuoter = {
+    id: "venue",
+    quote: async (q) => {
+      converted.push(q.assetIn);
+      return { provider: "venue", amountOut: q.amountIn, amountOutMinimum: q.amountIn };
+    },
+  };
+  const swap = {
+    provider: quoter,
+    delivered: usdt0,
+    deliveredContract: "CUSDT0",
+    wanted: xlm,
+    wantedContract: "native",
+  };
+
+  it("asks a direct rail for what the user wants, with no conversion and no compose", async () => {
+    const asked: Record<string, QuoteRequest> = {};
+    const composeAsked: string[] = [];
+    const rail = (id: string): BridgeAdapter => ({
+      ...adapter(id, async () => route(id)),
+      quote: async (r) => {
+        asked[id] = r;
+        return {
+          ...route(id, "100"),
+          id: `${id}-plain`,
+          destination: "GDEST",
+          receives: { asset: r.to, baseUnits: "100" },
+          receivesAtLeast: { asset: r.to, baseUnits: "99" },
+          deliveredAtLeast: { asset: r.to, baseUnits: "99" },
+          steps: [{ kind: "bridge", to: { asset: r.to, baseUnits: "100" } }],
+        } as unknown as Route;
+      },
+      quoteCompose: async () => {
+        composeAsked.push(id);
+        return undefined;
+      },
+    });
+    converted.length = 0;
+    const result = await raceAdapters(
+      [rail("lz"), rail("near")],
+      { ...request, to: xlm, maxSlippageBps: 50 },
+      { swap, direct: ["near"] },
+    );
+    expect(asked.lz?.to).toBe(usdt0);
+    expect(asked.near?.to).toBe(xlm);
+    // only the rail landing usdt0 is converted, and only it is asked to compose
+    expect(converted).toEqual(["CUSDT0"]);
+    expect(composeAsked).toEqual(["lz"]);
+    const near = result.routes.find((r) => r.source === "near");
+    expect(near?.steps.map((s) => s.kind)).toEqual(["bridge"]);
+    expect(near?.receives.asset).toBe(xlm);
+  });
+});
+
+describe("compose declines", () => {
+  it("marks a decline of the convert-on-arrival offer as such", async () => {
+    const usdt0 = {
+      chainId: "stellar",
+      id: "USDT0:G",
+      symbol: "USDT0",
+      decimals: 7,
+      curatedBy: "t",
+    };
+    const usdc = { chainId: "stellar", id: "USDC:G", symbol: "USDC", decimals: 7, curatedBy: "t" };
+    const swap = {
+      provider: {
+        id: "venue",
+        quote: async () => {
+          throw new Error("no venue");
+        },
+      } as SwapQuoter,
+      delivered: usdt0,
+      deliveredContract: "CUSDT0",
+      wanted: usdc,
+      wantedContract: "CUSDC",
+    };
+    const result = await raceAdapters(
+      [
+        {
+          ...adapter("lz", async () => ({
+            ...route("lz", "100"),
+            deliveredAtLeast: { asset: usdt0, baseUnits: "99" },
+            receivesAtLeast: { asset: usdt0, baseUnits: "99" },
+          })),
+          quoteCompose: async () => ({
+            source: "lz",
+            reason: "chain-unsupported",
+            explanation: "No contract here.",
+            retryable: false,
+          }),
+        },
+      ],
+      { ...request, to: usdc, maxSlippageBps: 50 },
+      { swap },
+    );
+    const compose = result.rejected.find((r) => r.explanation === "No contract here.");
+    expect(compose?.compose).toBe(true);
+    expect(result.rejected.filter((r) => r.compose !== true)).toHaveLength(1);
+  });
+});

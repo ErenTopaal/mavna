@@ -177,7 +177,7 @@ export class NearIntentsAdapter implements BridgeAdapter {
     if (chain === undefined) {
       return this.decline(
         "chain-unsupported",
-        "NEAR Intents cannot be paid from that chain here. It takes deposits from EVM chains only.",
+        "NEAR Intents does not take deposits on that chain, so it has no route from there.",
       );
     }
 
@@ -228,8 +228,12 @@ export class NearIntentsAdapter implements BridgeAdapter {
     const floor = BigInt(reply.quote.minAmountOut);
 
     // read once the solvers have said how much lands, so a trustline is held to it
-    const lane = await this.laneFor(request.destination, delivery, arriving);
-    if ("source" in lane) return lane;
+    const found = await this.laneFor(request.destination, delivery, arriving);
+    if ("source" in found) return found;
+    // HOT's payout opens a missing account itself when it pays XLM, so nothing
+    // here prepares one: the lane is as ready as an existing account's
+    const opensAccount = delivery.id === "native" && found.kind === "needs-account";
+    const lane: DestinationLane = opensAccount ? { kind: "ready", slotsNeeded: 0 } : found;
 
     const reserve = quoteReserve({
       lane,
@@ -289,7 +293,7 @@ export class NearIntentsAdapter implements BridgeAdapter {
       receivesAtLeast: atLeast,
       deliveredAtLeast: atLeast,
       fees: [
-        ...feesFrom(reply, request.sends.asset, receives.asset),
+        ...feesFrom(reply, request.sends.asset, receives.asset, opensAccount),
         ...(reserve.slots === 0
           ? []
           : [
@@ -539,11 +543,15 @@ export class NearIntentsAdapter implements BridgeAdapter {
     const delivery = deliveries.find((d) => d.id === to.id);
     if (delivery === undefined) {
       const offered = deliveries.map((d) => d.token.symbol).join(" and ");
+      // a symbol it does deliver, from another issuer, is a different asset
+      const asked = deliveries.some((d) => d.token.symbol === to.symbol)
+        ? `${to.symbol} from that issuer`
+        : to.symbol;
       return this.decline(
         "asset-unsupported",
         offered.length === 0
           ? "NEAR Intents is not delivering any asset to Stellar right now."
-          : `NEAR Intents delivers ${offered} on Stellar, and not the asset asked for.`,
+          : `NEAR Intents delivers ${offered} on Stellar, and not ${asked}.`,
       );
     }
     return { origin, delivery };
@@ -602,9 +610,10 @@ export class NearIntentsAdapter implements BridgeAdapter {
    * be prepared before the deposit. 1Click only delivers to a plain account
    * address, so a contract or muxed address was refused before this.
    *
-   * XLM needs the account to exist. Whether NEAR Intents' bridge creates one when
-   * it is missing is not documented anywhere it could be checked, and a payment
-   * to a missing account is how funds end up stuck, so that lane is declined.
+   * XLM can go to an address with no account. 1Click charges 1.1 XLM to withdraw
+   * there instead of 0.1, and HOT's relayer opens the account with 1 XLM just
+   * before its payout: seen on all 15 accounts it opened from 13 to 22 October
+   * 2026, each paid by HOT's locker in the next few seconds.
    */
   private async laneFor(
     destination: string,
@@ -626,13 +635,6 @@ export class NearIntentsAdapter implements BridgeAdapter {
       return this.unreadDestination(cause);
     }
     if (lane.kind === "unusable") return this.decline("destination-unsupported", lane.reason);
-    if (native && lane.kind === "needs-account") {
-      return this.decline(
-        "destination-unsupported",
-        "That Stellar account does not exist yet, and NEAR Intents cannot be relied on to " +
-          "create it. Send to an account that already has some XLM in it, or ask for USDC.",
-      );
-    }
     return lane;
   }
 
@@ -790,7 +792,13 @@ export function slippageOf(route: Route): number {
  * Both are already out of the quoted amount. The solver's spread is not a fee
  * line: it is in the price, and the price is what the user sees as received.
  */
-function feesFrom(reply: QuoteReply, sent: Asset, delivered: Asset): Fee[] {
+function feesFrom(
+  reply: QuoteReply,
+  sent: Asset,
+  delivered: Asset,
+  /** The payout opens the account, and 1Click's withdrawal fee carries its 1 XLM. */
+  opensAccount: boolean,
+): Fee[] {
   const fees: Fee[] = [];
   const platform = (BigInt(reply.quote.amountIn) * BigInt(reply.appFeesBps)) / 10_000n;
   if (platform > 0n) {
@@ -808,7 +816,15 @@ function feesFrom(reply: QuoteReply, sent: Asset, delivered: Asset): Fee[] {
     fees.push({
       kind: "bridge",
       total: amount,
-      recipients: [{ name: "NEAR Intents withdrawal", amount, address: undefined }],
+      recipients: [
+        {
+          name: opensAccount
+            ? "NEAR Intents withdrawal, with 1 XLM that opens the account"
+            : "NEAR Intents withdrawal",
+          amount,
+          address: undefined,
+        },
+      ],
       includedInQuote: true,
     });
   }

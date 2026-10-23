@@ -178,6 +178,11 @@ export interface RouteRejection {
    * node's own words (host errors, URLs), which can carry raw protocol text.
    */
   readonly detail?: string;
+  /**
+   * Set when this declines a rail's convert-on-arrival offer rather than its
+   * plain route, so a caller showing one answer per rail can tell them apart.
+   */
+  readonly compose?: true;
 }
 
 /**

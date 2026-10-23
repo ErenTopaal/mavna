@@ -2,6 +2,9 @@ import type { Asset, QuoteRequest, Route, RouteRejection } from "@mavna/core";
 import { RpcClient, XlmPriceSource } from "@mavna/stellar";
 import { xdr } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import funded from "./__fixtures__/one-click-quote-xlm-funded.json" with { type: "json" };
+import unfunded from "./__fixtures__/one-click-quote-xlm-unfunded.json" with { type: "json" };
+import liveTokens from "./__fixtures__/one-click-tokens-2026-10-23.json" with { type: "json" };
 import { NearIntentsAdapter, slippageOf } from "./adapter.js";
 import { ORIGIN_CHAINS } from "./chains.js";
 import type { JsonRpc } from "./evm.js";
@@ -461,7 +464,7 @@ describe("quoting", () => {
     const result = rejectionOf(await adapter().quote(ask({ to: lookalike })));
     expect(result.reason).toBe("asset-unsupported");
     expect(result.explanation).toBe(
-      "NEAR Intents delivers XLM and USDC on Stellar, and not the asset asked for.",
+      "NEAR Intents delivers XLM and USDC on Stellar, and not USDC from that issuer.",
     );
   });
 
@@ -524,12 +527,7 @@ describe("quoting", () => {
     expect(asked).toContain("horizon order book");
   });
 
-  it("delivers XLM only to an account that already exists", async () => {
-    ledger = { account: false, trustline: false };
-    const missing = rejectionOf(await adapter().quote(ask({ to: stellarXlm })));
-    expect(missing.reason).toBe("destination-unsupported");
-    expect(missing.explanation).toMatch(/does not exist yet/);
-
+  it("delivers XLM to an account that exists, with nothing to prepare", async () => {
     ledger = { account: true, trustline: false };
     const route = routeOf(await adapter().quote(ask({ to: stellarXlm })));
     expect(route.receives.asset.id).toBe("native");
@@ -813,5 +811,166 @@ describe("status", () => {
       phase: "idle",
     });
     expect((await adapter().status(byDeposit)).phase).toBe("pending");
+  });
+});
+
+/**
+ * USDT0 sent from the chains the widget offers it on, against 1Click's live
+ * token list of 23 October 2026 and the token each chain's USDT0 OFT moves,
+ * read from LayerZero the same day (Ethereum's OFT moves USDT itself).
+ */
+describe("usdt0 sends", () => {
+  const USDT0_TOKENS: ReadonlyArray<[chainId: string, token: string, originAsset: string]> = [
+    [
+      "ethereum",
+      "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near",
+    ],
+    [
+      "arbitrum",
+      "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+      "nep141:arb-0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9.omft.near",
+    ],
+    [
+      "optimism",
+      "0x01bFF41798a0BcF287b996046Ca68b395DbC1071",
+      "nep245:v2_1.omni.hot.tg:10_2R1RXDBxCyJTeMEsdXydh7xsHmz",
+    ],
+    [
+      "polygon",
+      "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+      "nep245:v2_1.omni.hot.tg:137_3hpYoaLtt8MP1Z2GH1U473DMRKgr",
+    ],
+    [
+      "x-layer",
+      "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+      "nep245:v2_1.omni.hot.tg:196_2fezDCvVYRsG8wrK6deJ2VRPiAS1",
+    ],
+    [
+      "bera",
+      "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+      "nep141:bera-0x779ded0c9e1022225f8e0630b35a9b54be713736.omft.near",
+    ],
+  ];
+
+  const usdt0On = (chainId: string, token: string): Asset => ({
+    chainId,
+    id: token,
+    symbol: "USD₮0",
+    decimals: 6,
+    curatedBy: "LayerZero",
+  });
+
+  beforeEach(() => {
+    oneClick.tokens = () => json(liveTokens);
+  });
+
+  it.each(USDT0_TOKENS)(
+    "quotes USDT0 from %s into XLM as 1Click's own token for it",
+    async (chainId, token, originAsset) => {
+      const from = usdt0On(chainId, token);
+      const route = routeOf(
+        await adapter().quote(
+          ask({ from, to: stellarXlm, sends: { asset: from, baseUnits: "100000000" } }),
+        ),
+      );
+      expect(quoteBodies.at(-1)?.originAsset).toBe(originAsset);
+      expect(quoteBodies.at(-1)?.destinationAsset).toBe(STELLAR_XLM_ASSET);
+      expect(route.receives.asset.id).toBe("native");
+      expect(route.sends.asset.id).toBe(token);
+    },
+  );
+
+  it.each(["ink", "unichain", "sei", "hyperevm", "flare", "rootstock"])(
+    "declines USDT0 from %s, a chain 1Click takes no deposits on, saying so",
+    async (chainId) => {
+      const from = usdt0On(chainId, "0x9151434b16b9763660705744891fA906F660EcC5");
+      const result = rejectionOf(
+        await adapter().quote(
+          ask({ from, to: stellarXlm, sends: { asset: from, baseUnits: "1" } }),
+        ),
+      );
+      expect(result.reason).toBe("chain-unsupported");
+      expect(result.explanation).toBe(
+        "NEAR Intents does not take deposits on that chain, so it has no route from there.",
+      );
+      expect(result.explanation).not.toMatch(/EVM/);
+      expect(quoteBodies).toHaveLength(0);
+    },
+  );
+
+  it("takes Plasma's current USDT0 rather than the deprecated listing of the same contract", async () => {
+    const from = usdt0On("plasma", "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb");
+    routeOf(
+      await adapter().quote(
+        ask({ from, to: stellarXlm, sends: { asset: from, baseUnits: "100000000" } }),
+      ),
+    );
+    expect(quoteBodies.at(-1)?.originAsset).toBe(
+      "nep141:plasma-0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb.omft.near",
+    );
+  });
+
+  it("names the asset it was asked for when it does not deliver it", async () => {
+    const from = usdt0On("arbitrum", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9");
+    const usdt0OnStellar: Asset = {
+      chainId: "stellar",
+      id: "USDT0:GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+      symbol: "USDT0",
+      decimals: 7,
+      curatedBy: "LayerZero",
+    };
+    const result = rejectionOf(
+      await adapter().quote(
+        ask({ from, to: usdt0OnStellar, sends: { asset: from, baseUnits: "1000000" } }),
+      ),
+    );
+    expect(result.reason).toBe("asset-unsupported");
+    expect(result.explanation).toBe(
+      "NEAR Intents delivers XLM and USDC on Stellar, and not USDT0.",
+    );
+  });
+
+  /*
+   * 1Click quotes XLM to an address with no account, charging 1.1 XLM to
+   * withdraw where an existing account is charged 0.1 (both replies are real,
+   * 23 October 2026). HOT's relayer (GCQJ7S55...) opens the account with 1 XLM
+   * seconds before its payout: all 15 accounts it created between 13 and 22
+   * October were paid by the HOT locker right after.
+   */
+  it("delivers XLM to an address with no account yet, which the HOT payout opens", async () => {
+    ledger = { account: false, trustline: false };
+    oneClick.quote = (body) =>
+      json({ ...unfunded, quoteRequest: { ...unfunded.quoteRequest, ...body } });
+    const from = usdt0On("arbitrum", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9");
+    const route = routeOf(
+      await adapter().quote(
+        ask({ from, to: stellarXlm, sends: { asset: from, baseUnits: "2000000" } }),
+      ),
+    );
+    expect(route.steps.map((s) => s.kind)).toEqual(["bridge"]);
+    expect(route.receives.baseUnits).toBe("102450082");
+    expect(route.receivesAtLeast.baseUnits).toBe("101937831");
+    const withdrawal = route.fees.find((f) => f.recipients[0]?.name.includes("withdrawal"));
+    expect(withdrawal?.total.baseUnits).toBe("11000000");
+    expect(withdrawal?.recipients[0]?.name).toBe(
+      "NEAR Intents withdrawal, with 1 XLM that opens the account",
+    );
+    // nobody else fronts a reserve here
+    expect(route.fees.some((f) => f.kind === "account-reserve")).toBe(false);
+  });
+
+  it("names the withdrawal plainly for an account that exists", async () => {
+    oneClick.quote = (body) =>
+      json({ ...funded, quoteRequest: { ...funded.quoteRequest, ...body } });
+    const from = usdt0On("arbitrum", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9");
+    const route = routeOf(
+      await adapter().quote(
+        ask({ from, to: stellarXlm, sends: { asset: from, baseUnits: "2000000" } }),
+      ),
+    );
+    const withdrawal = route.fees.find((f) => f.recipients[0]?.name.includes("withdrawal"));
+    expect(withdrawal?.total.baseUnits).toBe("1000000");
+    expect(withdrawal?.recipients[0]?.name).toBe("NEAR Intents withdrawal");
   });
 });

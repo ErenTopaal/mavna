@@ -401,6 +401,14 @@ export interface SponsorCheck {
   readonly repaymentCost?:
     | { readonly forStroops: bigint; readonly baseUnits: bigint | undefined }
     | Error;
+  /**
+   * The same two reads for every asset a route here may deliver, by asset id,
+   * when the rails do not all deliver one asset: on a USDT0 send NEAR Intents
+   * delivers what the user wants and LayerZero delivers USDT0.
+   */
+  readonly pricing?: Readonly<
+    Record<string, Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost">>
+  >;
   readonly holdsWanted?:
     | "ready"
     | "missing"
@@ -562,8 +570,9 @@ function convertsInto(route: Route, check: SponsorCheck): Asset | undefined {
  */
 function repaymentBlocker(
   route: Route,
-  check: Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost">,
+  sponsor: Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost" | "pricing">,
 ): [RouteRejection["reason"], string] | undefined {
+  const check = pricedFor(route, sponsor);
   const price = check.xlmStroopsPerUnit;
   if (price === undefined || price instanceof Error) {
     return [
@@ -589,6 +598,14 @@ function repaymentBlocker(
       `least ${fmtUnits(arrives.baseUnits, arrives.asset.decimals)} ${symbol} arrive, which ` +
       "may not cover it. Send more, or send to an account that can already receive it.",
   ];
+}
+
+/** The repayment's price and cost for the asset this route delivers. */
+function pricedFor(
+  route: Route,
+  check: Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost" | "pricing">,
+): Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost"> {
+  return check.pricing?.[route.deliveredAtLeast.asset.id] ?? check;
 }
 
 /**
@@ -663,7 +680,7 @@ function repaymentCeiling(
  */
 function withRepayment(route: Route, check: SponsorCheck): Route {
   const reserve = route.fees.find((f) => f.kind === "account-reserve");
-  const price = check.xlmStroopsPerUnit;
+  const price = pricedFor(route, check).xlmStroopsPerUnit;
   if (
     reserve === undefined ||
     typeof price !== "bigint" ||
@@ -867,6 +884,27 @@ function ownDeliveryBlocker(
   ];
 }
 
+/**
+ * The declines worth showing: one per rail, and none for a rail whose route is
+ * already listed. A rail asked for a compose route as well as its plain one can
+ * decline both, and the plain route's reason is the one that says why the rail
+ * has nothing to offer.
+ */
+export function visibleDeclines(
+  rejected: readonly RouteRejection[],
+  offered: readonly string[],
+): RouteRejection[] {
+  const shown = new Map<string, RouteRejection>();
+  for (const decline of rejected) {
+    if (offered.includes(decline.source)) continue;
+    const kept = shown.get(decline.source);
+    if (kept === undefined || (kept.compose === true && decline.compose !== true)) {
+      shown.set(decline.source, decline);
+    }
+  }
+  return [...shown.values()];
+}
+
 /** Move the routes the sponsor cannot carry into the declines, with the reason. */
 export function applySponsorTerms(set: RouteSet, check: SponsorCheck): RouteSet {
   const routes: Route[] = [];
@@ -925,8 +963,11 @@ async function checkSponsor(
     | "repaymentCost"
   >,
   destination: string,
-  /** What the rails deliver on Stellar, which a sponsored setup's repayment spends. */
-  delivered: Asset,
+  /**
+   * What the rails deliver on Stellar, which a sponsored setup's repayment
+   * spends: one asset, or several when some rails deliver another one directly.
+   */
+  delivered: Asset | readonly Asset[],
   /** What a conversion on Stellar would produce, when it is not XLM. */
   convertsInto?: Asset,
   /** Whether the route converts at all, whose fee the recipient pays. */
@@ -944,45 +985,61 @@ async function checkSponsor(
   let price: bigint | Error | undefined;
   let cost: SponsorCheck["repaymentCost"];
   const { baseReserveStroops } = engine;
+  const assets: readonly Asset[] = Array.isArray(delivered) ? delivered : [delivered as Asset];
+  const pricing: Record<string, Pick<SponsorCheck, "xlmStroopsPerUnit" | "repaymentCost">> = {};
   if (!(terms instanceof Error) && terms.reserveFunding === "sponsor") {
-    // the trustline a setup opens is the one the repayment spends: what the rails
-    // deliver when the sponsor curates it, otherwise USDC, which the decline names
-    const lendsIn =
-      trustlineNameOf(delivered.id, engine.usdcOnStellar.id) === undefined
-        ? engine.usdcOnStellar
-        : delivered;
-    const [lendsCode, lendsIssuer] = lendsIn.id.split(":");
-    // read too, so a decline can say whether the account or only the trustline is missing
-    try {
-      const state = await inspectDestination(
-        engine.rpc,
-        destination,
-        new StellarAsset(lendsCode ?? "", lendsIssuer),
-      );
-      found = state.lane.kind === "needs-account" ? "missing" : "exists";
-      // the recipient pays its own conversion's fee, from XLM it can spare
-      if (converts && found === "exists" && signer !== undefined) {
-        const entry = await readAccountEntry(engine.rpc, signer);
-        if (entry !== undefined) spare = spareStroops(entry, baseReserveStroops);
-      }
-      // something will be set up, and repaid from the arrival at this price
-      if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
-        try {
-          price = await engine.xlmStroopsPerUnit(lendsIn);
-        } catch (cause) {
-          price = cause instanceof Error ? cause : new Error(String(cause));
+    for (const [index, asset] of assets.entries()) {
+      // the trustline a setup opens is the one the repayment spends: what the rails
+      // deliver when the sponsor curates it, otherwise USDC, which the decline names
+      const lendsIn =
+        trustlineNameOf(asset.id, engine.usdcOnStellar.id) === undefined
+          ? engine.usdcOnStellar
+          : asset;
+      const [lendsCode, lendsIssuer] = lendsIn.id.split(":");
+      let assetPrice: bigint | Error | undefined;
+      let assetCost: SponsorCheck["repaymentCost"];
+      // read too, so a decline can say whether the account or only the trustline is missing
+      try {
+        const state = await inspectDestination(
+          engine.rpc,
+          destination,
+          new StellarAsset(lendsCode ?? "", lendsIssuer),
+        );
+        if (index === 0) {
+          found = state.lane.kind === "needs-account" ? "missing" : "exists";
+          // the recipient pays its own conversion's fee, from XLM it can spare
+          if (converts && found === "exists" && signer !== undefined) {
+            const entry = await readAccountEntry(engine.rpc, signer);
+            if (entry !== undefined) spare = spareStroops(entry, baseReserveStroops);
+          }
         }
-        // the account's two slots and the trustline's one, or the trustline alone
-        const forStroops =
-          BigInt(state.lane.kind === "needs-account" ? 3 : 1) * BigInt(baseReserveStroops);
-        try {
-          cost = { forStroops, baseUnits: await engine.repaymentCost(lendsIn, forStroops) };
-        } catch (cause) {
-          cost = cause instanceof Error ? cause : new Error(String(cause));
+        // something will be set up, and repaid from the arrival at this price
+        if (state.lane.kind === "needs-account" || state.lane.kind === "needs-trustline") {
+          try {
+            assetPrice = await engine.xlmStroopsPerUnit(lendsIn);
+          } catch (cause) {
+            assetPrice = cause instanceof Error ? cause : new Error(String(cause));
+          }
+          // the account's two slots and the trustline's one, or the trustline alone
+          const forStroops =
+            BigInt(state.lane.kind === "needs-account" ? 3 : 1) * BigInt(baseReserveStroops);
+          try {
+            assetCost = { forStroops, baseUnits: await engine.repaymentCost(lendsIn, forStroops) };
+          } catch (cause) {
+            assetCost = cause instanceof Error ? cause : new Error(String(cause));
+          }
         }
+      } catch (cause) {
+        if (index === 0) found = cause instanceof Error ? cause : new Error(String(cause));
       }
-    } catch (cause) {
-      found = cause instanceof Error ? cause : new Error(String(cause));
+      if (index === 0) {
+        price = assetPrice;
+        cost = assetCost;
+      }
+      pricing[asset.id] = {
+        ...(assetPrice === undefined ? {} : { xlmStroopsPerUnit: assetPrice }),
+        ...(assetCost === undefined ? {} : { repaymentCost: assetCost }),
+      };
     }
   }
   if (!(terms instanceof Error) && terms.reserveFunding === "self") {
@@ -1035,6 +1092,7 @@ async function checkSponsor(
     baseReserveStroops,
     ...(price === undefined ? {} : { xlmStroopsPerUnit: price }),
     ...(cost === undefined ? {} : { repaymentCost: cost }),
+    ...(assets.length > 1 ? { pricing } : {}),
     ...(convertsInto === undefined ? {} : { convertsInto, holdsWanted }),
   };
 }
@@ -1136,12 +1194,19 @@ export function runQuote(
     onDone(declined);
   };
 
-  const race = ({ from, to }: { from: Asset; to: Asset }, swap?: SwapAttachment): void => {
+  const race = (
+    { from, to }: { from: Asset; to: Asset },
+    swap?: SwapAttachment,
+    /** Rails asked for `to` itself rather than for what `swap` converts from. */
+    direct: readonly string[] = [],
+  ): void => {
     // The sponsor's terms come first, so no route it cannot carry is ever shown
     // and then taken back. They are cached on the engine after the first answer.
     // a conversion into anything but XLM needs a trustline the recipient holds
     const into = swap !== undefined && swap.wanted.id !== "native" ? swap.wanted : undefined;
-    void checkSponsor(engine, destination, swap?.delivered ?? to, into, swap !== undefined)
+    const directly = swap !== undefined && adapters.some((a) => direct.includes(a.id));
+    const delivered = swap === undefined ? to : directly ? [swap.delivered, to] : swap.delivered;
+    void checkSponsor(engine, destination, delivered, into, swap !== undefined)
       .then((check) => {
         if (!live) return undefined;
         onSponsor?.(check);
@@ -1171,6 +1236,7 @@ export function runQuote(
             // conversion may only count on what is left after that
             swap:
               swap === undefined || funding !== "sponsor" ? swap : { ...swap, repaysReserve: true },
+            ...(directly ? { direct } : {}),
             ranking: inputs.priority === "fast" ? "fastest" : "best-received",
             // Only a conversion on arrival collects a fee, and its route carries the
             // fee itself; no other route's builder pays one out, so none is applied here.
@@ -1219,7 +1285,14 @@ export function runQuote(
               ? engine.xlmOnStellar
               : undefined;
         if (wantedAsset === undefined) race(assets);
-        else race({ from: assets.from, to: wantedAsset }, engine.usdt0Swap(assets.to, wantedAsset));
+        else
+          race(
+            { from: assets.from, to: wantedAsset },
+            engine.usdt0Swap(assets.to, wantedAsset),
+            // NEAR Intents takes the USDT0 and delivers XLM or USDC itself, so it
+            // is asked for those rather than for a USDT0 it never lands
+            ["near-intents"],
+          );
       },
       (cause: unknown) => {
         if (live) {
